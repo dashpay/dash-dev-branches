@@ -40,6 +40,8 @@
 #include "masternodeman.h"
 #include "masternode-payments.h"
 
+#include "evo/subtx.h"
+
 #include <sstream>
 
 #include <boost/algorithm/string/replace.hpp>
@@ -509,12 +511,20 @@ bool CheckTransaction(const CTransaction& tx, CValidationState &state)
     {
         if (tx.vin[0].scriptSig.size() < 2 || tx.vin[0].scriptSig.size() > 100)
             return state.DoS(100, false, REJECT_INVALID, "bad-cb-length");
+
+        // never allow SubTX in coinbase
+        if (IsSubTx(tx))
+            return state.DoS(100, false, REJECT_INVALID, "bad-cb-subtx");
     }
     else
     {
         BOOST_FOREACH(const CTxIn& txin, tx.vin)
             if (txin.prevout.IsNull())
                 return state.DoS(10, false, REJECT_INVALID, "bad-txns-prevout-null");
+
+        // early check for valid SubTX. Only checks for basic structure of SubTX inputs and outputs
+        if (IsSubTx(tx) && !IsSubTxDataValid(tx, state))
+            return false;
     }
 
     return true;
@@ -570,6 +580,10 @@ bool AcceptToMemoryPoolWorker(CTxMemPool& pool, CValidationState &state, const C
     string reason;
     if (fRequireStandard && !IsStandardTx(tx, reason))
         return state.DoS(0, false, REJECT_NONSTANDARD, reason);
+
+    if (IsSubTx(tx) && !CheckSubTx(tx, state))
+        return false;
+    // TODO check for SubTX conflicts (usernames, resetkey, close, ...)
 
     // Don't relay version 2 transactions until CSV is active, and we can be
     // sure that such transactions will be mined (unless we're on
@@ -1685,7 +1699,7 @@ int ApplyTxInUndo(Coin&& undo, CCoinsViewCache& view, const COutPoint& out)
 
 /** Undo the effects of this block (with given index) on the UTXO set represented by coins.
  *  When UNCLEAN or FAILED is returned, view is left in an indeterminate state. */
-static DisconnectResult DisconnectBlock(const CBlock& block, CValidationState& state, const CBlockIndex* pindex, CCoinsViewCache& view)
+static DisconnectResult DisconnectBlock(const CBlock& block, CValidationState& state, const CBlockIndex* pindex, CCoinsViewCache& view, bool ignoreSubTxs = false)
 {
     assert(pindex->GetBlockHash() == view.GetBestBlock());
 
@@ -1759,6 +1773,13 @@ static DisconnectResult DisconnectBlock(const CBlock& block, CValidationState& s
                     fClean = false; // transaction output mismatch
                 }
             }
+        }
+
+        // Undo SubTXs
+        if (!ignoreSubTxs && IsSubTx(tx)) {
+            CValidationState dummyState;
+            if (!UndoSubTx(tx, dummyState))
+                fClean = false;
         }
 
         // restore inputs
@@ -1948,7 +1969,7 @@ static int64_t nTimeTotal = 0;
 /** Apply the effects of this block (with given index) on the UTXO set represented by coins.
  *  Validity checks that depend on the UTXO set are also done; ConnectBlock()
  *  can fail if those validity checks fail (among other reasons). */
-static bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockIndex* pindex, CCoinsViewCache& view, bool fJustCheck = false)
+static bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockIndex* pindex, CCoinsViewCache& view, bool fJustCheck = false, bool ignoreSubTxs = false)
 {
     const CChainParams& chainparams = Params();
     AssertLockHeld(cs_main);
@@ -2205,6 +2226,13 @@ static bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockInd
             blockundo.vtxundo.push_back(CTxUndo());
         }
         UpdateCoins(tx, state, view, i == 0 ? undoDummy : blockundo.vtxundo.back(), pindex->nHeight);
+
+        if (!ignoreSubTxs && IsSubTx(tx)) {
+            if (!CheckSubTx(tx, state))
+                return false;
+            if (!fJustCheck && !ProcessSubTx(tx, state))
+                return false;
+        }
 
         vPos.push_back(std::make_pair(tx.GetHash(), pos));
         pos.nTxOffset += ::GetSerializeSize(tx, SER_DISK, CLIENT_VERSION);
@@ -3880,7 +3908,7 @@ bool CVerifyDB::VerifyDB(const CChainParams& chainparams, CCoinsView *coinsview,
         }
         // check level 3: check for inconsistencies during memory-only disconnect of tip blocks
         if (nCheckLevel >= 3 && pindex == pindexState && (coins.DynamicMemoryUsage() + pcoinsTip->DynamicMemoryUsage()) <= nCoinCacheUsage) {
-            DisconnectResult res = DisconnectBlock(block, state, pindex, coins);
+            DisconnectResult res = DisconnectBlock(block, state, pindex, coins, true);
             if (res == DISCONNECT_FAILED) {
                 return error("VerifyDB(): *** irrecoverable inconsistency in block data at %d, hash=%s", pindex->nHeight, pindex->GetBlockHash().ToString());
             }
@@ -3908,7 +3936,7 @@ bool CVerifyDB::VerifyDB(const CChainParams& chainparams, CCoinsView *coinsview,
             CBlock block;
             if (!ReadBlockFromDisk(block, pindex, chainparams.GetConsensus()))
                 return error("VerifyDB(): *** ReadBlockFromDisk failed at %d, hash=%s", pindex->nHeight, pindex->GetBlockHash().ToString());
-            if (!ConnectBlock(block, state, pindex, coins))
+            if (!ConnectBlock(block, state, pindex, coins, false, true))
                 return error("VerifyDB(): *** found unconnectable block at %d, hash=%s", pindex->nHeight, pindex->GetBlockHash().ToString());
         }
     }

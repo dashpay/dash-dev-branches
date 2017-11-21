@@ -77,6 +77,12 @@ bool Solver(const CScript& scriptPubKey, txnouttype& typeRet, vector<vector<unsi
         return true;
     }
 
+    // SubTX output
+    if (scriptPubKey.size() >= 1 && scriptPubKey[0] == OP_SUBSCRIPTION && scriptPubKey.IsPushOnly(scriptPubKey.begin()+1)) {
+        typeRet = TX_SUBSCRIPTION;
+        return true;
+    }
+
     // Scan templates
     const CScript& script1 = scriptPubKey;
     BOOST_FOREACH(const PAIRTYPE(txnouttype, CScript)& tplate, mTemplates)
