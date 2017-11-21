@@ -299,6 +299,10 @@ extern UniValue reconsiderblock(const UniValue& params, bool fHelp);
 extern UniValue getspentinfo(const UniValue& params, bool fHelp);
 extern UniValue sentinelping(const UniValue& params, bool fHelp);
 
+extern UniValue getuser(const UniValue& params, bool fHelp);
+extern UniValue createrawsubtx(const UniValue& params, bool fHelp);
+extern UniValue createsubtx(const UniValue& params, bool fHelp);
+
 bool StartRPC();
 void InterruptRPC();
 void StopRPC();

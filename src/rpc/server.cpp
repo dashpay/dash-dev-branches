@@ -405,6 +405,9 @@ static const CRPCCommand vRPCCommands[] =
     { "wallet",             "walletpassphrasechange", &walletpassphrasechange, true  },
     { "wallet",             "walletpassphrase",       &walletpassphrase,       true  },
 #endif // ENABLE_WALLET
+    { "evo",                "getuser",                &getuser,                true  },
+    { "evo",                "createrawsubtx",         &createrawsubtx,         true  },
+    { "evo",                "createsubtx",            &createsubtx,            true  },
 };
 
 CRPCTable::CRPCTable()
