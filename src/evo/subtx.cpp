@@ -67,10 +67,9 @@ bool IsSubTxDataValid(const CTransaction &tx, CValidationState &state) {
 
     // try to deserialize the data
     try {
-        CSubTxData *p = CSubTxData::Deserialize(subTxData);
+        auto p = CSubTxData::Deserialize(subTxData);
         if (!p)
             return state.DoS(10, false, REJECT_INVALID, "bad-subtx-data");
-        delete p;
     } catch (...) {
         return state.DoS(10, false, REJECT_INVALID, "bad-subtx-data");
     }
@@ -87,11 +86,8 @@ bool CheckSubTx(const CTransaction &tx, CValidationState &state) {
     if (!GetSubTxData(tx, subTxData, state))
         return false;
 
-    CSubTxData *p = CSubTxData::Deserialize(subTxData);
-    assert(p); // previous validation should have handled this
-
+    auto p = CSubTxData::Deserialize(subTxData);
     bool result = p->Check(tx, state);
-    delete p;
     return result;
 }
 
@@ -104,11 +100,8 @@ bool ProcessSubTx(const CTransaction &tx, CValidationState &state) {
     if (!GetSubTxData(tx, subTxData, state))
         return false;
 
-    CSubTxData *p = CSubTxData::Deserialize(subTxData);
-    assert(p); // previous validation should have handled this
-
+    auto p = CSubTxData::Deserialize(subTxData);
     bool result = p->Process(tx, state);
-    delete p;
     return result;
 }
 
@@ -121,39 +114,36 @@ bool UndoSubTx(const CTransaction &tx, CValidationState &state) {
     if (!GetSubTxData(tx, subTxData, state))
         return false;
 
-    CSubTxData *p = CSubTxData::Deserialize(subTxData);
-    assert(p); // previous validation should have handled this
-
+    auto p = CSubTxData::Deserialize(subTxData);
     bool result = p->Undo(tx, state);
-    delete p;
     return result;
 }
 
-CSubTxData *CSubTxData::Deserialize(const std::vector<unsigned char> &data) {
+std::unique_ptr<CSubTxData> CSubTxData::Deserialize(const std::vector<unsigned char> &data) {
     if (data.size() == 0)
         return nullptr;
     SubTxAction action = (SubTxAction)data[0];
     CDataStream ds(data, SER_DISK, CLIENT_VERSION);
     switch (action) {
         case SubTxAction_Register: {
-            CSubTxRegister *p = new CSubTxRegister();
+            auto p = std::unique_ptr<CSubTxRegister>(new CSubTxRegister());
             ds >> *p;
-            return p;
+            return std::move(p);
         }
         case SubTxAction_TopUp: {
-            CSubTxTopUp *p = new CSubTxTopUp();
+            auto p = std::unique_ptr<CSubTxTopUp>(new CSubTxTopUp());
             ds >> *p;
-            return p;
+            return std::move(p);
         }
         case SubTxAction_ResetKey: {
-            CSubTxResetKey *p = new CSubTxResetKey();
+            auto p = std::unique_ptr<CSubTxResetKey>(new CSubTxResetKey());
             ds >> *p;
-            return p;
+            return std::move(p);
         }
         case SubTxAction_Close: {
-            CSubTxClose *p = new CSubTxClose();
+            auto p = std::unique_ptr<CSubTxClose>(new CSubTxClose());
             ds >> *p;
-            return p;
+            return std::move(p);
         }
         default:
             LogPrintf("CSubTxData::Deserialize -- unknown or invalid action %d\n", action);

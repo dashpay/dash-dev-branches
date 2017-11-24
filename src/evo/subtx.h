@@ -48,7 +48,7 @@ public:
     virtual bool Process(const CTransaction &subTx, CValidationState &state) = 0;
     virtual bool Undo(const CTransaction &subTx, CValidationState &state) = 0;
 
-    static CSubTxData *Deserialize(const std::vector<unsigned char> &data);
+    static std::unique_ptr<CSubTxData> Deserialize(const std::vector<unsigned char> &data);
 
 protected:
     template <typename Stream, typename Operation>
