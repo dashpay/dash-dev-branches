@@ -155,7 +155,12 @@ CSubTxData *CSubTxData::Deserialize(const std::vector<unsigned char> &data) {
             ds >> *p;
             return p;
         }
+        default:
+            LogPrintf("CSubTxData::Deserialize -- unknown or invalid action %d\n", action);
+            return nullptr;
     }
+
+    // should never get to this point
     return nullptr;
 }
 
