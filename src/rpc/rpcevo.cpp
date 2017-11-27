@@ -17,7 +17,7 @@ static UniValue User2Json(const CEvoUser &user) {
     UniValue json(UniValue::VOBJ);
     json.push_back(std::make_pair("uname", user.GetUserName()));
     json.push_back(std::make_pair("regtxid", user.GetRegTxId().ToString()));
-    json.push_back(std::make_pair("pubkey", user.GetCurPubKey().GetID().ToString()));
+    json.push_back(std::make_pair("pubkey", HexStr(user.GetCurPubKey())));
     json.push_back(std::make_pair("credits", user.GetCreditBalance()));
 
     UniValue subTxIdArr(UniValue::VARR);
