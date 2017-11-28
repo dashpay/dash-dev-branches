@@ -20,9 +20,9 @@ CEvoUserDB::CEvoUserDB(size_t nCacheSize, bool fMemory, bool fWipe)
 
 bool CEvoUserDB::WriteUser(const CEvoUser &user) {
     LOCK(cs);
-    if (!db.Write(MakeKey(DB_USER, user.GetRegTxId()), user))
+    if (!db.Write(std::make_pair(DB_USER, user.GetRegTxId()), user))
         return false;
-    if (!db.Write(MakeKey(DB_USER_BY_NAME, user.GetUserName()), user.GetRegTxId()))
+    if (!db.Write(std::make_pair(DB_USER_BY_NAME, user.GetUserName()), user.GetRegTxId()))
         return false;
     return true;
 }
@@ -34,29 +34,29 @@ bool CEvoUserDB::DeleteUser(const uint256 &regTxId) {
     if (!GetUser(regTxId, user))
         return false;
 
-    if (!db.Erase(MakeKey(DB_USER, regTxId)))
+    if (!db.Erase(std::make_pair(DB_USER, regTxId)))
         return false;
-    if (!db.Erase(MakeKey(DB_USER_BY_NAME, user.GetUserName())))
+    if (!db.Erase(std::make_pair(DB_USER_BY_NAME, user.GetUserName())))
         return false;
     return true;
 }
 
 bool CEvoUserDB::GetUser(const uint256 &regTxId, CEvoUser &user) {
     LOCK(cs);
-    return db.Read(MakeKey(DB_USER, regTxId), user);
+    return db.Read(std::make_pair(DB_USER, regTxId), user);
 }
 
 bool CEvoUserDB::GetUserIdByName(const std::string &userName, uint256 &regTxId) {
     LOCK(cs);
-    return db.Read(MakeKey(DB_USER_BY_NAME, userName), regTxId);
+    return db.Read(std::make_pair(DB_USER_BY_NAME, userName), regTxId);
 }
 
 bool CEvoUserDB::UserExists(const uint256 &regTxId) {
     LOCK(cs);
-    return db.Exists(MakeKey(DB_USER, regTxId));
+    return db.Exists(std::make_pair(DB_USER, regTxId));
 }
 
 bool CEvoUserDB::UserNameExists(const std::string &userName) {
     LOCK(cs);
-    return db.Exists(MakeKey(DB_USER_BY_NAME, userName));
+    return db.Exists(std::make_pair(DB_USER_BY_NAME, userName));
 }

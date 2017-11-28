@@ -128,13 +128,6 @@ public:
     bool UserExists(const uint256 &regTxId);
     bool UserNameExists(const std::string &userName);
 
-private:
-    template <typename K>
-    CDataStream MakeKey(char prefix, const K &key) {
-        CDataStream s(SER_DISK, CLIENT_VERSION);
-        s << prefix << key;
-        return s;
-    }
 };
 
 extern CEvoUserDB *evoUserDB;
