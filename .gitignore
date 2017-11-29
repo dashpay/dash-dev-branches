@@ -132,3 +132,8 @@ dash-cli
 dashd
 dash-qt
 make
+
+#CLion
+.idea
+CMakeLists.txt
+cmake-build-*
