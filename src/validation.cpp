@@ -45,6 +45,9 @@
 #include "evo/providertx.h"
 #include "evo/deterministicmns.h"
 #include "evo/cbtx.h"
+#include "evo/subtx.h"
+#include "evo/user.h"
+#include "evo/users.h"
 
 #include "llmq/quorums_instantsend.h"
 #include "llmq/quorums_chainlocks.h"
@@ -516,15 +519,31 @@ int GetUTXOConfirmations(const COutPoint& outpoint)
 
 bool CheckTransaction(const CTransaction& tx, CValidationState &state)
 {
-    bool allowEmptyTxInOut = false;
-    if (tx.nType == TRANSACTION_QUORUM_COMMITMENT) {
-        allowEmptyTxInOut = true;
+    bool allowEmptyVin = false;
+    bool allowEmptyVout = false;
+
+    switch (tx.nType) {
+		case TRANSACTION_QUORUM_COMMITMENT:
+        case TRANSACTION_SUBTX_REGISTER:
+        case TRANSACTION_SUBTX_RESETKEY:
+        case TRANSACTION_SUBTX_CLOSEACCOUNT:
+        case TRANSACTION_SUBTX_TRANSITION:
+            allowEmptyVin = true;
+            allowEmptyVout = true;
+            break;
+        case TRANSACTION_SUBTX_TOPUP:
+            allowEmptyVout = true;
+			break;
+        default:
+            allowEmptyVin = false;
+            allowEmptyVout = false;
+			break;
     }
 
     // Basic checks that don't depend on any context
-    if (!allowEmptyTxInOut && tx.vin.empty())
+    if (!allowEmptyVin && tx.vin.empty())
         return state.DoS(10, false, REJECT_INVALID, "bad-txns-vin-empty");
-    if (!allowEmptyTxInOut && tx.vout.empty())
+    if (!allowEmptyVout && tx.vout.empty())
         return state.DoS(10, false, REJECT_INVALID, "bad-txns-vout-empty");
     // Size limits
     if (::GetSerializeSize(tx, SER_NETWORK, PROTOCOL_VERSION) > MAX_LEGACY_BLOCK_SIZE)
@@ -588,7 +607,12 @@ bool ContextualCheckTransaction(const CTransaction& tx, CValidationState &state,
                 tx.nType != TRANSACTION_PROVIDER_UPDATE_REGISTRAR &&
                 tx.nType != TRANSACTION_PROVIDER_UPDATE_REVOKE &&
                 tx.nType != TRANSACTION_COINBASE &&
-                tx.nType != TRANSACTION_QUORUM_COMMITMENT) {
+                tx.nType != TRANSACTION_QUORUM_COMMITMENT &&
+				tx.nType != TRANSACTION_SUBTX_REGISTER &&
+                tx.nType != TRANSACTION_SUBTX_TOPUP &&
+                tx.nType != TRANSACTION_SUBTX_RESETKEY &&
+                tx.nType != TRANSACTION_SUBTX_CLOSEACCOUNT &&
+                tx.nType != TRANSACTION_SUBTX_TRANSITION) {
                 return state.DoS(100, false, REJECT_INVALID, "bad-txns-type");
             }
             if (tx.IsCoinBase() && tx.nType != TRANSACTION_COINBASE)
@@ -666,6 +690,15 @@ bool AcceptToMemoryPoolWorker(CTxMemPool& pool, CValidationState& state, const C
     std::string reason;
     if (fRequireStandard && !IsStandardTx(tx, reason))
         return state.DoS(0, false, REJECT_NONSTANDARD, reason);
+
+    if (tx.nType == TRANSACTION_SUBTX_REGISTER) {
+        CSubTxRegister subTx;
+        GetTxPayloadAssert(tx, subTx);
+        if (pool.existsSubTxRegisterUserName(subTx.userName))
+            return state.DoS(0, false, REJECT_DUPLICATE, "subtx-dup-username");
+
+        // TODO topups are rejected atm when the user does not exist yet, even when a register SubTx is in the mempool
+    }
 
     // Only accept nLockTime-using transactions that can be mined in the next
     // block; we don't want our mempool filled up with transactions that can't
@@ -768,6 +801,27 @@ bool AcceptToMemoryPoolWorker(CTxMemPool& pool, CValidationState& state, const C
             }
         }
 
+        uint256 hashPrevSubTx = GetSubTxHashPrevSubTx(tx);
+        if (!hashPrevSubTx.IsNull()) {
+            if (mempool.mapNextTx.count(COutPoint(hashPrevSubTx, (uint32_t)-1))) {
+                return state.Invalid(false, REJECT_CONFLICT, "subtx-mempool-conflict");
+            }
+            uint256 regTxId = GetRegTxIdFromSubTx(tx);
+            assert(!regTxId.IsNull());
+
+            CEvoUser user;
+            if (!evoUserManager->GetUser(regTxId, user, true)) {
+                return state.Invalid(false, REJECT_CONFLICT, "subtx-mempool-nouser");
+            }
+            if (user.GetCurSubTx() != hashPrevSubTx) {
+                // we handle this the same way as we would handle orphan transactions
+                if (pfMissingInputs) {
+                    *pfMissingInputs = true;
+                }
+                return false;
+            }
+        }
+
         // Bring the best block into scope
         view.GetBestBlock();
 
@@ -793,7 +847,7 @@ bool AcceptToMemoryPoolWorker(CTxMemPool& pool, CValidationState& state, const C
         nSigOps += GetP2SHSigOpCount(tx, view);
 
         CAmount nValueOut = tx.GetValueOut();
-        CAmount nFees = nValueIn-nValueOut;
+        CAmount nFees = nValueIn - nValueOut + GetSubTxFee(tx);
         // nModifiedFees includes any fee deltas from PrioritiseTransaction
         CAmount nModifiedFees = nFees;
         pool.ApplyDelta(hash, nModifiedFees);
@@ -851,7 +905,7 @@ bool AcceptToMemoryPoolWorker(CTxMemPool& pool, CValidationState& state, const C
         // check special TXs after all the other checks. If we'd do this before the other checks, we might end up
         // DoS scoring a node for non-critical errors, e.g. duplicate keys because a TX is received that was already
         // mined
-        if (!CheckSpecialTx(tx, chainActive.Tip(), state))
+        if (!CheckSpecialTx(tx, chainActive.Tip(), true, state))
             return false;
 
         if (pool.existsProviderTxConflict(tx)) {
@@ -2190,7 +2244,12 @@ static bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockInd
     LogPrint("bench", "    - Verify %u txins: %.2fms (%.3fms/txin) [%.2fs]\n", nInputs - 1, 0.001 * (nTime4 - nTime2), nInputs <= 1 ? 0 : 0.001 * (nTime4 - nTime2) / (nInputs-1), nTimeVerify * 0.000001);
 
 
-    // DASH
+    // DASH : MODIFIED TO CHECK MASTERNODE PAYMENTS AND SUPERBLOCKS
+
+    if (!ProcessSpecialTxsInBlock(block, pindex, state, specialTxsFee, fJustCheck, fScriptChecks)) {
+        return error("ConnectBlock(DASH): ProcessSpecialTxsInBlock for block %s failed with %s",
+                     pindex->GetBlockHash().ToString(), FormatStateMessage(state));
+    }
 
     // It's possible that we simply don't have enough data and this could fail
     // (i.e. block itself could be a correct one and we need to store it),
@@ -2244,6 +2303,8 @@ static bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockInd
 
     // TODO: resync data (both ways?) and try to reprocess this block later.
     CAmount blockReward = nFees + GetBlockSubsidy(pindex->pprev->nBits, pindex->pprev->nHeight, chainparams.GetConsensus());
+    blockReward += specialTxsFee;
+
     std::string strError = "";
 
     int64_t nTime5_2 = GetTimeMicros(); nTimeSubsidy += nTime5_2 - nTime5_1;
@@ -2264,11 +2325,6 @@ static bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockInd
 
     int64_t nTime5_4 = GetTimeMicros(); nTimePayeeValid += nTime5_4 - nTime5_3;
     LogPrint("bench", "      - IsBlockPayeeValid: %.2fms [%.2fs]\n", 0.001 * (nTime5_4 - nTime5_3), nTimePayeeValid * 0.000001);
-
-    if (!ProcessSpecialTxsInBlock(block, pindex, state, fJustCheck, fScriptChecks)) {
-        return error("ConnectBlock(DASH): ProcessSpecialTxsInBlock for block %s failed with %s",
-                     pindex->GetBlockHash().ToString(), FormatStateMessage(state));
-    }
 
     int64_t nTime5_5 = GetTimeMicros(); nTimeProcessSpecial += nTime5_5 - nTime5_4;
     LogPrint("bench", "      - ProcessSpecialTxsInBlock: %.2fms [%.2fs]\n", 0.001 * (nTime5_5 - nTime5_4), nTimeProcessSpecial * 0.000001);
@@ -2570,6 +2626,7 @@ bool static DisconnectTip(CValidationState& state, const CChainParams& chainpara
     // UpdateTransactionsFromBlock finds descendants of any transactions in this
     // block that were added back and cleans up the mempool state.
     mempool.UpdateTransactionsFromBlock(vHashUpdate);
+
     // Update chainActive and related variables.
     UpdateTip(pindexDelete->pprev, chainparams);
     // Let wallets know transactions went from 1-confirmed to
@@ -2646,6 +2703,7 @@ bool static ConnectTip(CValidationState& state, const CChainParams& chainparams,
     LogPrint("bench", "  - Writing chainstate: %.2fms [%.2fs]\n", (nTime5 - nTime4) * 0.001, nTimeChainState * 0.000001);
     // Remove conflicting transactions from the mempool.;
     mempool.removeForBlock(blockConnecting.vtx, pindexNew->nHeight);
+
     // Update chainActive & related variables.
     UpdateTip(pindexNew, chainparams);
 
@@ -4090,7 +4148,7 @@ bool CVerifyDB::VerifyDB(const CChainParams& chainparams, CCoinsView *coinsview,
             CBlock block;
             if (!ReadBlockFromDisk(block, pindex, chainparams.GetConsensus()))
                 return error("VerifyDB(): *** ReadBlockFromDisk failed at %d, hash=%s", pindex->nHeight, pindex->GetBlockHash().ToString());
-            if (!ConnectBlock(block, state, pindex, coins, chainparams))
+            if (!ConnectBlock(block, state, pindex, coins, chainparams, false))
                 return error("VerifyDB(): *** found unconnectable block at %d, hash=%s", pindex->nHeight, pindex->GetBlockHash().ToString());
         }
     }

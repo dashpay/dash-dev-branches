@@ -20,9 +20,11 @@
 #include "utiltime.h"
 #include "version.h"
 #include "hash.h"
+#include "messagesigner.h"
 
 #include "evo/specialtx.h"
 #include "evo/providertx.h"
+#include "evo/subtx.h"
 
 #include "llmq/quorums_instantsend.h"
 
@@ -178,6 +180,16 @@ bool CTxMemPool::CalculateMemPoolAncestors(const CTxMemPoolEntry &entry, setEntr
                 }
             }
         }
+
+        // each SubTx with a parent is handled the same way as we handle other parents
+        uint256 hashPrevSubTx = GetSubTxHashPrevSubTx(tx);
+        if (!hashPrevSubTx.IsNull()) {
+            auto piter = mapTx.find(hashPrevSubTx);
+            if (piter != mapTx.end()) {
+                parentHashes.insert(piter);
+            }
+        }
+
     } else {
         // If we're not searching for parents, we require this to be an
         // entry in the mempool already.
@@ -404,6 +416,19 @@ bool CTxMemPool::addUnchecked(const uint256& hash, const CTxMemPoolEntry &entry,
         mapNextTx.insert(std::make_pair(&tx.vin[i].prevout, &tx));
         setParentTransactions.insert(tx.vin[i].prevout.hash);
     }
+
+    // each SubTx with a parent is handled the same way as we handle other parents
+    uint256 hashPrevSubTx = GetSubTxHashPrevSubTx(tx);
+    if (!hashPrevSubTx.IsNull()) {
+        mapTx.modify(newit, [&](CTxMemPoolEntry& e) {
+            e.GetSubTxDummyOutPoint()->hash = hashPrevSubTx;
+            e.GetSubTxDummyOutPoint()->n = (uint32_t)-1;
+        });
+
+        mapNextTx.insert(std::make_pair(newit->GetSubTxDummyOutPoint(), &tx));
+        setParentTransactions.insert(hashPrevSubTx);
+    }
+
     // Don't bother worrying about child transactions of this one.
     // Normal case of a new transaction arriving is that there can't be any
     // children, because such children would be orphans.
@@ -473,8 +498,21 @@ bool CTxMemPool::addUnchecked(const uint256& hash, const CTxMemPoolEntry &entry,
         if (dmn->pdmnState->pubKeyOperator != CBLSPublicKey()) {
             newit->isKeyChangeProTx = true;
         }
+    } else if (tx.nType == TRANSACTION_SUBTX_REGISTER) {
+        CSubTxRegister subTx;
+        if (!GetTxPayload(tx, subTx)) {
+            LogPrintf("%s: ERROR: Invalid transaction payload, tx: %s", __func__, tx.ToString());
+            return false;
+        }
+        mapSubTxRegisterUserNames.emplace(subTx.userName, tx.GetHash());
+    } else if (tx.nType == TRANSACTION_SUBTX_TOPUP) {
+        CSubTxTopup subTx;
+        if (!GetTxPayload(tx, subTx)) {
+            LogPrintf("%s: ERROR: Invalid transaction payload, tx: %s", __func__, tx.ToString());
+            return false;
+        }
+        mapSubTxTopups[subTx.regTxId].insert(tx.GetHash());
     }
-
     return true;
 }
 
@@ -640,6 +678,9 @@ void CTxMemPool::removeUnchecked(txiter it, MemPoolRemovalReason reason)
     const uint256 hash = it->GetTx().GetHash();
     BOOST_FOREACH(const CTxIn& txin, it->GetTx().vin)
         mapNextTx.erase(txin.prevout);
+    if (!it->GetSubTxDummyOutPoint()->hash.IsNull()) {
+        mapNextTx.erase(*it->GetSubTxDummyOutPoint());
+    }
 
     if (vTxHashes.size() > 1) {
         vTxHashes[it->vTxHashesIdx] = std::move(vTxHashes.back());
@@ -663,9 +704,7 @@ void CTxMemPool::removeUnchecked(txiter it, MemPoolRemovalReason reason)
 
     if (it->GetTx().nType == TRANSACTION_PROVIDER_REGISTER) {
         CProRegTx proTx;
-        if (!GetTxPayload(it->GetTx(), proTx)) {
-            assert(false);
-        }
+        GetTxPayloadAssert(it->GetTx(), proTx);
         if (!proTx.collateralOutpoint.IsNull()) {
             eraseProTxRef(it->GetTx().GetHash(), proTx.collateralOutpoint.hash);
         }
@@ -675,24 +714,31 @@ void CTxMemPool::removeUnchecked(txiter it, MemPoolRemovalReason reason)
         mapProTxCollaterals.erase(proTx.collateralOutpoint);
     } else if (it->GetTx().nType == TRANSACTION_PROVIDER_UPDATE_SERVICE) {
         CProUpServTx proTx;
-        if (!GetTxPayload(it->GetTx(), proTx)) {
-            assert(false);
-        }
+        GetTxPayloadAssert(it->GetTx(), proTx);
         eraseProTxRef(proTx.proTxHash, it->GetTx().GetHash());
         mapProTxAddresses.erase(proTx.addr);
     } else if (it->GetTx().nType == TRANSACTION_PROVIDER_UPDATE_REGISTRAR) {
         CProUpRegTx proTx;
-        if (!GetTxPayload(it->GetTx(), proTx)) {
-            assert(false);
-        }
+        GetTxPayloadAssert(it->GetTx(), proTx);
         eraseProTxRef(proTx.proTxHash, it->GetTx().GetHash());
         mapProTxBlsPubKeyHashes.erase(proTx.pubKeyOperator.GetHash());
     } else if (it->GetTx().nType == TRANSACTION_PROVIDER_UPDATE_REVOKE) {
         CProUpRevTx proTx;
-        if (!GetTxPayload(it->GetTx(), proTx)) {
-            assert(false);
-        }
+        GetTxPayloadAssert(it->GetTx(), proTx);
         eraseProTxRef(proTx.proTxHash, it->GetTx().GetHash());
+    } else if (it->GetTx().nType == TRANSACTION_SUBTX_REGISTER) {
+        CSubTxRegister subTx;
+        GetTxPayloadAssert(it->GetTx(), subTx);
+        mapSubTxRegisterUserNames.erase(subTx.userName);
+    } else if (it->GetTx().nType == TRANSACTION_SUBTX_TOPUP) {
+        CSubTxTopup subTx;
+        GetTxPayloadAssert(it->GetTx(), subTx);
+        auto it = mapSubTxTopups.find(subTx.regTxId);
+        if (it != mapSubTxTopups.end()) {
+            it->second.erase(hash);
+            if (it->second.empty())
+                mapSubTxTopups.erase(subTx.regTxId);
+        }
     }
 
     totalTxSize -= it->GetTxSize();
@@ -757,6 +803,14 @@ void CTxMemPool::removeRecursive(const CTransaction &origTx, MemPoolRemovalReaso
                 assert(nextit != mapTx.end());
                 txToRemove.insert(nextit);
             }
+
+            // remove dummy SubTx entries
+            auto it = mapNextTx.find(COutPoint(origTx.GetHash(), (uint32_t)-1));
+            if (it != mapNextTx.end()) {
+                txiter nextit = mapTx.find(it->second->GetHash());
+                assert(nextit != mapTx.end());
+                txToRemove.insert(nextit);
+            }
         }
         setEntries setAllRemoves;
         BOOST_FOREACH(txiter it, txToRemove) {
@@ -810,6 +864,19 @@ void CTxMemPool::removeConflicts(const CTransaction &tx)
     LOCK(cs);
     BOOST_FOREACH(const CTxIn &txin, tx.vin) {
         auto it = mapNextTx.find(txin.prevout);
+        if (it != mapNextTx.end()) {
+            const CTransaction &txConflict = *it->second;
+            if (txConflict != tx)
+            {
+                ClearPrioritisation(txConflict.GetHash());
+                removeRecursive(txConflict, MemPoolRemovalReason::CONFLICT);
+            }
+        }
+    }
+
+    uint256 hashPrevSubTx = GetSubTxHashPrevSubTx(tx);
+    if (!hashPrevSubTx.IsNull()) {
+        auto it = mapNextTx.find(COutPoint(hashPrevSubTx, (uint32_t)-1));
         if (it != mapNextTx.end()) {
             const CTransaction &txConflict = *it->second;
             if (txConflict != tx)
@@ -960,6 +1027,97 @@ void CTxMemPool::removeProTxConflicts(const CTransaction &tx)
     }
 }
 
+void CTxMemPool::removeSubTxTopups(const uint256 &regTxId) {
+    // first remove topups for conflicting register SubTx
+    if (mapSubTxTopups.count(regTxId)) {
+        for (const uint256 &topUpTx : mapSubTxTopups[regTxId]) {
+            auto topUpTxIt = mapTx.find(topUpTx);
+            if (topUpTxIt == mapTx.end())
+                continue;
+
+            removeRecursive(topUpTxIt->GetTx());
+            ClearPrioritisation(topUpTxIt->GetTx().GetHash());
+        }
+    }
+}
+
+template<typename SubTx>
+static inline bool IsSubTxForUser(const CTransaction& tx, const uint256& regTxId)
+{
+    SubTx subTx;
+    GetTxPayloadAssert(tx, subTx);
+    return subTx.regTxId == regTxId;
+}
+
+template<typename SubTx>
+static inline bool IsSubTxValidForKey(const CTransaction& tx, const CKeyID& keyId)
+{
+    SubTx subTx;
+    GetTxPayloadAssert(tx, subTx);
+    std::string strError;
+    return CHashSigner::VerifyHash(subTx.GetSignHash(), keyId, subTx.vchSig, strError);
+}
+
+void CTxMemPool::removeSubTxsForUser(const uint256 &regTxId) {
+    std::set<uint256> toRemove;
+
+    for (const auto& txRef : getSubTxsForUser(regTxId)) {
+        const CTransaction& tx = *txRef;
+        if (tx.nType == TRANSACTION_SUBTX_REGISTER) {
+            toRemove.emplace(tx.GetHash());
+        } else if (tx.nType == TRANSACTION_SUBTX_TOPUP) {
+            if (IsSubTxForUser<CSubTxTopup>(tx, regTxId)) {
+                toRemove.emplace(tx.GetHash());
+            }
+        } else if (tx.nType == TRANSACTION_SUBTX_RESETKEY) {
+            if (IsSubTxForUser<CSubTxResetKey>(tx, regTxId)) {
+                toRemove.emplace(tx.GetHash());
+            }
+        } else if (tx.nType == TRANSACTION_SUBTX_CLOSEACCOUNT) {
+            if (IsSubTxForUser<CSubTxCloseAccount>(tx, regTxId)) {
+                toRemove.emplace(tx.GetHash());
+            }
+        } else if (tx.nType == TRANSACTION_SUBTX_TRANSITION) {
+            if (IsSubTxForUser<CSubTxTransition>(tx, regTxId)) {
+                toRemove.emplace(tx.GetHash());
+            }
+        }
+    }
+
+    for (auto& txHash : toRemove) {
+        auto tx = get(txHash);
+        if (!tx) {
+            continue;
+        }
+        removeRecursive(*tx, MemPoolRemovalReason::CONFLICT);
+        ClearPrioritisation(txHash);
+    }
+}
+
+void CTxMemPool::removeSubTxConflicts(const CTransaction &tx)
+{
+    if (tx.nType == TRANSACTION_SUBTX_REGISTER) {
+        CSubTxRegister subTx;
+        GetTxPayloadAssert(tx, subTx);
+        auto it = mapSubTxRegisterUserNames.find(subTx.userName);
+        if (it == mapSubTxRegisterUserNames.end())
+            return;
+        auto it2 = mapTx.find(it->second);
+        if (it2 == mapTx.end())
+            return;
+
+        const CTransaction &txConflict = it2->GetTx();
+        if (txConflict == tx)
+            return;
+
+        removeSubTxsForUser(txConflict.GetHash());
+    } else if (tx.nType == TRANSACTION_SUBTX_CLOSEACCOUNT) {
+        CSubTxCloseAccount subTx;
+        GetTxPayloadAssert(tx, subTx);
+        removeSubTxsForUser(subTx.regTxId);
+    }
+}
+
 /**
  * Called when a block is connected. Removes from mempool and updates the miner fee estimator.
  */
@@ -987,6 +1145,7 @@ void CTxMemPool::removeForBlock(const std::vector<CTransactionRef>& vtx, unsigne
         }
         removeConflicts(*tx);
         removeProTxConflicts(*tx);
+        removeSubTxConflicts(*tx);
         ClearPrioritisation(tx->GetHash());
     }
     lastRollingFeeUpdate = GetTime();
@@ -1000,6 +1159,8 @@ void CTxMemPool::_clear()
     mapNextTx.clear();
     mapProTxAddresses.clear();
     mapProTxPubKeyIDs.clear();
+    mapSubTxRegisterUserNames.clear();
+    mapSubTxTopups.clear();
     totalTxSize = 0;
     cachedInnerUsage = 0;
     lastRollingFeeUpdate = GetTime();
@@ -1065,6 +1226,12 @@ void CTxMemPool::check(const CCoinsViewCache *pcoins) const
             assert(it3->first == &txin.prevout);
             assert(it3->second == &tx);
             i++;
+        }
+        if (!it->GetSubTxDummyOutPoint()->IsNull()) {
+            auto it4 = mapTx.find(it->GetSubTxDummyOutPoint()->hash);
+            if (it4 != mapTx.end()) {
+                setParentCheck.emplace(it4);
+            }
         }
         assert(setParentCheck == GetMemPoolParents(it));
         // Verify ancestor state is correct.
@@ -1323,6 +1490,42 @@ bool CTxMemPool::existsProviderTxConflict(const CTransaction &tx) const {
         }
     }
     return false;
+}
+
+bool CTxMemPool::getRegTxIdFromUserName(const std::string &userName, uint256 &regTxId) const {
+    LOCK(cs);
+    auto it = mapSubTxRegisterUserNames.find(userName);
+    if (it == mapSubTxRegisterUserNames.end())
+        return false;
+    regTxId = it->second;
+    return true;
+}
+
+bool CTxMemPool::getTopupsForUser(const uint256 &regTxId, std::vector<CTransactionRef> &result) const {
+    LOCK(cs);
+    auto it = mapSubTxTopups.find(regTxId);
+    if (it == mapSubTxTopups.end())
+        return false;
+    for (const auto txHash : it->second) {
+        auto it2 = mapTx.find(txHash);
+        if (it2 != mapTx.end()) {
+            result.push_back(it2->GetSharedTx());
+        }
+    }
+    return true;
+}
+
+std::vector<CTransactionRef> CTxMemPool::getSubTxsForUser(const uint256& regTxId) const
+{
+    LOCK(cs);
+    std::vector<CTransactionRef> result;
+    for (indexed_transaction_set::const_iterator it = mapTx.begin(); it != mapTx.end(); it++) {
+        auto tx = it->GetSharedTx();
+        if (tx->nType >= TRANSACTION_SUBTX_REGISTER && tx->nType <= TRANSACTION_SUBTX_TRANSITION) {
+            result.emplace_back(tx);
+        }
+    }
+    return result;
 }
 
 CFeeRate CTxMemPool::estimateFee(int nBlocks) const

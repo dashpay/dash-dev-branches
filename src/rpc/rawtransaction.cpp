@@ -33,7 +33,7 @@
 #include "evo/specialtx.h"
 #include "evo/providertx.h"
 #include "evo/cbtx.h"
-
+#include "evo/subtx.h"
 #include "llmq/quorums_chainlocks.h"
 #include "llmq/quorums_commitment.h"
 #include "llmq/quorums_instantsend.h"
@@ -43,6 +43,8 @@
 #include <boost/assign/list_of.hpp>
 
 #include <univalue.h>
+
+void SubTxToJSON(const CTransaction &tx, UniValue &entry);
 
 void ScriptPubKeyToJSON(const CScript& scriptPubKey, UniValue& out, bool fIncludeHex)
 {
@@ -177,6 +179,36 @@ void TxToJSON(const CTransaction& tx, const uint256 hashBlock, UniValue& entry)
             UniValue obj;
             qcTx.ToJson(obj);
             entry.push_back(Pair("qcTx", obj));
+        }
+    } else if (tx.nType == TRANSACTION_SUBTX_REGISTER) {
+        CSubTxRegister subTx;
+        if (GetTxPayload(tx, subTx)) {
+            UniValue proTxObj = subTx.ToJson();
+            entry.push_back(Pair("subTxRegister", proTxObj));
+        }
+    } else if (tx.nType == TRANSACTION_SUBTX_TOPUP) {
+        CSubTxTopup subTx;
+        if (GetTxPayload(tx, subTx)) {
+            UniValue proTxObj = subTx.ToJson();
+            entry.push_back(Pair("subTxTopup", proTxObj));
+        }
+    } else if (tx.nType == TRANSACTION_SUBTX_RESETKEY) {
+        CSubTxResetKey subTx;
+        if (GetTxPayload(tx, subTx)) {
+            UniValue proTxObj = subTx.ToJson();
+            entry.push_back(Pair("subTxReset", proTxObj));
+        }
+    } else if (tx.nType == TRANSACTION_SUBTX_CLOSEACCOUNT) {
+        CSubTxCloseAccount subTx;
+        if (GetTxPayload(tx, subTx)) {
+            UniValue proTxObj = subTx.ToJson();
+            entry.push_back(Pair("subTxCloseAccount", proTxObj));
+        }
+    } else if (tx.nType == TRANSACTION_SUBTX_TRANSITION) {
+        CSubTxTransition subTx;
+        if (GetTxPayload(tx, subTx)) {
+            UniValue proTxObj = subTx.ToJson();
+            entry.push_back(Pair("subTxTransition", proTxObj));
         }
     }
 

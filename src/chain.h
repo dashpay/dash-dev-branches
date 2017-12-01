@@ -405,6 +405,7 @@ public:
         READWRITE(nTime);
         READWRITE(nBits);
         READWRITE(nNonce);
+        READWRITE(hashMerkleRoot);
     }
 
     uint256 GetBlockHash() const

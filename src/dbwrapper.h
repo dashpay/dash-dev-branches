@@ -12,6 +12,8 @@
 #include "utilstrencodings.h"
 #include "version.h"
 
+#include <map>
+#include <memory>
 #include <typeindex>
 
 #include <boost/filesystem/path.hpp>
