@@ -104,6 +104,8 @@ BITCOIN_CORE_H = \
   consensus/validation.h \
   core_io.h \
   core_memusage.h \
+  evo/users.h \
+  evo/subtx.h \
   privatesend.h \
   privatesend-client.h \
   privatesend-server.h \
@@ -217,6 +219,8 @@ libbitcoin_server_a_SOURCES = \
   bloom.cpp \
   chain.cpp \
   checkpoints.cpp \
+  evo/users.cpp \
+  evo/subtx.cpp \
   httprpc.cpp \
   httpserver.cpp \
   init.cpp \
@@ -247,6 +251,7 @@ libbitcoin_server_a_SOURCES = \
   rpc/misc.cpp \
   rpc/net.cpp \
   rpc/rawtransaction.cpp \
+  rpc/rpcevo.cpp \
   rpc/server.cpp \
   script/sigcache.cpp \
   sendalert.cpp \

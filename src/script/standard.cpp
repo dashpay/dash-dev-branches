@@ -31,6 +31,7 @@ const char* GetTxnOutputType(txnouttype t)
     case TX_SCRIPTHASH: return "scripthash";
     case TX_MULTISIG: return "multisig";
     case TX_NULL_DATA: return "nulldata";
+    case TX_SUBSCRIPTION: return "subscription";
     }
     return NULL;
 }
@@ -73,6 +74,12 @@ bool Solver(const CScript& scriptPubKey, txnouttype& typeRet, vector<vector<unsi
     // script.
     if (scriptPubKey.size() >= 1 && scriptPubKey[0] == OP_RETURN && scriptPubKey.IsPushOnly(scriptPubKey.begin()+1)) {
         typeRet = TX_NULL_DATA;
+        return true;
+    }
+
+    // SubTX output
+    if (scriptPubKey.size() >= 1 && scriptPubKey[0] == OP_SUBSCRIPTION && scriptPubKey.IsPushOnly(scriptPubKey.begin()+1)) {
+        typeRet = TX_SUBSCRIPTION;
         return true;
     }
 
@@ -198,7 +205,7 @@ bool ExtractDestinations(const CScript& scriptPubKey, txnouttype& typeRet, vecto
     vector<valtype> vSolutions;
     if (!Solver(scriptPubKey, typeRet, vSolutions))
         return false;
-    if (typeRet == TX_NULL_DATA){
+    if (typeRet == TX_NULL_DATA || typeRet == TX_SUBSCRIPTION){
         // This is data, not addresses
         return false;
     }
