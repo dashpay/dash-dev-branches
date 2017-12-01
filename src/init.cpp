@@ -69,7 +69,7 @@
 #include "warnings.h"
 
 #include "evo/deterministicmns.h"
-#include "llmq/quorums_init.h"
+#include "evo/users.h"
 
 #include "llmq/quorums_init.h"
 
@@ -1805,10 +1805,12 @@ bool AppInitMain(boost::thread_group& threadGroup, CScheduler& scheduler)
                 delete pblocktree;
                 llmq::DestroyLLMQSystem();
                 delete deterministicMNManager;
+                delete evoUserManager;
                 delete evoDb;
 
                 evoDb = new CEvoDB(nEvoDbCache, false, fReindex || fReindexChainState);
                 deterministicMNManager = new CDeterministicMNManager(*evoDb);
+                evoUserManager = new CEvoUserManager(*evoDb);
                 pblocktree = new CBlockTreeDB(nBlockTreeDBCache, false, fReindex);
                 pcoinsdbview = new CCoinsViewDB(nCoinDBCache, false, fReindex || fReindexChainState);
                 pcoinscatcher = new CCoinsViewErrorCatcher(pcoinsdbview);

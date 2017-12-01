@@ -45,6 +45,7 @@
 #include "evo/deterministicmns.h"
 #include "evo/mnauth.h"
 #include "evo/simplifiedmns.h"
+
 #include "llmq/quorums_blockprocessor.h"
 #include "llmq/quorums_commitment.h"
 #include "llmq/quorums_chainlocks.h"
@@ -2213,6 +2214,8 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             for (unsigned int i = 0; i < tx.vout.size(); i++) {
                 vWorkQueue.emplace_back(inv.hash, i);
             }
+            // for special transactions having dependencies onto other
+            vWorkQueue.emplace_back(inv.hash, (uint32_t)-1);
 
             pfrom->nLastTXTime = GetTime();
 
@@ -2620,7 +2623,6 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                 pfrom->nLastBlockTime = GetTime();
         }
     }
-
 
     else if (strCommand == NetMsgType::HEADERS && !fImporting && !fReindex) // Ignore headers received while importing
     {

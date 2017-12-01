@@ -100,6 +100,9 @@ private:
     CAmount nModFeesWithAncestors;
     unsigned int nSigOpCountWithAncestors;
 
+    // Used to track parent transactions through the indirectmap mapNextTx
+    COutPoint subTxDummyOutPoint;
+
 public:
     CTxMemPoolEntry(const CTransactionRef& _tx, const CAmount& _nFee,
                     int64_t _nTime, unsigned int _entryHeight,
@@ -145,6 +148,9 @@ public:
     // If this is a proTx, this will be the hash of the key for which this ProTx was valid
     mutable uint256 validForProTxKey;
     mutable bool isKeyChangeProTx{false};
+
+    const COutPoint* GetSubTxDummyOutPoint() const { return &subTxDummyOutPoint; }
+    COutPoint* GetSubTxDummyOutPoint() { return &subTxDummyOutPoint; }
 };
 
 // Helpers for modifying CTxMemPool::mapTx, which is a boost multi_index.
@@ -522,6 +528,8 @@ private:
     std::map<CKeyID, uint256> mapProTxPubKeyIDs;
     std::map<uint256, uint256> mapProTxBlsPubKeyHashes;
     std::map<COutPoint, uint256> mapProTxCollaterals;
+    std::map<std::string, uint256> mapSubTxRegisterUserNames;
+    std::map<uint256, std::set<uint256>> mapSubTxTopups;
 
     void UpdateParent(txiter entry, txiter parent, bool add);
     void UpdateChild(txiter entry, txiter child, bool add);
@@ -570,6 +578,9 @@ public:
     void removeProTxSpentCollateralConflicts(const CTransaction &tx);
     void removeProTxKeyChangedConflicts(const CTransaction &tx, const uint256& proTxHash, const uint256& newKeyHash);
     void removeProTxConflicts(const CTransaction &tx);
+    void removeSubTxTopups(const uint256 &regTxId);
+    void removeSubTxsForUser(const uint256 &regTxId);
+    void removeSubTxConflicts(const CTransaction &tx);
     void removeForBlock(const std::vector<CTransactionRef>& vtx, unsigned int nBlockHeight);
 
     void clear();
@@ -678,6 +689,15 @@ public:
     std::vector<TxMempoolInfo> infoAll() const;
 
     bool existsProviderTxConflict(const CTransaction &tx) const;
+
+    bool existsSubTxRegisterUserName(const std::string &userName) const {
+        LOCK(cs);
+        return mapSubTxRegisterUserNames.count(userName);
+    }
+
+    bool getRegTxIdFromUserName(const std::string &userName, uint256 &regTxId) const;
+    bool getTopupsForUser(const uint256 &regTxId, std::vector<CTransactionRef> &result) const;
+    std::vector<CTransactionRef> getSubTxsForUser(const uint256 &regTxId) const;
 
     size_t DynamicMemoryUsage() const;
     // returns share of the used memory to maximum allowed memory

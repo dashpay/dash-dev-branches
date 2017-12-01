@@ -13,11 +13,12 @@
 #include "cbtx.h"
 #include "deterministicmns.h"
 #include "specialtx.h"
+#include "subtx.h"
 
 #include "llmq/quorums_commitment.h"
 #include "llmq/quorums_blockprocessor.h"
 
-bool CheckSpecialTx(const CTransaction& tx, const CBlockIndex* pindexPrev, CValidationState& state)
+bool CheckSpecialTx(const CTransaction& tx, const CBlockIndex* pindexPrev, bool forMempool, CValidationState& state)
 {
     if (tx.nVersion != 3 || tx.nType == TRANSACTION_NORMAL)
         return true;
@@ -39,12 +40,22 @@ bool CheckSpecialTx(const CTransaction& tx, const CBlockIndex* pindexPrev, CVali
         return CheckCbTx(tx, pindexPrev, state);
     case TRANSACTION_QUORUM_COMMITMENT:
         return llmq::CheckLLMQCommitment(tx, pindexPrev, state);
+    case TRANSACTION_SUBTX_REGISTER:
+        return evoUserManager->CheckSubTxRegister(tx, pindexPrev, state);
+    case TRANSACTION_SUBTX_TOPUP:
+        return evoUserManager->CheckSubTxTopup(tx, pindexPrev, state);
+    case TRANSACTION_SUBTX_RESETKEY:
+        return evoUserManager->CheckSubTxResetKey(tx, pindexPrev, state);
+    case TRANSACTION_SUBTX_CLOSEACCOUNT:
+        return evoUserManager->CheckSubTxCloseAccount(tx, pindexPrev, state);
+    case TRANSACTION_SUBTX_TRANSITION:
+        return evoUserManager->CheckSubTxTransition(tx, pindexPrev, forMempool, state);
     }
 
     return state.DoS(10, false, REJECT_INVALID, "bad-tx-type-check");
 }
 
-bool ProcessSpecialTx(const CTransaction& tx, const CBlockIndex* pindex, CValidationState& state)
+bool ProcessSpecialTx(const CTransaction& tx, const CBlockIndex* pindex, CValidationState& state, CAmount& specialTxFees)
 {
     if (tx.nVersion != 3 || tx.nType == TRANSACTION_NORMAL) {
         return true;
@@ -60,6 +71,16 @@ bool ProcessSpecialTx(const CTransaction& tx, const CBlockIndex* pindex, CValida
         return true; // nothing to do
     case TRANSACTION_QUORUM_COMMITMENT:
         return true; // handled per block
+    case TRANSACTION_SUBTX_REGISTER:
+        return evoUserManager->ProcessSubTxRegister(tx, pindex, state, specialTxFees);
+    case TRANSACTION_SUBTX_TOPUP:
+        return evoUserManager->ProcessSubTxTopup(tx, pindex, state, specialTxFees);
+    case TRANSACTION_SUBTX_RESETKEY:
+        return evoUserManager->ProcessSubTxResetKey(tx, pindex, state, specialTxFees);
+    case TRANSACTION_SUBTX_CLOSEACCOUNT:
+        return evoUserManager->ProcessSubTxCloseAccount(tx, pindex, state, specialTxFees);
+    case TRANSACTION_SUBTX_TRANSITION:
+        return evoUserManager->ProcessSubTxTransition(tx, pindex, state, specialTxFees);
     }
 
     return state.DoS(100, false, REJECT_INVALID, "bad-tx-type-proc");
@@ -81,12 +102,22 @@ bool UndoSpecialTx(const CTransaction& tx, const CBlockIndex* pindex)
         return true; // nothing to do
     case TRANSACTION_QUORUM_COMMITMENT:
         return true; // handled per block
+    case TRANSACTION_SUBTX_REGISTER:
+        return evoUserManager->UndoSubTxRegister(tx, pindex);
+    case TRANSACTION_SUBTX_TOPUP:
+        return evoUserManager->UndoSubTxTopup(tx, pindex);
+    case TRANSACTION_SUBTX_RESETKEY:
+        return evoUserManager->UndoSubTxResetKey(tx, pindex);
+    case TRANSACTION_SUBTX_CLOSEACCOUNT:
+        return evoUserManager->UndoSubTxCloseAccount(tx, pindex);
+    case TRANSACTION_SUBTX_TRANSITION:
+        return evoUserManager->UndoSubTxTransition(tx, pindex);
     }
 
     return false;
 }
 
-bool ProcessSpecialTxsInBlock(const CBlock& block, const CBlockIndex* pindex, CValidationState& state, bool fJustCheck, bool fCheckCbTxMerleRoots)
+bool ProcessSpecialTxsInBlock(const CBlock& block, const CBlockIndex* pindex, CValidationState& state, CAmount& specialTxFees, bool fJustCheck, bool fCheckCbTxMerleRoots)
 {
     static int64_t nTimeLoop = 0;
     static int64_t nTimeQuorum = 0;
@@ -95,12 +126,14 @@ bool ProcessSpecialTxsInBlock(const CBlock& block, const CBlockIndex* pindex, CV
 
     int64_t nTime1 = GetTimeMicros();
 
+    specialTxFees = 0;
+
     for (int i = 0; i < (int)block.vtx.size(); i++) {
         const CTransaction& tx = *block.vtx[i];
-        if (!CheckSpecialTx(tx, pindex->pprev, state)) {
+        if (!CheckSpecialTx(tx, pindex->pprev, false, state)) {
             return false;
         }
-        if (!ProcessSpecialTx(tx, pindex, state)) {
+        if (!ProcessSpecialTx(tx, pindex, state, specialTxFees)) {
             return false;
         }
     }

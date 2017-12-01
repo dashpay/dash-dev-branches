@@ -13,6 +13,8 @@
 #include "utilstrencodings.h"
 #include "version.h"
 
+#include <map>
+#include <memory>
 #include <typeindex>
 
 #include <leveldb/db.h>

@@ -13,8 +13,8 @@ class CBlock;
 class CBlockIndex;
 class CValidationState;
 
-bool CheckSpecialTx(const CTransaction& tx, const CBlockIndex* pindexPrev, CValidationState& state);
-bool ProcessSpecialTxsInBlock(const CBlock& block, const CBlockIndex* pindex, CValidationState& state, bool fJustCheck, bool fCheckCbTxMerleRoots);
+bool CheckSpecialTx(const CTransaction& tx, const CBlockIndex* pindexPrev, bool forMempool, CValidationState& state);
+bool ProcessSpecialTxsInBlock(const CBlock& block, const CBlockIndex* pindex, CValidationState& state, CAmount& specialTxFees, bool fJustCheck, bool fCheckCbTxMerleRoots);
 bool UndoSpecialTxsInBlock(const CBlock& block, const CBlockIndex* pindex);
 
 template <typename T>
@@ -37,6 +37,14 @@ template <typename T>
 inline bool GetTxPayload(const CTransaction& tx, T& obj)
 {
     return GetTxPayload(tx.vExtraPayload, obj);
+}
+
+template <typename T>
+inline void GetTxPayloadAssert(const CTransaction& tx, T& obj)
+{
+    if (!GetTxPayload(tx.vExtraPayload, obj)) {
+        assert(false);
+    }
 }
 
 template <typename T>

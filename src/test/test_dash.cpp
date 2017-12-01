@@ -26,6 +26,7 @@
 #include "evo/specialtx.h"
 #include "evo/deterministicmns.h"
 #include "evo/cbtx.h"
+#include "evo/users.h"
 #include "llmq/quorums_init.h"
 
 #include <memory>
@@ -49,12 +50,14 @@ BasicTestingSetup::BasicTestingSetup(const std::string& chainName)
         SelectParams(chainName);
         evoDb = new CEvoDB(1 << 20, true, true);
         deterministicMNManager = new CDeterministicMNManager(*evoDb);
+        evoUserManager = new CEvoUserManager(*evoDb);
         noui_connect();
 }
 
 BasicTestingSetup::~BasicTestingSetup()
 {
         delete deterministicMNManager;
+        delete evoUserManager;
         delete evoDb;
 
         ECC_Stop();

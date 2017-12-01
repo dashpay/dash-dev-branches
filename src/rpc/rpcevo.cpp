@@ -103,7 +103,7 @@ std::string GetHelpString(int nParamNum, std::string strParamName)
 }
 
 // Allows to specify Dash address or priv key. In case of Dash address, the priv key is taken from the wallet
-static CKey ParsePrivKey(CWallet* pwallet, const std::string &strKeyOrAddress, bool allowAddresses = true) {
+CKey ParsePrivKey(CWallet* pwallet, const std::string &strKeyOrAddress, bool allowAddresses = true) {
     CBitcoinAddress address;
     if (allowAddresses && address.SetString(strKeyOrAddress) && address.IsValid()) {
 #ifdef ENABLE_WALLET
@@ -272,7 +272,7 @@ static std::string SignAndSendSpecialTx(const CMutableTransaction& tx)
     LOCK(cs_main);
 
     CValidationState state;
-    if (!CheckSpecialTx(tx, chainActive.Tip(), state)) {
+    if (!CheckSpecialTx(tx, chainActive.Tip(), false, state)) {
         throw std::runtime_error(FormatStateMessage(state));
     }
 

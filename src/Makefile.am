@@ -140,6 +140,10 @@ BITCOIN_CORE_H = \
   evo/providertx.h \
   evo/simplifiedmns.h \
   evo/specialtx.h \
+  evo/subtx.h \
+  evo/user.h \
+  evo/users.h \
+  evo/usersdb.h \
   privatesend/privatesend.h \
   privatesend/privatesend-client.h \
   privatesend/privatesend-server.h \
@@ -276,6 +280,10 @@ libdash_server_a_SOURCES = \
   evo/providertx.cpp \
   evo/simplifiedmns.cpp \
   evo/specialtx.cpp \
+  evo/subtx.cpp \
+  evo/user.cpp \
+  evo/users.cpp \
+  evo/usersdb.cpp \
   httprpc.cpp \
   httpserver.cpp \
   init.cpp \
@@ -326,6 +334,7 @@ libdash_server_a_SOURCES = \
   rpc/net.cpp \
   rpc/rawtransaction.cpp \
   rpc/rpcevo.cpp \
+  rpc/rpcevousers.cpp \
   rpc/rpcquorums.cpp \
   rpc/server.cpp \
   script/sigcache.cpp \

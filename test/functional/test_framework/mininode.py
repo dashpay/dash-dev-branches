@@ -45,6 +45,8 @@ MY_VERSION = 70214  # MIN_PEER_PROTO_VERSION
 MY_SUBVERSION = b"/python-mininode-tester:0.0.3/"
 MY_RELAY = 1 # from version 70001 onwards, fRelay should be appended to version messages (BIP37)
 
+VERSIONBITS_EVO = 0x00001000
+
 MAX_INV_SZ = 50000
 MAX_BLOCK_SIZE = 1000000
 
@@ -120,6 +122,22 @@ def deser_uint256(f):
 def ser_uint256(u):
     rs = b""
     for i in range(8):
+        rs += struct.pack("<I", u & 0xFFFFFFFF)
+        u >>= 32
+    return rs
+
+
+def deser_uint160(f):
+    r = 0
+    for i in range(5):
+        t = struct.unpack("<I", f.read(4))[0]
+        r += t << (i * 32)
+    return r
+
+
+def ser_uint160(u):
+    rs = b""
+    for i in range(5):
         rs += struct.pack("<I", u & 0xFFFFFFFF)
         u >>= 32
     return rs
@@ -467,6 +485,93 @@ class CTransaction(object):
             % (self.nVersion, repr(self.vin), repr(self.vout), self.nLockTime)
 
 
+class CTransition(object):
+    def __init__(self, ts=None):
+        if ts is None:
+            self.nVersion = 0x00010000
+            self.action = 0
+            self.fee = 0
+            self.hashRegTx = 0
+            self.hashPrevTransition = 0
+            self.hashSTPacket = 0
+            self.newPubKeyID = 0
+            self.vchUserSig = b""
+            self.vvchQuorumSigs = []
+            self.sha256 = None
+            self.hash = None
+        else:
+            self.nVersion = ts.nVersion
+            self.action = ts.action
+            self.fee = ts.fee
+            self.hashRegTx = ts.hashRegTx
+            self.hashPrevTransition = ts.hashPrevTransition
+            self.hashSTPacket = ts.hashSTPacket
+            self.newPubKeyID = ts.newPubKeyID
+            self.vchUserSig = ts.vchUserSig
+            self.vvchQuorumSigs = ts.vvchQuorumSigs
+            self.sha256 = None
+            self.hash = None
+
+    def deserialize(self, f):
+        self.nVersion = struct.unpack("<i", f.read(4))[0]
+        self.action = f.read(1)
+        self.fee = struct.unpack("<q", f.read(8))[0]
+        self.hashRegTx = deser_uint256(f)
+        self.hashPrevTransition = deser_uint256(f)
+
+        if self.action == 1:
+            self.hashSTPacket = deser_uint256(f)
+        elif self.action == 2:
+            self.newPubKeyID = deser_uint160(f)
+        elif self.action == 3:
+            pass
+        else:
+            assert False, "invalid action %d" % self.action
+
+        self.vchUserSig = deser_string(f)
+        self.vvchQuorumSigs = deser_string_vector(f)
+        self.sha256 = None
+        self.hash = None
+
+    def serialize(self):
+        r = b""
+        r += struct.pack("<i", self.nVersion)
+        r += struct.pack("<b", self.action)
+        r += ser_uint256(self.hashRegTx)
+        r += ser_uint256(self.hashPrevTransition)
+
+        if self.action == 1:
+            r += ser_uint256(self.hashSTPacket)
+        elif self.action == 2:
+            r += ser_uint160(self.newPubKeyID)
+        elif self.action == 3:
+            pass
+        else:
+            assert False, "invalid action %d" % self.action
+
+        r += ser_string(self.vchUserSig)
+        r += ser_string_vector(self.vvchQuorumSigs)
+
+        return r
+
+    def rehash(self):
+        self.sha256 = None
+        self.calc_sha256()
+
+    def calc_sha256(self):
+        if self.sha256 is None:
+            self.sha256 = uint256_from_str(hash256(self.serialize()))
+        self.hash = encode(hash256(self.serialize())[::-1], 'hex_codec').decode('ascii')
+
+    def is_valid(self):
+        self.calc_sha256()
+        return True
+
+    def __repr__(self):
+        return "CTransition(nVersion=%i action=%d)" \
+               % (self.nVersion, self.action)
+
+
 class CBlockHeader(object):
     def __init__(self, header=None):
         if header is None:
@@ -539,15 +644,20 @@ class CBlock(CBlockHeader):
     def __init__(self, header=None):
         super(CBlock, self).__init__(header)
         self.vtx = []
+        self.vts = []
 
     def deserialize(self, f):
         super(CBlock, self).deserialize(f)
         self.vtx = deser_vector(f, CTransaction)
+        if self.nVersion & VERSIONBITS_EVO:
+            self.vts = deser_vector(f, CTransition)
 
     def serialize(self):
         r = b""
         r += super(CBlock, self).serialize()
         r += ser_vector(self.vtx)
+        if self.nVersion & VERSIONBITS_EVO:
+            r += ser_vector(self.vts)
         return r
 
     # Calculate the merkle root given a vector of transaction hashes
@@ -575,6 +685,9 @@ class CBlock(CBlockHeader):
             return False
         for tx in self.vtx:
             if not tx.is_valid():
+                return False
+        for ts in self.vts:
+            if not ts.is_valid():
                 return False
         if self.calc_merkle_root() != self.hashMerkleRoot:
             return False
