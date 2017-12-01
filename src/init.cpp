@@ -67,6 +67,7 @@
 #include "warnings.h"
 
 #include "evo/deterministicmns.h"
+#include "evo/users.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -1657,6 +1658,7 @@ bool AppInitMain(boost::thread_group& threadGroup, CScheduler& scheduler)
                 delete pcoinscatcher;
                 delete pblocktree;
                 delete deterministicMNManager;
+                delete evoUserDB;
                 delete evoDb;
 
                 evoDb = new CEvoDB(nEvoDbCache, false, fReindex || fReindexChainState);
@@ -1666,6 +1668,7 @@ bool AppInitMain(boost::thread_group& threadGroup, CScheduler& scheduler)
                 pcoinscatcher = new CCoinsViewErrorCatcher(pcoinsdbview);
                 pcoinsTip = new CCoinsViewCache(pcoinscatcher);
                 deterministicMNManager = new CDeterministicMNManager(*evoDb);
+                evoUserDB = new CEvoUserDB(*evoDb);
 
                 if (fReindex) {
                     pblocktree->WriteReindexing(true);
