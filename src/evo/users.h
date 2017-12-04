@@ -10,6 +10,7 @@
 #include "dbwrapper.h"
 #include "uint256.h"
 #include "serialize.h"
+#include "transition.h"
 
 class CEvoUser {
 private:
@@ -17,6 +18,7 @@ private:
     std::string userName;
     std::vector<CPubKey> pubKeys;
     std::vector<uint256> subTxIds;
+    uint256 lastTransition;
 
     CAmount topupCredits{};
     CAmount spentCredits{};
@@ -41,6 +43,7 @@ public:
         READWRITE(userName);
         READWRITE(pubKeys);
         READWRITE(subTxIds);
+        READWRITE(lastTransition);
         READWRITE(topupCredits);
         READWRITE(spentCredits);
         READWRITE(closed);
@@ -109,6 +112,13 @@ public:
         return subTxIds;
     }
 
+    const uint256 &GetLastTransition() const {
+        return lastTransition;
+    }
+    void SetLastTransition(const uint256 &tsHash) {
+        lastTransition = tsHash;
+    }
+
     bool VerifySig(const std::string &msg, const std::vector<unsigned char> &sig, std::string &errorRet) const;
 };
 
@@ -138,6 +148,16 @@ public:
     bool GetUserIdByName(const std::string &userName, uint256 &regTxId);
     bool UserExists(const uint256 &regTxId);
     bool UserNameExists(const std::string &userName);
+
+    bool WriteTransition(const CTransition &ts);
+    bool DeleteTransition(const uint256 &tsHash);
+    bool GetTransition(const uint256 &tsHash, CTransition &ts);
+    bool GetLastTransitionForUser(const uint256 &regTxId, CTransition &ts);
+    bool GetTransitionsForUser(const uint256 &regTxId, int maxCount, std::vector<CTransition> &transitions);
+
+    bool WriteTransitionBlockHash(const uint256 &tsHash, const uint256 &blockHash);
+    bool GetTransitionBlockHash(const uint256 &tsHash, uint256 &blockHash);
+    bool DeleteTransitionBlockHash(const uint256 &tsHash);
 
     bool Commit();
     void Rollback();
