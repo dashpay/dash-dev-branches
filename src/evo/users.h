@@ -113,9 +113,20 @@ public:
 };
 
 class CEvoUserDB {
-private:
+public:
     CCriticalSection cs;
+
+    struct RAIITransaction {
+        CEvoUserDB &userDb;
+        RAIITransaction(CEvoUserDB &_userDb) : userDb(_userDb) {}
+        ~RAIITransaction() {
+            userDb.Rollback();
+        }
+    };
+
+private:
     CDBWrapper db;
+    CDBTransaction transaction;
 
 public:
     CEvoUserDB(size_t nCacheSize, bool fMemory=false, bool fWipe=false);
@@ -128,6 +139,14 @@ public:
     bool UserExists(const uint256 &regTxId);
     bool UserNameExists(const std::string &userName);
 
+    bool Commit();
+    void Rollback();
+    bool IsTransactionClean();
+
+    std::unique_ptr<RAIITransaction> BeginTransaction() {
+        assert(IsTransactionClean());
+        return std::unique_ptr<RAIITransaction>(new RAIITransaction(*this));
+    }
 };
 
 extern CEvoUserDB *evoUserDB;

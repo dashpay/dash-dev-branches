@@ -15,15 +15,14 @@ bool CEvoUser::VerifySig(const std::string &msg, const std::vector<unsigned char
 }
 
 CEvoUserDB::CEvoUserDB(size_t nCacheSize, bool fMemory, bool fWipe)
-        : db(GetDataDir() / "users", nCacheSize, fMemory, fWipe) {
+        : db(GetDataDir() / "users", nCacheSize, fMemory, fWipe),
+          transaction(db){
 }
 
 bool CEvoUserDB::WriteUser(const CEvoUser &user) {
     LOCK(cs);
-    if (!db.Write(std::make_pair(DB_USER, user.GetRegTxId()), user))
-        return false;
-    if (!db.Write(std::make_pair(DB_USER_BY_NAME, user.GetUserName()), user.GetRegTxId()))
-        return false;
+    transaction.Write(std::make_pair(DB_USER, user.GetRegTxId()), user);
+    transaction.Write(std::make_pair(DB_USER_BY_NAME, user.GetUserName()), user.GetRegTxId());
     return true;
 }
 
@@ -34,29 +33,40 @@ bool CEvoUserDB::DeleteUser(const uint256 &regTxId) {
     if (!GetUser(regTxId, user))
         return false;
 
-    if (!db.Erase(std::make_pair(DB_USER, regTxId)))
-        return false;
-    if (!db.Erase(std::make_pair(DB_USER_BY_NAME, user.GetUserName())))
-        return false;
+    transaction.Erase(std::make_pair(DB_USER, regTxId));
+    transaction.Erase(std::make_pair(DB_USER_BY_NAME, user.GetUserName()));
     return true;
 }
 
 bool CEvoUserDB::GetUser(const uint256 &regTxId, CEvoUser &user) {
     LOCK(cs);
-    return db.Read(std::make_pair(DB_USER, regTxId), user);
+    return transaction.Read(std::make_pair(DB_USER, regTxId), user);
 }
 
 bool CEvoUserDB::GetUserIdByName(const std::string &userName, uint256 &regTxId) {
     LOCK(cs);
-    return db.Read(std::make_pair(DB_USER_BY_NAME, userName), regTxId);
+    return transaction.Read(std::make_pair(DB_USER_BY_NAME, userName), regTxId);
 }
 
 bool CEvoUserDB::UserExists(const uint256 &regTxId) {
     LOCK(cs);
-    return db.Exists(std::make_pair(DB_USER, regTxId));
+    return transaction.Exists(std::make_pair(DB_USER, regTxId));
 }
 
 bool CEvoUserDB::UserNameExists(const std::string &userName) {
     LOCK(cs);
-    return db.Exists(std::make_pair(DB_USER_BY_NAME, userName));
+    return transaction.Exists(std::make_pair(DB_USER_BY_NAME, userName));
+}
+
+
+bool CEvoUserDB::Commit() {
+    return transaction.Commit();
+}
+
+void CEvoUserDB::Rollback() {
+    transaction.Clear();
+}
+
+bool CEvoUserDB::IsTransactionClean() {
+    return transaction.IsClean();
 }
