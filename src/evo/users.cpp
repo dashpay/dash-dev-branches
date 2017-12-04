@@ -10,7 +10,7 @@ CEvoUserDB *evoUserDB;
 static const char DB_USER = 'U';
 static const char DB_USER_BY_NAME = 'u';
 
-bool CEvoUser::VerifySig(const std::string &msg, const std::vector<unsigned char> &sig, std::string &errorRet) {
+bool CEvoUser::VerifySig(const std::string &msg, const std::vector<unsigned char> &sig, std::string &errorRet) const {
     return CMessageSigner::VerifyMessage(GetCurPubKey(), sig, msg, errorRet);
 }
 

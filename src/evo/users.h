@@ -109,7 +109,7 @@ public:
         return subTxIds;
     }
 
-    bool VerifySig(const std::string &msg, const std::vector<unsigned char> &sig, std::string &errorRet);
+    bool VerifySig(const std::string &msg, const std::vector<unsigned char> &sig, std::string &errorRet) const;
 };
 
 class CEvoUserDB {

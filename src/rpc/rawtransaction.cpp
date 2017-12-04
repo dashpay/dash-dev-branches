@@ -29,6 +29,8 @@
 #include "wallet/wallet.h"
 #endif
 
+#include "evo/subtx.h"
+
 #include <stdint.h>
 
 #include <boost/assign/list_of.hpp>
@@ -36,6 +38,8 @@
 #include <univalue.h>
 
 using namespace std;
+
+void SubTxToJSON(const CTransaction &tx, UniValue &entry);
 
 void ScriptPubKeyToJSON(const CScript& scriptPubKey, UniValue& out, bool fIncludeHex)
 {
@@ -122,6 +126,12 @@ void TxToJSON(const CTransaction& tx, const uint256 hashBlock, UniValue& entry)
         vout.push_back(out);
     }
     entry.push_back(Pair("vout", vout));
+
+    if (IsSubTx(tx)) {
+        UniValue subTxValue(UniValue::VOBJ);
+        SubTxToJSON(tx, subTxValue);
+        entry.push_back(Pair("subtx", subTxValue));
+    }
 
     if (!hashBlock.IsNull()) {
         entry.push_back(Pair("blockhash", hashBlock.GetHex()));

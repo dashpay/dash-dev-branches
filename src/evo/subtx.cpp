@@ -5,6 +5,9 @@
 #include "consensus/validation.h"
 #include "messagesigner.h"
 #include "script/standard.h"
+#include "tinyformat.h"
+#include "univalue.h"
+
 #include "subtx.h"
 #include "users.h"
 
@@ -26,25 +29,32 @@ static bool GetSubTxData(const CTxOut &txout, std::vector<unsigned char> &data) 
     return txout.scriptPubKey.GetOp(it, opcode, data);
 }
 
-static bool GetSubTxData(const CTransaction &tx, std::vector<unsigned char> &data, CValidationState &state) {
-    if (!GetSubTxData(tx.vout[0], data)) {
-        return state.DoS(10, false, REJECT_INVALID, "bad-subtx-data");
-    }
+bool GetSubTxData(const CTransaction &tx, CSubTxData &subTxData) {
+    std::vector<unsigned char> subTxData2;
+    if (!GetSubTxData(tx.vout[0], subTxData2))
+        return false;
 
-    if (data.size() > MAX_SUBTX_DATA_LEN) {
-        return state.DoS(10, false, REJECT_INVALID, "bad-subtx-datalen");
+    CDataStream ds(subTxData2, SER_NETWORK, CLIENT_VERSION);
+    try {
+        ds >> subTxData;
+    } catch (...) {
+        return false;
     }
     return true;
 }
 
-bool IsSubTxDataValid(const CTransaction &tx, CValidationState &state) {
+static bool CheckSubTxStructure(const CTransaction &tx, CValidationState &state) {
     if (!IsSubTx(tx))
-        return state.DoS(10, false, REJECT_INVALID, "bad-subtx-notsubtx");
+        return state.DoS(100, false, REJECT_INVALID, "bad-subtx-notsubtx");
+
+    if (tx.IsCoinBase()) {
+        return state.DoS(100, false, REJECT_INVALID, "bad-subtx-cb");
+    }
 
     // first output must be OP_SUBSCRIPTION + data pushes only
     const CTxOut &subTxOut = tx.vout[0];
     if (subTxOut.scriptPubKey.size() < 2 || subTxOut.scriptPubKey[0] != OP_SUBSCRIPTION || !subTxOut.scriptPubKey.IsPushOnly(subTxOut.scriptPubKey.begin()+1)) {
-        return state.DoS(10, false, REJECT_INVALID, "bad-subtx-opcode");
+        return state.DoS(100, false, REJECT_INVALID, "bad-subtx-opcode");
     }
 
     // remaining outputs must be standard (non-data) types
@@ -54,126 +64,148 @@ bool IsSubTxDataValid(const CTransaction &tx, CValidationState &state) {
         txnouttype txType;
         std::vector <std::vector<unsigned char>> solutions;
         if (!Solver(txOut.scriptPubKey, txType, solutions)) {
-            return state.DoS(10, false, REJECT_INVALID, "bad-subtx-badchange");
+            return state.DoS(100, false, REJECT_INVALID, "bad-subtx-badchange");
         }
         if (txType != TX_PUBKEY && txType != TX_PUBKEYHASH && txType != TX_SCRIPTHASH) {
-            return state.DoS(10, false, REJECT_INVALID, "bad-subtx-badchange");
+            return state.DoS(100, false, REJECT_INVALID, "bad-subtx-badchange");
         }
     }
 
     std::vector<unsigned char> subTxData;
-    if (!GetSubTxData(tx, subTxData, state))
-        return false;
+    if (!GetSubTxData(tx.vout[0], subTxData)) {
+        return state.DoS(100, false, REJECT_INVALID, "bad-subtx-data");
+    }
 
-    // try to deserialize the data
-    try {
-        auto p = CSubTxData::Deserialize(subTxData);
-        if (!p)
-            return state.DoS(10, false, REJECT_INVALID, "bad-subtx-data");
-    } catch (...) {
-        return state.DoS(10, false, REJECT_INVALID, "bad-subtx-data");
+    if (subTxData.size() > MAX_SUBTX_DATA_LEN) {
+        return state.DoS(100, false, REJECT_INVALID, "bad-subtx-datalen");
     }
 
     return true;
 }
 
 bool CheckSubTx(const CTransaction &tx, CValidationState &state) {
-    // should never happen, but we want to be extra secure
-    if (!IsSubTx(tx) || !IsSubTxDataValid(tx, state))
+    if (!CheckSubTxStructure(tx, state))
         return false;
 
-    std::vector<unsigned char> subTxData;
-    if (!GetSubTxData(tx, subTxData, state))
-        return false;
+    CSubTxData subTxData;
+    if (!GetSubTxData(tx, subTxData))
+        return state.DoS(100, false, REJECT_INVALID, "bad-subtx-data");
 
-    auto p = CSubTxData::Deserialize(subTxData);
-    bool result = p->Check(tx, state);
-    return result;
+    return subTxData.Check(tx, state);
 }
 
 bool ProcessSubTx(const CTransaction &tx, CValidationState &state) {
     // should never happen, but we want to be extra secure
-    if (!IsSubTx(tx) || !IsSubTxDataValid(tx, state))
+    if (!CheckSubTxStructure(tx, state))
         return false;
 
-    std::vector<unsigned char> subTxData;
-    if (!GetSubTxData(tx, subTxData, state))
-        return false;
+    CSubTxData subTxData;
+    if (!GetSubTxData(tx, subTxData))
+        return state.DoS(100, false, REJECT_INVALID, "bad-subtx-data");
 
-    auto p = CSubTxData::Deserialize(subTxData);
-    bool result = p->Process(tx, state);
-    return result;
+    return subTxData.Process(tx, state);
 }
 
 bool UndoSubTx(const CTransaction &tx, CValidationState &state) {
     // should never happen, but we want to be extra secure
-    if (!IsSubTx(tx) || !IsSubTxDataValid(tx, state))
+    if (!CheckSubTxStructure(tx, state))
         return false;
 
-    std::vector<unsigned char> subTxData;
-    if (!GetSubTxData(tx, subTxData, state))
-        return false;
+    CSubTxData subTxData;
+    if (!GetSubTxData(tx, subTxData))
+        return state.DoS(100, false, REJECT_INVALID, "bad-subtx-data");
 
-    auto p = CSubTxData::Deserialize(subTxData);
-    bool result = p->Undo(tx, state);
-    return result;
+    return subTxData.Undo(tx, state);
 }
 
-std::unique_ptr<CSubTxData> CSubTxData::Deserialize(const std::vector<unsigned char> &data) {
-    if (data.size() == 0)
-        return nullptr;
-    SubTxAction action = (SubTxAction)data[0];
-    CDataStream ds(data, SER_DISK, CLIENT_VERSION);
-    switch (action) {
-        case SubTxAction_Register: {
-            auto p = std::unique_ptr<CSubTxRegister>(new CSubTxRegister());
-            ds >> *p;
-            return std::move(p);
-        }
-        case SubTxAction_TopUp: {
-            auto p = std::unique_ptr<CSubTxTopUp>(new CSubTxTopUp());
-            ds >> *p;
-            return std::move(p);
-        }
-        case SubTxAction_ResetKey: {
-            auto p = std::unique_ptr<CSubTxResetKey>(new CSubTxResetKey());
-            ds >> *p;
-            return std::move(p);
-        }
-        case SubTxAction_Close: {
-            auto p = std::unique_ptr<CSubTxClose>(new CSubTxClose());
-            ds >> *p;
-            return std::move(p);
-        }
-        default:
-            LogPrintf("CSubTxData::Deserialize -- unknown or invalid action %d\n", action);
-            return nullptr;
+bool CheckSubTxsInBlock(const CBlock &block, CValidationState &state) {
+    for (const CTransaction &tx : block.vtx) {
+        if (!IsSubTx(tx))
+            continue;
+        if (!CheckSubTx(tx, state))
+            return false;
     }
-
-    // should never get to this point
-    return nullptr;
+    return true;
 }
 
-bool CSubTxRegister::Check(const CTransaction &subTx, CValidationState &state) {
+bool ProcessSubTxsInBlock(const CBlock &block, CValidationState &state) {
+    for (const CTransaction &tx : block.vtx) {
+        if (!IsSubTx(tx))
+            continue;
+        if (!CheckSubTx(tx, state))
+            return false;
+        if (!ProcessSubTx(tx, state))
+            return false;
+    }
+    return true;
+}
+
+bool UndoSubTxsInBlock(const CBlock &block, CValidationState &state) {
+    for (int i = block.vtx.size() - 1; i >= 0; i--) {
+        const CTransaction &tx = block.vtx[i];
+        if (!IsSubTx(tx))
+            continue;
+        if (!UndoSubTx(tx, state))
+            return false;
+    }
+    return true;
+}
+
+bool CSubTxData::Check(const CTransaction &tx, CValidationState &state) {
+    switch (action) {
+        case SubTxAction_Register:
+            return CheckRegister(tx, state);
+        case SubTxAction_TopUp:
+            return CheckTopUp(tx, state);
+        default:
+            return state.DoS(100, false, REJECT_INVALID, "bad-subtx-action");
+    }
+}
+
+bool CSubTxData::Process(const CTransaction &tx, CValidationState &state) {
+    switch (action) {
+        case SubTxAction_Register:
+            return ProcessRegister(tx, state);
+        case SubTxAction_TopUp:
+            return ProcessTopUp(tx, state);
+        default:
+            return state.DoS(100, false, REJECT_INVALID, "bad-subtx-action");
+    }
+}
+
+bool CSubTxData::Undo(const CTransaction &tx, CValidationState &state) {
+    switch (action) {
+        case SubTxAction_Register:
+            return UndoRegister(tx, state);
+        case SubTxAction_TopUp:
+            return UndoTopUp(tx, state);
+        default:
+            return state.DoS(100, false, REJECT_INVALID, "bad-subtx-action");
+    }
+}
+
+
+bool CSubTxData::CheckRegister(const CTransaction &subTx, CValidationState &state) const {
     if (evoUserDB->UserNameExists(userName))
-        return state.DoS(10, false, REJECT_INVALID, "bad-subtx-dupusername");
+        return state.DoS(100, false, REJECT_INVALID, "bad-subtx-dupusername");
 
     if (subTx.vout[0].nValue < MIN_SUBTX_TOPUP)
-        return state.DoS(10, false, REJECT_INVALID, "bad-subtx-lowtopup");
+        return state.DoS(100, false, REJECT_INVALID, "bad-subtx-lowtopup");
 
     CEvoUser dummyUser(subTx.GetHash(), userName, pubKey);
 
     std::string verifyError;
     if (!dummyUser.VerifySig(MakeSignMessage(), vchSig, verifyError))
-        return state.DoS(10, false, REJECT_INVALID, "bad-subtx-sig", false, verifyError);
+        return state.DoS(100, false, REJECT_INVALID, "bad-subtx-sig", false, verifyError);
 
     // TODO check username and pubKey validity
 
     return true;
 }
 
-bool CSubTxRegister::Process(const CTransaction &subTx, CValidationState &state) {
+bool CSubTxData::ProcessRegister(const CTransaction &subTx, CValidationState &state) const {
     CEvoUser user(subTx.GetHash(), userName, pubKey);
+
     user.PushSubTx(subTx.GetHash());
     user.AddTopUp(subTx.vout[0].nValue);
 
@@ -183,50 +215,47 @@ bool CSubTxRegister::Process(const CTransaction &subTx, CValidationState &state)
     return true;
 }
 
-bool CSubTxRegister::Undo(const CTransaction &subTx, CValidationState &state) {
+bool CSubTxData::UndoRegister(const CTransaction &subTx, CValidationState &state) const {
     if (!evoUserDB->DeleteUser(subTx.GetHash())) {
         return state.Error(strprintf("CSubTxRegister::Undo: failed to delete user with name %s", userName));
     }
     return true;
 }
 
-std::string CSubTxRegister::MakeSignMessage() const {
-    return "register|" + userName + "|" + pubKey.GetID().ToString();
-}
-
-bool CSubTxRegister::Sign(const CKey &key) {
-    return CMessageSigner::SignMessage(MakeSignMessage(), vchSig, key);
-}
-
-bool CSubTxDataExistingUser::Check(const CTransaction &subTx, CValidationState &state) {
+bool CSubTxData::CheckTopUp(const CTransaction &subTx, CValidationState &state) const {
     CEvoUser user;
-    if (!evoUserDB->GetUser(GetRegTxId(), user))
-        return state.DoS(10, false, REJECT_INVALID, "bad-subtx-noaccount");
+    if (!evoUserDB->GetUser(regTxId, user))
+        return state.DoS(100, false, REJECT_INVALID, "bad-subtx-noaccount");
     if (user.IsClosed())
-        return state.DoS(10, false, REJECT_INVALID, "bad-subtx-accountclosed");
-    return Check(subTx, user, state);
-}
+        return state.DoS(100, false, REJECT_INVALID, "bad-subtx-accountclosed");
 
-bool CSubTxDataExistingUser::Process(const CTransaction &subTx, CValidationState &state) {
-    CEvoUser user;
-    if (!evoUserDB->GetUser(GetRegTxId(), user))
-        return state.DoS(10, false, REJECT_INVALID, "bad-subtx-noaccount");
-    if (user.IsClosed())
-        return state.DoS(10, false, REJECT_INVALID, "bad-subtx-accountclosed");
-    user.PushSubTx(subTx.GetHash());
-    if (!Process(subTx, user, state))
-        return false;
-    if (!evoUserDB->WriteUser(user))
-        return state.Error(strprintf("CSubTxDataExistingUser::Process: failed to write user with id %s", GetRegTxId().ToString()));
+    if (subTx.vout[0].nValue < MIN_SUBTX_TOPUP)
+        return state.DoS(100, false, REJECT_INVALID, "bad-subtx-lowtopup");
+
     return true;
 }
 
-bool CSubTxDataExistingUser::Undo(const CTransaction &subTx, CValidationState &state) {
+bool CSubTxData::ProcessTopUp(const CTransaction &subTx, CValidationState &state) const {
     CEvoUser user;
-    if (!evoUserDB->GetUser(GetRegTxId(), user))
-        return state.DoS(10, false, REJECT_INVALID, "bad-subtx-noaccount");
-    if (!Undo(subTx, user, state))
-        return false;
+    if (!evoUserDB->GetUser(regTxId, user))
+        return state.DoS(100, false, REJECT_INVALID, "bad-subtx-noaccount");
+    if (user.IsClosed())
+        return state.DoS(100, false, REJECT_INVALID, "bad-subtx-accountclosed");
+
+    user.PushSubTx(subTx.GetHash());
+    user.AddTopUp(subTx.vout[0].nValue);
+
+    if (!evoUserDB->WriteUser(user))
+        return state.Error(strprintf("CSubTxDataExistingUser::Process: failed to write user with id %s", regTxId.ToString()));
+    return true;
+}
+
+bool CSubTxData::UndoTopUp(const CTransaction &subTx, CValidationState &state) const {
+    CEvoUser user;
+    if (!evoUserDB->GetUser(regTxId, user))
+        return state.DoS(100, false, REJECT_INVALID, "bad-subtx-noaccount");
+
+    user.AddTopUp(-subTx.vout[0].nValue);
 
     uint256 poppedId = user.PopSubTx();
     if (poppedId != subTx.GetHash()) {
@@ -234,83 +263,43 @@ bool CSubTxDataExistingUser::Undo(const CTransaction &subTx, CValidationState &s
     }
 
     if (!evoUserDB->WriteUser(user))
-        return state.Error(strprintf("CSubTxDataExistingUser::Process: failed to write user with id %s", GetRegTxId().ToString()));
+        return state.Error(strprintf("CSubTxDataExistingUser::Process: failed to write user with id %s", regTxId.ToString()));
+
     return true;
 }
 
-bool CSubTxTopUp::Check(const CTransaction &subTx, CEvoUser &user, CValidationState &state) {
-    if (subTx.vout[0].nValue < MIN_SUBTX_TOPUP)
-        return state.DoS(10, false, REJECT_INVALID, "bad-subtx-lowtopup");
-    return true;
-}
 
-bool CSubTxTopUp::Process(const CTransaction &subTx, CEvoUser &user, CValidationState &state) {
-    user.AddTopUp(subTx.vout[0].nValue);
-    return true;
-}
-
-bool CSubTxTopUp::Undo(const CTransaction &subTx, CEvoUser &user, CValidationState &state) {
-    user.AddTopUp(-subTx.vout[0].nValue);
-    return true;
-}
-
-bool CSubTxResetKey::Check(const CTransaction &subTx, CEvoUser &user, CValidationState &state) {
-    if (subTx.vout[0].nValue != 0)
-        return state.DoS(10, false, REJECT_INVALID, "bad-subtx-nztopup");
-
-    std::string verifyError;
-    if (!user.VerifySig(MakeSignMessage(), lastPubkeySig, verifyError))
-        return state.DoS(10, false, REJECT_INVALID, "bad-subtx-sig", false, verifyError);
-    return true;
-}
-
-bool CSubTxResetKey::Process(const CTransaction &subTx, CEvoUser &user, CValidationState &state) {
-    user.PushPubKey(newPubKey);
-    return true;
-}
-
-bool CSubTxResetKey::Undo(const CTransaction &subTx, CEvoUser &user, CValidationState &state) {
-    CPubKey k = user.PopPubKey();
-    if (k != newPubKey) {
-        return state.Error(strprintf("CSubTxResetKey::Undo: popped key %s != expected key %s", k.GetID().ToString(), newPubKey.GetID().ToString()));
+void CSubTxData::ToJSON(UniValue &uv) const {
+    uv.setObject();
+    switch (action) {
+        case SubTxAction_Register:
+            uv.push_back(Pair("action", "register"));
+            uv.push_back(Pair("uname", userName));
+            uv.push_back(Pair("pubkey", HexStr(pubKey.begin(), pubKey.end())));
+            uv.push_back(Pair("vchSigSize", vchSig.size()));
+            break;
+        case SubTxAction_TopUp:
+            uv.push_back(Pair("action", "topup"));
+            uv.push_back(Pair("regtxid", regTxId.ToString()));
+            break;
+        default:
+            uv.push_back(Pair("action", "invalid"));
+            break;
     }
-    return true;
 }
 
-std::string CSubTxResetKey::MakeSignMessage() const {
-    return "resetkey|" + regTxId.ToString() + "|" + newPubKey.GetID().ToString();
+std::string CSubTxData::MakeSignMessage() const {
+    switch (action) {
+        case SubTxAction_Register:
+            return "register|" + userName + "|" + pubKey.GetID().ToString();
+        case SubTxAction_TopUp:
+            // we don't do signing for topup
+            return "";
+        default:
+            return "";
+    }
 }
 
-bool CSubTxResetKey::Sign(const CKey &key) {
-    return CMessageSigner::SignMessage(MakeSignMessage(), lastPubkeySig, key);
-}
-
-bool CSubTxClose::Check(const CTransaction &subTx, CEvoUser &user, CValidationState &state) {
-    if (subTx.vout[0].nValue != 0)
-        return state.DoS(10, false, REJECT_INVALID, "bad-subtx-nztopup");
-
-    std::string verifyError;
-    if (!user.VerifySig(MakeSignMessage(), lastPubkeySig, verifyError))
-        return state.DoS(10, false, REJECT_INVALID, "bad-subtx-sig", false, verifyError);
-    return true;
-}
-
-bool CSubTxClose::Process(const CTransaction &subTx, CEvoUser &user, CValidationState &state) {
-    user.SetClosed(true);
-    return true;
-}
-
-bool CSubTxClose::Undo(const CTransaction &subTx, CEvoUser &user, CValidationState &state) {
-    if (!user.IsClosed())
-        return state.Error(strprintf("CSubTxClose::Undo: expected account %s to be closed", GetRegTxId().ToString()));
-    user.SetClosed(false);
-    return true;
-}
-
-std::string CSubTxClose::MakeSignMessage() const {
-    return "close|" + regTxId.ToString();
-}
-
-bool CSubTxClose::Sign(const CKey &key) {
-    return CMessageSigner::SignMessage(MakeSignMessage(), lastPubkeySig, key);
+bool CSubTxData::Sign(const CKey &key) {
+    return CMessageSigner::SignMessage(MakeSignMessage(), vchSig, key);
 }
