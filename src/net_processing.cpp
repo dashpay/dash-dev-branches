@@ -1775,6 +1775,8 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
         for (unsigned int n = 0; n < nCount; n++) {
             vRecv >> headers[n];
             ReadCompactSize(vRecv); // ignore tx count; assume it is 0.
+            if (headers[n].ContainsTransitions())
+                ReadCompactSize(vRecv); // ignore ts count; assume it is 0.
         }
 
         CBlockIndex *pindexLast = NULL;

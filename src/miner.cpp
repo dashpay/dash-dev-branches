@@ -407,6 +407,7 @@ void IncrementExtraNonce(CBlock* pblock, const CBlockIndex* pindexPrev, unsigned
 
     pblock->vtx[0] = txCoinbase;
     pblock->hashMerkleRoot = BlockMerkleRoot(*pblock);
+    pblock->hashTransitionsMerkleRoot = BlockTransitionsMerkleRoot(*pblock);
 }
 
 //////////////////////////////////////////////////////////////////////////////
