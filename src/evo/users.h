@@ -58,7 +58,7 @@ public:
         return topupCredits;
     }
 
-    CAmount GetSpentCredeits() const {
+    CAmount GetSpentCredits() const {
         return spentCredits;
     }
 
