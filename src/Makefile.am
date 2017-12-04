@@ -106,6 +106,7 @@ BITCOIN_CORE_H = \
   core_memusage.h \
   evo/users.h \
   evo/subtx.h \
+  evo/tsmempool.h \
   evo/tsvalidation.h \
   evo/transition.h \
   privatesend.h \
@@ -223,6 +224,7 @@ libbitcoin_server_a_SOURCES = \
   checkpoints.cpp \
   evo/users.cpp \
   evo/subtx.cpp \
+  evo/tsmempool.cpp \
   evo/tsvalidation.cpp \
   evo/transition.cpp \
   httprpc.cpp \

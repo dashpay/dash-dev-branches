@@ -41,6 +41,7 @@
 #include "masternode-payments.h"
 
 #include "evo/subtx.h"
+#include "evo/tsmempool.h"
 #include "evo/tsvalidation.h"
 
 #include <sstream>
@@ -2546,6 +2547,10 @@ bool static DisconnectTip(CValidationState& state, const Consensus::Params& cons
     // UpdateTransactionsFromBlock finds descendants of any transactions in this
     // block that were added back and cleans up the mempool state.
     mempool.UpdateTransactionsFromBlock(vHashUpdate);
+
+    // Readd transitions to mempool
+    tsMempool.ReAddForReorg(block);
+
     // Update chainActive and related variables.
     UpdateTip(pindexDelete->pprev);
     // Let wallets know transactions went from 1-confirmed to
@@ -2607,6 +2612,10 @@ bool static ConnectTip(CValidationState& state, const CChainParams& chainparams,
     // Remove conflicting transactions from the mempool.
     list<CTransaction> txConflicted;
     mempool.removeForBlock(pblock->vtx, pindexNew->nHeight, txConflicted, !IsInitialBlockDownload());
+
+    // Remove transitions from new block from mempool
+    tsMempool.RemoveForBlock(*pblock);
+
     // Update chainActive & related variables.
     UpdateTip(pindexNew);
     // Tell wallet about transactions that went from mempool
