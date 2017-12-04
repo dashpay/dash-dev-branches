@@ -244,3 +244,61 @@ bool UndoTransitionsInBlock(const CBlock &block, CValidationState &state) {
 
     return true;
 }
+
+// this can be called multiple times for the same block. this is needed if new register SubTxs are later added to the block
+void AddMempoolTransitionsToBlock(CBlock &block, uint64_t maxTsSpace, uint64_t maxBlockSize) {
+    LOCK(tsMempool.cs);
+
+    // TODO fee based selection for miner reward maximization
+
+    std::vector<uint256> userRegTxs;
+    if (!tsMempool.GetUsers(userRegTxs))
+        return;
+
+    std::map<uint256, CEvoUser> users;
+    GetUsers(userRegTxs, users);
+
+    // add transitions one at a time per user to evenly distribute block space
+    // TODO: Change this to be fee based (without loosing correct order) as miners most likely wish to maximize profits.
+    uint64_t tsSpaceUsed = ::GetSerializeSize(block.vts, SER_NETWORK, CLIENT_VERSION);
+    uint64_t blockSize = block.GetSerializeSize(SER_NETWORK, CLIENT_VERSION);
+    while (true) {
+        bool stop = true;
+        for (auto &p : users) {
+            CEvoUser &user = p.second;
+
+            CTransition ts;
+            if (!tsMempool.GetNextTransitionForUser(user, ts))
+                continue;
+
+            uint64_t tsSize = ::GetSerializeSize(ts, SER_NETWORK, CLIENT_VERSION);
+            if (tsSpaceUsed + tsSize > maxTsSpace || blockSize + tsSize > maxBlockSize)
+                continue;
+
+            CValidationState state;
+            if (!CheckTransitionForUser(ts, user, true, state)) {
+                LogPrintf("AddTransitionsToBlock(): CheckTransition failed for %s. state=%s\n", ts.GetHash().ToString(), FormatStateMessage(state));
+                continue;
+            }
+            if (!ProcessTransitionForUser(ts, user, state)) {
+                LogPrintf("AddTransitionsToBlock(): ProcessTransitionForUser failed for %s. state=%s\n", ts.GetHash().ToString(), FormatStateMessage(state));
+                continue;
+            }
+
+            tsSpaceUsed += tsSize;
+            blockSize += tsSize;
+            block.vts.push_back(ts);
+            stop = false;
+        }
+        if (stop)
+            break;
+    }
+}
+
+CAmount CalcTransitionFeesForBlock(const CBlock &block) {
+    CAmount fees = 0;
+    for (const CTransition &ts : block.vts) {
+        fees += ts.nFee;
+    }
+    return fees;
+}

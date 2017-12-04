@@ -20,4 +20,8 @@ bool ProcessTransitionForUser(const CTransition &ts, CEvoUser &user, CValidation
 bool ProcessTransitionsInBlock(const CBlock &block, bool onlyCheck, CValidationState &state);
 bool UndoTransitionsInBlock(const CBlock &block, CValidationState &state);
 
+void AddMempoolTransitionsToBlock(CBlock &block, uint64_t maxTsSpace, uint64_t maxBlockSize);
+
+CAmount CalcTransitionFeesForBlock(const CBlock &block);
+
 #endif //DASH_TSVALIDATION_H

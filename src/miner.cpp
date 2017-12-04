@@ -28,6 +28,9 @@
 #include "masternode-sync.h"
 #include "validationinterface.h"
 
+#include "evo/tsmempool.h"
+#include "evo/tsvalidation.h"
+
 #include <boost/thread.hpp>
 #include <boost/tuple/tuple.hpp>
 #include <queue>
@@ -106,6 +109,7 @@ CBlockTemplate* CreateNewBlock(const CChainParams& chainparams, const CScript& s
 
     // Reserved block size to use for SubTx and state transitions
     unsigned int nBlockReserveSubTxSize = GetArg("-blockreservesubtxsize", nBlockMaxSize / 10);
+    unsigned int nBlockReserveTsSize = GetArg("-blockreservetssize", nBlockMaxSize / 10);
 
     // Collect memory pool transactions into the block
     CTxMemPool::setEntries inBlock;
@@ -140,6 +144,7 @@ CBlockTemplate* CreateNewBlock(const CChainParams& chainparams, const CScript& s
         pblocktemplate->vTxFees.push_back(-1); // updated at end
         pblocktemplate->vTxSigOps.push_back(-1); // updated at end
         pblock->nVersion = ComputeBlockVersion(pindexPrev, chainparams.GetConsensus());
+        pblock->nVersion |= VERSIONBITS_EVO; // TODO
         // -regtest only: allow overriding block.nVersion with
         // -blockversion=N to test forking scenarios
         if (chainparams.MineBlocksOnDemand())
@@ -179,6 +184,12 @@ CBlockTemplate* CreateNewBlock(const CChainParams& chainparams, const CScript& s
 
             // to collect orphan topups
             std::map<uint256, std::list<CTxMemPool::txiter>> orphanSubTxs;
+
+            // We actually call this twice. Once here and once after adding transaction to the block. This way we ensure
+            // that nBlockReserveTsSize is honered and at the same time block space is not wasted
+            AddMempoolTransitionsToBlock(*pblock, nBlockReserveTsSize, nBlockMaxSize);
+
+            nBlockSize += ::GetSerializeSize(pblock->vts, SER_NETWORK, CLIENT_VERSION);
 
             CTxMemPool::indexed_transaction_set::nth_index<3>::type::iterator mi = mempool.mapTx.get<3>().begin();
             CTxMemPool::txiter iter;
@@ -350,7 +361,26 @@ CBlockTemplate* CreateNewBlock(const CChainParams& chainparams, const CScript& s
                     }
                 }
             }
+        }
 
+        // fill up remaining block space with transitions
+        {
+            LOCK(evoUserDB->cs);
+
+            // begin tx and let it rollback
+            auto evoDbTx = evoUserDB->BeginTransaction();
+
+            // first we need to update the current user states to reflect what we have in the block right now
+            CValidationState state;
+            if (!ProcessSubTxsInBlock(*pblock, state)) {
+                LogPrintf("CreateNewBlock(): ProcessSubTxsInBlock() failed. state=%s", FormatStateMessage(state));
+                assert(false);
+            }
+            if (!ProcessTransitionsInBlock(*pblock, false, state)) {
+                LogPrintf("CreateNewBlock(): ProcessTransitionsInBlock() failed. state=%s", FormatStateMessage(state));
+                assert(false);
+            }
+            AddMempoolTransitionsToBlock(*pblock, nBlockMaxSize, nBlockMaxSize);
         }
 
         // NOTE: unlike in bitcoin, we need to pass PREVIOUS block height here
