@@ -41,6 +41,7 @@
 #include "masternode-payments.h"
 
 #include "evo/subtx.h"
+#include "evo/tsvalidation.h"
 
 #include <sstream>
 
@@ -1726,6 +1727,10 @@ static DisconnectResult DisconnectBlock(const CBlock& block, CValidationState& s
     std::vector<std::pair<CAddressUnspentKey, CAddressUnspentValue> > addressUnspentIndex;
     std::vector<std::pair<CSpentIndexKey, CSpentIndexValue> > spentIndex;
 
+    // Evo transitions
+    if (!UndoTransitionsInBlock(block, state)) {
+        return DISCONNECT_FAILED;
+    }
     // Evo SubTxs
     if (!UndoSubTxsInBlock(block, state)) {
         return DISCONNECT_FAILED;
@@ -2234,6 +2239,10 @@ static bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockInd
     // Evo SubTXs
     if (!ProcessSubTxsInBlock(block, state))
         return false;
+    // Evo transitions
+    if (!ProcessTransitionsInBlock(block, fJustCheck, state))
+        return false;
+
     // DASH : MODIFIED TO CHECK MASTERNODE PAYMENTS AND SUPERBLOCKS
 
     // It's possible that we simply don't have enough data and this could fail
