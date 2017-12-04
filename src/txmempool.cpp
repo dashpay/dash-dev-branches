@@ -18,6 +18,8 @@
 #include "utiltime.h"
 #include "version.h"
 
+#include "evo/subtx.h"
+
 using namespace std;
 
 CTxMemPoolEntry::CTxMemPoolEntry(const CTransaction& _tx, const CAmount& _nFee,
@@ -413,6 +415,16 @@ bool CTxMemPool::addUnchecked(const uint256& hash, const CTxMemPoolEntry &entry,
     totalTxSize += entry.GetTxSize();
     minerPolicyEstimator->processTransaction(entry, fCurrentEstimate);
 
+    if (IsSubTx(tx)) {
+        CSubTxData subTxData;
+        GetSubTxData(tx, subTxData);
+        if (subTxData.action == SubTxAction_Register) {
+            mapSubTxRegisterUserNames.emplace(subTxData.userName, tx.GetHash());
+        } else if (subTxData.action == SubTxAction_TopUp) {
+            mapSubTxTopups[subTxData.regTxId].insert(tx.GetHash());
+        }
+    }
+
     return true;
 }
 
@@ -563,6 +575,21 @@ void CTxMemPool::removeUnchecked(txiter it)
     BOOST_FOREACH(const CTxIn& txin, it->GetTx().vin)
         mapNextTx.erase(txin.prevout);
 
+    if (IsSubTx(it->GetTx())) {
+        CSubTxData subTxData;
+        GetSubTxData(it->GetTx(), subTxData);
+        if (subTxData.action == SubTxAction_Register) {
+            mapSubTxRegisterUserNames.erase(subTxData.userName);
+        } else if (subTxData.action == SubTxAction_TopUp) {
+            auto it = mapSubTxTopups.find(subTxData.regTxId);
+            if (it != mapSubTxTopups.end()) {
+                it->second.erase(hash);
+                if (it->second.empty())
+                    mapSubTxTopups.erase(subTxData.regTxId);
+            }
+        }
+    }
+
     totalTxSize -= it->GetTxSize();
     cachedInnerUsage -= it->DynamicMemoryUsage();
     cachedInnerUsage -= memusage::DynamicUsage(mapLinks[it].parents) + memusage::DynamicUsage(mapLinks[it].children);
@@ -695,6 +722,44 @@ void CTxMemPool::removeConflicts(const CTransaction &tx, std::list<CTransaction>
     }
 }
 
+void CTxMemPool::removeSubTxConflicts(const CTransaction &tx, std::list<CTransaction>& removed)
+{
+    if (!IsSubTx(tx))
+        return;
+
+    CSubTxData subTxData;
+    GetSubTxData(tx, subTxData);
+    if (subTxData.action != SubTxAction_Register)
+        return;
+
+    auto it = mapSubTxRegisterUserNames.find(subTxData.userName);
+    if (it == mapSubTxRegisterUserNames.end())
+        return;
+    auto it2 = mapTx.find(it->second);
+    if (it2 == mapTx.end())
+        return;
+
+    const CTransaction &txConflict = it2->GetTx();
+    if (txConflict == tx)
+        return;
+
+    // first remove topups for conflicting register SubTx
+    if (mapSubTxTopups.count(txConflict.GetHash())) {
+        for (const uint256 &topUpTx : mapSubTxTopups[txConflict.GetHash()]) {
+            auto topUpTxIt = mapTx.find(topUpTx);
+            if (topUpTxIt == mapTx.end())
+                continue;
+
+            remove(topUpTxIt->GetTx(), removed, true);
+            ClearPrioritisation(topUpTxIt->GetTx().GetHash());
+        }
+    }
+
+    // remove conflicting register SubTx
+    remove(txConflict, removed, true);
+    ClearPrioritisation(txConflict.GetHash());
+}
+
 /**
  * Called when a block is connected. Removes from mempool and updates the miner fee estimator.
  */
@@ -716,6 +781,7 @@ void CTxMemPool::removeForBlock(const std::vector<CTransaction>& vtx, unsigned i
         std::list<CTransaction> dummy;
         remove(tx, dummy, false);
         removeConflicts(tx, conflicts);
+        removeSubTxConflicts(tx, conflicts);
         ClearPrioritisation(tx.GetHash());
     }
     // After the txs in the new block have been removed from the mempool, update policy estimates
@@ -729,6 +795,8 @@ void CTxMemPool::_clear()
     mapLinks.clear();
     mapTx.clear();
     mapNextTx.clear();
+    mapSubTxRegisterUserNames.clear();
+    mapSubTxTopups.clear();
     totalTxSize = 0;
     cachedInnerUsage = 0;
     lastRollingFeeUpdate = GetTime();

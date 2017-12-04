@@ -573,9 +573,18 @@ bool AcceptToMemoryPoolWorker(CTxMemPool& pool, CValidationState &state, const C
     if (fRequireStandard && !IsStandardTx(tx, reason))
         return state.DoS(0, false, REJECT_NONSTANDARD, reason);
 
-    if (IsSubTx(tx) && !CheckSubTx(tx, state))
-        return false;
-    // TODO check for SubTX conflicts (usernames, resetkey, close, ...)
+    if (IsSubTx(tx)) {
+        if (!CheckSubTx(tx, state))
+            return false;
+        CSubTxData subTxData;
+        GetSubTxData(tx, subTxData);
+        if (subTxData.action == SubTxAction_Register) {
+            if (pool.existsSubTxRegisterUserName(subTxData.userName))
+                return state.DoS(0, false, REJECT_DUPLICATE, "subtx-dup-username");
+        }
+
+        // TODO topups are rejected atm when the user does not exist yet, even when a register SubTx is in the mempool
+    }
 
     // Don't relay version 2 transactions until CSV is active, and we can be
     // sure that such transactions will be mined (unless we're on

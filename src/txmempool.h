@@ -448,6 +448,9 @@ private:
     typedef std::map<uint256, std::vector<CSpentIndexKey> > mapSpentIndexInserted;
     mapSpentIndexInserted mapSpentInserted;
 
+    std::map<std::string, uint256> mapSubTxRegisterUserNames;
+    std::map<uint256, std::set<uint256>> mapSubTxTopups;
+
     void UpdateParent(txiter entry, txiter parent, bool add);
     void UpdateChild(txiter entry, txiter child, bool add);
 
@@ -491,6 +494,7 @@ public:
     void remove(const CTransaction &tx, std::list<CTransaction>& removed, bool fRecursive = false);
     void removeForReorg(const CCoinsViewCache *pcoins, unsigned int nMemPoolHeight, int flags);
     void removeConflicts(const CTransaction &tx, std::list<CTransaction>& removed);
+    void removeSubTxConflicts(const CTransaction &tx, std::list<CTransaction>& removed);
     void removeForBlock(const std::vector<CTransaction>& vtx, unsigned int nBlockHeight,
                         std::list<CTransaction>& conflicts, bool fCurrentEstimate = true);
     void clear();
@@ -585,6 +589,11 @@ public:
         LOCK(cs);
         auto it = mapTx.find(outpoint.hash);
         return (it != mapTx.end() && outpoint.n < it->GetTx().vout.size());
+    }
+
+    bool existsSubTxRegisterUserName(const std::string &userName) const {
+        LOCK(cs);
+        return mapSubTxRegisterUserNames.count(userName);
     }
 
     bool lookup(uint256 hash, CTransaction& result) const;
