@@ -408,6 +408,11 @@ static const CRPCCommand vRPCCommands[] =
     { "evo",                "getuser",                &getuser,                true  },
     { "evo",                "createrawsubtx",         &createrawsubtx,         true  },
     { "evo",                "createsubtx",            &createsubtx,            true  },
+    { "evo",                "createrawtransition",    &createrawtransition,    true  },
+    { "evo",                "createtransition",       &createtransition,       true  },
+    { "evo",                "signrawtransition",      &signrawtransition,      true  },
+    { "evo",                "sendrawtransition",      &sendrawtransition,      true  },
+    { "evo",                "gettransition",          &gettransition,          true  },
 };
 
 CRPCTable::CRPCTable()

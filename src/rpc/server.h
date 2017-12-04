@@ -302,6 +302,11 @@ extern UniValue sentinelping(const UniValue& params, bool fHelp);
 extern UniValue getuser(const UniValue& params, bool fHelp);
 extern UniValue createrawsubtx(const UniValue& params, bool fHelp);
 extern UniValue createsubtx(const UniValue& params, bool fHelp);
+extern UniValue createrawtransition(const UniValue& params, bool fHelp);
+extern UniValue createtransition(const UniValue& params, bool fHelp);
+extern UniValue signrawtransition(const UniValue& params, bool fHelp);
+extern UniValue sendrawtransition(const UniValue& params, bool fHelp);
+extern UniValue gettransition(const UniValue& params, bool fHelp);
 
 bool StartRPC();
 void InterruptRPC();

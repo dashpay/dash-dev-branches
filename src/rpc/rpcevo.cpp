@@ -14,6 +14,54 @@
 
 #include "evo/subtx.h"
 #include "evo/users.h"
+#include "evo/tsvalidation.h"
+#include "evo/tsmempool.h"
+
+void TsToJSON(const CTransition& ts, const uint256 &hashBlock, UniValue& entry)
+{
+    entry.setObject();
+
+    uint256 tsid = ts.GetHash();
+    entry.push_back(Pair("tsid", tsid.GetHex()));
+    entry.push_back(Pair("size", (int)::GetSerializeSize(ts, SER_NETWORK, PROTOCOL_VERSION)));
+    entry.push_back(Pair("version", ts.nVersion));
+    entry.push_back(Pair("fee", ValueFromAmount(ts.nFee)));
+    entry.push_back(Pair("hashRegTx", ts.hashRegTx.GetHex()));
+    entry.push_back(Pair("hashPrevTransition", ts.hashPrevTransition.GetHex()));
+    entry.push_back(Pair("vchUserSigSize", ts.vchUserSig.size()));
+    entry.push_back(Pair("vvchQuorumSigsSize", (int)::GetSerializeSize(ts.vvchQuorumSigs, SER_NETWORK, PROTOCOL_VERSION)));
+
+    switch (ts.action) {
+        case Transition_UpdateData:
+            entry.push_back(Pair("action", "updateData"));
+            entry.push_back(Pair("hashDataMerkleRoot", ts.hashDataMerkleRoot.GetHex()));
+            break;
+        case Transition_ResetKey:
+            entry.push_back(Pair("action", "resetKey"));
+            entry.push_back(Pair("newKey", HexStr(ts.newPubKey.begin(), ts.newPubKey.end())));
+            break;
+        case Transition_CloseAccount:
+            entry.push_back(Pair("action", "closeAccount"));
+            break;
+    }
+
+    if (!hashBlock.IsNull()) {
+        entry.push_back(Pair("blockhash", hashBlock.GetHex()));
+        BlockMap::iterator mi = mapBlockIndex.find(hashBlock);
+        if (mi != mapBlockIndex.end() && (*mi).second) {
+            CBlockIndex* pindex = (*mi).second;
+            if (chainActive.Contains(pindex)) {
+                entry.push_back(Pair("height", pindex->nHeight));
+                entry.push_back(Pair("confirmations", 1 + chainActive.Height() - pindex->nHeight));
+                entry.push_back(Pair("time", pindex->GetBlockTime()));
+                entry.push_back(Pair("blocktime", pindex->GetBlockTime()));
+            } else {
+                entry.push_back(Pair("height", -1));
+                entry.push_back(Pair("confirmations", 0));
+            }
+        }
+    }
+}
 
 void SubTxToJSON(const CTransaction &tx, UniValue &entry) {
     entry.setObject();
@@ -38,6 +86,15 @@ static void User2Json(const CEvoUser &user, bool withSubTxAndTs, bool detailed, 
     json.push_back(std::make_pair("pubkey", HexStr(user.GetCurPubKey())));
     json.push_back(std::make_pair("credits", user.GetCreditBalance()));
 
+    uint256 lastTransitionHash = user.GetLastTransition();
+    if (lastTransitionHash.IsNull()) {
+        json.push_back(std::make_pair("data", uint256().ToString()));
+    } else {
+        CTransition lastTransition;
+        if (!evoUserDB->GetTransition(lastTransitionHash, lastTransition)) {
+            throw std::runtime_error(strprintf("failed to get transition %s", lastTransitionHash.ToString()));
+        }
+        json.push_back(std::make_pair("data", lastTransition.hashDataMerkleRoot.ToString()));
     }
 
     std::string state;
@@ -65,6 +122,22 @@ static void User2Json(const CEvoUser &user, bool withSubTxAndTs, bool detailed, 
             }
         }
         json.push_back(std::make_pair("subtx", subTxArr));
+
+        std::vector<CTransition> transitions;
+        evoUserDB->GetTransitionsForUser(user.GetRegTxId(), -1, transitions);
+
+        UniValue transitionsArr(UniValue::VARR);
+        for (CTransition ts : transitions) {
+            if (detailed) {
+                UniValue ts2(UniValue::VOBJ);
+                TsToJSON(ts, uint256(), ts2);
+                transitionsArr.push_back(ts2);
+            } else {
+                transitionsArr.push_back(ts.GetHash().ToString());
+            }
+        }
+
+        json.push_back(std::make_pair("transitions", transitionsArr));
     }
 }
 
@@ -229,4 +302,124 @@ UniValue createsubtx(const UniValue& params, bool fHelp)
     UniValue signedTx = signrawtransaction(signParams, false);
 
     return signedTx;
+}
+
+UniValue createrawtransition(const UniValue& params, bool fHelp) {
+    if (fHelp || (params.size() != 4 && params.size() != 5))
+        throw std::runtime_error(
+                "createrawtransition <type> args...\n"
+                "\nCreates a raw transition. Arguments depend on type of transition to be created.\n"
+                "Arguments that expect a key can be either a private key or a Dash address. In case\n"
+                "a Dash address is provided, the private key is looked up in the local wallet.\n"
+                "\nAvailable types:\n"
+                "  createrawtransition update   <regTxId|username> <fee> <merkleRoot> (<prevTransition>) - Update account data\n"
+                "  createrawtransition resetkey <regTxId|username> <fee> <newKey>     (<prevTransition>) - Reset user key\n"
+                "  createrawtransition close    <regTxId|username> <fee>              (<prevTransition>) - Close account\n"
+        );
+
+    std::string action = params[0].get_str();
+
+    CTransition ts;
+    ts.nVersion = CTransition::CURRENT_VERSION;
+    ts.hashRegTx = GetRegTxId(params[1].get_str());
+    if (!ParseMoney(params[2].get_str(), ts.nFee))
+        throw std::runtime_error(strprintf("invalid fee %s", params[2].get_str()));
+
+    if (action == "update") {
+        ts.action = Transition_UpdateData;
+        ts.hashDataMerkleRoot = ParseHashStr(params[3].get_str(), "merkleRoot");
+        ts.hashPrevTransition = GetLastTransitionFromParams(params, 4, ts.hashRegTx);
+    } else if (action == "resetkey") {
+        ts.action = Transition_ResetKey;
+        ts.newPubKey = ParsePrivKey(params[3].get_str()).GetPubKey();
+        ts.hashPrevTransition = GetLastTransitionFromParams(params, 4, ts.hashRegTx);
+    } else if (action == "close") {
+        ts.action = Transition_CloseAccount;
+    }
+
+    CDataStream ds(SER_DISK, CLIENT_VERSION);
+    ds << ts;
+    return HexStr(ds.begin(), ds.end());
+}
+
+UniValue signrawtransition(const UniValue& params, bool fHelp) {
+    if (fHelp || (params.size() != 1) && params.size() != 2)
+        throw std::runtime_error(
+                "signrawtransition <hexTs> (<key>)\n"
+                "\nSigns a raw transition. If the key is omitted, it will lookup the current pubKey of the user and\n"
+                "then try to get the private key from the wallet.\n"
+        );
+
+    std::string hexTs = params[0].get_str();
+    CDataStream ds(ParseHex(hexTs), SER_DISK, CLIENT_VERSION);
+
+    CTransition ts;
+    ds >> ts;
+
+    CKey userKey = GetKeyFromParamsOrWallet(params, 1, ts.hashRegTx);
+    if (!CMessageSigner::SignMessage(ts.MakeSignMessage(), ts.vchUserSig, userKey))
+        throw std::runtime_error(strprintf("could not sign transition for for user %s. keyId=%s", ts.hashRegTx.ToString(), userKey.GetPubKey().GetID().ToString()));
+
+    CDataStream ds2(SER_DISK, CLIENT_VERSION);
+    ds2 << ts;
+    return HexStr(ds2.begin(), ds2.end());
+}
+
+UniValue createtransition(const UniValue& params, bool fHelp) {
+    if (fHelp || (params.size() != 4 && params.size() != 5))
+        throw std::runtime_error(
+                "createtransition <type> args...\n"
+                "\nCreates a raw transition and signs it. Arguments are the same as for createrawtransition.\n"
+        );
+
+    UniValue rawTs = createrawtransition(params, fHelp);
+
+    UniValue signParams(UniValue::VARR);
+    signParams.push_back(rawTs.get_str());
+    UniValue signedTs = signrawtransition(signParams, false);
+    return signedTs;
+}
+
+UniValue sendrawtransition(const UniValue& params, bool fHelp) {
+    if (fHelp || params.size() != 1)
+        throw std::runtime_error(
+                "sendrawtransition <hexTs>\n"
+                "\nSends a signed transition to the network.\n"
+        );
+
+    std::string hexTs = params[0].get_str();
+    CDataStream ds(ParseHex(hexTs), SER_DISK, CLIENT_VERSION);
+
+    CTransition ts;
+    ds >> ts;
+
+    if (!tsMempool.AddTransition(ts))
+        throw std::runtime_error("failed to add transition to mempool");
+
+    // TODO actually send it
+
+    return UniValue(ts.GetHash().ToString());
+}
+
+UniValue gettransition(const UniValue &params, bool fHelp) {
+    if (fHelp || params.size() != 1)
+        throw std::runtime_error(
+                "gettransition <tsHash>\n"
+                "\nGet transition with hash <tsHash> and output a json object.\n"
+        );
+
+    uint256 tsHash = ParseHashStr(params[0].get_str(), "tsHash");
+
+    CTransition ts;
+    if (!evoUserDB->GetTransition(tsHash, ts)) {
+        if (!tsMempool.GetTransition(tsHash, ts))
+            throw std::runtime_error("transition not found");
+    }
+
+    uint256 blockHash;
+    evoUserDB->GetTransitionBlockHash(ts.GetHash(), blockHash);
+
+    UniValue result;
+    TsToJSON(ts, blockHash, result);
+    return result;
 }
