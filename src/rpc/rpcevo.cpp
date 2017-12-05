@@ -38,7 +38,7 @@ void TsToJSON(const CTransition& ts, const uint256 &hashBlock, UniValue& entry)
             break;
         case Transition_ResetKey:
             entry.push_back(Pair("action", "resetKey"));
-            entry.push_back(Pair("newKey", HexStr(ts.newPubKey.begin(), ts.newPubKey.end())));
+            entry.push_back(Pair("newKeyID", ts.newPubKeyID.ToString()));
             break;
         case Transition_CloseAccount:
             entry.push_back(Pair("action", "closeAccount"));
@@ -83,7 +83,7 @@ static void User2Json(const CEvoUser &user, bool withSubTxAndTs, bool detailed, 
 
     json.push_back(std::make_pair("uname", user.GetUserName()));
     json.push_back(std::make_pair("regtxid", user.GetRegTxId().ToString()));
-    json.push_back(std::make_pair("pubkey", HexStr(user.GetCurPubKey())));
+    json.push_back(std::make_pair("pubkeyid", user.GetCurPubKeyID().ToString()));
     json.push_back(std::make_pair("credits", user.GetCreditBalance()));
 
     uint256 lastTransitionHash = user.GetLastTransition();
@@ -205,10 +205,10 @@ static CKey GetKeyFromParamsOrWallet(const UniValue &params, int paramPos, const
         throw std::runtime_error(strprintf("user %s not found", regTxId.ToString()));
     }
 
-    const CPubKey &pubKey = user.GetCurPubKey();
+    const CKeyID &pubKeyID = user.GetCurPubKeyID();
     CKey key;
-    if (!pwalletMain->GetKey(pubKey.GetID(), key)) {
-        throw std::runtime_error(strprintf("wallet key with id %s not found", pubKey.GetID().ToString()));
+    if (!pwalletMain->GetKey(pubKeyID, key)) {
+        throw std::runtime_error(strprintf("wallet key with id %s not found", pubKeyID.ToString()));
     }
     return key;
 }
@@ -251,7 +251,7 @@ UniValue createrawsubtx(const UniValue& params, bool fHelp)
         CSubTxData subTxData;
         subTxData.action = SubTxAction_Register;
         subTxData.userName = userName;
-        subTxData.pubKey = key.GetPubKey();
+        subTxData.pubKeyID = key.GetPubKey().GetID();
         if (!subTxData.Sign(key))
             throw std::runtime_error("failed to sign data");
 
@@ -331,7 +331,7 @@ UniValue createrawtransition(const UniValue& params, bool fHelp) {
         ts.hashPrevTransition = GetLastTransitionFromParams(params, 4, ts.hashRegTx);
     } else if (action == "resetkey") {
         ts.action = Transition_ResetKey;
-        ts.newPubKey = ParsePrivKey(params[3].get_str()).GetPubKey();
+        ts.newPubKeyID = ParsePrivKey(params[3].get_str()).GetPubKey().GetID();
         ts.hashPrevTransition = GetLastTransitionFromParams(params, 4, ts.hashRegTx);
     } else if (action == "close") {
         ts.action = Transition_CloseAccount;

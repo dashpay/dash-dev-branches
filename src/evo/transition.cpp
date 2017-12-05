@@ -45,7 +45,7 @@ std::string CTransition::MakeSignMessage() const {
             ss << "|" << hashDataMerkleRoot.ToString();
             break;
         case Transition_ResetKey:
-            ss << "|" << HexStr(newPubKey.begin(), newPubKey.end());
+            ss << "|" << newPubKeyID.ToString();
             break;
         case Transition_CloseAccount:
             // nothing

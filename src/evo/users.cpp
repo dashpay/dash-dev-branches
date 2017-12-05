@@ -13,7 +13,7 @@ static const char DB_TRANSITION = 'T';
 static const char DB_TRANSITION_BLOCK_HASH = 't';
 
 bool CEvoUser::VerifySig(const std::string &msg, const std::vector<unsigned char> &sig, std::string &errorRet) const {
-    return CMessageSigner::VerifyMessage(GetCurPubKey(), sig, msg, errorRet);
+    return CMessageSigner::VerifyMessage(GetCurPubKeyID(), sig, msg, errorRet);
 }
 
 CEvoUserDB::CEvoUserDB(size_t nCacheSize, bool fMemory, bool fWipe)

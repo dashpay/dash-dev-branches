@@ -37,7 +37,7 @@ public:
     uint256 hashDataMerkleRoot;
 
     // only valid for type == Transition_ResetKey
-    CPubKey newPubKey;
+    CKeyID newPubKeyID;
 
     std::vector<unsigned char> vchUserSig;
     std::vector<std::vector<unsigned char>> vvchQuorumSigs;
@@ -66,7 +66,7 @@ public:
                 READWRITE(hashDataMerkleRoot);
                 break;
             case Transition_ResetKey:
-                READWRITE(newPubKey);
+                READWRITE(newPubKeyID);
                 break;
             case Transition_CloseAccount:
                 // nothing
@@ -91,7 +91,7 @@ public:
         this->hashRegTx = r.hashRegTx;
         this->hashPrevTransition = r.hashPrevTransition;
         this->hashDataMerkleRoot = r.hashDataMerkleRoot;
-        this->newPubKey = r.newPubKey;
+        this->newPubKeyID = r.newPubKeyID;
         this->vchUserSig = r.vchUserSig;
         this->vvchQuorumSigs = r.vvchQuorumSigs;
         this->cachedHash.SetNull();

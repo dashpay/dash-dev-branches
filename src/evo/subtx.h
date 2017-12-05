@@ -44,7 +44,7 @@ public:
 
     // only valid for register
     std::string userName;
-    CPubKey pubKey;
+    CKeyID pubKeyID;
     std::vector<unsigned char> vchSig;
 
     // only valid for topup
@@ -64,7 +64,7 @@ public:
         switch (action) {
             case SubTxAction_Register:
                 READWRITE(userName);
-                READWRITE(pubKey);
+                READWRITE(pubKeyID);
                 READWRITE(vchSig);
                 break;
             case SubTxAction_TopUp:

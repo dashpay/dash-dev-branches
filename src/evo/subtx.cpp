@@ -192,7 +192,7 @@ bool CSubTxData::CheckRegister(const CTransaction &subTx, CValidationState &stat
     if (subTx.vout[0].nValue < MIN_SUBTX_TOPUP)
         return state.DoS(100, false, REJECT_INVALID, "bad-subtx-lowtopup");
 
-    CEvoUser dummyUser(subTx.GetHash(), userName, pubKey);
+    CEvoUser dummyUser(subTx.GetHash(), userName, pubKeyID);
 
     std::string verifyError;
     if (!dummyUser.VerifySig(MakeSignMessage(), vchSig, verifyError))
@@ -204,7 +204,7 @@ bool CSubTxData::CheckRegister(const CTransaction &subTx, CValidationState &stat
 }
 
 bool CSubTxData::ProcessRegister(const CTransaction &subTx, CValidationState &state) const {
-    CEvoUser user(subTx.GetHash(), userName, pubKey);
+    CEvoUser user(subTx.GetHash(), userName, pubKeyID);
 
     user.PushSubTx(subTx.GetHash());
     user.AddTopUp(subTx.vout[0].nValue);
@@ -275,7 +275,7 @@ void CSubTxData::ToJSON(UniValue &uv) const {
         case SubTxAction_Register:
             uv.push_back(Pair("action", "register"));
             uv.push_back(Pair("uname", userName));
-            uv.push_back(Pair("pubkey", HexStr(pubKey.begin(), pubKey.end())));
+            uv.push_back(Pair("pubkeyid", pubKeyID.ToString()));
             uv.push_back(Pair("vchSigSize", vchSig.size()));
             break;
         case SubTxAction_TopUp:
@@ -291,7 +291,7 @@ void CSubTxData::ToJSON(UniValue &uv) const {
 std::string CSubTxData::MakeSignMessage() const {
     switch (action) {
         case SubTxAction_Register:
-            return "register|" + userName + "|" + pubKey.GetID().ToString();
+            return "register|" + userName + "|" + pubKeyID.ToString();
         case SubTxAction_TopUp:
             // we don't do signing for topup
             return "";

@@ -22,7 +22,7 @@ static bool Process_UpdateData(const CTransition &ts, CEvoUser &user, CValidatio
 }
 
 static bool Process_ResetKey(const CTransition &ts, CEvoUser &user, CValidationState &state) {
-    user.PushPubKey(ts.newPubKey);
+    user.PushPubKeyID(ts.newPubKeyID);
     return true;
 }
 
@@ -40,8 +40,8 @@ static bool Undo_UpdateData(const CTransition &ts, CEvoUser &user, CValidationSt
 }
 
 static bool Undo_ResetKey(const CTransition &ts, CEvoUser &user, CValidationState &state) {
-    CPubKey key = user.PopPubKey();
-    if (key != ts.newPubKey)
+    CKeyID key = user.PopPubKeyID();
+    if (key != ts.newPubKeyID)
         return state.Error(strprintf("unexpected key %s popped from user %s", HexStr(key.begin(), key.end()), user.GetRegTxId().ToString()));
     return true;
 }
