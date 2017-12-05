@@ -55,10 +55,10 @@ public:
 
     template <typename Stream, typename Operation>
     inline void SerializationOp(Stream& s, Operation ser_action, int nType, int nVersion) {
-        READWRITE(VARINT(this->nVersion));
+        READWRITE(this->nVersion);
 
-        int _action = action;
-        READWRITE(VARINT(_action));
+        int8_t _action = action;
+        READWRITE(_action);
         action = (SubTxAction)_action;
 
         switch (action) {
