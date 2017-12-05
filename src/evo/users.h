@@ -28,8 +28,8 @@ private:
 public:
     CEvoUser() {}
     CEvoUser(const uint256 &_regTxId, const std::string &_userName, const CKeyID &_pubKeyID)
-            : userName(_userName),
-              regTxId(_regTxId),
+            : regTxId(_regTxId),
+              userName(_userName),
               pubKeyIDs{_pubKeyID}
     {}
 

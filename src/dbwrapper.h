@@ -388,6 +388,7 @@ private:
         const KeyHolderImpl<K> &key;
         V value;
     };
+
     struct keyCmp {
         bool operator()(const KeyHolderPtr &a, const KeyHolderPtr &b) const {
             return a->Less(*b);
@@ -410,16 +411,17 @@ private:
             return nullptr;
         auto it2 = m.emplace(std::make_pair(typeid(K).name(), KeyValueMap()));
         return &it2.first->second;
-    };
+    }
 
     template <typename K>
     KeyValueMap *getWritesMap(bool create) {
         return getMapForType<K>(writes, create);
-    };
+    }
+
     template <typename K>
     KeyValueMap *getDeletesMap(bool create) {
         return getMapForType<K>(deletes, create);
-    };
+    }
 
 public:
     CDBTransaction(CDBWrapper &_db) : db(_db) {}
