@@ -136,7 +136,7 @@ public:
 
 private:
     CDBWrapper db;
-    CDBTransaction transaction;
+    CDBTransaction dbTransaction;
 
 public:
     CEvoUserDB(size_t nCacheSize, bool fMemory=false, bool fWipe=false);

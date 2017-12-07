@@ -18,13 +18,13 @@ bool CEvoUser::VerifySig(const std::string &msg, const std::vector<unsigned char
 
 CEvoUserDB::CEvoUserDB(size_t nCacheSize, bool fMemory, bool fWipe)
         : db(GetDataDir() / "users", nCacheSize, fMemory, fWipe),
-          transaction(db){
+          dbTransaction(db){
 }
 
 bool CEvoUserDB::WriteUser(const CEvoUser &user) {
     LOCK(cs);
-    transaction.Write(std::make_pair(DB_USER, user.GetRegTxId()), user);
-    transaction.Write(std::make_pair(DB_USER_BY_NAME, user.GetUserName()), user.GetRegTxId());
+    dbTransaction.Write(std::make_pair(DB_USER, user.GetRegTxId()), user);
+    dbTransaction.Write(std::make_pair(DB_USER_BY_NAME, user.GetUserName()), user.GetRegTxId());
     return true;
 }
 
@@ -35,46 +35,46 @@ bool CEvoUserDB::DeleteUser(const uint256 &regTxId) {
     if (!GetUser(regTxId, user))
         return false;
 
-    transaction.Erase(std::make_pair(DB_USER, regTxId));
-    transaction.Erase(std::make_pair(DB_USER_BY_NAME, user.GetUserName()));
+    dbTransaction.Erase(std::make_pair(DB_USER, regTxId));
+    dbTransaction.Erase(std::make_pair(DB_USER_BY_NAME, user.GetUserName()));
     return true;
 }
 
 bool CEvoUserDB::GetUser(const uint256 &regTxId, CEvoUser &user) {
     LOCK(cs);
-    return transaction.Read(std::make_pair(DB_USER, regTxId), user);
+    return dbTransaction.Read(std::make_pair(DB_USER, regTxId), user);
 }
 
 bool CEvoUserDB::GetUserIdByName(const std::string &userName, uint256 &regTxId) {
     LOCK(cs);
-    return transaction.Read(std::make_pair(DB_USER_BY_NAME, userName), regTxId);
+    return dbTransaction.Read(std::make_pair(DB_USER_BY_NAME, userName), regTxId);
 }
 
 bool CEvoUserDB::UserExists(const uint256 &regTxId) {
     LOCK(cs);
-    return transaction.Exists(std::make_pair(DB_USER, regTxId));
+    return dbTransaction.Exists(std::make_pair(DB_USER, regTxId));
 }
 
 bool CEvoUserDB::UserNameExists(const std::string &userName) {
     LOCK(cs);
-    return transaction.Exists(std::make_pair(DB_USER_BY_NAME, userName));
+    return dbTransaction.Exists(std::make_pair(DB_USER_BY_NAME, userName));
 }
 
 bool CEvoUserDB::WriteTransition(const CTransition &ts) {
     LOCK(cs);
-    transaction.Write(std::make_pair(DB_TRANSITION, ts.GetHash()), ts);
+    dbTransaction.Write(std::make_pair(DB_TRANSITION, ts.GetHash()), ts);
     return true;
 }
 
 bool CEvoUserDB::DeleteTransition(const uint256 &tsHash) {
     LOCK(cs);
-    transaction.Erase(std::make_pair(DB_TRANSITION, tsHash));
+    dbTransaction.Erase(std::make_pair(DB_TRANSITION, tsHash));
     return true;
 }
 
 bool CEvoUserDB::GetTransition(const uint256 &tsHash, CTransition &ts) {
     LOCK(cs);
-    return transaction.Read(std::make_pair(DB_TRANSITION, tsHash), ts);
+    return dbTransaction.Read(std::make_pair(DB_TRANSITION, tsHash), ts);
 }
 
 bool CEvoUserDB::GetLastTransitionForUser(const uint256 &regTxId, CTransition &ts) {
@@ -109,29 +109,29 @@ bool CEvoUserDB::GetTransitionsForUser(const uint256 &regTxId, int maxCount, std
 
 bool CEvoUserDB::WriteTransitionBlockHash(const uint256 &tsHash, const uint256 &blockHash) {
     LOCK(cs);
-    transaction.Write(std::make_pair(DB_TRANSITION_BLOCK_HASH, tsHash), blockHash);
+    dbTransaction.Write(std::make_pair(DB_TRANSITION_BLOCK_HASH, tsHash), blockHash);
     return true;
 }
 
 bool CEvoUserDB::GetTransitionBlockHash(const uint256 &tsHash, uint256 &blockHash) {
     LOCK(cs);
-    return transaction.Read(std::make_pair(DB_TRANSITION_BLOCK_HASH, tsHash), blockHash);
+    return dbTransaction.Read(std::make_pair(DB_TRANSITION_BLOCK_HASH, tsHash), blockHash);
 }
 
 bool CEvoUserDB::DeleteTransitionBlockHash(const uint256 &tsHash) {
     LOCK(cs);
-    transaction.Erase(std::make_pair(DB_TRANSITION_BLOCK_HASH, tsHash));
+    dbTransaction.Erase(std::make_pair(DB_TRANSITION_BLOCK_HASH, tsHash));
     return true;
 }
 
 bool CEvoUserDB::Commit() {
-    return transaction.Commit();
+    return dbTransaction.Commit();
 }
 
 void CEvoUserDB::Rollback() {
-    transaction.Clear();
+    dbTransaction.Clear();
 }
 
 bool CEvoUserDB::IsTransactionClean() {
-    return transaction.IsClean();
+    return dbTransaction.IsClean();
 }
