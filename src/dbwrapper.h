@@ -14,6 +14,7 @@
 
 #include <map>
 #include <memory>
+#include <typeindex>
 
 #include <boost/filesystem/path.hpp>
 
@@ -380,8 +381,7 @@ private:
     struct KeyValueHolderImpl : KeyValueHolder {
         KeyValueHolderImpl(const KeyHolderImpl<K> &_key, const V &_value)
                 : key(_key),
-                  value(_value) {
-        }
+                  value(_value) { }
         virtual void Write(CDBBatch &batch) {
             batch.Write(key.key, value);
         }
@@ -396,20 +396,20 @@ private:
     };
 
     typedef std::map<KeyHolderPtr, KeyValueHolderPtr, keyCmp> KeyValueMap;
-    typedef std::map<std::string, KeyValueMap> TypeKeyValueMap;
+    typedef std::map<std::type_index, KeyValueMap> TypeKeyValueMap;
 
     TypeKeyValueMap writes;
     TypeKeyValueMap deletes;
 
     template <typename K>
     KeyValueMap *getMapForType(TypeKeyValueMap &m, bool create) {
-        auto it = m.find(typeid(K).name());
+        auto it = m.find(typeid(K));
         if (it != m.end()) {
             return &it->second;
         }
         if (!create)
             return nullptr;
-        auto it2 = m.emplace(std::make_pair(typeid(K).name(), KeyValueMap()));
+        auto it2 = m.emplace(typeid(K), KeyValueMap());
         return &it2.first->second;
     }
 
@@ -472,23 +472,20 @@ public:
         if (ds && ds->count(k))
             return false;
 
-        for (auto &p : writes) {
-            if (p.first == typeid(K).name()) {
-                if (p.second.count(k))
-                    return true;
-            }
-        }
+        KeyValueMap *ws = getWritesMap<K>(false);
+        if (ws && ws->count(k))
+            return true;
+
         return db.Exists(key);
     }
 
     template <typename K>
     void Erase(const K& key) {
         KeyHolderPtr k(new KeyHolderImpl<K>(key));
-        for (auto &p : writes) {
-            if (p.first == typeid(K).name()) {
-                p.second.erase(k);
-            }
-        }
+
+        KeyValueMap *ws = getWritesMap<K>(false);
+        if (ws)
+            ws->erase(k);
         KeyValueMap *ds = getDeletesMap<K>(true);
         ds->emplace(std::move(k), nullptr);
     }
