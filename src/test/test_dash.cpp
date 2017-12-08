@@ -24,6 +24,8 @@
 #include "wallet/wallet.h"
 #endif
 
+#include "evo/users.h"
+
 #include <boost/filesystem.hpp>
 #include <boost/test/unit_test.hpp>
 #include <boost/thread.hpp>
@@ -65,6 +67,7 @@ TestingSetup::TestingSetup(const std::string& chainName) : BasicTestingSetup(cha
         mapArgs["-datadir"] = pathTemp.string();
         pblocktree = new CBlockTreeDB(1 << 20, true);
         pcoinsdbview = new CCoinsViewDB(1 << 23, true);
+        evoUserDB = new CEvoUserDB(1 << 20, true, true);
         pcoinsTip = new CCoinsViewCache(pcoinsdbview);
         InitBlockIndex(chainparams);
 #ifdef ENABLE_WALLET
@@ -93,6 +96,7 @@ TestingSetup::~TestingSetup()
 #endif
         UnloadBlockIndex();
         delete pcoinsTip;
+        delete evoUserDB;
         delete pcoinsdbview;
         delete pblocktree;
 #ifdef ENABLE_WALLET
