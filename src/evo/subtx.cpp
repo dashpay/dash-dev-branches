@@ -276,7 +276,7 @@ void CSubTxData::ToJSON(UniValue &uv) const {
             uv.push_back(Pair("action", "register"));
             uv.push_back(Pair("uname", userName));
             uv.push_back(Pair("pubkeyid", pubKeyID.ToString()));
-            uv.push_back(Pair("vchSigSize", vchSig.size()));
+            uv.push_back(Pair("vchSigSize", (int)vchSig.size()));
             break;
         case SubTxAction_TopUp:
             uv.push_back(Pair("action", "topup"));

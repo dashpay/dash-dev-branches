@@ -28,7 +28,7 @@ void TsToJSON(const CTransition& ts, const uint256 &hashBlock, UniValue& entry)
     entry.push_back(Pair("fee", ValueFromAmount(ts.nFee)));
     entry.push_back(Pair("hashRegTx", ts.hashRegTx.GetHex()));
     entry.push_back(Pair("hashPrevTransition", ts.hashPrevTransition.GetHex()));
-    entry.push_back(Pair("vchUserSigSize", ts.vchUserSig.size()));
+    entry.push_back(Pair("vchUserSigSize", (int)ts.vchUserSig.size()));
     entry.push_back(Pair("vvchQuorumSigsSize", (int)::GetSerializeSize(ts.vvchQuorumSigs, SER_NETWORK, PROTOCOL_VERSION)));
 
     switch (ts.action) {
