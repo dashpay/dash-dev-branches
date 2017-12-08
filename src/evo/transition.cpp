@@ -3,22 +3,16 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include "tinyformat.h"
-#include "messagesigner.h"
 #include "clientversion.h"
 #include "transition.h"
 #include "utilstrencodings.h"
 
 uint256 CTransition::ComputeHash() const {
-    CHashWriter hw(SER_GETHASH, CLIENT_VERSION);
-    hw << *this;
-    return hw.GetHash();
+    return ::SerializeHash(*this);
 }
 
 uint256 CTransition::GetHash() const {
-    LOCK(const_cast<CTransition*>(this)->csCachedHash);
-    if (cachedHash.IsNull())
-        const_cast<CTransition*>(this)->cachedHash = ComputeHash();
-    return cachedHash;
+    return ComputeHash();
 }
 
 std::string CTransition::ToString() const {

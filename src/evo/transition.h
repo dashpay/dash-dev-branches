@@ -7,13 +7,10 @@
 
 #include "amount.h"
 #include "uint256.h"
-#include "sync.h"
-#include "key.h"
+#include "pubkey.h"
 #include "tinyformat.h"
 
 #include <cstdint>
-#include <memory>
-#include <atomic>
 
 enum TransitionAction {
     Transition_Invalid = 0,
@@ -41,10 +38,6 @@ public:
 
     std::vector<unsigned char> vchUserSig;
     std::vector<std::vector<unsigned char>> vvchQuorumSigs;
-
-    // memory only
-    CCriticalSection csCachedHash;
-    uint256 cachedHash;
 
 public:
     ADD_SERIALIZE_METHODS;
@@ -94,12 +87,11 @@ public:
         this->newPubKeyID = r.newPubKeyID;
         this->vchUserSig = r.vchUserSig;
         this->vvchQuorumSigs = r.vvchQuorumSigs;
-        this->cachedHash.SetNull();
         return *this;
     }
 
     uint256 ComputeHash() const;
-    // Warning, this should only be used on transitions which are not changed afterwards
+    // Warning, this is slow
     uint256 GetHash() const;
 
     std::string ToString() const;
