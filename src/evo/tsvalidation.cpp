@@ -233,10 +233,6 @@ bool UndoTransitionsInBlock(const CBlock &block, CValidationState &state) {
         if (!evoUserDB->DeleteTransitionBlockHash(ts.GetHash())) {
             return state.Error(strprintf("UndoTransitionsInBlock(): DeleteTransitionBlockHash failed for %s", ts.hashRegTx.ToString()));
         }
-
-        if (!tsMempool.AddTransition(ts)) {
-            LogPrintf("UndoTransitionsInBlock(): AddTransition for %s failed\n", ts.GetHash().ToString());
-        }
     }
 
     if (!WriteUsers(users, state))
