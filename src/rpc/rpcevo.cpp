@@ -409,8 +409,7 @@ UniValue sendrawtransition(const UniValue& params, bool fHelp) {
     CTransition ts;
     ds >> ts;
 
-    if (!tsMempool.AddTransition(ts))
-        throw std::runtime_error("failed to add transition to mempool");
+    tsMempool.AddTransition(ts);
 
     // TODO actually send it
 

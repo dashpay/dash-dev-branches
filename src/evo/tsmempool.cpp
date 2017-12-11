@@ -8,7 +8,7 @@
 
 CTsMempool tsMempool;
 
-bool CTsMempool::AddTransition(const CTransition &ts) {
+void CTsMempool::AddTransition(const CTransition &ts) {
     LOCK(cs);
 
     /*
@@ -18,7 +18,7 @@ bool CTsMempool::AddTransition(const CTransition &ts) {
 
     if (transitions.count(ts.GetHash())) {
         transitions[ts.GetHash()]->addedTime = GetTimeMillis();
-        return true;
+        return;
     }
 
     CTsMempoolTsEntryPtr entry = std::make_shared<CTsMempoolTsEntry>(ts, GetTimeMillis());
@@ -34,16 +34,14 @@ bool CTsMempool::AddTransition(const CTransition &ts) {
     if (GetTimeMillis() - lastCleanupTime >= CLEANUP_INTERVALL) {
         cleanup();
     }
-
-    return true;
 }
 
-bool CTsMempool::RemoveTransition(const uint256 &tsHash) {
+void CTsMempool::RemoveTransition(const uint256 &tsHash) {
     LOCK(cs);
 
     auto it = transitions.find(tsHash);
     if (it == transitions.end()) {
-        return true;
+        return;
     }
     CTsMempoolTsEntryPtr entry = it->second;
 
@@ -54,8 +52,6 @@ bool CTsMempool::RemoveTransition(const uint256 &tsHash) {
     if (byUsersMap.empty()) {
         transitionsByUsers.erase(entry->ts.hashRegTx);
     }
-
-    return true;
 }
 
 bool CTsMempool::GetTransition(const uint256 &tsHash, CTransition &ts) {
@@ -119,15 +115,13 @@ bool CTsMempool::GetNextTransitionForUser(const CEvoUser &user, CTransition &ts)
     return false;
 }
 
-bool CTsMempool::ReAddForReorg(const CBlock &block) {
+void CTsMempool::ReAddForReorg(const CBlock &block) {
     LOCK(cs);
 
     for (int i = (int)block.vts.size() - 1; i >= 0; i--) {
         const CTransition &ts = block.vts[i];
-        if (!AddTransition(ts))
-            return false;
+        AddTransition(ts);
     }
-    return true;
 }
 
 void CTsMempool::RemoveForBlock(const CBlock &block) {

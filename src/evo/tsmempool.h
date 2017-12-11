@@ -41,15 +41,15 @@ private:
     int64_t lastCleanupTime{};
 
 public:
-    bool AddTransition(const CTransition &ts);
-    bool RemoveTransition(const uint256 &tsHash);
+    void AddTransition(const CTransition &ts);
+    void RemoveTransition(const uint256 &tsHash);
     bool GetTransition(const uint256 &tsHash, CTransition &ts);
 
     bool GetUsers(std::vector<uint256> &regTxIds);
     bool GetTransitionsForUser(const uint256 &regTxId, std::vector<CTransition> &transitions);
     bool GetNextTransitionForUser(const CEvoUser &user, CTransition &ts);
 
-    bool ReAddForReorg(const CBlock &block);
+    void ReAddForReorg(const CBlock &block);
     void RemoveForBlock(const CBlock &block);
 
 private:
