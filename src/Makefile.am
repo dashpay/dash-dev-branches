@@ -114,6 +114,9 @@ BITCOIN_CORE_H = \
   evo/simplifiedmns.h \
   evo/users.h \
   evo/subtx.h \  
+  evo/tsmempool.h \
+  evo/tsvalidation.h \
+  evo/transition.h \
   privatesend.h \
   privatesend-client.h \
   privatesend-server.h \
@@ -232,6 +235,9 @@ libdash_server_a_SOURCES = \
   evo/simplifiedmns.cpp \
   evo/users.cpp \
   evo/subtx.cpp \
+  evo/tsmempool.cpp \
+  evo/tsvalidation.cpp \
+  evo/transition.cpp \
   httprpc.cpp \
   httpserver.cpp \
   init.cpp \
@@ -405,6 +411,7 @@ libdash_common_a_SOURCES = \
   compressor.cpp \
   core_read.cpp \
   core_write.cpp \
+  evo/transition.cpp \
   hdchain.cpp \
   key.cpp \
   keystore.cpp \

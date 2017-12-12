@@ -537,6 +537,8 @@ private:
 
     std::map<CService, uint256> mapProTxAddresses;
     std::map<CKeyID, uint256> mapProTxPubKeyIDs;
+    std::map<std::string, uint256> mapSubTxRegisterUserNames;
+    std::map<uint256, std::set<uint256>> mapSubTxTopups;
 
     void UpdateParent(txiter entry, txiter parent, bool add);
     void UpdateChild(txiter entry, txiter child, bool add);
@@ -582,6 +584,7 @@ public:
     void removeConflicts(const CTransaction &tx);
     void removeProTxPubKeyConflicts(const CTransaction &tx, const CKeyID &keyId);
     void removeProTxConflicts(const CTransaction &tx);
+    void removeSubTxConflicts(const CTransaction &tx);
     void removeForBlock(const std::vector<CTransactionRef>& vtx, unsigned int nBlockHeight);
 
     void clear();
@@ -691,6 +694,11 @@ public:
     std::vector<TxMempoolInfo> infoAll() const;
 
     bool existsProviderTxConflict(const CTransaction &tx) const;
+
+    bool existsSubTxRegisterUserName(const std::string &userName) const {
+        LOCK(cs);
+        return mapSubTxRegisterUserNames.count(userName);
+    }
 
     /** Estimate fee rate needed to get into the next nBlocks
      *  If no answer can be given at nBlocks, return an estimate
