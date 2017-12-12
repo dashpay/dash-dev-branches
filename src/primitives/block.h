@@ -10,6 +10,8 @@
 #include "serialize.h"
 #include "uint256.h"
 
+static const int32_t VERSIONBITS_EVO = 0x00001000UL; // Temporarily until we figure out how to fork Evo
+
 /** Nodes collect new transactions into a block, hash them into a hash tree,
  * and scan through nonce values to make the block's hash satisfy proof-of-work
  * requirements.  When they solve the proof-of-work, they broadcast the block

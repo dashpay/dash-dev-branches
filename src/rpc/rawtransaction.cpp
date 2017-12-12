@@ -32,12 +32,15 @@
 #include "evo/specialtx.h"
 #include "evo/providertx.h"
 #include "evo/cbtx.h"
+#include "evo/subtx.h"
 
 #include <stdint.h>
 
 #include <boost/assign/list_of.hpp>
 
 #include <univalue.h>
+
+void SubTxToJSON(const CTransaction &tx, UniValue &entry);
 
 void ScriptPubKeyToJSON(const CScript& scriptPubKey, UniValue& out, bool fIncludeHex)
 {
@@ -166,7 +169,7 @@ void TxToJSON(const CTransaction& tx, const uint256 hashBlock, UniValue& entry)
             cbTx.ToJson(proTxObj);
             entry.push_back(Pair("cbTx", proTxObj));
         }
-    }
+    } subtx
 
     if (!hashBlock.IsNull()) {
         entry.push_back(Pair("blockhash", hashBlock.GetHex()));
