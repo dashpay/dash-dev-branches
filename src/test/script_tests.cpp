@@ -88,7 +88,8 @@ static ScriptErrorDesc script_errors[]={
     {SCRIPT_ERR_SIG_NULLDUMMY, "SIG_NULLDUMMY"},
     {SCRIPT_ERR_PUBKEYTYPE, "PUBKEYTYPE"},
     {SCRIPT_ERR_CLEANSTACK, "CLEANSTACK"},
-    {SCRIPT_ERR_DISCOURAGE_UPGRADABLE_NOPS, "DISCOURAGE_UPGRADABLE_NOPS"}
+    {SCRIPT_ERR_DISCOURAGE_UPGRADABLE_NOPS, "DISCOURAGE_UPGRADABLE_NOPS"},
+    {SCRIPT_ERR_OP_SUBSCRIPTION, "OP_SUBSCRIPTION"}
 };
 
 const char *FormatScriptError(ScriptError_t err)
@@ -708,14 +709,23 @@ BOOST_AUTO_TEST_CASE(script_json_test)
             }
             continue;
         }
-        string scriptSigString = test[0].get_str();
-        CScript scriptSig = ParseScript(scriptSigString);
-        string scriptPubKeyString = test[1].get_str();
-        CScript scriptPubKey = ParseScript(scriptPubKeyString);
-        unsigned int scriptflags = ParseScriptFlags(test[2].get_str());
-        int scriptError = ParseScriptError(test[3].get_str());
 
-        DoTest(scriptPubKey, scriptSig, scriptflags, strTest, scriptError);
+        if (strTest.find("1 0x01 0xb8") != std::string::npos) {
+            int a = 0;
+        }
+
+        try {
+            string scriptSigString = test[0].get_str();
+            CScript scriptSig = ParseScript(scriptSigString);
+            string scriptPubKeyString = test[1].get_str();
+            CScript scriptPubKey = ParseScript(scriptPubKeyString);
+            unsigned int scriptflags = ParseScriptFlags(test[2].get_str());
+            int scriptError = ParseScriptError(test[3].get_str());
+
+            DoTest(scriptPubKey, scriptSig, scriptflags, strTest, scriptError);
+        } catch (const std::exception &e) {
+            BOOST_ERROR("Exception in test: " << strTest);
+        }
     }
 }
 

@@ -7,8 +7,11 @@
 #define BITCOIN_PRIMITIVES_BLOCK_H
 
 #include "primitives/transaction.h"
+#include "evo/transition.h"
 #include "serialize.h"
 #include "uint256.h"
+
+static const int32_t VERSIONBITS_EVO = 0x00001000UL; // Temporarily until we figure out how to fork Evo
 
 /** Nodes collect new transactions into a block, hash them into a hash tree,
  * and scan through nonce values to make the block's hash satisfy proof-of-work
@@ -28,6 +31,9 @@ public:
     uint32_t nBits;
     uint32_t nNonce;
 
+    // Evo
+    uint256 hashTransitionsMerkleRoot;
+
     CBlockHeader()
     {
         SetNull();
@@ -44,6 +50,12 @@ public:
         READWRITE(nTime);
         READWRITE(nBits);
         READWRITE(nNonce);
+
+        if (ContainsTransitions()) {
+            READWRITE(hashTransitionsMerkleRoot);
+        } else {
+            assert(hashTransitionsMerkleRoot.IsNull());
+        }
     }
 
     void SetNull()
@@ -54,6 +66,7 @@ public:
         nTime = 0;
         nBits = 0;
         nNonce = 0;
+        hashTransitionsMerkleRoot.SetNull();
     }
 
     bool IsNull() const
@@ -67,6 +80,10 @@ public:
     {
         return (int64_t)nTime;
     }
+
+    bool ContainsTransitions() const {
+        return (nVersion & VERSIONBITS_EVO) != 0;
+    }
 };
 
 
@@ -75,6 +92,7 @@ class CBlock : public CBlockHeader
 public:
     // network and disk
     std::vector<CTransaction> vtx;
+    std::vector<CTransition> vts;
 
     // memory only
     mutable CTxOut txoutMasternode; // masternode payment
@@ -98,6 +116,12 @@ public:
     inline void SerializationOp(Stream& s, Operation ser_action, int nType, int nVersion) {
         READWRITE(*(CBlockHeader*)this);
         READWRITE(vtx);
+
+        if (ContainsTransitions()) {
+            READWRITE(vts);
+        } else {
+            assert(vts.empty());
+        }
     }
 
     void SetNull()
@@ -118,6 +142,7 @@ public:
         block.nTime          = nTime;
         block.nBits          = nBits;
         block.nNonce         = nNonce;
+        block.hashTransitionsMerkleRoot = hashTransitionsMerkleRoot;
         return block;
     }
 

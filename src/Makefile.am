@@ -106,6 +106,9 @@ BITCOIN_CORE_H = \
   core_memusage.h \
   evo/users.h \
   evo/subtx.h \
+  evo/tsmempool.h \
+  evo/tsvalidation.h \
+  evo/transition.h \
   privatesend.h \
   privatesend-client.h \
   privatesend-server.h \
@@ -221,6 +224,9 @@ libbitcoin_server_a_SOURCES = \
   checkpoints.cpp \
   evo/users.cpp \
   evo/subtx.cpp \
+  evo/tsmempool.cpp \
+  evo/tsvalidation.cpp \
+  evo/transition.cpp \
   httprpc.cpp \
   httpserver.cpp \
   init.cpp \
@@ -361,6 +367,7 @@ libbitcoin_common_a_SOURCES = \
   consensus/merkle.cpp \
   core_read.cpp \
   core_write.cpp \
+  evo/transition.cpp \
   hash.cpp \
   hdchain.cpp \
   key.cpp \
@@ -494,6 +501,7 @@ libdashconsensus_la_SOURCES = \
   crypto/sha1.cpp \
   crypto/sha256.cpp \
   crypto/sha512.cpp \
+  evo/transition.cpp \
   hash.cpp \
   primitives/transaction.cpp \
   pubkey.cpp \

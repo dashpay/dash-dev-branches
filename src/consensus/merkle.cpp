@@ -161,6 +161,15 @@ uint256 BlockMerkleRoot(const CBlock& block, bool* mutated)
     return ComputeMerkleRoot(leaves, mutated);
 }
 
+uint256 BlockTransitionsMerkleRoot(const CBlock& block, bool* mutated) {
+    std::vector<uint256> leaves;
+    leaves.resize(block.vts.size());
+    for (size_t s = 0; s < block.vts.size(); s++) {
+        leaves[s] = block.vts[s].GetHash();
+    }
+    return ComputeMerkleRoot(leaves, mutated);
+}
+
 std::vector<uint256> BlockMerkleBranch(const CBlock& block, uint32_t position)
 {
     std::vector<uint256> leaves;

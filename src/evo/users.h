@@ -10,13 +10,15 @@
 #include "dbwrapper.h"
 #include "uint256.h"
 #include "serialize.h"
+#include "transition.h"
 
 class CEvoUser {
 private:
     uint256 regTxId;
     std::string userName;
-    std::vector<CPubKey> pubKeys;
+    std::vector<CKeyID> pubKeyIDs;
     std::vector<uint256> subTxIds;
+    uint256 lastTransition;
 
     CAmount topupCredits{};
     CAmount spentCredits{};
@@ -25,10 +27,10 @@ private:
 
 public:
     CEvoUser() {}
-    CEvoUser(const uint256 &_regTxId, const std::string &_userName, const CPubKey &_pubKey)
-            : userName(_userName),
-              regTxId(_regTxId),
-              pubKeys{_pubKey}
+    CEvoUser(const uint256 &_regTxId, const std::string &_userName, const CKeyID &_pubKeyID)
+            : regTxId(_regTxId),
+              userName(_userName),
+              pubKeyIDs{_pubKeyID}
     {}
 
     ADD_SERIALIZE_METHODS;
@@ -39,8 +41,9 @@ public:
         //nVersion = this->nVersion;
         READWRITE(regTxId);
         READWRITE(userName);
-        READWRITE(pubKeys);
+        READWRITE(pubKeyIDs);
         READWRITE(subTxIds);
+        READWRITE(lastTransition);
         READWRITE(topupCredits);
         READWRITE(spentCredits);
         READWRITE(closed);
@@ -58,7 +61,7 @@ public:
         return topupCredits;
     }
 
-    CAmount GetSpentCredeits() const {
+    CAmount GetSpentCredits() const {
         return spentCredits;
     }
 
@@ -82,18 +85,18 @@ public:
         return closed;
     }
 
-    void PushPubKey(const CPubKey &key) {
-        pubKeys.push_back(key);
+    void PushPubKeyID(const CKeyID &keyID) {
+        pubKeyIDs.push_back(keyID);
     }
-    CPubKey PopPubKey() {
-        assert(pubKeys.size() != 0);
-        CPubKey ret(pubKeys.back());
-        pubKeys.pop_back();
+    CKeyID PopPubKeyID() {
+        assert(pubKeyIDs.size() != 0);
+        CKeyID ret(pubKeyIDs.back());
+        pubKeyIDs.pop_back();
         return ret;
     }
-    const CPubKey &GetCurPubKey() const {
-        assert(pubKeys.size() != 0);
-        return pubKeys.back();
+    const CKeyID &GetCurPubKeyID() const {
+        assert(pubKeyIDs.size() != 0);
+        return pubKeyIDs.back();
     }
     
     void PushSubTx(const uint256 &subTxId) {
@@ -109,13 +112,31 @@ public:
         return subTxIds;
     }
 
-    bool VerifySig(const std::string &msg, const std::vector<unsigned char> &sig, std::string &errorRet);
+    const uint256 &GetLastTransition() const {
+        return lastTransition;
+    }
+    void SetLastTransition(const uint256 &tsHash) {
+        lastTransition = tsHash;
+    }
+
+    bool VerifySig(const std::string &msg, const std::vector<unsigned char> &sig, std::string &errorRet) const;
 };
 
 class CEvoUserDB {
-private:
+public:
     CCriticalSection cs;
+
+    struct RAIITransaction {
+        CEvoUserDB &userDb;
+        RAIITransaction(CEvoUserDB &_userDb) : userDb(_userDb) {}
+        ~RAIITransaction() {
+            userDb.Rollback();
+        }
+    };
+
+private:
     CDBWrapper db;
+    CDBTransaction dbTransaction;
 
 public:
     CEvoUserDB(size_t nCacheSize, bool fMemory=false, bool fWipe=false);
@@ -128,12 +149,23 @@ public:
     bool UserExists(const uint256 &regTxId);
     bool UserNameExists(const std::string &userName);
 
-private:
-    template <typename K>
-    CDataStream MakeKey(char prefix, const K &key) {
-        CDataStream s(SER_DISK, CLIENT_VERSION);
-        s << prefix << key;
-        return s;
+    bool WriteTransition(const CTransition &ts);
+    bool DeleteTransition(const uint256 &tsHash);
+    bool GetTransition(const uint256 &tsHash, CTransition &ts);
+    bool GetLastTransitionForUser(const uint256 &regTxId, CTransition &ts);
+    bool GetTransitionsForUser(const uint256 &regTxId, int maxCount, std::vector<CTransition> &transitions);
+
+    bool WriteTransitionBlockHash(const uint256 &tsHash, const uint256 &blockHash);
+    bool GetTransitionBlockHash(const uint256 &tsHash, uint256 &blockHash);
+    bool DeleteTransitionBlockHash(const uint256 &tsHash);
+
+    bool Commit();
+    void Rollback();
+    bool IsTransactionClean();
+
+    std::unique_ptr<RAIITransaction> BeginTransaction() {
+        assert(IsTransactionClean());
+        return std::unique_ptr<RAIITransaction>(new RAIITransaction(*this));
     }
 };
 

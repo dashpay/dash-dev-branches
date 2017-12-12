@@ -28,6 +28,9 @@
 #include "masternode-sync.h"
 #include "validationinterface.h"
 
+#include "evo/tsmempool.h"
+#include "evo/tsvalidation.h"
+
 #include <boost/thread.hpp>
 #include <boost/tuple/tuple.hpp>
 #include <queue>
@@ -104,6 +107,10 @@ CBlockTemplate* CreateNewBlock(const CChainParams& chainparams, const CScript& s
     unsigned int nBlockMinSize = GetArg("-blockminsize", DEFAULT_BLOCK_MIN_SIZE);
     nBlockMinSize = std::min(nBlockMaxSize, nBlockMinSize);
 
+    // Reserved block size to use for SubTx and state transitions
+    unsigned int nBlockReserveSubTxSize = GetArg("-blockreservesubtxsize", nBlockMaxSize / 10);
+    unsigned int nBlockReserveTsSize = GetArg("-blockreservetssize", nBlockMaxSize / 10);
+
     // Collect memory pool transactions into the block
     CTxMemPool::setEntries inBlock;
     CTxMemPool::setEntries waitSet;
@@ -119,6 +126,7 @@ CBlockTemplate* CreateNewBlock(const CChainParams& chainparams, const CScript& s
     bool fPrintPriority = GetBoolArg("-printpriority", DEFAULT_PRINTPRIORITY);
     uint64_t nBlockSize = 1000;
     uint64_t nBlockTx = 0;
+    uint64_t nBlockSizeForSubTxs = 0;
     unsigned int nBlockSigOps = 100;
     int lastFewTxs = 0;
     CAmount nFees = 0;
@@ -136,6 +144,7 @@ CBlockTemplate* CreateNewBlock(const CChainParams& chainparams, const CScript& s
         pblocktemplate->vTxFees.push_back(-1); // updated at end
         pblocktemplate->vTxSigOps.push_back(-1); // updated at end
         pblock->nVersion = ComputeBlockVersion(pindexPrev, chainparams.GetConsensus());
+        pblock->nVersion |= VERSIONBITS_EVO; // TODO
         // -regtest only: allow overriding block.nVersion with
         // -blockversion=N to test forking scenarios
         if (chainparams.MineBlocksOnDemand())
@@ -162,18 +171,44 @@ CBlockTemplate* CreateNewBlock(const CChainParams& chainparams, const CScript& s
                 std::make_heap(vecPriority.begin(), vecPriority.end(), pricomparer);
             }
 
+            // collect SubTXs sorted by score
+            std::priority_queue<CTxMemPool::txiter, std::vector<CTxMemPool::txiter>, ScoreCompare> prioritySubTxs;
+            bool prioritizeSubTxs = true;
+            for (CTxMemPool::indexed_transaction_set::iterator mi = mempool.mapTx.begin();
+                 mi != mempool.mapTx.end(); ++mi)
+            {
+                if (IsSubTx(mi->GetTx())) {
+                    prioritySubTxs.push(mi);
+                }
+            }
+
+            // to collect orphan topups
+            std::map<uint256, std::list<CTxMemPool::txiter>> orphanSubTxs;
+
+            // We actually call this twice. Once here and once after adding transaction to the block. This way we ensure
+            // that nBlockReserveTsSize is honered and at the same time block space is not wasted
+            AddMempoolTransitionsToBlock(*pblock, nBlockReserveTsSize, nBlockMaxSize);
+
+            nBlockSize += ::GetSerializeSize(pblock->vts, SER_NETWORK, CLIENT_VERSION);
+
             CTxMemPool::indexed_transaction_set::nth_index<3>::type::iterator mi = mempool.mapTx.get<3>().begin();
             CTxMemPool::txiter iter;
 
             while (mi != mempool.mapTx.get<3>().end() || !clearedTxs.empty())
             {
                 bool priorityTx = false;
+                bool prioritySubTx = false;
                 if (fPriorityBlock && !vecPriority.empty()) { // add a tx from priority queue to fill the blockprioritysize
                     priorityTx = true;
                     iter = vecPriority.front().second;
                     actualPriority = vecPriority.front().first;
                     std::pop_heap(vecPriority.begin(), vecPriority.end(), pricomparer);
                     vecPriority.pop_back();
+                }
+                else if (prioritizeSubTxs && !prioritySubTxs.empty()) {
+                    iter = prioritySubTxs.top();
+                    prioritySubTxs.pop();
+                    prioritySubTx = true;
                 }
                 else if (clearedTxs.empty()) { // add tx with next highest score
                     iter = mempool.mapTx.project<0>(mi);
@@ -188,6 +223,12 @@ CBlockTemplate* CreateNewBlock(const CChainParams& chainparams, const CScript& s
                     continue; // could have been added to the priorityBlock
 
                 const CTransaction& tx = iter->GetTx();
+
+                CSubTxData subTxData;
+                if (IsSubTx(tx)) {
+                    if (!GetSubTxData(tx, subTxData))
+                        continue; // should never happen
+                }
 
                 bool fOrphan = false;
                 BOOST_FOREACH(CTxMemPool::txiter parent, mempool.GetMemPoolParents(iter))
@@ -205,6 +246,23 @@ CBlockTemplate* CreateNewBlock(const CChainParams& chainparams, const CScript& s
                     continue;
                 }
 
+                // check if we have an orphan topup. If yes, we need to postpone adding it to the block until the
+                // required register SubTx is added
+                if (IsSubTx(tx) && subTxData.action != SubTxAction_Register) {
+                    CValidationState dummyState;
+                    if (!CheckSubTx(tx, dummyState))
+                        continue; // might happen in case topup was added to mempool before the account was closed
+                    auto regTxIter = mempool.mapTx.find(subTxData.regTxId);
+                    if ((regTxIter == mempool.mapTx.end() || !inBlock.count(regTxIter)) && !evoUserDB->UserExists(subTxData.regTxId)) {
+                        // might happen when topups and register SubTXs for same user are in mempool
+                        auto it = orphanSubTxs.find(subTxData.regTxId);
+                        if (it == orphanSubTxs.end())
+                            it = orphanSubTxs.emplace(subTxData.regTxId, std::list<CTxMemPool::txiter>()).first;
+                        it->second.push_back(iter);
+                        continue;
+                    }
+                }
+
                 unsigned int nTxSize = iter->GetTxSize();
                 if (fPriorityBlock &&
                     (nBlockSize + nTxSize >= nBlockPrioritySize || !AllowFree(actualPriority))) {
@@ -214,6 +272,12 @@ CBlockTemplate* CreateNewBlock(const CChainParams& chainparams, const CScript& s
                 if (!priorityTx &&
                     (iter->GetModifiedFee() < ::minRelayTxFee.GetFee(nTxSize) && nBlockSize >= nBlockMinSize)) {
                     break;
+                }
+                if (IsSubTx(tx)) {
+                    if (prioritizeSubTxs && prioritySubTx && nBlockSizeForSubTxs + nTxSize >= nBlockReserveSubTxSize) {
+                        prioritizeSubTxs = false;
+                        continue;
+                    }
                 }
                 if (nBlockSize + nTxSize >= nBlockMaxSize) {
                     if (nBlockSize >  nBlockMaxSize - 100 || lastFewTxs > 50) {
@@ -249,6 +313,10 @@ CBlockTemplate* CreateNewBlock(const CChainParams& chainparams, const CScript& s
                 nBlockSigOps += nTxSigOps;
                 nFees += nTxFees;
 
+                if (IsSubTx(tx)) {
+                    nBlockSizeForSubTxs += tx.GetTotalSize();
+                }
+
                 if (fPrintPriority)
                 {
                     double dPriority = iter->GetPriority(nHeight);
@@ -259,6 +327,20 @@ CBlockTemplate* CreateNewBlock(const CChainParams& chainparams, const CScript& s
                 }
 
                 inBlock.insert(iter);
+
+                // Add SubTxs that depend on this register SubTx
+                if (IsSubTx(tx) && subTxData.action == SubTxAction_Register) {
+                    if (orphanSubTxs.count(tx.GetHash())) {
+                        for (auto &iter2 : orphanSubTxs[tx.GetHash()]) {
+                            if (prioritizeSubTxs) {
+                                prioritySubTxs.push(iter2);
+                            } else {
+                                clearedTxs.push(iter2);
+                            }
+                        }
+                        orphanSubTxs.erase(tx.GetHash());
+                    }
+                }
 
                 // Add transactions that depend on this one to the priority queue
                 BOOST_FOREACH(CTxMemPool::txiter child, mempool.GetMemPoolChildren(iter))
@@ -279,11 +361,33 @@ CBlockTemplate* CreateNewBlock(const CChainParams& chainparams, const CScript& s
                     }
                 }
             }
+        }
 
+        // fill up remaining block space with transitions
+        {
+            LOCK(evoUserDB->cs);
+
+            // begin tx and let it rollback
+            auto evoDbTx = evoUserDB->BeginTransaction();
+
+            // first we need to update the current user states to reflect what we have in the block right now
+            CValidationState state;
+            if (!ProcessSubTxsInBlock(*pblock, state)) {
+                LogPrintf("CreateNewBlock(): ProcessSubTxsInBlock() failed. state=%s", FormatStateMessage(state));
+                assert(false);
+            }
+            if (!ProcessTransitionsInBlock(*pblock, false, state)) {
+                LogPrintf("CreateNewBlock(): ProcessTransitionsInBlock() failed. state=%s", FormatStateMessage(state));
+                assert(false);
+            }
+            AddMempoolTransitionsToBlock(*pblock, nBlockMaxSize, nBlockMaxSize);
         }
 
         // NOTE: unlike in bitcoin, we need to pass PREVIOUS block height here
         CAmount blockReward = nFees + GetBlockSubsidy(pindexPrev->nBits, pindexPrev->nHeight, Params().GetConsensus());
+
+        CAmount transitionFees = CalcTransitionFeesForBlock(*pblock);
+        blockReward += transitionFees;
 
         // Compute regular coinbase transaction.
         txNew.vout[0].nValue = blockReward;
@@ -301,7 +405,7 @@ CBlockTemplate* CreateNewBlock(const CChainParams& chainparams, const CScript& s
 
         // Update block coinbase
         pblock->vtx[0] = txNew;
-        pblocktemplate->vTxFees[0] = -nFees;
+        pblocktemplate->vTxFees[0] = -nFees - transitionFees;
 
         // Fill in header
         pblock->hashPrevBlock  = pindexPrev->GetBlockHash();
@@ -336,6 +440,7 @@ void IncrementExtraNonce(CBlock* pblock, const CBlockIndex* pindexPrev, unsigned
 
     pblock->vtx[0] = txCoinbase;
     pblock->hashMerkleRoot = BlockMerkleRoot(*pblock);
+    pblock->hashTransitionsMerkleRoot = BlockTransitionsMerkleRoot(*pblock);
 }
 
 //////////////////////////////////////////////////////////////////////////////
