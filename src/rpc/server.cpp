@@ -407,12 +407,16 @@ static const CRPCCommand vRPCCommands[] =
 #endif // ENABLE_WALLET
     { "evo",                "getuser",                &getuser,                true  },
     { "evo",                "createrawsubtx",         &createrawsubtx,         true  },
-    { "evo",                "createsubtx",            &createsubtx,            true  },
     { "evo",                "createrawtransition",    &createrawtransition,    true  },
     { "evo",                "createtransition",       &createtransition,       true  },
     { "evo",                "signrawtransition",      &signrawtransition,      true  },
     { "evo",                "sendrawtransition",      &sendrawtransition,      true  },
     { "evo",                "gettransition",          &gettransition,          true  },
+
+#ifdef ENABLE_WALLET
+    // createsubtx requires the wallet to be enabled to fund the SubTx
+    { "evo",                "createsubtx",            &createsubtx,            true  },
+#endif//ENABLE_WALLET
 };
 
 CRPCTable::CRPCTable()
