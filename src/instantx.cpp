@@ -16,11 +16,17 @@
 #include "txmempool.h"
 #include "util.h"
 #include "consensus/validation.h"
+#include "validationinterface.h"
+#ifdef ENABLE_WALLET
+#include "wallet/wallet.h"
+#endif // ENABLE_WALLET
 
 #include <boost/algorithm/string/replace.hpp>
 #include <boost/thread.hpp>
 
+#ifdef ENABLE_WALLET
 extern CWallet* pwalletMain;
+#endif // ENABLE_WALLET
 extern CTxMemPool mempool;
 
 bool fEnableInstantSend = true;
@@ -45,9 +51,6 @@ void CInstantSend::ProcessMessage(CNode* pfrom, std::string& strCommand, CDataSt
     if(fLiteMode) return; // disable all Dash specific functionality
     if(!sporkManager.IsSporkActive(SPORK_2_INSTANTSEND_ENABLED)) return;
 
-    // Ignore any InstantSend messages until masternode list is synced
-    if(!masternodeSync.IsMasternodeListSynced()) return;
-
     // NOTE: NetMsgType::TXLOCKREQUEST is handled via ProcessMessage() in main.cpp
 
     if (strCommand == NetMsgType::TXLOCKVOTE) // InstantSend Transaction Lock Consensus Votes
@@ -57,16 +60,20 @@ void CInstantSend::ProcessMessage(CNode* pfrom, std::string& strCommand, CDataSt
         CTxLockVote vote;
         vRecv >> vote;
 
+
+        uint256 nVoteHash = vote.GetHash();
+
+        pfrom->setAskFor.erase(nVoteHash);
+
+        // Ignore any InstantSend messages until masternode list is synced
+        if(!masternodeSync.IsMasternodeListSynced()) return;
+
         LOCK(cs_main);
 #ifdef ENABLE_WALLET
         if (pwalletMain)
             LOCK(pwalletMain->cs_wallet);
 #endif
         LOCK(cs_instantsend);
-
-        uint256 nVoteHash = vote.GetHash();
-
-        pfrom->setAskFor.erase(nVoteHash);
 
         if(mapTxLockVotes.count(nVoteHash)) return;
         mapTxLockVotes.insert(std::make_pair(nVoteHash, vote));
@@ -934,17 +941,6 @@ bool CTxLockRequest::IsValid() const
     }
 
     CAmount nValueIn = 0;
-    CAmount nValueOut = 0;
-
-    BOOST_FOREACH(const CTxOut& txout, vout) {
-        // InstantSend supports normal scripts and unspendable (i.e. data) scripts.
-        // TODO: Look into other script types that are normal and can be included
-        if(!txout.scriptPubKey.IsNormalPaymentScript() && !txout.scriptPubKey.IsUnspendable()) {
-            LogPrint("instantsend", "CTxLockRequest::IsValid -- Invalid Script %s", ToString());
-            return false;
-        }
-        nValueOut += txout.nValue;
-    }
 
     BOOST_FOREACH(const CTxIn& txin, vin) {
 
@@ -973,6 +969,8 @@ bool CTxLockRequest::IsValid() const
         return false;
     }
 
+    CAmount nValueOut = GetValueOut();
+
     if(nValueIn - nValueOut < GetMinFee()) {
         LogPrint("instantsend", "CTxLockRequest::IsValid -- did not include enough fees in transaction: fees=%d, tx=%s", nValueOut - nValueIn, ToString());
         return false;
@@ -983,7 +981,7 @@ bool CTxLockRequest::IsValid() const
 
 CAmount CTxLockRequest::GetMinFee() const
 {
-    CAmount nMinFee = fDIP0001ActiveAtTip ? MIN_FEE / 10 : MIN_FEE;
+    CAmount nMinFee = MIN_FEE;
     return std::max(nMinFee, CAmount(vin.size() * nMinFee));
 }
 

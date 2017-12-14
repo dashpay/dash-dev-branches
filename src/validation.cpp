@@ -95,7 +95,7 @@ std::atomic<bool> fDIP0001ActiveAtTip{false};
 uint256 hashAssumeValid;
 
 /** Fees smaller than this (in duffs) are considered zero fee (for relaying, mining and transaction creation) */
-CFeeRate minRelayTxFee = CFeeRate(DEFAULT_LEGACY_MIN_RELAY_TX_FEE);
+CFeeRate minRelayTxFee = CFeeRate(DEFAULT_MIN_RELAY_TX_FEE);
 
 CTxMemPool mempool(::minRelayTxFee);
 map<uint256, int64_t> mapRejectedBlocks GUARDED_BY(cs_main);
@@ -1129,6 +1129,9 @@ bool GetTransaction(const uint256 &hash, CTransaction &txOut, const Consensus::P
                 return error("%s: txid mismatch", __func__);
             return true;
         }
+
+        // transaction not found in index, nothing more can be done
+        return false;
     }
 
     if (fAllowSlow) { // use coin database to locate block that contains transaction, and scan it
@@ -1955,7 +1958,7 @@ public:
     {
         return ((pindex->nVersion & VERSIONBITS_TOP_MASK) == VERSIONBITS_TOP_BITS) &&
                ((pindex->nVersion >> bit) & 1) != 0 &&
-               ((ComputeBlockVersion(pindex->pprev, params) >> bit) & 1) == 0;
+               ((ComputeBlockVersion(pindex->pprev, params, true) >> bit) & 1) == 0;
     }
 };
 
@@ -3238,7 +3241,7 @@ bool CheckBlock(const CBlock& block, CValidationState& state, bool fCheckPOW, bo
             BOOST_FOREACH(const CTxIn& txin, tx.vin) {
                 uint256 hashLocked;
                 if(instantsend.GetLockedOutPointTxHash(txin.prevout, hashLocked) && hashLocked != tx.GetHash()) {
-                    // The node which relayed this will have to swtich later,
+                    // The node which relayed this will have to switch later,
                     // relaying instantsend data won't help it.
                     LOCK(cs_main);
                     mapRejectedBlocks.insert(make_pair(block.GetHash(), GetTime()));
