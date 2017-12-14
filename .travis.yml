@@ -51,7 +51,7 @@ env:
 # dashd
     - HOST=x86_64-unknown-linux-gnu PPA="ppa:bitcoin/bitcoin" PACKAGES="bc python3-zmq" DEP_OPTS="NO_QT=1 NO_UPNP=1 DEBUG=1" RUN_TESTS=true GOAL="install" BITCOIN_CONFIG="--enable-zmq --enable-glibc-back-compat --enable-reduce-exports" CPPFLAGS="-DDEBUG_LOCKORDER -DENABLE_DASH_DEBUG" PYZMQ=true
 # No wallet
-#    - HOST=x86_64-unknown-linux-gnu PPA="ppa:bitcoin/bitcoin" PACKAGES="python3" DEP_OPTS="NO_WALLET=1" RUN_TESTS=true GOAL="install" BITCOIN_CONFIG="--enable-glibc-back-compat --enable-reduce-exports"
+    - HOST=x86_64-unknown-linux-gnu PPA="ppa:bitcoin/bitcoin" PACKAGES="python3" DEP_OPTS="NO_WALLET=1" RUN_TESTS=true GOAL="install" BITCOIN_CONFIG="--enable-glibc-back-compat --enable-reduce-exports"
 # Cross-Mac
     - HOST=x86_64-apple-darwin11 PPA="ppa:bitcoin/bitcoin" PACKAGES="cmake imagemagick libcap-dev librsvg2-bin libz-dev libbz2-dev libtiff-tools python-dev" BITCOIN_CONFIG="--enable-gui --enable-reduce-exports" OSX_SDK=10.9 GOAL="deploy"
 # dashd release build (for docker)
@@ -94,7 +94,7 @@ script:
     - make $MAKEJOBS $GOAL || ( echo "Build failure. Verbose build follows." && make $GOAL V=1 ; false )
     - export LD_LIBRARY_PATH=$TRAVIS_BUILD_DIR/depends/$HOST/lib
     - if [ "$RUN_TESTS" = "true" -a "$WINE" != "true" ]; then travis_wait 30 make $MAKEJOBS check VERBOSE=1; fi
-    - if [ "$RUN_TESTS" = "true" -a "$WINE" = "true" ]; then wine  src/test/test_dash.exe; fi
+    - if [ "$RUN_TESTS" = "true" -a "$WINE" = "true" ]; then wine  src/test/test_dash.exe --log_level=test_suite; fi
     - if [ "$RUN_TESTS" = "true" ]; then qa/pull-tester/rpc-tests.py --coverage; fi
     - cd ..
     - if [ "$DOCKER_BUILD" = "true" ]; then BUILD_DIR=dash-$HOST ./docker/build-docker.sh; fi
