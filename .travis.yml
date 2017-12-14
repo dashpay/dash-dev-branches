@@ -13,6 +13,12 @@ group: deprecated-2017Q3
 os: linux
 language: generic
 
+# Only build main branches
+branches:
+  only:
+  - master
+  - develop
+
 services:
   - docker
 
