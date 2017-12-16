@@ -28,6 +28,8 @@
 #include "masternode-payments.h"
 #include "masternode-sync.h"
 
+#include "evo/transition.h"
+
 #include <stdint.h>
 
 #include <boost/assign/list_of.hpp>
@@ -631,6 +633,20 @@ UniValue getblocktemplate(const UniValue& params, bool fHelp)
         transactions.push_back(entry);
     }
 
+    UniValue transitions(UniValue::VARR);
+    for (const CTransition& ts : pblock->vts) {
+        UniValue entry(UniValue::VOBJ);
+
+        CDataStream ds(SER_NETWORK, PROTOCOL_VERSION);
+        ds << ts;
+
+        entry.push_back(Pair("data", HexStr(ds.begin(), ds.end())));
+        entry.push_back(Pair("hash", ts.GetHash().GetHex()));
+        entry.push_back(Pair("fee", ts.nFee));
+
+        transitions.push_back(entry);
+    }
+
     UniValue aux(UniValue::VOBJ);
     aux.push_back(Pair("flags", HexStr(COINBASE_FLAGS.begin(), COINBASE_FLAGS.end())));
 
@@ -639,6 +655,7 @@ UniValue getblocktemplate(const UniValue& params, bool fHelp)
     UniValue aMutable(UniValue::VARR);
     aMutable.push_back("time");
     aMutable.push_back("transactions");
+    aMutable.push_back("transitions");
     aMutable.push_back("prevblock");
 
     UniValue result(UniValue::VOBJ);
@@ -690,6 +707,7 @@ UniValue getblocktemplate(const UniValue& params, bool fHelp)
     result.push_back(Pair("rules", aRules));
     result.push_back(Pair("vbavailable", vbavailable));
     result.push_back(Pair("vbrequired", int(0)));
+    result.push_back(Pair("is_evo", (pblock->nVersion & VERSIONBITS_EVO) != 0));
 
     if (nMaxVersionPreVB >= 2) {
         // If VB is supported by the client, nMaxVersionPreVB is -1, so we won't get here
@@ -701,6 +719,7 @@ UniValue getblocktemplate(const UniValue& params, bool fHelp)
 
     result.push_back(Pair("previousblockhash", pblock->hashPrevBlock.GetHex()));
     result.push_back(Pair("transactions", transactions));
+    result.push_back(Pair("transitions", transitions));
     result.push_back(Pair("coinbaseaux", aux));
     result.push_back(Pair("coinbasevalue", (int64_t)pblock->vtx[0].GetValueOut()));
     result.push_back(Pair("longpollid", chainActive.Tip()->GetBlockHash().GetHex() + i64tostr(nTransactionsUpdatedLast)));
