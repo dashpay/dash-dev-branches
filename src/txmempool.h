@@ -16,6 +16,8 @@
 #include "primitives/transaction.h"
 #include "sync.h"
 
+#include "evo/transition.h"
+
 #undef foreach
 #include "boost/multi_index_container.hpp"
 #include "boost/multi_index/ordered_index.hpp"
@@ -548,8 +550,10 @@ public:
     void removeRecursive(const CTransaction &tx, std::list<CTransaction>& removed);
     void removeForReorg(const CCoinsViewCache *pcoins, unsigned int nMemPoolHeight, int flags);
     void removeConflicts(const CTransaction &tx, std::list<CTransaction>& removed);
+    void removeSubTxTopups(const uint256 &regTxId, std::list<CTransaction>& removed);
     void removeSubTxConflicts(const CTransaction &tx, std::list<CTransaction>& removed);
-    void removeForBlock(const std::vector<CTransaction>& vtx, unsigned int nBlockHeight,
+    void removeTsConflicts(const CTransition &ts, std::list<CTransaction>& removed);
+    void removeForBlock(const std::vector<CTransaction>& vtx, const std::vector<CTransition>& vts, unsigned int nBlockHeight,
                         std::list<CTransaction>& conflicts, bool fCurrentEstimate = true);
     void clear();
     void _clear(); //lock free
