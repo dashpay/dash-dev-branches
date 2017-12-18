@@ -18,7 +18,7 @@ private:
     std::string userName;
     std::vector<CKeyID> pubKeyIDs;
     std::vector<uint256> subTxIds;
-    uint256 lastTransition;
+    uint256 hashLastTransition;
 
     CAmount topupCredits{};
     CAmount spentCredits{};
@@ -43,7 +43,7 @@ public:
         READWRITE(userName);
         READWRITE(pubKeyIDs);
         READWRITE(subTxIds);
-        READWRITE(lastTransition);
+        READWRITE(hashLastTransition);
         READWRITE(topupCredits);
         READWRITE(spentCredits);
         READWRITE(closed);
@@ -112,11 +112,11 @@ public:
         return subTxIds;
     }
 
-    const uint256 &GetLastTransition() const {
-        return lastTransition;
+    const uint256 &GetHashLastTransition() const {
+        return hashLastTransition;
     }
-    void SetLastTransition(const uint256 &tsHash) {
-        lastTransition = tsHash;
+    void SetHashLastTransition(const uint256 &tsHash) {
+        hashLastTransition = tsHash;
     }
 
     bool VerifySig(const std::string &msg, const std::vector<unsigned char> &sig, std::string &errorRet) const;

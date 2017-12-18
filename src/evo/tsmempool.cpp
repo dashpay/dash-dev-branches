@@ -147,7 +147,7 @@ bool CTsMempool::isEligableForCleanup(const CTsMempoolTsEntryPtr &entry) {
     std::list<CTsMempoolTsEntryPtr> tsChain;
     uint256 cur = ts.hashPrevTransition;
     while (true) {
-        if (user.GetLastTransition() == cur)
+        if (user.GetHashLastTransition() == cur)
             break;
 
         if (!transitions.count(cur))

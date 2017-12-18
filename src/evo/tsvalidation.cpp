@@ -17,7 +17,7 @@ static bool CheckTransitionSignatures(const CTransition &ts, const CEvoUser &use
 }
 
 static bool Process_UpdateData(const CTransition &ts, CEvoUser &user, CValidationState &state) {
-    user.SetLastTransition(ts.GetHash());
+    user.SetHashLastTransition(ts.GetHash());
     return true;
 }
 
@@ -32,10 +32,10 @@ static bool Process_CloseAccount(const CTransition &ts, CEvoUser &user, CValidat
 }
 
 static bool Undo_UpdateData(const CTransition &ts, CEvoUser &user, CValidationState &state) {
-    if (user.GetLastTransition() != ts.GetHash()) {
-        return state.Error(strprintf("unexpected last subtx %s for user %s", user.GetLastTransition().ToString(), user.GetRegTxId().ToString()));
+    if (user.GetHashLastTransition() != ts.GetHash()) {
+        return state.Error(strprintf("unexpected last subtx %s for user %s", user.GetHashLastTransition().ToString(), user.GetRegTxId().ToString()));
     }
-    user.SetLastTransition(ts.hashPrevTransition);
+    user.SetHashLastTransition(ts.hashPrevTransition);
     return true;
 }
 
@@ -72,7 +72,7 @@ bool CheckTransitionForUser(const CTransition &ts, const CEvoUser &user, bool ch
         return state.DoS(100, false, REJECT_INVALID, "bad-ts-nocredits");
     }
 
-    if (ts.hashPrevTransition != user.GetLastTransition()) {
+    if (ts.hashPrevTransition != user.GetHashLastTransition()) {
         return state.DoS(100, false, REJECT_INVALID, "bad-ts-ancestor");
     }
 

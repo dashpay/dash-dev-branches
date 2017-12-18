@@ -89,7 +89,7 @@ static void User2Json(const CEvoUser &user, bool withSubTxAndTs, bool detailed, 
     json.push_back(std::make_pair("pubkeyid", user.GetCurPubKeyID().ToString()));
     json.push_back(std::make_pair("credits", user.GetCreditBalance()));
 
-    uint256 lastTransitionHash = user.GetLastTransition();
+    uint256 lastTransitionHash = user.GetHashLastTransition();
     if (lastTransitionHash.IsNull()) {
         json.push_back(std::make_pair("data", uint256().ToString()));
     } else {
@@ -231,7 +231,7 @@ static uint256 GetLastTransitionFromParams(const UniValue& params, int paramPos,
     CEvoUser user;
     if (!evoUserDB->GetUser(regTxId, user))
         throw std::runtime_error(strprintf("user %s not found", regTxId.ToString()));
-    return user.GetLastTransition();
+    return user.GetHashLastTransition();
 }
 
 UniValue createrawsubtx(const UniValue& params, bool fHelp)

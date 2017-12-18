@@ -95,7 +95,7 @@ bool CEvoUserDB::GetTransitionsForUser(const uint256 &regTxId, int maxCount, std
         return false;
 
     transitions.clear();
-    uint256 tsHash = user.GetLastTransition();
+    uint256 tsHash = user.GetHashLastTransition();
     while ((maxCount == -1 || (int)transitions.size() < maxCount) && !tsHash.IsNull()) {
         CTransition ts;
         if (!GetTransition(tsHash, ts))
