@@ -10,7 +10,7 @@
 static bool CheckTransitionSignatures(const CTransition &ts, const CEvoUser &user, CValidationState &state) {
     std::string err;
     if (!user.VerifySig(ts.MakeSignMessage(), ts.vchUserSig, err))
-        return state.DoS(100, false, REJECT_INVALID, "bad-ts-usersig", false, err);
+        return state.DoS(100, false, REJECT_TS_SIG, "bad-ts-usersig", false, err);
 
     // TODO check MN quorum sigs
     return true;
@@ -59,7 +59,8 @@ bool CheckTransitionForUser(const CTransition &ts, const CEvoUser &user, bool ch
     }
 
     if (user.IsClosed()) {
-        return state.DoS(100, false, REJECT_INVALID, "bad-ts-accountclosed");
+        // Low DoS score as peers may not know about the closed account yet
+        return state.DoS(10, false, REJECT_INVALID, "bad-ts-accountclosed");
     }
 
     // TODO min fee depending on TS size
@@ -68,11 +69,13 @@ bool CheckTransitionForUser(const CTransition &ts, const CEvoUser &user, bool ch
     }
 
     if (user.GetCreditBalance() < ts.nFee) {
-        return state.DoS(100, false, REJECT_INVALID, "bad-ts-nocredits");
+        // Low DoS score as peers may not know about the low balance (e.g. due to not mined topups)
+        return state.DoS(10, false, REJECT_INSUFFICIENTFEE, "bad-ts-nocredits");
     }
 
     if (ts.hashPrevTransition != user.GetHashLastTransition()) {
-        return state.DoS(100, false, REJECT_INVALID, "bad-ts-ancestor");
+        // Low DoS score as peers may not know yet that the user had other TSs applied
+        return state.DoS(10, false, REJECT_TS_ANCESTOR, "bad-ts-ancestor");
     }
 
     if (checkSigs && !CheckTransitionSignatures(ts, user, state))
@@ -167,7 +170,7 @@ bool ProcessTransitionsInBlock(const CBlock &block, bool onlyCheck, CValidationS
 
     // get all users first
     if (!GetUsersFromBlock(block, users))
-        return state.DoS(100, false, REJECT_INVALID, "bad-ts-nouser");
+        return state.DoS(100, false, REJECT_TS_NOUSER, "bad-ts-nouser");
 
     if (!ProcessTransitionsInBlockForUsers(block, users, state))
         return false;
