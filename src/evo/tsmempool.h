@@ -49,6 +49,8 @@ public:
     bool GetTransitionsForUser(const uint256 &regTxId, std::vector<CTransition> &transitions);
     bool GetNextTransitionForUser(const CEvoUser &user, CTransition &ts);
 
+    void GetTransitionsChain(const uint256 &lastTsHash, const uint256 &stopAtTsHash, std::vector<CTransition> &result);
+
     void ReAddForReorg(const CBlock &block);
     void RemoveForBlock(const CBlock &block);
 

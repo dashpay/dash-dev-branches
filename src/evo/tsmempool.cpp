@@ -115,6 +115,20 @@ bool CTsMempool::GetNextTransitionForUser(const CEvoUser &user, CTransition &ts)
     return false;
 }
 
+void CTsMempool::GetTransitionsChain(const uint256 &lastTsHash, const uint256 &stopAtTsHash, std::vector<CTransition> &result) {
+    LOCK(cs);
+    result.clear();
+    uint256 cur = lastTsHash;
+    while (cur != stopAtTsHash) {
+        const auto it = transitions.find(cur);
+        if (it == transitions.end())
+            break;
+        result.push_back(it->second->ts);
+        cur = it->second->ts.hashPrevTransition;
+    }
+    std::reverse(result.begin(), result.end());
+}
+
 void CTsMempool::ReAddForReorg(const CBlock &block) {
     LOCK(cs);
 
@@ -143,28 +157,17 @@ bool CTsMempool::isEligableForCleanup(const CTsMempoolTsEntryPtr &entry) {
     if (!evoUserDB->GetUser(ts.hashRegTx, user))
         return true;
 
+
     // get chain of TSs back to user
-    std::list<CTsMempoolTsEntryPtr> tsChain;
-    uint256 cur = ts.hashPrevTransition;
-    while (true) {
-        if (user.GetHashLastTransition() == cur)
-            break;
-
-        if (!transitions.count(cur))
-            return true;
-
-        const auto &curEntry = transitions[cur];
-        tsChain.push_front(curEntry);
-
-        cur = curEntry->ts.hashPrevTransition;
-    }
+    std::vector<CTransition> tsChain;
+    GetTransitionsChain(ts.hashPrevTransition, user.GetHashLastTransition(), tsChain);
 
     // now try to process them on the temporary user
-    for (const auto &entry : tsChain) {
+    for (const auto &ts2 : tsChain) {
         CValidationState state;
-        if (!CheckTransitionForUser(entry->ts, user, true, state))
+        if (!CheckTransitionForUser(ts2, user, true, state))
             return true;
-        if (!ProcessTransitionForUser(entry->ts, user, state))
+        if (!ProcessTransitionForUser(ts2, user, state))
             return true;
     }
 
