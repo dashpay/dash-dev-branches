@@ -88,17 +88,7 @@ static void User2Json(const CEvoUser &user, bool withSubTxAndTs, bool detailed, 
     json.push_back(std::make_pair("regtxid", user.GetRegTxId().ToString()));
     json.push_back(std::make_pair("pubkeyid", user.GetCurPubKeyID().ToString()));
     json.push_back(std::make_pair("credits", user.GetCreditBalance()));
-
-    uint256 lastTransitionHash = user.GetHashLastTransition();
-    if (lastTransitionHash.IsNull()) {
-        json.push_back(std::make_pair("data", uint256().ToString()));
-    } else {
-        CTransition lastTransition;
-        if (!evoUserDB->GetTransition(lastTransitionHash, lastTransition)) {
-            throw std::runtime_error(strprintf("failed to get transition %s", lastTransitionHash.ToString()));
-        }
-        json.push_back(std::make_pair("data", lastTransition.hashDataMerkleRoot.ToString()));
-    }
+    json.push_back(std::make_pair("data", user.GetCurHashDataMerkleRoot().ToString()));
 
     std::string state;
     if (user.IsClosed())

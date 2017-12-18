@@ -18,6 +18,7 @@ private:
     std::string userName;
     std::vector<CKeyID> pubKeyIDs;
     std::vector<uint256> subTxIds;
+    std::vector<uint256> hashDataMerkleRoots;
     uint256 hashLastTransition;
 
     CAmount topupCredits{};
@@ -30,7 +31,8 @@ public:
     CEvoUser(const uint256 &_regTxId, const std::string &_userName, const CKeyID &_pubKeyID)
             : regTxId(_regTxId),
               userName(_userName),
-              pubKeyIDs{_pubKeyID}
+              pubKeyIDs{_pubKeyID},
+              hashDataMerkleRoots{uint256()} // start with 000... hashDataMerkleRoot
     {}
 
     ADD_SERIALIZE_METHODS;
@@ -43,6 +45,7 @@ public:
         READWRITE(userName);
         READWRITE(pubKeyIDs);
         READWRITE(subTxIds);
+        READWRITE(hashDataMerkleRoots);
         READWRITE(hashLastTransition);
         READWRITE(topupCredits);
         READWRITE(spentCredits);
@@ -110,6 +113,20 @@ public:
     }
     const std::vector<uint256> &GetSubTxIds() const {
         return subTxIds;
+    }
+
+    void PushHashDataMerkleRoot(const uint256 &h) {
+        hashDataMerkleRoots.push_back(h);
+    }
+    uint256 PopHashDataMerkleRoot() {
+        assert(hashDataMerkleRoots.size() != 0);
+        uint256 ret(hashDataMerkleRoots.back());
+        hashDataMerkleRoots.pop_back();
+        return ret;
+    }
+    const uint256 &GetCurHashDataMerkleRoot() const {
+        assert(hashDataMerkleRoots.size() != 0);
+        return hashDataMerkleRoots.back();
     }
 
     const uint256 &GetHashLastTransition() const {

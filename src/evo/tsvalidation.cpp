@@ -17,7 +17,7 @@ static bool CheckTransitionSignatures(const CTransition &ts, const CEvoUser &use
 }
 
 static bool Process_UpdateData(const CTransition &ts, CEvoUser &user, CValidationState &state) {
-    user.SetHashLastTransition(ts.GetHash());
+    user.PushHashDataMerkleRoot(ts.hashDataMerkleRoot);
     return true;
 }
 
@@ -32,17 +32,16 @@ static bool Process_CloseAccount(const CTransition &ts, CEvoUser &user, CValidat
 }
 
 static bool Undo_UpdateData(const CTransition &ts, CEvoUser &user, CValidationState &state) {
-    if (user.GetHashLastTransition() != ts.GetHash()) {
-        return state.Error(strprintf("unexpected last subtx %s for user %s", user.GetHashLastTransition().ToString(), user.GetRegTxId().ToString()));
-    }
-    user.SetHashLastTransition(ts.hashPrevTransition);
+    uint256 hashDataMerkleRoot = user.PopHashDataMerkleRoot();
+    if (hashDataMerkleRoot != ts.hashDataMerkleRoot)
+        return state.Error(strprintf("unexpected hashDataMerkleRoot %s for user %s. Expected %s", hashDataMerkleRoot.ToString(), user.GetRegTxId().ToString(), ts.hashDataMerkleRoot.ToString()));
     return true;
 }
 
 static bool Undo_ResetKey(const CTransition &ts, CEvoUser &user, CValidationState &state) {
     CKeyID key = user.PopPubKeyID();
     if (key != ts.newPubKeyID)
-        return state.Error(strprintf("unexpected key %s popped from user %s", HexStr(key.begin(), key.end()), user.GetRegTxId().ToString()));
+        return state.Error(strprintf("unexpected key %s popped from user %s. Expected %s", key.ToString(), user.GetRegTxId().ToString(), ts.newPubKeyID.ToString()));
     return true;
 }
 
@@ -99,6 +98,7 @@ bool ProcessTransitionForUser(const CTransition &ts, CEvoUser &user, CValidation
         default:
             return state.DoS(100, false, REJECT_INVALID, "bad-ts-action");
     }
+    user.SetHashLastTransition(ts.GetHash());
     user.AddSpend(ts.nFee);
     return true;
 }
@@ -190,6 +190,9 @@ bool ProcessTransitionsInBlock(const CBlock &block, bool onlyCheck, CValidationS
 }
 
 static bool UndoTransitionForUser(const CTransition &ts, CEvoUser &user, CValidationState &state) {
+    if (user.GetHashLastTransition() != ts.GetHash()) {
+        return state.Error(strprintf("UndoTransition() -- Unexpected hashLastTransition %s. Expected %s", user.GetHashLastTransition().ToString(), ts.GetHash().ToString()));
+    }
 
     switch (ts.action) {
         case Transition_UpdateData:
@@ -213,6 +216,7 @@ static bool UndoTransitionForUser(const CTransition &ts, CEvoUser &user, CValida
         return state.Error("UndoTransition() -- Unexpected negative spent credits");
     }
 
+    user.SetHashLastTransition(ts.hashPrevTransition);
     return true;
 }
 
