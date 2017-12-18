@@ -30,6 +30,7 @@
 #endif
 
 #include "evo/subtx.h"
+#include "evo/tsvalidation.h"
 
 #include <stdint.h>
 
@@ -911,6 +912,7 @@ UniValue sendrawtransaction(const UniValue& params, bool fHelp)
         throw JSONRPCError(RPC_CLIENT_P2P_DISABLED, "Error: Peer-to-peer functionality missing or disabled");
 
     g_connman->RelayTransaction(tx, txFeeRate);
+    RelayNowValidTransitions();
 
     return hashTx.GetHex();
 }

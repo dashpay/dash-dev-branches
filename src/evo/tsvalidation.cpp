@@ -271,6 +271,17 @@ bool UndoTransitionsInBlock(const CBlock &block, CValidationState &state) {
     return true;
 }
 
+void RelayNowValidTransitions() {
+    std::vector<uint256> validTsHashes;
+    tsMempool.GetNowValidWaitForRelayTransitions(validTsHashes);
+
+    for (const uint256 &tsHash : validTsHashes) {
+        CInv inv(MSG_TRANSITION, tsHash);
+        g_connman->RelayInv(inv, MIN_EVO_PROTO_VERSION);
+    }
+
+    tsMempool.RemoveWaitForRelay(validTsHashes);
+}
 
 void HandleIncomingTransition(CNode *pfrom, const CTransition &ts) {
     if (tsMempool.Exists(ts.GetHash()))
@@ -315,6 +326,7 @@ void HandleIncomingTransition(CNode *pfrom, const CTransition &ts) {
         } else {
             CInv inv(MSG_TRANSITION, ts.GetHash());
             g_connman->RelayInv(inv, MIN_EVO_PROTO_VERSION);
+            RelayNowValidTransitions();
         }
     }
 }

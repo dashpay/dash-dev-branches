@@ -23,6 +23,7 @@ bool ProcessTransitionForUser(const CTransition &ts, CEvoUser &user, CValidation
 bool ProcessTransitionsInBlock(const CBlock &block, bool onlyCheck, CValidationState &state);
 bool UndoTransitionsInBlock(const CBlock &block, CValidationState &state);
 
+void RelayNowValidTransitions();
 void HandleIncomingTransition(CNode *pfrom, const CTransition &ts);
 
 bool BuildUserFromMempool(const uint256 &regTxId, CEvoUser &user);

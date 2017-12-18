@@ -1686,6 +1686,8 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
                 tx.GetHash().ToString(),
                 mempool.size(), mempool.DynamicMemoryUsage() / 1000);
 
+            bool isAnySubTx = IsSubTx(tx);
+
             // Recursively process any orphan transactions that depended on this one
             set<NodeId> setMisbehaving;
             for (unsigned int i = 0; i < vWorkQueue.size(); i++)
@@ -1716,6 +1718,9 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
                         connman.RelayTransaction(orphanTx, orphanFeeRate);
                         vWorkQueue.push_back(orphanHash);
                         vEraseQueue.push_back(orphanHash);
+
+                        if (IsSubTx(orphanTx))
+                            isAnySubTx = true;
                     }
                     else if (!fMissingInputs2)
                     {
@@ -1740,6 +1745,11 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
 
             BOOST_FOREACH(uint256 hash, vEraseQueue)
                 EraseOrphanTx(hash);
+
+            if (isAnySubTx) {
+                // previously invalid transitions might have become valid. Relay these.
+                RelayNowValidTransitions();
+            }
         }
         else if (fMissingInputs)
         {

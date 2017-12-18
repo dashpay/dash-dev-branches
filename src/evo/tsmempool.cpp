@@ -52,6 +52,8 @@ void CTsMempool::RemoveTransition(const uint256 &tsHash) {
     if (byUsersMap.empty()) {
         transitionsByUsers.erase(entry->ts.hashRegTx);
     }
+
+    waitForRelay.erase(tsHash);
 }
 
 bool CTsMempool::GetTransition(const uint256 &tsHash, CTransition &ts) {
@@ -132,6 +134,64 @@ void CTsMempool::GetTransitionsChain(const uint256 &lastTsHash, const uint256 &s
         cur = it->second->ts.hashPrevTransition;
     }
     std::reverse(result.begin(), result.end());
+}
+
+void CTsMempool::AddWaitForRelay(const uint256 &tsHash) {
+    LOCK(cs);
+    assert(transitions.count(tsHash) != 0);
+    waitForRelay.insert(tsHash);
+}
+
+void CTsMempool::RemoveWaitForRelay(const uint256 &tsHash) {
+    LOCK(cs);
+    waitForRelay.erase(tsHash);
+}
+
+void CTsMempool::RemoveWaitForRelay(const std::vector<uint256> &tsHashes) {
+    LOCK(cs);
+    for (const uint256 &tsHash : tsHashes)
+        waitForRelay.erase(tsHash);
+}
+
+void CTsMempool::GetNowValidWaitForRelayTransitions(std::vector<uint256> &result) {
+    LOCK(cs);
+
+    std::list<uint256> tmp;
+
+    for (const uint256 &tsHash : waitForRelay) {
+        const auto entry = transitions.find(tsHash);
+        assert(entry != transitions.end());
+
+        CValidationState state;
+        if (CheckTransition(entry->second->ts, true, true, state)) {
+            tmp.push_back(entry->first);
+        }
+    }
+
+    result.clear();
+    std::set<uint256> added;
+
+    // Make sure we return the list in the correct order, meaning that parent transitions must appear first
+    while (!tmp.empty()) {
+        const uint256 &tsHash = tmp.front();
+        tmp.pop_front();
+
+        const auto it = transitions.find(tsHash);
+        assert(it != transitions.end());
+        const CTransition &ts = it->second->ts;
+
+        // does the current TS have a parent that needs to be relayed first
+        if (!ts.hashPrevTransition.IsNull() && waitForRelay.count(ts.hashPrevTransition)) {
+            // did we already add it to the result?
+            if (!added.count(ts.hashPrevTransition)) {
+                // try again later
+                tmp.push_back(tsHash);
+                continue;
+            }
+        }
+        result.push_back(tsHash);
+        added.insert(tsHash);
+    }
 }
 
 void CTsMempool::ReAddForReorg(const CBlock &block) {

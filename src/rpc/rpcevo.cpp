@@ -440,6 +440,7 @@ UniValue sendrawtransition(const UniValue& params, bool fHelp) {
                 CInv inv(MSG_TRANSITION, ts.GetHash());
                 g_connman->RelayInv(inv, MIN_EVO_PROTO_VERSION);
             } else if (state.GetRejectCode()) {
+                tsMempool.AddWaitForRelay(ts.GetHash());
                 throw std::runtime_error(strprintf("transition %s not valid. state: %s", ts.GetHash().ToString(), FormatStateMessage(state)));
             }
         }
