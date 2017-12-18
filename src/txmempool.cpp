@@ -1008,6 +1008,28 @@ bool CTxMemPool::lookupFeeRate(const uint256& hash, CFeeRate& feeRate) const
     return true;
 }
 
+bool CTxMemPool::getRegTxIdFromUserName(const std::string &userName, uint256 &regTxId) const {
+    LOCK(cs);
+    auto it = mapSubTxRegisterUserNames.find(userName);
+    if (it == mapSubTxRegisterUserNames.end())
+        return false;
+    regTxId = it->second;
+    return true;
+}
+
+bool CTxMemPool::getTopupsForUser(const uint256 &regTxId, std::vector<CTransaction> &result) const {
+    LOCK(cs);
+    auto it = mapSubTxTopups.find(regTxId);
+    if (it == mapSubTxTopups.end())
+        return false;
+    for (const auto txHash : it->second) {
+        auto it2 = mapTx.find(txHash);
+        if (it2 != mapTx.end())
+            result.push_back(it2->GetTx());
+    }
+    return true;
+}
+
 CFeeRate CTxMemPool::estimateFee(int nBlocks) const
 {
     LOCK(cs);

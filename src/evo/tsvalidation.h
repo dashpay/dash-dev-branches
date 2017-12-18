@@ -15,10 +15,16 @@ static const CAmount EVO_TS_MIN_FEE = (CAmount)(0.01 * COIN);
 static const CAmount EVO_TS_MAX_FEE = (CAmount)(0.10 * COIN);
 static const size_t EVO_TS_MAX_SIZE = 1500; // TODO find correct max size
 
+bool CheckTransition(const CTransition &ts, bool checkSigs, bool includeMempool, CValidationState &state);
+
 bool CheckTransitionForUser(const CTransition &ts, const CEvoUser &user, bool checkSigs, CValidationState &state);
 bool ProcessTransitionForUser(const CTransition &ts, CEvoUser &user, CValidationState &state);
 bool ProcessTransitionsInBlock(const CBlock &block, bool onlyCheck, CValidationState &state);
 bool UndoTransitionsInBlock(const CBlock &block, CValidationState &state);
+
+bool BuildUserFromMempool(const uint256 &regTxId, CEvoUser &user);
+bool TopupUserFromMempool(CEvoUser &user);
+bool ApplyUserTransitionsFromMempool(CEvoUser &user, const uint256 &stopAtTs = uint256());
 
 void AddMempoolTransitionsToBlock(CBlock &block, uint64_t maxTsSpace, uint64_t maxBlockSize);
 

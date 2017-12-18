@@ -653,13 +653,16 @@ public:
         return (it != mapTx.end() && outpoint.n < it->GetTx().vout.size());
     }
 
+    bool lookup(uint256 hash, CTransaction& result) const;
+    bool lookupFeeRate(const uint256& hash, CFeeRate& feeRate) const;
+
     bool existsSubTxRegisterUserName(const std::string &userName) const {
         LOCK(cs);
         return mapSubTxRegisterUserNames.count(userName);
     }
 
-    bool lookup(uint256 hash, CTransaction& result) const;
-    bool lookupFeeRate(const uint256& hash, CFeeRate& feeRate) const;
+    bool getRegTxIdFromUserName(const std::string &userName, uint256 &regTxId) const;
+    bool getTopupsForUser(const uint256 &regTxId, std::vector<CTransaction> &result) const;
 
     /** Estimate fee rate needed to get into the next nBlocks
      *  If no answer can be given at nBlocks, return an estimate

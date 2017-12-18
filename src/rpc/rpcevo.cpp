@@ -8,6 +8,7 @@
 #include "init.h"
 #include "messagesigner.h"
 #include "rpc/server.h"
+#include "txmempool.h"
 #include "utilmoneystr.h"
 #include "validation.h"
 
@@ -119,11 +120,17 @@ static void User2Json(const CEvoUser &user, bool withSubTxAndTs, bool detailed, 
         std::vector<CTransition> transitions;
         evoUserDB->GetTransitionsForUser(user.GetRegTxId(), -1, transitions);
 
+        std::vector<CTransition> mempoolTransitions;
+        tsMempool.GetTransitionsChain(user.GetHashLastTransition(), transitions.empty() ? uint256() : transitions.back().GetHash(), mempoolTransitions);
+        transitions.insert(transitions.end(), mempoolTransitions.begin(), mempoolTransitions.end());
+
         UniValue transitionsArr(UniValue::VARR);
-        for (CTransition ts : transitions) {
+        for (const CTransition &ts : transitions) {
             if (detailed) {
                 UniValue ts2(UniValue::VOBJ);
-                TsToJSON(ts, uint256(), ts2);
+                uint256 blockHash;
+                evoUserDB->GetTransitionBlockHash(ts.GetHash(), blockHash);
+                TsToJSON(ts, blockHash, ts2);
                 transitionsArr.push_back(ts2);
             } else {
                 transitionsArr.push_back(ts.GetHash().ToString());
@@ -146,29 +153,46 @@ static uint256 GetRegTxId(const std::string &regTxIdOrUserName) {
     uint256 regTxId;
     if (evoUserDB->GetUserIdByName(regTxIdOrUserName, regTxId))
         return regTxId;
+    if (mempool.getRegTxIdFromUserName(regTxIdOrUserName, regTxId))
+        return regTxId;
     throw std::runtime_error(strprintf("user %s not found", regTxIdOrUserName));
 }
 
 UniValue getuser(const UniValue& params, bool fHelp)
 {
-    if (fHelp || (params.size() != 1 && params.size() != 2))
+    if (fHelp || (params.size() != 1 && params.size() != 2 && params.size() != 3))
         throw std::runtime_error(
-                "getuser <regTxId|username> (verbose)\n"
+                "getuser <regTxId|username> (includeMempool) (verbose)\n"
                 "\nGet registered user in JSON format as defined by dash-schema.\n"
         );
 
     uint256 regTxId = GetRegTxId(params[0].get_str());
     bool verbose = false;
+    bool includeMempool = true;
     if (params.size() > 1) {
-        verbose = params[1].get_int() != 0;
+        includeMempool = params[1].get_int() != 0;
+    }
+    if (params.size() > 2) {
+        verbose = params[2].get_int() != 0;
     }
 
     CEvoUser user;
-    if (!evoUserDB->GetUser(regTxId, user))
-        throw std::runtime_error(strprintf("failed to read user %s from db", params[0].get_str()));
+    bool fromMempool = false;
+    if (!evoUserDB->GetUser(regTxId, user)) {
+        if (!includeMempool || !BuildUserFromMempool(regTxId, user))
+            throw std::runtime_error(strprintf("failed to read user %s from db", params[0].get_str()));
+        fromMempool = true;
+    }
+
+    if (includeMempool) {
+        fromMempool |= TopupUserFromMempool(user);
+        fromMempool |= ApplyUserTransitionsFromMempool(user);
+    }
 
     UniValue result;
     User2Json(user, true, verbose, result);
+    if (fromMempool)
+        result.push_back(Pair("from_mempool", true));
     return result;
 }
 
@@ -199,7 +223,7 @@ static CKey GetKeyFromParamsOrWallet(const UniValue &params, int paramPos, const
 
 #ifdef ENABLE_WALLET
     CEvoUser user;
-    if (!evoUserDB->GetUser(regTxId, user)) {
+    if (!evoUserDB->GetUser(regTxId, user) && !BuildUserFromMempool(regTxId, user)) {
         throw std::runtime_error(strprintf("user %s not found", regTxId.ToString()));
     }
 
@@ -219,8 +243,9 @@ static uint256 GetLastTransitionFromParams(const UniValue& params, int paramPos,
         return ParseHashStr(params[paramPos].get_str(), "hashLastTransition");
 
     CEvoUser user;
-    if (!evoUserDB->GetUser(regTxId, user))
+    if (!evoUserDB->GetUser(regTxId, user) && !BuildUserFromMempool(regTxId, user))
         throw std::runtime_error(strprintf("user %s not found", regTxId.ToString()));
+    ApplyUserTransitionsFromMempool(user);
     return user.GetHashLastTransition();
 }
 
@@ -387,13 +412,19 @@ UniValue createtransition(const UniValue& params, bool fHelp) {
 }
 
 UniValue sendrawtransition(const UniValue& params, bool fHelp) {
-    if (fHelp || params.size() != 1)
+    if (fHelp || (params.size() != 1 && params.size() != 2))
         throw std::runtime_error(
-                "sendrawtransition <hexTs>\n"
+                "sendrawtransition <hexTs> (<reallySend>)\n"
                 "\nSends a signed transition to the network.\n"
+                "If reallySend is specified and set to 0, the transition is only added to the mempool.\n"
         );
 
     std::string hexTs = params[0].get_str();
+    bool reallySend = true;
+    if (params.size() == 2) {
+        reallySend = params[1].get_int() != 0;
+    }
+
     CDataStream ds(ParseHex(hexTs), SER_DISK, CLIENT_VERSION);
 
     CTransition ts;
@@ -415,10 +446,12 @@ UniValue gettransition(const UniValue &params, bool fHelp) {
 
     uint256 tsHash = ParseHashStr(params[0].get_str(), "tsHash");
 
+    bool fromMempool = false;
     CTransition ts;
     if (!evoUserDB->GetTransition(tsHash, ts)) {
         if (!tsMempool.GetTransition(tsHash, ts))
             throw std::runtime_error("transition not found");
+        fromMempool = true;
     }
 
     uint256 blockHash;
@@ -426,6 +459,8 @@ UniValue gettransition(const UniValue &params, bool fHelp) {
 
     UniValue result;
     TsToJSON(ts, blockHash, result);
+    if (fromMempool)
+        result.push_back(Pair("from_mempool", true));
     return result;
 }
 

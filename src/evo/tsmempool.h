@@ -44,6 +44,7 @@ public:
     void AddTransition(const CTransition &ts);
     void RemoveTransition(const uint256 &tsHash);
     bool GetTransition(const uint256 &tsHash, CTransition &ts);
+    bool Exists(const uint256 &tsHash);
 
     bool GetUsers(std::vector<uint256> &regTxIds);
     bool GetTransitionsForUser(const uint256 &regTxId, std::vector<CTransition> &transitions);

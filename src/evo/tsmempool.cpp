@@ -65,6 +65,11 @@ bool CTsMempool::GetTransition(const uint256 &tsHash, CTransition &ts) {
     return true;
 }
 
+bool CTsMempool::Exists(const uint256 &tsHash) {
+    LOCK(cs);
+    return transitions.count(tsHash) != 0;
+}
+
 bool CTsMempool::GetUsers(std::vector<uint256> &regTxIds) {
     LOCK(cs);
     regTxIds.clear();
@@ -154,9 +159,11 @@ bool CTsMempool::isEligableForCleanup(const CTsMempoolTsEntryPtr &entry) {
     const CTransition &ts = entry->ts;
 
     CEvoUser user;
-    if (!evoUserDB->GetUser(ts.hashRegTx, user))
+    if (!evoUserDB->GetUser(ts.hashRegTx, user) && !BuildUserFromMempool(ts.hashRegTx, user)) {
         return true;
+    }
 
+    TopupUserFromMempool(user);
 
     // get chain of TSs back to user
     std::vector<CTransition> tsChain;

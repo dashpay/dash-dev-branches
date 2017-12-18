@@ -84,6 +84,27 @@ bool CheckTransitionForUser(const CTransition &ts, const CEvoUser &user, bool ch
     return true;
 }
 
+bool CheckTransition(const CTransition &ts, bool checkSigs, bool includeMempool, CValidationState &state) {
+    bool userValid = false;
+    CEvoUser user;
+    if (evoUserDB->GetUser(ts.hashRegTx, user))
+        userValid = true;
+    else if (includeMempool && BuildUserFromMempool(ts.hashRegTx, user))
+        userValid = true;
+
+    if (!userValid) {
+        // Low DoS score as peers may not know about this user yet
+        return state.DoS(10, false, REJECT_TS_NOUSER, "bad-ts-nouser");
+    }
+
+    if (includeMempool) {
+        TopupUserFromMempool(user);
+        ApplyUserTransitionsFromMempool(user, ts.GetHash());
+    }
+
+    return CheckTransitionForUser(ts, user, checkSigs, state);
+}
+
 bool ProcessTransitionForUser(const CTransition &ts, CEvoUser &user, CValidationState &state) {
     switch (ts.action) {
         case Transition_UpdateData:
@@ -246,6 +267,55 @@ bool UndoTransitionsInBlock(const CBlock &block, CValidationState &state) {
         return false;
 
     return true;
+}
+
+bool BuildUserFromMempool(const uint256 &regTxId, CEvoUser &user) {
+    CTransaction subTx;
+    if (!mempool.lookup(regTxId, subTx))
+        return false;
+    CValidationState dummyState;
+    if (!CheckSubTx(subTx, dummyState))
+        return false;
+
+    CSubTxData subTxData;
+    GetSubTxData(subTx, subTxData);
+    subTxData.BuildNewUser(subTx, user);
+
+    return true;
+}
+
+bool TopupUserFromMempool(CEvoUser &user) {
+    std::vector<CTransaction> topups;
+    if (!mempool.getTopupsForUser(user.GetRegTxId(), topups))
+        return false;
+
+    bool didTopup = false;
+    for (const auto &tx : topups) {
+        CSubTxData subTxData;
+        GetSubTxData(tx, subTxData);
+        assert(subTxData.action == SubTxAction_TopUp);
+        user.AddTopUp(tx.vout[0].nValue);
+        didTopup = true;
+    }
+    return didTopup;
+}
+
+bool ApplyUserTransitionsFromMempool(CEvoUser &user, const uint256 &stopAtTs) {
+    bool didApply = false;
+    while (true) {
+        CTransition ts;
+        if (!tsMempool.GetNextTransitionForUser(user, ts))
+            break;
+        if (ts.GetHash() == stopAtTs)
+            break;
+
+        CValidationState dummyState;
+        bool dummyValid = ProcessTransitionForUser(ts, user, dummyState);
+        assert(dummyValid);
+
+        didApply = true;
+    }
+    return didApply;
 }
 
 // this can be called multiple times for the same block. this is needed if new register SubTxs are later added to the block
