@@ -7,6 +7,7 @@
 #include "core_io.h"
 #include "init.h"
 #include "messagesigner.h"
+#include "net.h"
 #include "rpc/server.h"
 #include "txmempool.h"
 #include "utilmoneystr.h"
@@ -430,9 +431,19 @@ UniValue sendrawtransition(const UniValue& params, bool fHelp) {
     CTransition ts;
     ds >> ts;
 
-    tsMempool.AddTransition(ts);
+    if (!tsMempool.Exists(ts.GetHash())) {
+        tsMempool.AddTransition(ts);
 
-    // TODO actually send it
+        if (reallySend) {
+            CValidationState state;
+            if (CheckTransition(ts, true, true, state)) {
+                CInv inv(MSG_TRANSITION, ts.GetHash());
+                g_connman->RelayInv(inv, MIN_EVO_PROTO_VERSION);
+            } else if (state.GetRejectCode()) {
+                throw std::runtime_error(strprintf("transition %s not valid. state: %s", ts.GetHash().ToString(), FormatStateMessage(state)));
+            }
+        }
+    }
 
     return UniValue(ts.GetHash().ToString());
 }

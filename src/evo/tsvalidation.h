@@ -9,6 +9,7 @@
 #include "validation.h"
 
 class CEvoUser;
+class CNode;
 
 // TODO define good min/max fees
 static const CAmount EVO_TS_MIN_FEE = (CAmount)(0.01 * COIN);
@@ -21,6 +22,8 @@ bool CheckTransitionForUser(const CTransition &ts, const CEvoUser &user, bool ch
 bool ProcessTransitionForUser(const CTransition &ts, CEvoUser &user, CValidationState &state);
 bool ProcessTransitionsInBlock(const CBlock &block, bool onlyCheck, CValidationState &state);
 bool UndoTransitionsInBlock(const CBlock &block, CValidationState &state);
+
+void HandleIncomingTransition(CNode *pfrom, const CTransition &ts);
 
 bool BuildUserFromMempool(const uint256 &regTxId, CEvoUser &user);
 bool TopupUserFromMempool(CEvoUser &user);
