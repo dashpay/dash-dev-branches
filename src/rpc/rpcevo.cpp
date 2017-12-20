@@ -171,10 +171,10 @@ UniValue getuser(const UniValue& params, bool fHelp)
     bool verbose = false;
     bool includeMempool = true;
     if (params.size() > 1) {
-        includeMempool = params[1].get_int() != 0;
+        includeMempool = params[1].get_bool();
     }
     if (params.size() > 2) {
-        verbose = params[2].get_int() != 0;
+        verbose = params[2].get_bool();
     }
 
     CEvoUser user;
@@ -423,7 +423,7 @@ UniValue sendrawtransition(const UniValue& params, bool fHelp) {
     std::string hexTs = params[0].get_str();
     bool reallySend = true;
     if (params.size() == 2) {
-        reallySend = params[1].get_int() != 0;
+        reallySend = params[1].get_bool();
     }
 
     CDataStream ds(ParseHex(hexTs), SER_DISK, CLIENT_VERSION);

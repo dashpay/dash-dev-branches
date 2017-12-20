@@ -138,6 +138,7 @@ static const CRPCConvertParam vRPCConvertParams[] =
     { "getaddressmempool", 0},
     { "getuser", 1},
     { "getuser", 2},
+    { "sendrawtransition", 1},
 };
 
 class CRPCConvertTable
