@@ -765,13 +765,13 @@ void CTxMemPool::removeSubTxConflicts(const CTransaction &tx, std::list<CTransac
             if (topUpTxIt == mapTx.end())
                 continue;
 
-            remove(topUpTxIt->GetTx(), removed, true);
+            removeRecursive(topUpTxIt->GetTx(), removed);
             ClearPrioritisation(topUpTxIt->GetTx().GetHash());
         }
     }
 
     // remove conflicting register SubTx
-    remove(txConflict, removed, true);
+    removeRecursive(txConflict, removed);
     ClearPrioritisation(txConflict.GetHash());
 }
 
