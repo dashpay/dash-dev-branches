@@ -431,19 +431,19 @@ UniValue sendrawtransition(const UniValue& params, bool fHelp) {
     CTransition ts;
     ds >> ts;
 
-    if (!tsMempool.Exists(ts.GetHash())) {
-        tsMempool.AddTransition(ts);
+    tsMempool.AddTransition(ts);
 
+    CValidationState state;
+    if (CheckTransition(ts, true, true, state)) {
         if (reallySend) {
-            CValidationState state;
-            if (CheckTransition(ts, true, true, state)) {
-                CInv inv(MSG_TRANSITION, ts.GetHash());
-                g_connman->RelayInv(inv, MIN_EVO_PROTO_VERSION);
-            } else if (state.GetRejectCode()) {
-                tsMempool.AddWaitForRelay(ts.GetHash());
-                throw std::runtime_error(strprintf("transition %s not valid. state: %s", ts.GetHash().ToString(), FormatStateMessage(state)));
-            }
+            CInv inv(MSG_TRANSITION, ts.GetHash());
+            g_connman->RelayInv(inv, MIN_EVO_PROTO_VERSION);
         }
+    } else {
+        if (reallySend && (state.GetRejectCode() == REJECT_TS_ANCESTOR || state.GetRejectCode() == REJECT_TS_NOUSER || state.GetRejectCode() == REJECT_INSUFFICIENTFEE)) {
+            tsMempool.AddWaitForRelay(ts.GetHash());
+        }
+        throw std::runtime_error(strprintf("transition %s not valid. state: %s", ts.GetHash().ToString(), FormatStateMessage(state)));
     }
 
     return UniValue(ts.GetHash().ToString());
