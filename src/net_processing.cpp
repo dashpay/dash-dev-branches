@@ -754,7 +754,7 @@ bool static AlreadyHave(const CInv& inv) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
         return mnodeman.mapSeenMasternodeVerification.count(inv.hash);
 
     case MSG_TRANSITION:
-        return tsMempool.Exists(inv.hash);
+        return tsMempool.Exists(inv.hash) || evoUserDB->TransitionExists(inv.hash);
     }
 
     // Don't know what it is, just say we already got one

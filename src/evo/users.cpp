@@ -72,6 +72,12 @@ bool CEvoUserDB::DeleteTransition(const uint256 &tsHash) {
     return true;
 }
 
+bool CEvoUserDB::TransitionExists(const uint256 &tsHash) {
+    LOCK(cs);
+    dbTransaction.Exists(std::make_pair(DB_TRANSITION, tsHash));
+    return true;
+}
+
 bool CEvoUserDB::GetTransition(const uint256 &tsHash, CTransition &ts) {
     LOCK(cs);
     return dbTransaction.Read(std::make_pair(DB_TRANSITION, tsHash), ts);

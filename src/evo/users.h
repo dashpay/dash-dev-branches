@@ -168,6 +168,7 @@ public:
 
     bool WriteTransition(const CTransition &ts);
     bool DeleteTransition(const uint256 &tsHash);
+    bool TransitionExists(const uint256 &tsHash);
     bool GetTransition(const uint256 &tsHash, CTransition &ts);
     bool GetLastTransitionForUser(const uint256 &regTxId, CTransition &ts);
     bool GetTransitionsForUser(const uint256 &regTxId, int maxCount, std::vector<CTransition> &transitions);
