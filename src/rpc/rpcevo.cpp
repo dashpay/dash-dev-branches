@@ -293,6 +293,9 @@ UniValue createrawsubtx(const UniValue& params, bool fHelp)
 }
 
 #ifdef ENABLE_WALLET
+extern UniValue fundrawtransaction(const UniValue& params, bool fHelp);
+extern UniValue signrawtransaction(const UniValue& params, bool fHelp);
+
 UniValue createsubtx(const UniValue& params, bool fHelp)
 {
     if (params.size() == 0 || fHelp) {
@@ -435,4 +438,27 @@ UniValue gettransition(const UniValue &params, bool fHelp) {
     UniValue result;
     TsToJSON(ts, blockHash, result);
     return result;
+}
+
+static const CRPCCommand commands[] =
+{ //  category              name                      actor (function)         okSafeMode
+  //  --------------------- ------------------------  -----------------------  ----------
+    { "evo",                "getuser",                &getuser,                true  },
+    { "evo",                "createrawsubtx",         &createrawsubtx,         true  },
+    { "evo",                "createrawtransition",    &createrawtransition,    true  },
+    { "evo",                "createtransition",       &createtransition,       true  },
+    { "evo",                "signrawtransition",      &signrawtransition,      true  },
+    { "evo",                "sendrawtransition",      &sendrawtransition,      true  },
+    { "evo",                "gettransition",          &gettransition,          true  },
+
+#ifdef ENABLE_WALLET
+        // createsubtx requires the wallet to be enabled to fund the SubTx
+    { "evo",                "createsubtx",            &createsubtx,            true  },
+#endif//ENABLE_WALLET
+};
+
+void RegisterEvoRPCCommands(CRPCTable &tableRPC)
+{
+    for (unsigned int vcidx = 0; vcidx < ARRAYLEN(commands); vcidx++)
+        tableRPC.appendCommand(commands[vcidx].name, &commands[vcidx]);
 }
