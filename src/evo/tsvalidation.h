@@ -12,8 +12,8 @@ class CEvoUser;
 class CNode;
 
 // TODO define good min/max fees
-static const CAmount EVO_TS_MIN_FEE = (CAmount)(0.01 * COIN);
-static const CAmount EVO_TS_MAX_FEE = (CAmount)(0.10 * COIN);
+static const CAmount EVO_TS_MIN_FEE = 1000; // TODO find good min fee
+static const CAmount EVO_TS_MAX_FEE = EVO_TS_MIN_FEE * 10; // TODO find good max fee
 static const size_t EVO_TS_MAX_SIZE = 1500; // TODO find correct max size
 
 bool CheckTransition(const CTransition &ts, bool checkSigs, bool includeMempool, CValidationState &state);
