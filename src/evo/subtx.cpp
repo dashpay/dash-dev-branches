@@ -184,6 +184,13 @@ bool CSubTxData::Undo(const CTransaction &tx, CValidationState &state) {
     }
 }
 
+void CSubTxData::BuildNewUser(const CTransaction &subTx, CEvoUser &user) const {
+    assert(action == SubTxAction_Register);
+
+    user = CEvoUser(subTx.GetHash(), userName, pubKeyID);
+    user.PushSubTx(subTx.GetHash());
+    user.AddTopUp(subTx.vout[0].nValue);
+}
 
 bool CSubTxData::CheckRegister(const CTransaction &subTx, CValidationState &state) const {
     if (evoUserDB->UserNameExists(userName))
@@ -192,7 +199,8 @@ bool CSubTxData::CheckRegister(const CTransaction &subTx, CValidationState &stat
     if (subTx.vout[0].nValue < MIN_SUBTX_TOPUP)
         return state.DoS(100, false, REJECT_INVALID, "bad-subtx-lowtopup");
 
-    CEvoUser dummyUser(subTx.GetHash(), userName, pubKeyID);
+    CEvoUser dummyUser;
+    BuildNewUser(subTx, dummyUser);
 
     std::string verifyError;
     if (!dummyUser.VerifySig(MakeSignMessage(), vchSig, verifyError))
@@ -204,10 +212,8 @@ bool CSubTxData::CheckRegister(const CTransaction &subTx, CValidationState &stat
 }
 
 bool CSubTxData::ProcessRegister(const CTransaction &subTx, CValidationState &state) const {
-    CEvoUser user(subTx.GetHash(), userName, pubKeyID);
-
-    user.PushSubTx(subTx.GetHash());
-    user.AddTopUp(subTx.vout[0].nValue);
+    CEvoUser user;
+    BuildNewUser(subTx, user);
 
     if (!evoUserDB->WriteUser(user)) {
         return state.Error(strprintf("CSubTxRegister::Process: failed to write user with name %s", userName));

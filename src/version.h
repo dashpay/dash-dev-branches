@@ -50,4 +50,7 @@ static const int MIN_PROTX_PROTO_VERSION = 70211;
 //! maximum ProTx proto version (slightly higher then current PROTOCOL_VERSION to ensure masternodes can upgrade)
 static const int MAX_PROTX_PROTO_VERSION = PROTOCOL_VERSION + 2;
 
+//! evo commands starts with this version
+static const int MIN_EVO_PROTO_VERSION = 70211;
+
 #endif // BITCOIN_VERSION_H
