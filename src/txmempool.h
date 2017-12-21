@@ -23,6 +23,8 @@
 #include "random.h"
 #include "netaddress.h"
 
+#include "evo/transition.h"
+
 #undef foreach
 #include "boost/multi_index_container.hpp"
 #include "boost/multi_index/ordered_index.hpp"
@@ -584,7 +586,9 @@ public:
     void removeConflicts(const CTransaction &tx);
     void removeProTxPubKeyConflicts(const CTransaction &tx, const CKeyID &keyId);
     void removeProTxConflicts(const CTransaction &tx);
+    void removeSubTxTopups(const uint256 &regTxId);
     void removeSubTxConflicts(const CTransaction &tx);
+    void removeTsConflicts(const CTransition &ts);
     void removeForBlock(const std::vector<CTransactionRef>& vtx, unsigned int nBlockHeight);
 
     void clear();
@@ -699,6 +703,9 @@ public:
         LOCK(cs);
         return mapSubTxRegisterUserNames.count(userName);
     }
+
+    bool getRegTxIdFromUserName(const std::string &userName, uint256 &regTxId) const;
+    bool getTopupsForUser(const uint256 &regTxId, std::vector<CTransaction> &result) const;
 
     /** Estimate fee rate needed to get into the next nBlocks
      *  If no answer can be given at nBlocks, return an estimate

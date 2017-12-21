@@ -44,6 +44,9 @@
 
 #include "evo/deterministicmns.h"
 #include "evo/simplifiedmns.h"
+#include "evo/transition.h"
+#include "evo/tsmempool.h"
+#include "evo/tsvalidation.h"
 
 #include <boost/thread.hpp>
 
@@ -959,6 +962,9 @@ bool static AlreadyHave(const CInv& inv) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 
     case MSG_MASTERNODE_VERIFY:
         return mnodeman.mapSeenMasternodeVerification.count(inv.hash);
+
+    case MSG_TRANSITION:
+        return tsMempool.Exists(inv.hash) || evoUserDB->TransitionExists(inv.hash);
     }
 
     // Don't know what it is, just say we already got one
@@ -2029,6 +2035,8 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                 tx.GetHash().ToString(),
                 mempool.size(), mempool.DynamicMemoryUsage() / 1000);
 
+            bool isAnySubTx = IsSubTx(tx);
+
             // Recursively process any orphan transactions that depended on this one
             std::set<NodeId> setMisbehaving;
             while (!vWorkQueue.empty()) {
@@ -2060,6 +2068,9 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                             vWorkQueue.emplace_back(orphanHash, i);
                         }
                         vEraseQueue.push_back(orphanHash);
+
+                        if (IsSubTx(orphanTx))
+                            isAnySubTx = true;
                     }
                     else if (!fMissingInputs2)
                     {
@@ -2086,6 +2097,11 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
 
             BOOST_FOREACH(uint256 hash, vEraseQueue)
                 EraseOrphanTx(hash);
+
+            if (isAnySubTx) {
+                // previously invalid transitions might have become valid. Relay these.
+                RelayNowValidTransitions();
+            }
         }
         else if (fMissingInputs)
         {
@@ -2430,7 +2446,17 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                 pfrom->nLastBlockTime = GetTime();
         }
     }
+    else if (strCommand == NetMsgType::TRANSITION)
+    {
+        CTransition ts;
+        vRecv >> ts;
 
+        CInv inv(MSG_TRANSITION, ts.GetHash());
+        pfrom->AddInventoryKnown(inv);
+        pfrom->setAskFor.erase(inv.hash);
+
+        HandleIncomingTransition(pfrom, ts);
+    }
 
     else if (strCommand == NetMsgType::HEADERS && !fImporting && !fReindex) // Ignore headers received while importing
     {

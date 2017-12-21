@@ -8,7 +8,7 @@
 
 CTsMempool tsMempool;
 
-bool CTsMempool::AddTransition(const CTransition &ts) {
+void CTsMempool::AddTransition(const CTransition &ts) {
     LOCK(cs);
 
     /*
@@ -18,7 +18,7 @@ bool CTsMempool::AddTransition(const CTransition &ts) {
 
     if (transitions.count(ts.GetHash())) {
         transitions[ts.GetHash()]->addedTime = GetTimeMillis();
-        return true;
+        return;
     }
 
     CTsMempoolTsEntryPtr entry = std::make_shared<CTsMempoolTsEntry>(ts, GetTimeMillis());
@@ -34,16 +34,14 @@ bool CTsMempool::AddTransition(const CTransition &ts) {
     if (GetTimeMillis() - lastCleanupTime >= CLEANUP_INTERVALL) {
         cleanup();
     }
-
-    return true;
 }
 
-bool CTsMempool::RemoveTransition(const uint256 &tsHash) {
+void CTsMempool::RemoveTransition(const uint256 &tsHash) {
     LOCK(cs);
 
     auto it = transitions.find(tsHash);
     if (it == transitions.end()) {
-        return true;
+        return;
     }
     CTsMempoolTsEntryPtr entry = it->second;
 
@@ -55,7 +53,7 @@ bool CTsMempool::RemoveTransition(const uint256 &tsHash) {
         transitionsByUsers.erase(entry->ts.hashRegTx);
     }
 
-    return true;
+    waitForRelay.erase(tsHash);
 }
 
 bool CTsMempool::GetTransition(const uint256 &tsHash, CTransition &ts) {
@@ -67,6 +65,11 @@ bool CTsMempool::GetTransition(const uint256 &tsHash, CTransition &ts) {
     }
     ts = it->second->ts;
     return true;
+}
+
+bool CTsMempool::Exists(const uint256 &tsHash) {
+    LOCK(cs);
+    return transitions.count(tsHash) != 0;
 }
 
 bool CTsMempool::GetUsers(std::vector<uint256> &regTxIds) {
@@ -119,15 +122,85 @@ bool CTsMempool::GetNextTransitionForUser(const CEvoUser &user, CTransition &ts)
     return false;
 }
 
-bool CTsMempool::ReAddForReorg(const CBlock &block) {
+void CTsMempool::GetTransitionsChain(const uint256 &lastTsHash, const uint256 &stopAtTsHash, std::vector<CTransition> &result) {
+    LOCK(cs);
+    result.clear();
+    uint256 cur = lastTsHash;
+    while (cur != stopAtTsHash) {
+        const auto it = transitions.find(cur);
+        if (it == transitions.end())
+            break;
+        result.push_back(it->second->ts);
+        cur = it->second->ts.hashPrevTransition;
+    }
+    std::reverse(result.begin(), result.end());
+}
+
+void CTsMempool::AddWaitForRelay(const uint256 &tsHash) {
+    LOCK(cs);
+    assert(transitions.count(tsHash) != 0);
+    waitForRelay.insert(tsHash);
+}
+
+void CTsMempool::RemoveWaitForRelay(const uint256 &tsHash) {
+    LOCK(cs);
+    waitForRelay.erase(tsHash);
+}
+
+void CTsMempool::RemoveWaitForRelay(const std::vector<uint256> &tsHashes) {
+    LOCK(cs);
+    for (const uint256 &tsHash : tsHashes)
+        waitForRelay.erase(tsHash);
+}
+
+void CTsMempool::GetNowValidWaitForRelayTransitions(std::vector<uint256> &result) {
+    LOCK(cs);
+
+    std::list<uint256> tmp;
+
+    for (const uint256 &tsHash : waitForRelay) {
+        const auto entry = transitions.find(tsHash);
+        assert(entry != transitions.end());
+
+        CValidationState state;
+        if (CheckTransition(entry->second->ts, true, true, state)) {
+            tmp.push_back(entry->first);
+        }
+    }
+
+    result.clear();
+    std::set<uint256> added;
+
+    // Make sure we return the list in the correct order, meaning that parent transitions must appear first
+    while (!tmp.empty()) {
+        const uint256 &tsHash = tmp.front();
+        tmp.pop_front();
+
+        const auto it = transitions.find(tsHash);
+        assert(it != transitions.end());
+        const CTransition &ts = it->second->ts;
+
+        // does the current TS have a parent that needs to be relayed first
+        if (!ts.hashPrevTransition.IsNull() && waitForRelay.count(ts.hashPrevTransition)) {
+            // did we already add it to the result?
+            if (!added.count(ts.hashPrevTransition)) {
+                // try again later
+                tmp.push_back(tsHash);
+                continue;
+            }
+        }
+        result.push_back(tsHash);
+        added.insert(tsHash);
+    }
+}
+
+void CTsMempool::ReAddForReorg(const CBlock &block) {
     LOCK(cs);
 
     for (int i = (int)block.vts.size() - 1; i >= 0; i--) {
         const CTransition &ts = block.vts[i];
-        if (!AddTransition(ts))
-            return false;
+        AddTransition(ts);
     }
-    return true;
 }
 
 void CTsMempool::RemoveForBlock(const CBlock &block) {
@@ -146,31 +219,22 @@ bool CTsMempool::isEligableForCleanup(const CTsMempoolTsEntryPtr &entry) {
     const CTransition &ts = entry->ts;
 
     CEvoUser user;
-    if (!evoUserDB->GetUser(ts.hashRegTx, user))
+    if (!evoUserDB->GetUser(ts.hashRegTx, user) && !BuildUserFromMempool(ts.hashRegTx, user)) {
         return true;
-
-    // get chain of TSs back to user
-    std::list<CTsMempoolTsEntryPtr> tsChain;
-    uint256 cur = ts.hashPrevTransition;
-    while (true) {
-        if (user.GetLastTransition() == cur)
-            break;
-
-        if (!transitions.count(cur))
-            return true;
-
-        const auto &curEntry = transitions[cur];
-        tsChain.push_front(curEntry);
-
-        cur = curEntry->ts.hashPrevTransition;
     }
 
+    TopupUserFromMempool(user);
+
+    // get chain of TSs back to user
+    std::vector<CTransition> tsChain;
+    GetTransitionsChain(ts.hashPrevTransition, user.GetHashLastTransition(), tsChain);
+
     // now try to process them on the temporary user
-    for (const auto &entry : tsChain) {
+    for (const auto &ts2 : tsChain) {
         CValidationState state;
-        if (!CheckTransitionForUser(entry->ts, user, true, state))
+        if (!CheckTransitionForUser(ts2, user, true, state))
             return true;
-        if (!ProcessTransitionForUser(entry->ts, user, state))
+        if (!ProcessTransitionForUser(ts2, user, state))
             return true;
     }
 

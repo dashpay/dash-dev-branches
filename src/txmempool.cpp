@@ -856,6 +856,20 @@ void CTxMemPool::removeProTxConflicts(const CTransaction &tx)
     }
 }
 
+void CTxMemPool::removeSubTxTopups(const uint256 &regTxId) {
+    // first remove topups for conflicting register SubTx
+    if (mapSubTxTopups.count(regTxId)) {
+        for (const uint256 &topUpTx : mapSubTxTopups[regTxId]) {
+            auto topUpTxIt = mapTx.find(topUpTx);
+            if (topUpTxIt == mapTx.end())
+                continue;
+
+            removeRecursive(topUpTxIt->GetTx());
+            ClearPrioritisation(topUpTxIt->GetTx().GetHash());
+        }
+    }
+}
+
 void CTxMemPool::removeSubTxConflicts(const CTransaction &tx)
 {
     if (!IsSubTx(tx))
@@ -877,21 +891,26 @@ void CTxMemPool::removeSubTxConflicts(const CTransaction &tx)
     if (txConflict == tx)
         return;
 
-    // first remove topups for conflicting register SubTx
-    if (mapSubTxTopups.count(txConflict.GetHash())) {
-        for (const uint256 &topUpTx : mapSubTxTopups[txConflict.GetHash()]) {
-            auto topUpTxIt = mapTx.find(topUpTx);
-            if (topUpTxIt == mapTx.end())
-                continue;
-
-            remove(topUpTxIt->GetTx(), removed, true);
-            ClearPrioritisation(topUpTxIt->GetTx().GetHash());
-        }
-    }
+    removeSubTxTopups(txConflict.GetHash());
 
     // remove conflicting register SubTx
     remove(txConflict, removed, true);
     ClearPrioritisation(txConflict.GetHash());
+}
+
+void CTxMemPool::removeTsConflicts(const CTransition &ts) {
+    // remove SubTxs for closed accounts
+
+    if (ts.action != Transition_CloseAccount)
+        return;
+
+    removeSubTxTopups(ts.hashRegTx, removed);
+
+    auto it = mapTx.find(ts.hashRegTx);
+    if (it != mapTx.end()) {
+        removeRecursive(it->GetTx(), removed);
+        ClearPrioritisation(ts.hashRegTx);
+    }
 }
 
 /**
@@ -922,6 +941,7 @@ void CTxMemPool::removeForBlock(const std::vector<CTransactionRef>& vtx, unsigne
         removeConflicts(*tx);
         removeProTxConflicts(*tx);
         removeSubTxConflicts(tx);
+		removeTsConflicts(tx);
         ClearPrioritisation(tx->GetHash());
     }
     lastRollingFeeUpdate = GetTime();
@@ -1195,6 +1215,28 @@ bool CTxMemPool::existsProviderTxConflict(const CTransaction &tx) const {
         return it != mapProTxPubKeyIDs.end() && it->second != proTx.proTxHash;
     }
     return false;
+}
+
+bool CTxMemPool::getRegTxIdFromUserName(const std::string &userName, uint256 &regTxId) const {
+    LOCK(cs);
+    auto it = mapSubTxRegisterUserNames.find(userName);
+    if (it == mapSubTxRegisterUserNames.end())
+        return false;
+    regTxId = it->second;
+    return true;
+}
+
+bool CTxMemPool::getTopupsForUser(const uint256 &regTxId, std::vector<CTransaction> &result) const {
+    LOCK(cs);
+    auto it = mapSubTxTopups.find(regTxId);
+    if (it == mapSubTxTopups.end())
+        return false;
+    for (const auto txHash : it->second) {
+        auto it2 = mapTx.find(txHash);
+        if (it2 != mapTx.end())
+            result.push_back(it2->GetTx());
+    }
+    return true;
 }
 
 CFeeRate CTxMemPool::estimateFee(int nBlocks) const
