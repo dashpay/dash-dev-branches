@@ -81,6 +81,8 @@ public:
 
     void ToJSON(UniValue &uv) const;
 
+    void BuildNewUser(const CTransaction &tx, CEvoUser &user) const;
+
     bool CheckRegister(const CTransaction &subTx, CValidationState &state) const;
     bool ProcessRegister(const CTransaction &subTx, CValidationState &state) const;
     bool UndoRegister(const CTransaction &subTx, CValidationState &state) const;

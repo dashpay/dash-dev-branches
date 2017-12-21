@@ -54,6 +54,7 @@ BOOST_AUTO_TEST_CASE(BlockPolicyEstimates)
 
     // Create a fake block
     std::vector<CTransaction> block;
+    std::vector<CTransition> vts;
     int blocknum = 0;
 
     // Loop through 200 blocks
@@ -80,7 +81,7 @@ BOOST_AUTO_TEST_CASE(BlockPolicyEstimates)
                 txHashes[9-h].pop_back();
             }
         }
-        mpool.removeForBlock(block, ++blocknum, dummyConflicted);
+        mpool.removeForBlock(block, vts, ++blocknum, dummyConflicted);
         block.clear();
         if (blocknum == 30) {
             // At this point we should need to combine 5 buckets to get enough data points
@@ -124,7 +125,7 @@ BOOST_AUTO_TEST_CASE(BlockPolicyEstimates)
     // Mine 50 more blocks with no transactions happening, estimates shouldn't change
     // We haven't decayed the moving average enough so we still have enough data points in every bucket
     while (blocknum < 250)
-        mpool.removeForBlock(block, ++blocknum, dummyConflicted);
+        mpool.removeForBlock(block, vts, ++blocknum, dummyConflicted);
 
     for (int i = 1; i < 10;i++) {
         BOOST_CHECK(mpool.estimateFee(i).GetFeePerK() < origFeeEst[i-1] + deltaFee);
@@ -145,7 +146,7 @@ BOOST_AUTO_TEST_CASE(BlockPolicyEstimates)
                 txHashes[j].push_back(hash);
             }
         }
-        mpool.removeForBlock(block, ++blocknum, dummyConflicted);
+        mpool.removeForBlock(block, vts, ++blocknum, dummyConflicted);
     }
 
     int answerFound;
@@ -166,7 +167,7 @@ BOOST_AUTO_TEST_CASE(BlockPolicyEstimates)
             txHashes[j].pop_back();
         }
     }
-    mpool.removeForBlock(block, 265, dummyConflicted);
+    mpool.removeForBlock(block, vts, 265, dummyConflicted);
     block.clear();
     for (int i = 1; i < 10;i++) {
         BOOST_CHECK(mpool.estimateFee(i).GetFeePerK() > origFeeEst[i-1] - deltaFee);
@@ -186,7 +187,7 @@ BOOST_AUTO_TEST_CASE(BlockPolicyEstimates)
                     block.push_back(btx);
             }
         }
-        mpool.removeForBlock(block, ++blocknum, dummyConflicted);
+        mpool.removeForBlock(block, vts, ++blocknum, dummyConflicted);
         block.clear();
     }
     for (int i = 1; i < 10; i++) {

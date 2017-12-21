@@ -2618,7 +2618,7 @@ bool static ConnectTip(CValidationState& state, const CChainParams& chainparams,
     LogPrint("bench", "  - Writing chainstate: %.2fms [%.2fs]\n", (nTime5 - nTime4) * 0.001, nTimeChainState * 0.000001);
     // Remove conflicting transactions from the mempool.
     list<CTransaction> txConflicted;
-    mempool.removeForBlock(pblock->vtx, pindexNew->nHeight, txConflicted, !IsInitialBlockDownload());
+    mempool.removeForBlock(pblock->vtx, pblock->vts, pindexNew->nHeight, txConflicted, !IsInitialBlockDownload());
 
     // Remove transitions from new block from mempool
     tsMempool.RemoveForBlock(*pblock);
@@ -2634,6 +2634,19 @@ bool static ConnectTip(CValidationState& state, const CChainParams& chainparams,
     BOOST_FOREACH(const CTransaction &tx, pblock->vtx) {
         GetMainSignals().SyncTransaction(tx, pindexNew, pblock);
     }
+
+    // Relay transitions which got valid now
+    bool containsSubTxOrTs = !pblock->vts.empty();
+    if (!containsSubTxOrTs) {
+        for (const CTransaction &tx : pblock->vtx) {
+            if (IsSubTx(tx)) {
+                containsSubTxOrTs = true;
+                break;
+            }
+        }
+    }
+    if (containsSubTxOrTs)
+        RelayNowValidTransitions();
 
     int64_t nTime6 = GetTimeMicros(); nTimePostConnect += nTime6 - nTime5; nTimeTotal += nTime6 - nTime1;
     LogPrint("bench", "  - Connect postprocess: %.2fms [%.2fs]\n", (nTime6 - nTime5) * 0.001, nTimePostConnect * 0.000001);

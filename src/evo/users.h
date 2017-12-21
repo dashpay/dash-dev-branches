@@ -18,7 +18,8 @@ private:
     std::string userName;
     std::vector<CKeyID> pubKeyIDs;
     std::vector<uint256> subTxIds;
-    uint256 lastTransition;
+    std::vector<uint256> hashDataMerkleRoots;
+    uint256 hashLastTransition;
 
     CAmount topupCredits{};
     CAmount spentCredits{};
@@ -30,7 +31,8 @@ public:
     CEvoUser(const uint256 &_regTxId, const std::string &_userName, const CKeyID &_pubKeyID)
             : regTxId(_regTxId),
               userName(_userName),
-              pubKeyIDs{_pubKeyID}
+              pubKeyIDs{_pubKeyID},
+              hashDataMerkleRoots{uint256()} // start with 000... hashDataMerkleRoot
     {}
 
     ADD_SERIALIZE_METHODS;
@@ -43,7 +45,8 @@ public:
         READWRITE(userName);
         READWRITE(pubKeyIDs);
         READWRITE(subTxIds);
-        READWRITE(lastTransition);
+        READWRITE(hashDataMerkleRoots);
+        READWRITE(hashLastTransition);
         READWRITE(topupCredits);
         READWRITE(spentCredits);
         READWRITE(closed);
@@ -112,11 +115,25 @@ public:
         return subTxIds;
     }
 
-    const uint256 &GetLastTransition() const {
-        return lastTransition;
+    void PushHashDataMerkleRoot(const uint256 &h) {
+        hashDataMerkleRoots.push_back(h);
     }
-    void SetLastTransition(const uint256 &tsHash) {
-        lastTransition = tsHash;
+    uint256 PopHashDataMerkleRoot() {
+        assert(hashDataMerkleRoots.size() != 0);
+        uint256 ret(hashDataMerkleRoots.back());
+        hashDataMerkleRoots.pop_back();
+        return ret;
+    }
+    const uint256 &GetCurHashDataMerkleRoot() const {
+        assert(hashDataMerkleRoots.size() != 0);
+        return hashDataMerkleRoots.back();
+    }
+
+    const uint256 &GetHashLastTransition() const {
+        return hashLastTransition;
+    }
+    void SetHashLastTransition(const uint256 &tsHash) {
+        hashLastTransition = tsHash;
     }
 
     bool VerifySig(const std::string &msg, const std::vector<unsigned char> &sig, std::string &errorRet) const;
@@ -151,6 +168,7 @@ public:
 
     bool WriteTransition(const CTransition &ts);
     bool DeleteTransition(const uint256 &tsHash);
+    bool TransitionExists(const uint256 &tsHash);
     bool GetTransition(const uint256 &tsHash, CTransition &ts);
     bool GetLastTransitionForUser(const uint256 &regTxId, CTransition &ts);
     bool GetTransitionsForUser(const uint256 &regTxId, int maxCount, std::vector<CTransition> &transitions);

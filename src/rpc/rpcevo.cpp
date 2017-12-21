@@ -7,7 +7,9 @@
 #include "core_io.h"
 #include "init.h"
 #include "messagesigner.h"
+#include "net.h"
 #include "rpc/server.h"
+#include "txmempool.h"
 #include "utilmoneystr.h"
 #include "validation.h"
 
@@ -88,17 +90,7 @@ static void User2Json(const CEvoUser &user, bool withSubTxAndTs, bool detailed, 
     json.push_back(std::make_pair("regtxid", user.GetRegTxId().ToString()));
     json.push_back(std::make_pair("pubkeyid", user.GetCurPubKeyID().ToString()));
     json.push_back(std::make_pair("credits", user.GetCreditBalance()));
-
-    uint256 lastTransitionHash = user.GetLastTransition();
-    if (lastTransitionHash.IsNull()) {
-        json.push_back(std::make_pair("data", uint256().ToString()));
-    } else {
-        CTransition lastTransition;
-        if (!evoUserDB->GetTransition(lastTransitionHash, lastTransition)) {
-            throw std::runtime_error(strprintf("failed to get transition %s", lastTransitionHash.ToString()));
-        }
-        json.push_back(std::make_pair("data", lastTransition.hashDataMerkleRoot.ToString()));
-    }
+    json.push_back(std::make_pair("data", user.GetCurHashDataMerkleRoot().ToString()));
 
     std::string state;
     if (user.IsClosed())
@@ -129,11 +121,17 @@ static void User2Json(const CEvoUser &user, bool withSubTxAndTs, bool detailed, 
         std::vector<CTransition> transitions;
         evoUserDB->GetTransitionsForUser(user.GetRegTxId(), -1, transitions);
 
+        std::vector<CTransition> mempoolTransitions;
+        tsMempool.GetTransitionsChain(user.GetHashLastTransition(), transitions.empty() ? uint256() : transitions.back().GetHash(), mempoolTransitions);
+        transitions.insert(transitions.end(), mempoolTransitions.begin(), mempoolTransitions.end());
+
         UniValue transitionsArr(UniValue::VARR);
-        for (CTransition ts : transitions) {
+        for (const CTransition &ts : transitions) {
             if (detailed) {
                 UniValue ts2(UniValue::VOBJ);
-                TsToJSON(ts, uint256(), ts2);
+                uint256 blockHash;
+                evoUserDB->GetTransitionBlockHash(ts.GetHash(), blockHash);
+                TsToJSON(ts, blockHash, ts2);
                 transitionsArr.push_back(ts2);
             } else {
                 transitionsArr.push_back(ts.GetHash().ToString());
@@ -156,29 +154,49 @@ static uint256 GetRegTxId(const std::string &regTxIdOrUserName) {
     uint256 regTxId;
     if (evoUserDB->GetUserIdByName(regTxIdOrUserName, regTxId))
         return regTxId;
+    if (mempool.getRegTxIdFromUserName(regTxIdOrUserName, regTxId))
+        return regTxId;
     throw std::runtime_error(strprintf("user %s not found", regTxIdOrUserName));
 }
 
 UniValue getuser(const UniValue& params, bool fHelp)
 {
-    if (fHelp || (params.size() != 1 && params.size() != 2))
+    if (fHelp || (params.size() != 1 && params.size() != 2 && params.size() != 3))
         throw std::runtime_error(
-                "getuser <regTxId|username> (verbose)\n"
+                "getuser \"regTxId|username\" ( includeMempool verbose )\n"
                 "\nGet registered user in JSON format as defined by dash-schema.\n"
+                "\nExamples:\n"
+                + HelpExampleCli("getuser", "\"bob\"")
+                + HelpExampleRpc("getuser", "\"alice\"")
         );
 
     uint256 regTxId = GetRegTxId(params[0].get_str());
     bool verbose = false;
+    bool includeMempool = true;
     if (params.size() > 1) {
-        verbose = params[1].get_int() != 0;
+        includeMempool = params[1].get_bool();
+    }
+    if (params.size() > 2) {
+        verbose = params[2].get_bool();
     }
 
     CEvoUser user;
-    if (!evoUserDB->GetUser(regTxId, user))
-        throw std::runtime_error(strprintf("failed to read user %s from db", params[0].get_str()));
+    bool fromMempool = false;
+    if (!evoUserDB->GetUser(regTxId, user)) {
+        if (!includeMempool || !BuildUserFromMempool(regTxId, user))
+            throw std::runtime_error(strprintf("failed to read user %s from db", params[0].get_str()));
+        fromMempool = true;
+    }
+
+    if (includeMempool) {
+        fromMempool |= TopupUserFromMempool(user);
+        fromMempool |= ApplyUserTransitionsFromMempool(user);
+    }
 
     UniValue result;
     User2Json(user, true, verbose, result);
+    if (fromMempool)
+        result.push_back(Pair("from_mempool", true));
     return result;
 }
 
@@ -209,7 +227,7 @@ static CKey GetKeyFromParamsOrWallet(const UniValue &params, int paramPos, const
 
 #ifdef ENABLE_WALLET
     CEvoUser user;
-    if (!evoUserDB->GetUser(regTxId, user)) {
+    if (!evoUserDB->GetUser(regTxId, user) && !BuildUserFromMempool(regTxId, user)) {
         throw std::runtime_error(strprintf("user %s not found", regTxId.ToString()));
     }
 
@@ -229,22 +247,27 @@ static uint256 GetLastTransitionFromParams(const UniValue& params, int paramPos,
         return ParseHashStr(params[paramPos].get_str(), "hashLastTransition");
 
     CEvoUser user;
-    if (!evoUserDB->GetUser(regTxId, user))
+    if (!evoUserDB->GetUser(regTxId, user) && !BuildUserFromMempool(regTxId, user))
         throw std::runtime_error(strprintf("user %s not found", regTxId.ToString()));
-    return user.GetLastTransition();
+    ApplyUserTransitionsFromMempool(user);
+    return user.GetHashLastTransition();
 }
 
 UniValue createrawsubtx(const UniValue& params, bool fHelp)
 {
     if (fHelp || params.size() == 0)
         throw std::runtime_error(
-                "createrawsubtx <type> args...\n"
+                "createrawsubtx type args...\n"
                 "\nCreates a raw (unfunded/unsigned) SubTx. Arguments depend on type of SubTx to be created.\n"
                 "Arguments that expect a key can be either a private key or a Dash address. In case\n"
                 "a Dash address is provided, the private key is looked up in the local wallet.\n"
                 "\nAvailable types:\n"
-                "  createrawsubtx register <username> <key> <topup>             - Create account register SubTx\n"
-                "  createrawsubtx topup    <regTxId|username> <topup>           - Create account topup SubTx\n"
+                "  createrawsubtx register \"username\" \"key\" \"topup\"             - Create account register SubTx\n"
+                "  createrawsubtx topup    \"regTxId|username\" \"topup\"           - Create account topup SubTx\n"
+                "\nExamples:\n"
+                + HelpExampleCli("createrawsubtx", "register \"bob\" \"92KdqxzX7HCnxCtwt1yHENGrXq71SAxD4vrrsFArbSU2wUKdQCM\" 0.01")
+                + HelpExampleCli("createrawsubtx", "register \"alice\" \"yT1a5WGcSJpDRQTvJRkCTKF8weK82qkt3A\" 0.01")
+                + HelpExampleRpc("createrawsubtx", "\"topup\", \"alice\", \"0.02\"")
         );
 
     CDataStream ds(SER_DISK, CLIENT_VERSION);
@@ -300,7 +323,7 @@ UniValue createsubtx(const UniValue& params, bool fHelp)
 {
     if (params.size() == 0 || fHelp) {
         throw std::runtime_error(
-                "createsubtx <type> args...\n"
+                "createsubtx args...\n"
                 "\nCreates, funds and signs a SubTx. Arguments are the same as for createrawsubtx\n"
         );
     }
@@ -323,14 +346,22 @@ UniValue createsubtx(const UniValue& params, bool fHelp)
 UniValue createrawtransition(const UniValue& params, bool fHelp) {
     if (fHelp || (params.size() != 4 && params.size() != 5))
         throw std::runtime_error(
-                "createrawtransition <type> args...\n"
+                "createrawtransition type args...\n"
                 "\nCreates a raw transition. Arguments depend on type of transition to be created.\n"
                 "Arguments that expect a key can be either a private key or a Dash address. In case\n"
                 "a Dash address is provided, the private key is looked up in the local wallet.\n"
+                "If prevTransition is not specified, the given user is looked up and the last transition\n"
+                "of that user is taken. This will also consider unconfirmed (only in mempool) users and\n"
+                "transitions.\n"
                 "\nAvailable types:\n"
-                "  createrawtransition update   <regTxId|username> <fee> <merkleRoot> (<prevTransition>) - Update account data\n"
-                "  createrawtransition resetkey <regTxId|username> <fee> <newKey>     (<prevTransition>) - Reset user key\n"
-                "  createrawtransition close    <regTxId|username> <fee>              (<prevTransition>) - Close account\n"
+                "  createrawtransition update   \"regTxId|username\" fee \"merkleRoot\" ( \"prevTransition\" ) - Update account data\n"
+                "  createrawtransition resetkey \"regTxId|username\" fee \"newKey\"     ( \"prevTransition\" ) - Reset user key\n"
+                "  createrawtransition close    \"regTxId|username\" fee              ( \"prevTransition\" ) - Close account\n"
+                "\nExamples:\n"
+                + HelpExampleCli("createrawtransition", "update \"bob\" 0.00001 \"1234123412341234123412341234123412341234123412341234123412341234\"")
+                + HelpExampleCli("createrawtransition", "resetkey \"bob\" 0.00001 \"93Fd7XY2zF4q9YKTZUSFxLgp4Xs7MuaMnvY9kpvH7V8oXWqsCC1\"")
+                + HelpExampleCli("createrawtransition", "close \"bob\" 0.00001")
+                + HelpExampleRpc("createrawtransition", "\"topup\", \"bob\" \"0.02\"")
         );
 
     std::string action = params[0].get_str();
@@ -361,9 +392,12 @@ UniValue createrawtransition(const UniValue& params, bool fHelp) {
 UniValue signrawtransition(const UniValue& params, bool fHelp) {
     if (fHelp || (params.size() != 1) && params.size() != 2)
         throw std::runtime_error(
-                "signrawtransition <hexTs> (<key>)\n"
+                "signrawtransition \"hexTs\" ( \"key\" )\n"
                 "\nSigns a raw transition. If the key is omitted, it will lookup the current pubKey of the user and\n"
                 "then try to get the private key from the wallet.\n"
+                 "\nExamples:\n"
+                + HelpExampleCli("signrawtransition", "\"myHexTs\"")
+                + HelpExampleRpc("signrawtransition", "\"myHexTs\"")
         );
 
     std::string hexTs = params[0].get_str();
@@ -384,7 +418,7 @@ UniValue signrawtransition(const UniValue& params, bool fHelp) {
 UniValue createtransition(const UniValue& params, bool fHelp) {
     if (fHelp || (params.size() != 4 && params.size() != 5))
         throw std::runtime_error(
-                "createtransition <type> args...\n"
+                "createtransition args...\n"
                 "\nCreates a raw transition and signs it. Arguments are the same as for createrawtransition.\n"
         );
 
@@ -397,22 +431,41 @@ UniValue createtransition(const UniValue& params, bool fHelp) {
 }
 
 UniValue sendrawtransition(const UniValue& params, bool fHelp) {
-    if (fHelp || params.size() != 1)
+    if (fHelp || (params.size() != 1 && params.size() != 2))
         throw std::runtime_error(
-                "sendrawtransition <hexTs>\n"
+                "sendrawtransition \"hexTs\" ( relay )\n"
                 "\nSends a signed transition to the network.\n"
+                "If relay is specified and set to false, the transition is only added to the mempool.\n"
+                "\nExamples:\n"
+                + HelpExampleCli("sendrawtransition", "\"myHexTs\"")
+                + HelpExampleRpc("sendrawtransition", "\"myHexTs\", \"false\"")
         );
 
     std::string hexTs = params[0].get_str();
+    bool relay = true;
+    if (params.size() == 2) {
+        relay = params[1].get_bool();
+    }
+
     CDataStream ds(ParseHex(hexTs), SER_DISK, CLIENT_VERSION);
 
     CTransition ts;
     ds >> ts;
 
-    if (!tsMempool.AddTransition(ts))
-        throw std::runtime_error("failed to add transition to mempool");
+    tsMempool.AddTransition(ts);
 
-    // TODO actually send it
+    CValidationState state;
+    if (CheckTransition(ts, true, true, state)) {
+        if (relay) {
+            CInv inv(MSG_TRANSITION, ts.GetHash());
+            g_connman->RelayInv(inv, MIN_EVO_PROTO_VERSION);
+        }
+    } else {
+        if (relay && (state.GetRejectCode() == REJECT_TS_ANCESTOR || state.GetRejectCode() == REJECT_TS_NOUSER || state.GetRejectCode() == REJECT_INSUFFICIENTFEE)) {
+            tsMempool.AddWaitForRelay(ts.GetHash());
+        }
+        throw std::runtime_error(strprintf("transition %s not valid. state: %s", ts.GetHash().ToString(), FormatStateMessage(state)));
+    }
 
     return UniValue(ts.GetHash().ToString());
 }
@@ -420,16 +473,21 @@ UniValue sendrawtransition(const UniValue& params, bool fHelp) {
 UniValue gettransition(const UniValue &params, bool fHelp) {
     if (fHelp || params.size() != 1)
         throw std::runtime_error(
-                "gettransition <tsHash>\n"
-                "\nGet transition with hash <tsHash> and output a json object.\n"
+                "gettransition \"tsHash\"\n"
+                "\nGet transition with hash \"tsHash\" and output a json object.\n"
+                "\nExamples:\n"
+                + HelpExampleCli("gettransition", "\"tsHash\"")
+                + HelpExampleRpc("gettransition", "\"tsHash\", \"false\"")
         );
 
     uint256 tsHash = ParseHashStr(params[0].get_str(), "tsHash");
 
+    bool fromMempool = false;
     CTransition ts;
     if (!evoUserDB->GetTransition(tsHash, ts)) {
         if (!tsMempool.GetTransition(tsHash, ts))
             throw std::runtime_error("transition not found");
+        fromMempool = true;
     }
 
     uint256 blockHash;
@@ -437,6 +495,8 @@ UniValue gettransition(const UniValue &params, bool fHelp) {
 
     UniValue result;
     TsToJSON(ts, blockHash, result);
+    if (fromMempool)
+        result.push_back(Pair("from_mempool", true));
     return result;
 }
 

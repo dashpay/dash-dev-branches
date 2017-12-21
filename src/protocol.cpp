@@ -66,6 +66,7 @@ const char *MNGOVERNANCESYNC="govsync";
 const char *MNGOVERNANCEOBJECT="govobj";
 const char *MNGOVERNANCEOBJECTVOTE="govobjvote";
 const char *MNVERIFY="mnv";
+const char *TRANSITION="ts";
 };
 
 static const char* ppszTypeName[] =
@@ -92,6 +93,7 @@ static const char* ppszTypeName[] =
     NetMsgType::MNGOVERNANCEOBJECT,
     NetMsgType::MNGOVERNANCEOBJECTVOTE,
     NetMsgType::MNVERIFY,
+    NetMsgType::TRANSITION,
 };
 
 /** All known message types. Keep this in the same order as the list of
@@ -146,6 +148,7 @@ const static std::string allNetMessageTypes[] = {
     NetMsgType::MNGOVERNANCEOBJECT,
     NetMsgType::MNGOVERNANCEOBJECTVOTE,
     NetMsgType::MNVERIFY,
+    NetMsgType::TRANSITION
 };
 const static std::vector<std::string> allNetMessageTypesVec(allNetMessageTypes, allNetMessageTypes+ARRAYLEN(allNetMessageTypes));
 

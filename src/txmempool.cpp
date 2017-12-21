@@ -737,6 +737,20 @@ void CTxMemPool::removeConflicts(const CTransaction &tx, std::list<CTransaction>
     }
 }
 
+void CTxMemPool::removeSubTxTopups(const uint256 &regTxId, std::list<CTransaction> &removed) {
+    // first remove topups for conflicting register SubTx
+    if (mapSubTxTopups.count(regTxId)) {
+        for (const uint256 &topUpTx : mapSubTxTopups[regTxId]) {
+            auto topUpTxIt = mapTx.find(topUpTx);
+            if (topUpTxIt == mapTx.end())
+                continue;
+
+            removeRecursive(topUpTxIt->GetTx(), removed);
+            ClearPrioritisation(topUpTxIt->GetTx().GetHash());
+        }
+    }
+}
+
 void CTxMemPool::removeSubTxConflicts(const CTransaction &tx, std::list<CTransaction>& removed)
 {
     if (!IsSubTx(tx))
@@ -758,27 +772,32 @@ void CTxMemPool::removeSubTxConflicts(const CTransaction &tx, std::list<CTransac
     if (txConflict == tx)
         return;
 
-    // first remove topups for conflicting register SubTx
-    if (mapSubTxTopups.count(txConflict.GetHash())) {
-        for (const uint256 &topUpTx : mapSubTxTopups[txConflict.GetHash()]) {
-            auto topUpTxIt = mapTx.find(topUpTx);
-            if (topUpTxIt == mapTx.end())
-                continue;
-
-            removeRecursive(topUpTxIt->GetTx(), removed);
-            ClearPrioritisation(topUpTxIt->GetTx().GetHash());
-        }
-    }
+    removeSubTxTopups(txConflict.GetHash(), removed);
 
     // remove conflicting register SubTx
     removeRecursive(txConflict, removed);
     ClearPrioritisation(txConflict.GetHash());
 }
 
+void CTxMemPool::removeTsConflicts(const CTransition &ts, std::list<CTransaction> &removed) {
+    // remove SubTxs for closed accounts
+
+    if (ts.action != Transition_CloseAccount)
+        return;
+
+    removeSubTxTopups(ts.hashRegTx, removed);
+
+    auto it = mapTx.find(ts.hashRegTx);
+    if (it != mapTx.end()) {
+        removeRecursive(it->GetTx(), removed);
+        ClearPrioritisation(ts.hashRegTx);
+    }
+}
+
 /**
  * Called when a block is connected. Removes from mempool and updates the miner fee estimator.
  */
-void CTxMemPool::removeForBlock(const std::vector<CTransaction>& vtx, unsigned int nBlockHeight,
+void CTxMemPool::removeForBlock(const std::vector<CTransaction>& vtx, const std::vector<CTransition>& vts, unsigned int nBlockHeight,
                                 std::list<CTransaction>& conflicts, bool fCurrentEstimate)
 {
     LOCK(cs);
@@ -802,6 +821,10 @@ void CTxMemPool::removeForBlock(const std::vector<CTransaction>& vtx, unsigned i
         removeConflicts(tx, conflicts);
         removeSubTxConflicts(tx, conflicts);
         ClearPrioritisation(tx.GetHash());
+    }
+    for (const CTransition &ts : vts)
+    {
+        removeTsConflicts(ts, conflicts);
     }
     // After the txs in the new block have been removed from the mempool, update policy estimates
     minerPolicyEstimator->processBlock(nBlockHeight, entries, fCurrentEstimate);
@@ -982,6 +1005,28 @@ bool CTxMemPool::lookupFeeRate(const uint256& hash, CFeeRate& feeRate) const
     if (i == mapTx.end())
         return false;
     feeRate = CFeeRate(i->GetFee(), i->GetTxSize());
+    return true;
+}
+
+bool CTxMemPool::getRegTxIdFromUserName(const std::string &userName, uint256 &regTxId) const {
+    LOCK(cs);
+    auto it = mapSubTxRegisterUserNames.find(userName);
+    if (it == mapSubTxRegisterUserNames.end())
+        return false;
+    regTxId = it->second;
+    return true;
+}
+
+bool CTxMemPool::getTopupsForUser(const uint256 &regTxId, std::vector<CTransaction> &result) const {
+    LOCK(cs);
+    auto it = mapSubTxTopups.find(regTxId);
+    if (it == mapSubTxTopups.end())
+        return false;
+    for (const auto txHash : it->second) {
+        auto it2 = mapTx.find(txHash);
+        if (it2 != mapTx.end())
+            result.push_back(it2->GetTx());
+    }
     return true;
 }
 

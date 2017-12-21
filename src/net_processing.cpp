@@ -40,6 +40,10 @@
 #endif // ENABLE_WALLET
 #include "privatesend-server.h"
 
+#include "evo/transition.h"
+#include "evo/tsmempool.h"
+#include "evo/tsvalidation.h"
+
 #include <boost/thread.hpp>
 
 using namespace std;
@@ -748,6 +752,9 @@ bool static AlreadyHave(const CInv& inv) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 
     case MSG_MASTERNODE_VERIFY:
         return mnodeman.mapSeenMasternodeVerification.count(inv.hash);
+
+    case MSG_TRANSITION:
+        return tsMempool.Exists(inv.hash) || evoUserDB->TransitionExists(inv.hash);
     }
 
     // Don't know what it is, just say we already got one
@@ -1046,6 +1053,23 @@ void static ProcessGetData(CNode* pfrom, const Consensus::Params& consensusParam
                         ss.reserve(1000);
                         ss << mnodeman.mapSeenMasternodeVerification[inv.hash];
                         connman.PushMessage(pfrom, NetMsgType::MNVERIFY, ss);
+                        pushed = true;
+                    }
+                }
+
+                if (!pushed && inv.type == MSG_TRANSITION) {
+                    bool found = false;
+                    CTransition ts;
+                    if (tsMempool.GetTransition(inv.hash, ts))
+                        found = true;
+                    else if (evoUserDB->GetTransition(inv.hash, ts))
+                        found = true;
+
+                    if (found) {
+                        CDataStream ss(SER_NETWORK, PROTOCOL_VERSION);
+                        ss.reserve(1000);
+                        ss << ts;
+                        connman.PushMessage(pfrom, NetMsgType::TRANSITION, ss);
                         pushed = true;
                     }
                 }
@@ -1662,6 +1686,8 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
                 tx.GetHash().ToString(),
                 mempool.size(), mempool.DynamicMemoryUsage() / 1000);
 
+            bool isAnySubTx = IsSubTx(tx);
+
             // Recursively process any orphan transactions that depended on this one
             set<NodeId> setMisbehaving;
             for (unsigned int i = 0; i < vWorkQueue.size(); i++)
@@ -1692,6 +1718,9 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
                         connman.RelayTransaction(orphanTx, orphanFeeRate);
                         vWorkQueue.push_back(orphanHash);
                         vEraseQueue.push_back(orphanHash);
+
+                        if (IsSubTx(orphanTx))
+                            isAnySubTx = true;
                     }
                     else if (!fMissingInputs2)
                     {
@@ -1716,6 +1745,11 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
 
             BOOST_FOREACH(uint256 hash, vEraseQueue)
                 EraseOrphanTx(hash);
+
+            if (isAnySubTx) {
+                // previously invalid transitions might have become valid. Relay these.
+                RelayNowValidTransitions();
+            }
         }
         else if (fMissingInputs)
         {
@@ -1775,7 +1809,17 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
                 Misbehaving(pfrom->GetId(), nDoS);
         }
     }
+    else if (strCommand == NetMsgType::TRANSITION)
+    {
+        CTransition ts;
+        vRecv >> ts;
 
+        CInv inv(MSG_TRANSITION, ts.GetHash());
+        pfrom->AddInventoryKnown(inv);
+        pfrom->setAskFor.erase(inv.hash);
+
+        HandleIncomingTransition(pfrom, ts);
+    }
 
     else if (strCommand == NetMsgType::HEADERS && !fImporting && !fReindex) // Ignore headers received while importing
     {
@@ -2598,6 +2642,8 @@ bool SendMessages(CNode* pto, CConnman& connman, std::atomic<bool>& interruptMsg
             BOOST_FOREACH(const CInv& inv, pto->vInventoryToSend)
             {
                 if (inv.type == MSG_TX && pto->filterInventoryKnown.contains(inv.hash))
+                    continue;
+                if (inv.type == MSG_TRANSITION && pto->filterInventoryKnown.contains(inv.hash))
                     continue;
 
                 // trickle out tx inv to protect privacy
