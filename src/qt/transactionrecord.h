@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2013 The Bitcoin Core developers
+// Copyright (c) 2011-2014 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -138,8 +138,8 @@ public:
     /** Return the unique identifier for this transaction (part) */
     QString getTxID() const;
 
-    /** Format subtransaction id */
-    static QString formatSubTxId(const uint256 &hash, int vout);
+    /** Return the output index of the subtransaction  */
+    int getOutputIndex() const;
 
     /** Update status from core wallet tx.
      */

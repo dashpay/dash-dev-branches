@@ -999,6 +999,7 @@ bool CConnman::AttemptToEvictConnection()
     // Reduce to the network group with the most connections
     std::vector<NodeEvictionCandidate> vEvictionNodes = mapAddrCounts[naMostConnections];
 
+    // Do not disconnect peers if there is only 1 connection from their network group
     if(vEvictionNodes.empty()) {
         return false;
     }
@@ -1674,9 +1675,10 @@ void CConnman::ThreadOpenConnections()
 
         // Only connect out to one peer per network group (/16 for IPv4).
         // Do this here so we don't have to critsect vNodes inside mapAddresses critsect.
+        // This is only done for mainnet and testnet
         int nOutbound = 0;
         std::set<std::vector<unsigned char> > setConnected;
-        {
+        if (!Params().AllowMultipleAddressesFromGroup()) {
             LOCK(cs_vNodes);
             BOOST_FOREACH(CNode* pnode, vNodes) {
                 if (!pnode->fInbound && !pnode->fMasternode) {
@@ -2032,7 +2034,7 @@ bool CConnman::BindListenPort(const CService &addrBind, std::string& strError, b
     {
         int nErr = WSAGetLastError();
         if (nErr == WSAEADDRINUSE)
-            strError = strprintf(_("Unable to bind to %s on this computer. Dash Core is probably already running."), addrBind.ToString());
+            strError = strprintf(_("Unable to bind to %s on this computer. %s is probably already running."), addrBind.ToString(), _(PACKAGE_NAME));
         else
             strError = strprintf(_("Unable to bind to %s on this computer (bind returned error %s)"), addrBind.ToString(), NetworkErrorString(nErr));
         LogPrintf("%s\n", strError);
@@ -2473,7 +2475,7 @@ bool CConnman::DisconnectNode(NodeId id)
     return false;
 }
 
-void CConnman::RelayTransaction(const CTransaction& tx)
+void CConnman::RelayTransaction(const CTransaction& tx, CFeeRate feerate)
 {
     CDataStream ss(SER_NETWORK, PROTOCOL_VERSION);
     ss.reserve(10000);
@@ -2487,10 +2489,10 @@ void CConnman::RelayTransaction(const CTransaction& tx)
     } else { // MSG_TX
         ss << tx;
     }
-    RelayTransaction(tx, ss);
+    RelayTransaction(tx, feerate, ss);
 }
 
-void CConnman::RelayTransaction(const CTransaction& tx, const CDataStream& ss)
+void CConnman::RelayTransaction(const CTransaction& tx, CFeeRate feerate, const CDataStream& ss)
 {
     uint256 hash = tx.GetHash();
     int nInv = static_cast<bool>(CPrivateSend::GetDSTX(hash)) ? MSG_DSTX :
@@ -2514,6 +2516,11 @@ void CConnman::RelayTransaction(const CTransaction& tx, const CDataStream& ss)
     {
         if(!pnode->fRelayTxes)
             continue;
+        {
+            LOCK(pnode->cs_feeFilter);
+            if (feerate.GetFeePerK() < pnode->minFeeFilter)
+                continue;
+        }
         LOCK(pnode->cs_filter);
         if (pnode->pfilter)
         {
@@ -2710,6 +2717,9 @@ CNode::CNode(NodeId idIn, ServiceFlags nLocalServicesIn, int nMyStartingHeightIn
     fPingQueued = false;
     fMasternode = false;
     nMinPingUsecTime = std::numeric_limits<int64_t>::max();
+    minFeeFilter = 0;
+    lastSentFeeFilter = 0;
+    nextSendTimeFeeFilter = 0;
     vchKeyedNetGroup = CalculateKeyedNetGroup(addr);
     id = idIn;
     nLocalServices = nLocalServicesIn;
