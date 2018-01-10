@@ -19,9 +19,6 @@ branches:
   - master
   - develop
 
-services:
-  - docker
-
 cache:
   apt: true
   ccache: true
@@ -43,8 +40,6 @@ env:
     - SDK_URL=https://bitcoincore.org/depends-sources/sdks
     - PYTHON_DEBUG=1
     - WINEDEBUG=fixme-all
-    - DOCKER_BUILD=false
-    - DOCKER_REPO=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
 
   matrix:
 # ARM
@@ -61,8 +56,6 @@ env:
     - HOST=x86_64-unknown-linux-gnu PPA="ppa:bitcoin/bitcoin" PACKAGES="python3" DEP_OPTS="NO_WALLET=1" RUN_TESTS=true GOAL="install" BITCOIN_CONFIG="--enable-glibc-back-compat --enable-reduce-exports"
 # Cross-Mac
     - HOST=x86_64-apple-darwin11 PPA="ppa:bitcoin/bitcoin" PACKAGES="cmake imagemagick libcap-dev librsvg2-bin libz-dev libbz2-dev libtiff-tools python-dev" BITCOIN_CONFIG="--enable-gui --enable-reduce-exports" OSX_SDK=10.9 GOAL="deploy"
-# dashd release build (for docker)
-    - HOST=x86_64-unknown-linux-gnu PPA="ppa:bitcoin/bitcoin" PACKAGES="bc python3-zmq" DEP_OPTS="NO_QT=1 NO_UPNP=1" GOAL="install" BITCOIN_CONFIG="--enable-zmq --enable-glibc-back-compat --enable-reduce-exports" PYZMQ=true DOCKER_BUILD=true
 
 before_install:
     # setup aws/docker
@@ -104,9 +97,5 @@ script:
     - if [ "$RUN_TESTS" = "true" -a "$WINE" != "true" ]; then travis_wait 30 make $MAKEJOBS check VERBOSE=1; fi
     - if [ "$RUN_TESTS" = "true" -a "$WINE" = "true" ]; then wine  src/test/test_dash.exe --log_level=test_suite; fi
     - if [ "$RUN_TESTS" = "true" ]; then qa/pull-tester/rpc-tests.py --coverage; fi
-    - cd ..
-    - if [ "$DOCKER_BUILD" = "true" ]; then BUILD_DIR=dash-$HOST ./docker/build-docker.sh; fi
 after_script:
     - if [ "$TRAVIS_PULL_REQUEST" != "false" ]; then (echo "Upload goes here. Something like: scp -r $BASE_OUTDIR server" || echo "upload failed"); fi
-after_success:
-    - if [ "$TRAVIS_BRANCH" = "develop" -a "$DOCKER_BUILD" = "true" ]; then ./docker/push-docker.sh; fi
