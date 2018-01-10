@@ -19,8 +19,8 @@ using namespace std;
 class CRPCConvertParam
 {
 public:
-    std::string methodName;            //! method whose params want conversion
-    int paramIdx;                      //! 0-based idx of param to convert
+    std::string methodName; //!< method whose params want conversion
+    int paramIdx;           //!< 0-based idx of param to convert
 };
 static const CRPCConvertParam vRPCConvertParams[] =
 {
@@ -124,6 +124,8 @@ static const CRPCConvertParam vRPCConvertParams[] =
     { "prioritisetransaction", 2 },
     { "setban", 2 },
     { "setban", 3 },
+    { "getmempoolancestors", 1 },
+    { "getmempooldescendants", 1 },
     { "setnetworkactive", 0 },
     { "spork", 1 },
     { "voteraw", 1 },

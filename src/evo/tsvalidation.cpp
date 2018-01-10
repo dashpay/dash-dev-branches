@@ -332,16 +332,16 @@ void HandleIncomingTransition(CNode *pfrom, const CTransition &ts) {
 }
 
 bool BuildUserFromMempool(const uint256 &regTxId, CEvoUser &user) {
-    CTransaction subTx;
-    if (!mempool.lookup(regTxId, subTx))
+    auto subTx = mempool.get(regTxId);
+    if (subTx == nullptr)
         return false;
     CValidationState dummyState;
-    if (!CheckSubTx(subTx, dummyState))
+    if (!CheckSubTx(*subTx, dummyState))
         return false;
 
     CSubTxData subTxData;
-    GetSubTxData(subTx, subTxData);
-    subTxData.BuildNewUser(subTx, user);
+    GetSubTxData(*subTx, subTxData);
+    subTxData.BuildNewUser(*subTx, user);
 
     return true;
 }
