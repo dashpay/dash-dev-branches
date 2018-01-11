@@ -141,6 +141,7 @@ private:
 
     // Configuration parameters for the block size
     unsigned int nBlockMaxSize;
+    unsigned int nBlockReserveTsSize;
 
     // Information on the current status of the block
     uint64_t nBlockSize;
@@ -148,6 +149,7 @@ private:
     unsigned int nBlockSigOps;
     CAmount nFees;
     CTxMemPool::setEntries inBlock;
+    std::set<uint256> subTxRegisterInBlock;
 
     // Chain context for the block
     int nHeight;
@@ -175,6 +177,10 @@ private:
     void addPriorityTxs();
     /** Add transactions based on feerate including unconfirmed ancestors */
     void addPackageTxs();
+    /** Add register SubTxs that don't have ancestors */
+    void addRegisterSubTxs();
+    /** Add transitions to block */
+    void addTransitions(uint64_t maxTsSpace);
 
     // helper function for addPriorityTxs
     /** Test if tx will still "fit" in the block */

@@ -28,6 +28,9 @@
 #include "masternode-sync.h"
 #include "validationinterface.h"
 
+#include "evo/subtx.h"
+#include "evo/tsvalidation.h"
+
 #include <algorithm>
 #include <boost/thread.hpp>
 #include <boost/tuple/tuple.hpp>
@@ -82,6 +85,8 @@ BlockAssembler::BlockAssembler(const CChainParams& _chainparams)
     nBlockMaxSize = GetArg("-blockmaxsize", DEFAULT_BLOCK_MAX_SIZE);
     // Limit to between 1K and MAX_BLOCK_SIZE-1K for sanity:
     nBlockMaxSize = std::max((unsigned int)1000, std::min((unsigned int)(MaxBlockSize(fDIP0001ActiveAtTip)-1000), nBlockMaxSize));
+    // Reserved block size to use for state transitions
+    nBlockReserveTsSize = GetArg("-blockreservetssize", nBlockMaxSize / 10);
 }
 
 void BlockAssembler::resetBlock()
@@ -120,6 +125,7 @@ CBlockTemplate* BlockAssembler::CreateNewBlock(const CScript& scriptPubKeyIn)
     nHeight = pindexPrev->nHeight + 1;
 
     pblock->nVersion = ComputeBlockVersion(pindexPrev, chainparams.GetConsensus());
+    pblock->nVersion |= VERSIONBITS_EVO; // TODO
     // -regtest only: allow overriding block.nVersion with
     // -blockversion=N to test forking scenarios
     if (chainparams.MineBlocksOnDemand())
@@ -133,7 +139,12 @@ CBlockTemplate* BlockAssembler::CreateNewBlock(const CScript& scriptPubKeyIn)
                        : pblock->GetBlockTime();
 
     addPriorityTxs();
+    addRegisterSubTxs();
+    addTransitions(nBlockReserveTsSize);
     addPackageTxs();
+
+    // fill up remaining block space with transitions
+    addTransitions(nBlockMaxSize - nBlockSize);
 
     nLastBlockTx = nBlockTx;
     nLastBlockSize = nBlockSize;
@@ -149,6 +160,9 @@ CBlockTemplate* BlockAssembler::CreateNewBlock(const CScript& scriptPubKeyIn)
     // NOTE: unlike in bitcoin, we need to pass PREVIOUS block height here
     CAmount blockReward = nFees + GetBlockSubsidy(pindexPrev->nBits, pindexPrev->nHeight, Params().GetConsensus());
 
+    CAmount transitionFees = CalcTransitionFeesForBlock(*pblock);
+    blockReward += transitionFees;
+
     // Compute regular coinbase transaction.
     coinbaseTx.vout[0].nValue = blockReward;
     coinbaseTx.vin[0].scriptSig = CScript() << nHeight << OP_0;
@@ -160,7 +174,7 @@ CBlockTemplate* BlockAssembler::CreateNewBlock(const CScript& scriptPubKeyIn)
     //             nHeight, blockReward, pblock->txoutMasternode.ToString(), coinbaseTx.ToString());
 
     pblock->vtx[0] = coinbaseTx;
-    pblocktemplate->vTxFees[0] = -nFees;
+    pblocktemplate->vTxFees[0] = -nFees - transitionFees;
 
     // Fill in header
     pblock->hashPrevBlock  = pindexPrev->GetBlockHash();
@@ -212,11 +226,21 @@ bool BlockAssembler::TestPackage(uint64_t packageSize, unsigned int packageSigOp
 
 // Perform transaction-level checks before adding to block:
 // - transaction finality (locktime)
+// - topups with existing users
 bool BlockAssembler::TestPackageTransactions(const CTxMemPool::setEntries& package)
 {
     BOOST_FOREACH (const CTxMemPool::txiter it, package) {
         if (!IsFinalTx(it->GetTx(), nHeight, nLockTimeCutoff))
             return false;
+
+        if (IsSubTx(it->GetTx())) {
+            CSubTxData subTxData;
+            GetSubTxData(it->GetTx(), subTxData);
+            if (subTxData.action == SubTxAction_TopUp) {
+                if (!evoUserDB->UserExists(subTxData.regTxId) && !subTxRegisterInBlock.count(subTxData.regTxId))
+                    return false;
+            }
+        }
     }
     return true;
 }
@@ -281,6 +305,14 @@ void BlockAssembler::AddToBlock(CTxMemPool::txiter iter)
                   dPriority,
                   CFeeRate(iter->GetModifiedFee(), iter->GetTxSize()).ToString(),
                   iter->GetTx().GetHash().ToString());
+    }
+
+    if (IsSubTx(iter->GetTx())) {
+        CSubTxData subTxData;
+        GetSubTxData(iter->GetTx(), subTxData);
+        if (subTxData.action == SubTxAction_Register) {
+            subTxRegisterInBlock.insert(iter->GetTx().GetHash());
+        }
     }
 }
 
@@ -456,6 +488,33 @@ void BlockAssembler::addPackageTxs()
     }
 }
 
+void BlockAssembler::addRegisterSubTxs()
+{
+    // add register SubTxs to block. This is implemented in a quite dumb way at the moment and completely ignores fees
+    // this is currently needed to allow topups to be added in addPackageTxs
+    // TODO change addPackageTxs in a way that it also considers the dependency of register->topup while choosing packages
+    //      this would make addRegisterSubTxs unnecessary
+    for (CTxMemPool::indexed_transaction_set::iterator mi = mempool.mapTx.begin();
+         mi != mempool.mapTx.end(); ++mi) {
+        // skip if it has parents
+        if (mempool.GetMemPoolParents(mi).size() != 0)
+            continue;
+
+        if (!IsSubTx(mi->GetTx()))
+            continue;
+
+        CSubTxData subTxData;
+        GetSubTxData(mi->GetTx(), subTxData);
+        if (subTxData.action != SubTxAction_Register)
+            continue;
+
+        // If this tx fits in the block add it, otherwise keep looping
+        if (TestForBlock(mi)) {
+            AddToBlock(mi);
+        }
+    }
+}
+
 void BlockAssembler::addPriorityTxs()
 {
     // How much of the block should be dedicated to high-priority transactions,
@@ -498,6 +557,12 @@ void BlockAssembler::addPriorityTxs()
             continue;
         }
 
+        // Don't add SubTxs in the priority section of the block
+        // Avoids duplicating orphan topup handling. It's probably not worth to implement it here as priority TXs
+        // might vanish at some point in the future
+        if (IsSubTx(iter->GetTx()))
+            continue;
+
         // If tx is dependent on other mempool txs which haven't yet been included
         // then put it in the waitSet
         if (isStillDependent(iter)) {
@@ -528,6 +593,31 @@ void BlockAssembler::addPriorityTxs()
             }
         }
     }
+}
+
+void BlockAssembler::addTransitions(uint64_t maxTsSpace)
+{
+    LOCK(evoUserDB->cs);
+
+    // begin db transaction and let it rollback
+    auto evoDbTx = evoUserDB->BeginTransaction();
+
+    // first we need to update the current user states to reflect what we have in the block right now
+    CValidationState state;
+    if (!ProcessSubTxsInBlock(*pblock, state)) {
+        LogPrintf("CreateNewBlock(): ProcessSubTxsInBlock() failed. state=%s", FormatStateMessage(state));
+        assert(false);
+    }
+    if (!ProcessTransitionsInBlock(*pblock, false, state)) {
+        LogPrintf("CreateNewBlock(): ProcessTransitionsInBlock() failed. state=%s", FormatStateMessage(state));
+        assert(false);
+    }
+
+    uint64_t oldVtsSize = ::GetSerializeSize(pblock->vts, SER_NETWORK, CLIENT_VERSION);
+    AddMempoolTransitionsToBlock(*pblock, maxTsSpace, nBlockMaxSize);
+    uint64_t newVtsSize = ::GetSerializeSize(pblock->vts, SER_NETWORK, CLIENT_VERSION);
+
+    nBlockSize += newVtsSize - oldVtsSize;
 }
 
 void IncrementExtraNonce(CBlock* pblock, const CBlockIndex* pindexPrev, unsigned int& nExtraNonce)
