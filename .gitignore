@@ -110,10 +110,9 @@ linux-build
 win32-build
 qa/pull-tester/run-bitcoind-for-test.sh
 qa/pull-tester/tests_config.py
-qa/pull-tester/cache/*
 qa/pull-tester/test.*/*
 qa/tmp
-cache/
+qa/cache/*
 share/BitcoindComparisonTool.jar
 
 !src/leveldb*/Makefile
@@ -124,6 +123,7 @@ share/BitcoindComparisonTool.jar
 /doc/doxygen/
 
 libdashconsensus.pc
+contrib/devtools/split-debug.sh
 src/qt/dash-qt.bash
 qa/pull-tester/tests-config.sh
 
@@ -133,7 +133,8 @@ dashd
 dash-qt
 make
 
+/docker/bin
+
 #CLion
 .idea
 CMakeLists.txt
-cmake-build-*

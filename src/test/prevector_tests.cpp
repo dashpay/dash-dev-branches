@@ -186,7 +186,6 @@ public:
 BOOST_AUTO_TEST_CASE(PrevectorTestInt)
 {
     for (int j = 0; j < 64; j++) {
-        BOOST_TEST_MESSAGE("PrevectorTestInt " << j);
         prevector_tester<8, int> test;
         for (int i = 0; i < 2048; i++) {
             int r = insecure_rand();
@@ -217,8 +216,8 @@ BOOST_AUTO_TEST_CASE(PrevectorTestInt)
             if (((r >> 21) % 32) == 7) {
                 int values[4];
                 int num = 1 + (insecure_rand() % 4);
-                for (int i = 0; i < num; i++) {
-                    values[i] = insecure_rand();
+                for (int k = 0; k < num; k++) {
+                    values[k] = insecure_rand();
                 }
                 test.insert_range(insecure_rand() % (test.size() + 1), values, values + num);
             }

@@ -3,14 +3,15 @@
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd $DIR/..
 
-if [ "$DOCKER_REPO" = "" ]; then
-  echo "Missing DOCKER_REPO environment variable"
-  exit 1
+DOCKER_IMAGE=${DOCKER_IMAGE:-dashpay/dashd-develop}
+DOCKER_TAG=${DOCKER_TAG:-latest}
+
+if [ -n "$DOCKER_REPO" ]; then
+  DOCKER_IMAGE_WITH_REPO=$DOCKER_REPO/$DOCKER_IMAGE
+else
+  DOCKER_IMAGE_WITH_REPO=$DOCKER_IMAGE
 fi
 
-DOCKER_IMAGE=${DOCKER_IMAGE:-dashevo/dashcore}
-DOCKER_TAG=${DOCKER_TAG:-develop}
-
-docker tag $DOCKER_IMAGE:$DOCKER_TAG $DOCKER_REPO/$DOCKER_IMAGE:$DOCKER_TAG
-docker push $DOCKER_REPO/$DOCKER_IMAGE:$DOCKER_TAG
-docker rmi $DOCKER_REPO/$DOCKER_IMAGE:$DOCKER_TAG
+docker tag $DOCKER_IMAGE:$DOCKER_TAG $DOCKER_IMAGE_WITH_REPO:$DOCKER_TAG
+docker push $DOCKER_IMAGE_WITH_REPO:$DOCKER_TAG
+docker rmi $DOCKER_IMAGE_WITH_REPO:$DOCKER_TAG

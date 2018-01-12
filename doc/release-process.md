@@ -1,7 +1,7 @@
 Release Process
 ====================
 
-* Update translations, see [translation_process.md](https://github.com/dashpay/dash/blob/master/doc/translation_process.md#syncing-with-transifex)
+* Update translations, see [translation_process.md](https://github.com/dashpay/dash/blob/master/doc/translation_process.md#synchronising-translations).
 * Update hardcoded [seeds](/contrib/seeds)
 
 * * *
@@ -53,7 +53,7 @@ Check out the source code in the following directory hierarchy.
 	git pull
 	popd
 
-  Ensure gitian-builder is up-to-date to take advantage of new caching features (`e9741525c` or later is recommended).
+  Ensure gitian-builder is up-to-date:
 
 	pushd ./gitian-builder
 	git pull
@@ -64,13 +64,7 @@ Check out the source code in the following directory hierarchy.
 	wget -P inputs https://bitcoincore.org/cfields/osslsigncode-Backports-to-1.7.1.patch
 	wget -P inputs http://downloads.sourceforge.net/project/osslsigncode/osslsigncode/osslsigncode-1.7.1.tar.gz
 
- Register and download the Apple SDK: see [OS X readme](README_osx.txt) for details.
-
- https://developer.apple.com/devcenter/download.action?path=/Developer_Tools/xcode_6.1.1/xcode_6.1.1.dmg
-
- Using a Mac, create a tarball for the 10.9 SDK and copy it to the inputs directory:
-
-	tar -C /Volumes/Xcode/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/ -czf MacOSX10.9.sdk.tar.gz MacOSX10.9.sdk
+  Create the OS X SDK tarball, see the [OS X readme](README_osx.md) for details, and copy it into the inputs directory.
 
 ### Optional: Seed the Gitian sources cache and offline git repositories
 
@@ -88,16 +82,16 @@ The gbuild invocations below <b>DO NOT DO THIS</b> by default.
 
 ### Build and sign Dash Core for Linux, Windows, and OS X:
 
-	./bin/gbuild --commit dash=v${VERSION} ../dash/contrib/gitian-descriptors/gitian-linux.yml
+	./bin/gbuild --memory 3000 --commit dash=v${VERSION} ../dash/contrib/gitian-descriptors/gitian-linux.yml
 	./bin/gsign --signer $SIGNER --release ${VERSION}-linux --destination ../gitian.sigs/ ../dash/contrib/gitian-descriptors/gitian-linux.yml
 	mv build/out/dash-*.tar.gz build/out/src/dash-*.tar.gz ../
 
-	./bin/gbuild --commit dash=v${VERSION} ../dash/contrib/gitian-descriptors/gitian-win.yml
+	./bin/gbuild --memory 3000 --commit dash=v${VERSION} ../dash/contrib/gitian-descriptors/gitian-win.yml
 	./bin/gsign --signer $SIGNER --release ${VERSION}-win-unsigned --destination ../gitian.sigs/ ../dash/contrib/gitian-descriptors/gitian-win.yml
 	mv build/out/dash-*-win-unsigned.tar.gz inputs/dash-win-unsigned.tar.gz
 	mv build/out/dash-*.zip build/out/dash-*.exe ../
 
-	./bin/gbuild --commit dash=v${VERSION} ../dash/contrib/gitian-descriptors/gitian-osx.yml
+	./bin/gbuild --memory 3000 --commit dash=v${VERSION} ../dash/contrib/gitian-descriptors/gitian-osx.yml
 	./bin/gsign --signer $SIGNER --release ${VERSION}-osx-unsigned --destination ../gitian.sigs/ ../dash/contrib/gitian-descriptors/gitian-osx.yml
 	mv build/out/dash-*-osx-unsigned.tar.gz inputs/dash-osx-unsigned.tar.gz
 	mv build/out/dash-*.tar.gz build/out/dash-*.dmg ../
@@ -115,7 +109,7 @@ The gbuild invocations below <b>DO NOT DO THIS</b> by default.
 
   Add other gitian builders keys to your gpg keyring
 
-	gpg --import ../dash/contrib/gitian-downloader/*.pgp
+	gpg --import ../dash/contrib/gitian-keys/*.pgp
 
   Verify the signatures
 
