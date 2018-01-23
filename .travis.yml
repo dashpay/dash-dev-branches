@@ -46,6 +46,7 @@ env:
     - DOCKER_BUILD=false
     - DOCKER_REPO=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
     - DOCKER_IMAGE=dashevo/dashcore
+    - DOCKER_TAG=develop
 
   matrix:
 # ARM
