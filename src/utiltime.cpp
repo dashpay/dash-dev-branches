@@ -64,7 +64,7 @@ void MilliSleep(int64_t n)
 {
 
 /**
- * Boost's sleep_for was uninterruptable when backed by nanosleep from 1.50
+ * Boost's sleep_for was uninterruptible when backed by nanosleep from 1.50
  * until fixed in 1.52. Use the deprecated sleep method for the broken case.
  * See: https://svn.boost.org/trac/boost/ticket/7238
  */
@@ -80,8 +80,9 @@ void MilliSleep(int64_t n)
 
 std::string DateTimeStrFormat(const char* pszFormat, int64_t nTime)
 {
+    static std::locale classic(std::locale::classic());
     // std::locale takes ownership of the pointer
-    std::locale loc(std::locale::classic(), new boost::posix_time::time_facet(pszFormat));
+    std::locale loc(classic, new boost::posix_time::time_facet(pszFormat));
     std::stringstream ss;
     ss.imbue(loc);
     ss << boost::posix_time::from_time_t(nTime);

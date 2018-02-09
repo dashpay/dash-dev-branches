@@ -62,7 +62,6 @@ libconftest.dylib*
 *.o
 *.o-*
 *.patch
-.dash
 *.a
 *.pb.cc
 *.pb.h
@@ -108,12 +107,8 @@ coverage_percent.txt
 linux-coverage-build
 linux-build
 win32-build
-qa/pull-tester/run-bitcoind-for-test.sh
 qa/pull-tester/tests_config.py
-qa/pull-tester/test.*/*
-qa/tmp
 qa/cache/*
-share/BitcoindComparisonTool.jar
 
 !src/leveldb*/Makefile
 

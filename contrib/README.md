@@ -1,17 +1,9 @@
-Wallet Tools
----------------------
-
-### [SpendFrom](/contrib/spendfrom) ###
-
-Use the raw transactions API to send coins received on a particular
-address (or addresses).
-
 Repository Tools
 ---------------------
 
 ### [Developer tools](/contrib/devtools) ###
 Specific tools for developers working on this repository.
-Contains the script `github-merge.py` for merging github pull requests securely and signing them using GPG.
+Contains the script `github-merge.py` for merging GitHub pull requests securely and signing them using GPG.
 
 ### [Verify-Commits](/contrib/verify-commits) ###
 Tool to verify that every merge commit was signed by a developer using the above `github-merge.py` script.
@@ -42,11 +34,14 @@ PGP keys used for signing Bitcoin Core [Gitian release](/doc/release-process.md)
 ### [MacDeploy](/contrib/macdeploy) ###
 Scripts and notes for Mac builds. 
 
+### [Gitian-build](/contrib/gitian-build.sh) ###
+Script for running full Gitian builds.
+
 Test and Verify Tools 
 ---------------------
 
 ### [TestGen](/contrib/testgen) ###
 Utilities to generate test vectors for the data-driven Dash tests.
 
-### [Verify SF Binaries](/contrib/verifysfbinaries) ###
-This script attempts to download and verify the signature file SHA256SUMS.asc from SourceForge.
+### [Verify Binaries](/contrib/verifybinaries) ###
+This script attempts to download and verify the signature file SHA256SUMS.asc from bitcoin.org.

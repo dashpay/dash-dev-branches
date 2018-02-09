@@ -3,12 +3,12 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include "coins.h"
-#include "random.h"
 #include "script/standard.h"
 #include "uint256.h"
 #include "undo.h"
 #include "utilstrencodings.h"
 #include "test/test_dash.h"
+#include "test/test_random.h"
 #include "validation.h"
 #include "consensus/validation.h"
 
@@ -539,7 +539,6 @@ const static char NO_ENTRY = -1;
 
 const static auto FLAGS = {char(0), FRESH, DIRTY, char(DIRTY | FRESH)};
 const static auto CLEAN_FLAGS = {char(0), FRESH};
-const static auto DIRTY_FLAGS = {DIRTY, char(DIRTY | FRESH)};
 const static auto ABSENT_FLAGS = {NO_ENTRY};
 
 void SetCoinsValue(CAmount value, Coin& coin)

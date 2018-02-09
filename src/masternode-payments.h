@@ -60,16 +60,16 @@ public:
     ADD_SERIALIZE_METHODS;
 
     template <typename Stream, typename Operation>
-    inline void SerializationOp(Stream& s, Operation ser_action, int nType, int nVersion) {
+    inline void SerializationOp(Stream& s, Operation ser_action) {
         READWRITE(*(CScriptBase*)(&scriptPubKey));
         READWRITE(vecVoteHashes);
     }
 
-    CScript GetPayee() { return scriptPubKey; }
+    CScript GetPayee() const { return scriptPubKey; }
 
     void AddVoteHash(uint256 hashIn) { vecVoteHashes.push_back(hashIn); }
-    std::vector<uint256> GetVoteHashes() { return vecVoteHashes; }
-    int GetVoteCount() { return vecVoteHashes.size(); }
+    std::vector<uint256> GetVoteHashes() const { return vecVoteHashes; }
+    int GetVoteCount() const { return vecVoteHashes.size(); }
 };
 
 // Keep track of votes for payees from masternodes
@@ -91,7 +91,7 @@ public:
     ADD_SERIALIZE_METHODS;
 
     template <typename Stream, typename Operation>
-    inline void SerializationOp(Stream& s, Operation ser_action, int nType, int nVersion) {
+    inline void SerializationOp(Stream& s, Operation ser_action) {
         READWRITE(nBlockHeight);
         READWRITE(vecPayees);
     }
@@ -132,7 +132,7 @@ public:
     ADD_SERIALIZE_METHODS;
 
     template <typename Stream, typename Operation>
-    inline void SerializationOp(Stream& s, Operation ser_action, int nType, int nVersion) {
+    inline void SerializationOp(Stream& s, Operation ser_action) {
         READWRITE(vinMasternode);
         READWRITE(nBlockHeight);
         READWRITE(*(CScriptBase*)(&payee));
@@ -186,7 +186,7 @@ public:
     ADD_SERIALIZE_METHODS;
 
     template <typename Stream, typename Operation>
-    inline void SerializationOp(Stream& s, Operation ser_action, int nType, int nVersion) {
+    inline void SerializationOp(Stream& s, Operation ser_action) {
         READWRITE(mapMasternodePaymentVotes);
         READWRITE(mapMasternodeBlocks);
     }
@@ -204,12 +204,12 @@ public:
 
     bool GetBlockPayee(int nBlockHeight, CScript& payee);
     bool IsTransactionValid(const CTransaction& txNew, int nBlockHeight);
-    bool IsScheduled(CMasternode& mn, int nNotBlockHeight);
+    bool IsScheduled(const CMasternode& mn, int nNotBlockHeight);
 
     bool CanVote(COutPoint outMasternode, int nBlockHeight);
 
     int GetMinMasternodePaymentsProto();
-    void ProcessMessage(CNode* pfrom, std::string& strCommand, CDataStream& vRecv, CConnman& connman);
+    void ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStream& vRecv, CConnman& connman);
     std::string GetRequiredPaymentsString(int nBlockHeight);
     void FillBlockPayee(CMutableTransaction& txNew, int nBlockHeight, CAmount blockReward, CTxOut& txoutMasternodeRet);
     std::string ToString() const;

@@ -101,83 +101,102 @@ if not (ENABLE_WALLET == 1 and ENABLE_UTILS == 1 and ENABLE_BITCOIND == 1):
 if ENABLE_ZMQ:
     try:
         import zmq
-    except ImportError as e:
-        print("WARNING: \"import zmq\" failed. Set ENABLE_ZMQ=0 or " \
-            "to run zmq tests, see dependency info in /qa/README.md.")
-        ENABLE_ZMQ=0
+    except ImportError:
+        print("ERROR: \"import zmq\" failed. Set ENABLE_ZMQ=0 or "
+              "to run zmq tests, see dependency info in /qa/README.md.")
+        # ENABLE_ZMQ=0
+        raise
 
-#Tests
 testScripts = [
     # longest test should go first, to favor running tests in parallel
-    'p2p-fullblocktest.py', # NOTE: needs dash_hash to pass
-    'walletbackup.py',
-    'bip68-112-113-p2p.py',
-    'wallet.py',
     'wallet-hd.py',
+    'walletbackup.py',
+    # vv Tests less than 5m vv
+    'p2p-fullblocktest.py', # NOTE: needs dash_hash to pass
+    'fundrawtransaction.py',
+    'fundrawtransaction-hd.py',
+    # vv Tests less than 2m vv
+    'wallet.py',
+    'wallet-accounts.py',
+    'wallet-dump.py',
     'listtransactions.py',
+    # vv Tests less than 60s vv
+    'sendheaders.py', # NOTE: needs dash_hash to pass
+    'zapwallettxes.py',
+    'importmulti.py',
+    'mempool_limit.py',
+    'merkle_blocks.py',
     'receivedby.py',
+    'abandonconflict.py',
+    'bip68-112-113-p2p.py',
+    'rawtransactions.py',
+    'reindex.py',
+    # vv Tests less than 30s vv
     'mempool_resurrect_test.py',
     'txn_doublespend.py --mineblock',
     'txn_clone.py',
     'getchaintips.py',
-    'rawtransactions.py',
     'rest.py',
     'mempool_spendcoinbase.py',
     'mempool_reorg.py',
-    'mempool_limit.py',
     'httpbasics.py',
     'multi_rpc.py',
-    'zapwallettxes.py',
     'proxy_test.py',
-    'merkle_blocks.py',
-    'fundrawtransaction.py',
-    'fundrawtransaction-hd.py',
     'signrawtransactions.py',
     'nodehandling.py',
-    'reindex.py',
     'addressindex.py',
     'timestampindex.py',
     'spentindex.py',
     'decodescript.py',
     'blockchain.py',
     'disablewallet.py',
-    'sendheaders.py', # NOTE: needs dash_hash to pass
     'keypool.py',
     'keypool-hd.py',
     'p2p-mempool.py',
     'prioritise_transaction.py',
     'invalidblockrequest.py', # NOTE: needs dash_hash to pass
     'invalidtxrequest.py', # NOTE: needs dash_hash to pass
-    'abandonconflict.py',
     'p2p-versionbits-warning.py',
+    'preciousblock.py',
     'importprunedfunds.py',
     'signmessages.py',
+    'nulldummy.py',
+    'import-rescan.py',
+    'rpcnamedargs.py',
+    'listsinceblock.py',
+    'p2p-leaktests.py',
 ]
 if ENABLE_ZMQ:
     testScripts.append('zmq_test.py')
 
 testScriptsExt = [
+    # 'pruning.py', # Prune mode is incompatible with -txindex.
+    # vv Tests less than 20m vv
+    'smartfees.py',
+    # vv Tests less than 5m vv
+    'maxuploadtarget.py',
+    'mempool_packages.py',
+    # vv Tests less than 2m vv
+    'bip68-sequence.py',
+    'getblocktemplate_longpoll.py',  # FIXME: "socket.error: [Errno 54] Connection reset by peer" on my Mac, same as  https://github.com/bitcoin/bitcoin/issues/6651
+    'p2p-timeouts.py',
+    # vv Tests less than 60s vv
     'bip9-softforks.py',
+    'p2p-feefilter.py',
+    'rpcbind_test.py',
+    # vv Tests less than 30s vv
     'bip65-cltv.py',
     'bip65-cltv-p2p.py', # NOTE: needs dash_hash to pass
-    'bip68-sequence.py',
     'bipdersig-p2p.py', # NOTE: needs dash_hash to pass
     'bipdersig.py',
-    'getblocktemplate_longpoll.py', # FIXME: "socket.error: [Errno 54] Connection reset by peer" on my Mac, same as  https://github.com/bitcoin/bitcoin/issues/6651
     'getblocktemplate_proposals.py',
     'txn_doublespend.py',
     'txn_clone.py --mineblock',
     'forknotify.py',
     'invalidateblock.py',
-    'rpcbind_test.py',
-    'smartfees.py',
     'maxblocksinflight.py',
     'p2p-acceptblock.py', # NOTE: needs dash_hash to pass
-    'mempool_packages.py',
-    'maxuploadtarget.py',
     # 'replace-by-fee.py', # RBF is disabled in Dash Core
-    'p2p-feefilter.py',
-    # 'pruning.py', # leave pruning last as it takes a REALLY long time #### Prune mode is incompatible with -txindex.
 ]
 
 
@@ -224,8 +243,8 @@ def runtests():
         time_sum += duration
 
         print('\n' + BOLD[1] + name + BOLD[0] + ":")
-        print(stdout)
-        print('stderr:\n' if not stderr == '' else '', stderr)
+        print('' if passed else stdout + '\n', end='')
+        print('' if stderr == '' else 'stderr:\n' + stderr + '\n', end='')
         results += "%s | %s | %s s\n" % (name.ljust(max_len_name), str(passed).ljust(6), duration)
         print("Pass: %s%s%s, Duration: %s s\n" % (BOLD[1], passed, BOLD[0], duration))
     results += BOLD[1] + "\n%s | %s | %s s (accumulated)" % ("ALL".ljust(max_len_name), str(all_passed).ljust(6), time_sum) + BOLD[0]
@@ -252,6 +271,10 @@ class RPCTestHandler:
         self.test_list = test_list
         self.flags = flags
         self.num_running = 0
+        # In case there is a graveyard of zombie bitcoinds, we can apply a
+        # pseudorandom offset to hopefully jump over them.
+        # (625 is PORT_RANGE/MAX_NODES)
+        self.portseed_offset = int(time.time() * 1000) % 625
         self.jobs = []
 
     def get_next(self):
@@ -259,7 +282,7 @@ class RPCTestHandler:
             # Add tests
             self.num_running += 1
             t = self.test_list.pop(0)
-            port_seed = ["--portseed=%s" % len(self.test_list)]
+            port_seed = ["--portseed={}".format(len(self.test_list) + self.portseed_offset)]
             log_stdout = tempfile.SpooledTemporaryFile(max_size=2**16)
             log_stderr = tempfile.SpooledTemporaryFile(max_size=2**16)
             self.jobs.append((t,

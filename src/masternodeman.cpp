@@ -10,6 +10,7 @@
 #include "masternodeman.h"
 #include "messagesigner.h"
 #include "netfulfilledman.h"
+#include "netmessagemaker.h"
 #ifdef ENABLE_WALLET
 #include "privatesend-client.h"
 #endif // ENABLE_WALLET
@@ -23,8 +24,8 @@ const std::string CMasternodeMan::SERIALIZATION_VERSION_STRING = "CMasternodeMan
 
 struct CompareLastPaidBlock
 {
-    bool operator()(const std::pair<int, CMasternode*>& t1,
-                    const std::pair<int, CMasternode*>& t2) const
+    bool operator()(const std::pair<int, const CMasternode*>& t1,
+                    const std::pair<int, const CMasternode*>& t2) const
     {
         return (t1.first != t2.first) ? (t1.first < t2.first) : (t1.second->vin < t2.second->vin);
     }
@@ -32,8 +33,8 @@ struct CompareLastPaidBlock
 
 struct CompareScoreMN
 {
-    bool operator()(const std::pair<arith_uint256, CMasternode*>& t1,
-                    const std::pair<arith_uint256, CMasternode*>& t2) const
+    bool operator()(const std::pair<arith_uint256, const CMasternode*>& t1,
+                    const std::pair<arith_uint256, const CMasternode*>& t2) const
     {
         return (t1.first != t2.first) ? (t1.first < t2.first) : (t1.second->vin < t2.second->vin);
     }
@@ -84,6 +85,7 @@ void CMasternodeMan::AskForMN(CNode* pnode, const COutPoint& outpoint, CConnman&
 {
     if(!pnode) return;
 
+    CNetMsgMaker msgMaker(pnode->GetSendVersion());
     LOCK(cs);
 
     std::map<COutPoint, std::map<CNetAddr, int64_t> >::iterator it1 = mWeAskedForMasternodeListEntry.find(outpoint);
@@ -106,7 +108,7 @@ void CMasternodeMan::AskForMN(CNode* pnode, const COutPoint& outpoint, CConnman&
     }
     mWeAskedForMasternodeListEntry[outpoint][pnode->addr] = GetTime() + DSEG_UPDATE_SECONDS;
 
-    connman.PushMessage(pnode, NetMsgType::DSEG, CTxIn(outpoint));
+    connman.PushMessage(pnode, msgMaker.Make(NetMsgType::DSEG, CTxIn(outpoint)));
 }
 
 bool CMasternodeMan::AllowMixing(const COutPoint &outpoint)
@@ -360,7 +362,7 @@ int CMasternodeMan::CountMasternodes(int nProtocolVersion)
     int nCount = 0;
     nProtocolVersion = nProtocolVersion == -1 ? mnpayments.GetMinMasternodePaymentsProto() : nProtocolVersion;
 
-    for (auto& mnpair : mapMasternodes) {
+    for (const auto& mnpair : mapMasternodes) {
         if(mnpair.second.nProtocolVersion < nProtocolVersion) continue;
         nCount++;
     }
@@ -374,7 +376,7 @@ int CMasternodeMan::CountEnabled(int nProtocolVersion)
     int nCount = 0;
     nProtocolVersion = nProtocolVersion == -1 ? mnpayments.GetMinMasternodePaymentsProto() : nProtocolVersion;
 
-    for (auto& mnpair : mapMasternodes) {
+    for (const auto& mnpair : mapMasternodes) {
         if(mnpair.second.nProtocolVersion < nProtocolVersion || !mnpair.second.IsEnabled()) continue;
         nCount++;
     }
@@ -388,7 +390,7 @@ int CMasternodeMan::CountByIP(int nNetworkType)
     LOCK(cs);
     int nNodeCount = 0;
 
-    for (auto& mnpair : mapMasternodes)
+    for (const auto& mnpair : mapMasternodes)
         if ((nNetworkType == NET_IPV4 && mnpair.second.addr.IsIPv4()) ||
             (nNetworkType == NET_TOR  && mnpair.second.addr.IsTor())  ||
             (nNetworkType == NET_IPV6 && mnpair.second.addr.IsIPv6())) {
@@ -401,6 +403,7 @@ int CMasternodeMan::CountByIP(int nNetworkType)
 
 void CMasternodeMan::DsegUpdate(CNode* pnode, CConnman& connman)
 {
+    CNetMsgMaker msgMaker(pnode->GetSendVersion());
     LOCK(cs);
 
     if(Params().NetworkIDString() == CBaseChainParams::MAIN) {
@@ -413,7 +416,7 @@ void CMasternodeMan::DsegUpdate(CNode* pnode, CConnman& connman)
         }
     }
 
-    connman.PushMessage(pnode, NetMsgType::DSEG, CTxIn());
+    connman.PushMessage(pnode, msgMaker.Make(NetMsgType::DSEG, CTxIn()));
     int64_t askAgain = GetTime() + DSEG_UPDATE_SECONDS;
     mWeAskedForMasternodeList[pnode->addr] = askAgain;
 
@@ -454,7 +457,7 @@ bool CMasternodeMan::GetMasternodeInfo(const COutPoint& outpoint, masternode_inf
 bool CMasternodeMan::GetMasternodeInfo(const CPubKey& pubKeyMasternode, masternode_info_t& mnInfoRet)
 {
     LOCK(cs);
-    for (auto& mnpair : mapMasternodes) {
+    for (const auto& mnpair : mapMasternodes) {
         if (mnpair.second.pubKeyMasternode == pubKeyMasternode) {
             mnInfoRet = mnpair.second.GetInfo();
             return true;
@@ -466,7 +469,7 @@ bool CMasternodeMan::GetMasternodeInfo(const CPubKey& pubKeyMasternode, masterno
 bool CMasternodeMan::GetMasternodeInfo(const CScript& payee, masternode_info_t& mnInfoRet)
 {
     LOCK(cs);
-    for (auto& mnpair : mapMasternodes) {
+    for (const auto& mnpair : mapMasternodes) {
         CScript scriptCollateralAddress = GetScriptForDestination(mnpair.second.pubKeyCollateralAddress.GetID());
         if (scriptCollateralAddress == payee) {
             mnInfoRet = mnpair.second.GetInfo();
@@ -503,7 +506,7 @@ bool CMasternodeMan::GetNextMasternodeInQueueForPayment(int nBlockHeight, bool f
     // Need LOCK2 here to ensure consistent locking order because the GetBlockHash call below locks cs_main
     LOCK2(cs_main,cs);
 
-    std::vector<std::pair<int, CMasternode*> > vecMasternodeLastPaid;
+    std::vector<std::pair<int, const CMasternode*> > vecMasternodeLastPaid;
 
     /*
         Make a vector with all of the last paid times
@@ -511,7 +514,7 @@ bool CMasternodeMan::GetNextMasternodeInQueueForPayment(int nBlockHeight, bool f
 
     int nMnCount = CountMasternodes();
 
-    for (auto& mnpair : mapMasternodes) {
+    for (const auto& mnpair : mapMasternodes) {
         if(!mnpair.second.IsValidForPayment()) continue;
 
         //check protocol version
@@ -550,8 +553,8 @@ bool CMasternodeMan::GetNextMasternodeInQueueForPayment(int nBlockHeight, bool f
     int nTenthNetwork = nMnCount/10;
     int nCountTenth = 0;
     arith_uint256 nHighest = 0;
-    CMasternode *pBestMasternode = NULL;
-    BOOST_FOREACH (PAIRTYPE(int, CMasternode*)& s, vecMasternodeLastPaid){
+    const CMasternode *pBestMasternode = NULL;
+    for (const auto& s : vecMasternodeLastPaid) {
         arith_uint256 nScore = s.second->CalculateScore(blockHash);
         if(nScore > nHighest){
             nHighest = nScore;
@@ -579,21 +582,21 @@ masternode_info_t CMasternodeMan::FindRandomNotInVec(const std::vector<COutPoint
     if(nCountNotExcluded < 1) return masternode_info_t();
 
     // fill a vector of pointers
-    std::vector<CMasternode*> vpMasternodesShuffled;
-    for (auto& mnpair : mapMasternodes) {
+    std::vector<const CMasternode*> vpMasternodesShuffled;
+    for (const auto& mnpair : mapMasternodes) {
         vpMasternodesShuffled.push_back(&mnpair.second);
     }
 
-    InsecureRand insecureRand;
+    FastRandomContext insecure_rand;
     // shuffle pointers
-    std::random_shuffle(vpMasternodesShuffled.begin(), vpMasternodesShuffled.end(), insecureRand);
+    std::random_shuffle(vpMasternodesShuffled.begin(), vpMasternodesShuffled.end(), insecure_rand);
     bool fExclude;
 
     // loop through
-    BOOST_FOREACH(CMasternode* pmn, vpMasternodesShuffled) {
+    for (const auto& pmn : vpMasternodesShuffled) {
         if(pmn->nProtocolVersion < nProtocolVersion || !pmn->IsEnabled()) continue;
         fExclude = false;
-        BOOST_FOREACH(const COutPoint &outpointToExclude, vecToExclude) {
+        for (const auto& outpointToExclude : vecToExclude) {
             if(pmn->vin.prevout == outpointToExclude) {
                 fExclude = true;
                 break;
@@ -622,7 +625,7 @@ bool CMasternodeMan::GetMasternodeScores(const uint256& nBlockHash, CMasternodeM
         return false;
 
     // calculate scores
-    for (auto& mnpair : mapMasternodes) {
+    for (const auto& mnpair : mapMasternodes) {
         if (mnpair.second.nProtocolVersion >= nMinProtocol) {
             vecMasternodeScoresRet.push_back(std::make_pair(mnpair.second.CalculateScore(nBlockHash), &mnpair.second));
         }
@@ -653,7 +656,7 @@ bool CMasternodeMan::GetMasternodeRank(const COutPoint& outpoint, int& nRankRet,
         return false;
 
     int nRank = 0;
-    for (auto& scorePair : vecMasternodeScores) {
+    for (const auto& scorePair : vecMasternodeScores) {
         nRank++;
         if(scorePair.second->vin.prevout == outpoint) {
             nRankRet = nRank;
@@ -685,7 +688,7 @@ bool CMasternodeMan::GetMasternodeRanks(CMasternodeMan::rank_pair_vec_t& vecMast
         return false;
 
     int nRank = 0;
-    for (auto& scorePair : vecMasternodeScores) {
+    for (const auto& scorePair : vecMasternodeScores) {
         nRank++;
         vecMasternodeRanksRet.push_back(std::make_pair(nRank, *scorePair.second));
     }
@@ -737,10 +740,54 @@ std::pair<CService, std::set<uint256> > CMasternodeMan::PopScheduledMnbRequestCo
     return std::make_pair(pairFront.first, setResult);
 }
 
+void CMasternodeMan::ProcessPendingMnbRequests(CConnman& connman)
+{
+    std::pair<CService, std::set<uint256> > p = PopScheduledMnbRequestConnection();
+    if (!(p.first == CService() || p.second.empty())) {
+        if (connman.IsMasternodeOrDisconnectRequested(p.first)) return;
+        mapPendingMNB.insert(std::make_pair(p.first, std::make_pair(GetTime(), p.second)));
+        connman.AddPendingMasternode(p.first);
+    }
 
-void CMasternodeMan::ProcessMessage(CNode* pfrom, std::string& strCommand, CDataStream& vRecv, CConnman& connman)
+    std::map<CService, std::pair<int64_t, std::set<uint256> > >::iterator itPendingMNB = mapPendingMNB.begin();
+    while (itPendingMNB != mapPendingMNB.end()) {
+        bool fDone = connman.ForNode(itPendingMNB->first, [&](CNode* pnode) {
+            // compile request vector
+            std::vector<CInv> vToFetch;
+            std::set<uint256>& setHashes = itPendingMNB->second.second;
+            std::set<uint256>::iterator it = setHashes.begin();
+            while(it != setHashes.end()) {
+                if(*it != uint256()) {
+                    vToFetch.push_back(CInv(MSG_MASTERNODE_ANNOUNCE, *it));
+                    LogPrint("masternode", "-- asking for mnb %s from addr=%s\n", it->ToString(), pnode->addr.ToString());
+                }
+                ++it;
+            }
+
+            // ask for data
+            CNetMsgMaker msgMaker(pnode->GetSendVersion());
+            connman.PushMessage(pnode, msgMaker.Make(NetMsgType::GETDATA, vToFetch));
+            return true;
+        });
+
+        int64_t nTimeAdded = itPendingMNB->second.first;
+        if (fDone || (GetTime() - nTimeAdded > 15)) {
+            if (!fDone) {
+                LogPrint("masternode", "CMasternodeMan::%s -- failed to connect to %s\n", __func__, itPendingMNB->first.ToString());
+            }
+            mapPendingMNB.erase(itPendingMNB++);
+        } else {
+            ++itPendingMNB;
+        }
+    }
+    LogPrint("masternode", "%s -- mapPendingMNB size: %d\n", __func__, mapPendingMNB.size());
+}
+
+void CMasternodeMan::ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStream& vRecv, CConnman& connman)
 {
     if(fLiteMode) return; // disable all Dash specific functionality
+
+    CNetMsgMaker msgMaker(pfrom->GetSendVersion());
 
     if (strCommand == NetMsgType::MNANNOUNCE) { //Masternode Broadcast
 
@@ -844,7 +891,7 @@ void CMasternodeMan::ProcessMessage(CNode* pfrom, std::string& strCommand, CData
 
         int nInvCount = 0;
 
-        for (auto& mnpair : mapMasternodes) {
+        for (const auto& mnpair : mapMasternodes) {
             if (vin != CTxIn() && vin != mnpair.second.vin) continue; // asked for specific vin but we are not there yet
             if (mnpair.second.addr.IsRFC1918() || mnpair.second.addr.IsLocal()) continue; // do not send local network masternode
             if (mnpair.second.IsUpdateRequired()) continue; // do not send outdated masternodes
@@ -862,18 +909,18 @@ void CMasternodeMan::ProcessMessage(CNode* pfrom, std::string& strCommand, CData
             mapSeenMasternodePing.insert(std::make_pair(hashMNP, mnp));
 
             if (vin.prevout == mnpair.first) {
-                LogPrintf("DSEG -- Sent 1 Masternode inv to peer %d\n", pfrom->id);
+                LogPrintf("DSEG -- Sent 1 Masternode inv to peer=%d\n", pfrom->id);
                 return;
             }
         }
 
         if(vin == CTxIn()) {
-            connman.PushMessage(pfrom, NetMsgType::SYNCSTATUSCOUNT, MASTERNODE_SYNC_LIST, nInvCount);
-            LogPrintf("DSEG -- Sent %d Masternode invs to peer %d\n", nInvCount, pfrom->id);
+            connman.PushMessage(pfrom, msgMaker.Make(NetMsgType::SYNCSTATUSCOUNT, MASTERNODE_SYNC_LIST, nInvCount));
+            LogPrintf("DSEG -- Sent %d Masternode invs to peer=%d\n", nInvCount, pfrom->id);
             return;
         }
         // smth weird happen - someone asked us for vin we have no idea about?
-        LogPrint("masternode", "DSEG -- No invs sent to peer %d\n", pfrom->id);
+        LogPrint("masternode", "DSEG -- No invs sent to peer=%d\n", pfrom->id);
 
     } else if (strCommand == NetMsgType::MNVERIFY) { // Masternode Verify
 
@@ -920,7 +967,7 @@ void CMasternodeMan::DoFullVerificationStep(CConnman& connman)
     int nRanksTotal = (int)vecMasternodeRanks.size();
 
     // send verify requests only if we are in top MAX_POSE_RANK
-    std::vector<std::pair<int, CMasternode> >::iterator it = vecMasternodeRanks.begin();
+    rank_pair_vec_t::iterator it = vecMasternodeRanks.begin();
     while(it != vecMasternodeRanks.end()) {
         if(it->first > MAX_POSE_RANK) {
             LogPrint("masternode", "CMasternodeMan::DoFullVerificationStep -- Must be in top %d to send verify request\n",
@@ -944,8 +991,8 @@ void CMasternodeMan::DoFullVerificationStep(CConnman& connman)
     int nOffset = MAX_POSE_RANK + nMyRank - 1;
     if(nOffset >= (int)vecMasternodeRanks.size()) return;
 
-    std::vector<CMasternode*> vSortedByAddr;
-    for (auto& mnpair : mapMasternodes) {
+    std::vector<const CMasternode*> vSortedByAddr;
+    for (const auto& mnpair : mapMasternodes) {
         vSortedByAddr.push_back(&mnpair.second);
     }
 
@@ -1002,7 +1049,7 @@ void CMasternodeMan::CheckSameAddr()
 
         sort(vSortedByAddr.begin(), vSortedByAddr.end(), CompareByAddr());
 
-        BOOST_FOREACH(CMasternode* pmn, vSortedByAddr) {
+        for (const auto& pmn : vSortedByAddr) {
             // check only (pre)enabled masternodes
             if(!pmn->IsEnabled() && !pmn->IsPreEnabled()) continue;
             // initial step
@@ -1030,13 +1077,13 @@ void CMasternodeMan::CheckSameAddr()
     }
 
     // ban duplicates
-    BOOST_FOREACH(CMasternode* pmn, vBan) {
+    for (auto& pmn : vBan) {
         LogPrintf("CMasternodeMan::CheckSameAddr -- increasing PoSe ban score for masternode %s\n", pmn->vin.prevout.ToStringShort());
         pmn->IncreasePoSeBanScore();
     }
 }
 
-bool CMasternodeMan::SendVerifyRequest(const CAddress& addr, const std::vector<CMasternode*>& vSortedByAddr, CConnman& connman)
+bool CMasternodeMan::SendVerifyRequest(const CAddress& addr, const std::vector<const CMasternode*>& vSortedByAddr, CConnman& connman)
 {
     if(netfulfilledman.HasFulfilledRequest(addr, strprintf("%s", NetMsgType::MNVERIFY)+"-request")) {
         // we already asked for verification, not a good idea to do this too often, skip it
@@ -1044,26 +1091,51 @@ bool CMasternodeMan::SendVerifyRequest(const CAddress& addr, const std::vector<C
         return false;
     }
 
-    CNode* pnode = connman.ConnectNode(addr, NULL, false, true);
-    if(pnode == NULL) {
-        LogPrintf("CMasternodeMan::SendVerifyRequest -- can't connect to node to verify it, addr=%s\n", addr.ToString());
-        return false;
-    }
+    if (connman.IsMasternodeOrDisconnectRequested(addr)) return false;
 
-    netfulfilledman.AddFulfilledRequest(addr, strprintf("%s", NetMsgType::MNVERIFY)+"-request");
+    connman.AddPendingMasternode(addr);
     // use random nonce, store it and require node to reply with correct one later
     CMasternodeVerification mnv(addr, GetRandInt(999999), nCachedBlockHeight - 1);
-    mWeAskedForVerification[addr] = mnv;
+    LOCK(cs_mapPendingMNV);
+    mapPendingMNV.insert(std::make_pair(addr, std::make_pair(GetTime(), mnv)));
     LogPrintf("CMasternodeMan::SendVerifyRequest -- verifying node using nonce %d addr=%s\n", mnv.nonce, addr.ToString());
-    connman.PushMessage(pnode, NetMsgType::MNVERIFY, mnv);
-
     return true;
+}
+
+void CMasternodeMan::ProcessPendingMnvRequests(CConnman& connman)
+{
+    LOCK(cs_mapPendingMNV);
+
+    std::map<CService, std::pair<int64_t, CMasternodeVerification> >::iterator itPendingMNV = mapPendingMNV.begin();
+
+    while (itPendingMNV != mapPendingMNV.end()) {
+        bool fDone = connman.ForNode(itPendingMNV->first, [&](CNode* pnode) {
+            netfulfilledman.AddFulfilledRequest(pnode->addr, strprintf("%s", NetMsgType::MNVERIFY)+"-request");
+            // use random nonce, store it and require node to reply with correct one later
+            mWeAskedForVerification[pnode->addr] = itPendingMNV->second.second;
+            LogPrint("masternode", "-- verifying node using nonce %d addr=%s\n", itPendingMNV->second.second.nonce, pnode->addr.ToString());
+            CNetMsgMaker msgMaker(pnode->GetSendVersion()); // TODO this gives a warning about version not being set (we should wait for VERSION exchange)
+            connman.PushMessage(pnode, msgMaker.Make(NetMsgType::MNVERIFY, itPendingMNV->second.second));
+            return true;
+        });
+
+        int64_t nTimeAdded = itPendingMNV->second.first;
+        if (fDone || (GetTime() - nTimeAdded > 15)) {
+            if (!fDone) {
+                LogPrint("masternode", "CMasternodeMan::%s -- failed to connect to %s\n", __func__, itPendingMNV->first.ToString());
+            }
+            mapPendingMNV.erase(itPendingMNV++);
+        } else {
+            ++itPendingMNV;
+        }
+    }
+    LogPrint("masternode", "%s -- mapPendingMNV size: %d\n", __func__, mapPendingMNV.size());
 }
 
 void CMasternodeMan::SendVerifyReply(CNode* pnode, CMasternodeVerification& mnv, CConnman& connman)
 {
     // only masternodes can sign this, why would someone ask regular node?
-    if(!fMasterNode) {
+    if(!fMasternodeMode) {
         // do not ban, malicious node might be using my IP
         // and trying to confuse the node which tries to verify it
         return;
@@ -1096,7 +1168,8 @@ void CMasternodeMan::SendVerifyReply(CNode* pnode, CMasternodeVerification& mnv,
         return;
     }
 
-    connman.PushMessage(pnode, NetMsgType::MNVERIFY, mnv);
+    CNetMsgMaker msgMaker(pnode->GetSendVersion());
+    connman.PushMessage(pnode, msgMaker.Make(NetMsgType::MNVERIFY, mnv));
     netfulfilledman.AddFulfilledRequest(pnode->addr, strprintf("%s", NetMsgType::MNVERIFY)+"-reply");
 }
 
@@ -1198,7 +1271,7 @@ void CMasternodeMan::ProcessVerifyReply(CNode* pnode, CMasternodeVerification& m
         LogPrintf("CMasternodeMan::ProcessVerifyReply -- verified real masternode %s for addr %s\n",
                     prealMasternode->vin.prevout.ToStringShort(), pnode->addr.ToString());
         // increase ban score for everyone else
-        BOOST_FOREACH(CMasternode* pmn, vpMasternodesToBan) {
+        for (const auto& pmn : vpMasternodesToBan) {
             pmn->IncreasePoSeBanScore();
             LogPrint("masternode", "CMasternodeMan::ProcessVerifyReply -- increased PoSe ban score for %s addr %s, new score %d\n",
                         prealMasternode->vin.prevout.ToStringShort(), pnode->addr.ToString(), pmn->nPoSeBanScore);
@@ -1418,7 +1491,7 @@ bool CMasternodeMan::CheckMnbAndUpdateMasternodeList(CNode* pfrom, CMasternodeBr
         Add(mnb);
         masternodeSync.BumpAssetLastTime("CMasternodeMan::CheckMnbAndUpdateMasternodeList - new");
         // if it matches our Masternode privkey...
-        if(fMasterNode && mnb.pubKeyMasternode == activeMasternode.pubKeyMasternode) {
+        if(fMasternodeMode && mnb.pubKeyMasternode == activeMasternode.pubKeyMasternode) {
             mnb.nPoSeBanScore = -MASTERNODE_POSE_BAN_MAX_SCORE;
             if(mnb.nProtocolVersion == PROTOCOL_VERSION) {
                 // ... and PROTOCOL_VERSION, then we've been remotely activated ...
@@ -1450,7 +1523,7 @@ void CMasternodeMan::UpdateLastPaid(const CBlockIndex* pindex)
     static bool IsFirstRun = true;
     // Do full scan on first run or if we are not a masternode
     // (MNs should update this info on every block, so limited scan should be enough for them)
-    int nMaxBlocksToScanBack = (IsFirstRun || !fMasterNode) ? mnpayments.GetStorageLimit() : LAST_PAID_SCAN_BLOCKS;
+    int nMaxBlocksToScanBack = (IsFirstRun || !fMasternodeMode) ? mnpayments.GetStorageLimit() : LAST_PAID_SCAN_BLOCKS;
 
     // LogPrint("mnpayments", "CMasternodeMan::UpdateLastPaid -- nHeight=%d, nMaxBlocksToScanBack=%d, IsFirstRun=%s\n",
     //                         nCachedBlockHeight, nMaxBlocksToScanBack, IsFirstRun ? "true" : "false");
@@ -1547,7 +1620,7 @@ void CMasternodeMan::UpdatedBlockTip(const CBlockIndex *pindex)
 
     CheckSameAddr();
 
-    if(fMasterNode) {
+    if(fMasternodeMode) {
         // normal wallet does not need to update this every block, doing update on rpc call should be enough
         UpdateLastPaid(pindex);
     }

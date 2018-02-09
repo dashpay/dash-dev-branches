@@ -6,7 +6,6 @@
 from test_framework.mininode import *
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import *
-import time
 
 class TestNode(NodeConnCB):
     def __init__(self):
@@ -63,7 +62,7 @@ class TestNode(NodeConnCB):
         def received_pong():
             return (self.last_pong.nonce == self.ping_counter)
         self.connection.send_message(msg_ping(nonce=self.ping_counter))
-        success = wait_until(received_pong, timeout)
+        success = wait_until(received_pong, timeout=timeout)
         self.ping_counter += 1
         return success
 

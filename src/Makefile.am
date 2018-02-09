@@ -1,7 +1,12 @@
+# Copyright (c) 2013-2016 The Bitcoin Core developers
+# Copyright (c) 2014-2018 The Dash Core developers
+# Distributed under the MIT software license, see the accompanying
+# file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
 DIST_SUBDIRS = secp256k1 univalue
 
 AM_LDFLAGS = $(PTHREAD_CFLAGS) $(LIBTOOL_LDFLAGS) $(HARDENED_LDFLAGS)
-AM_CXXFLAGS = $(HARDENED_CXXFLAGS)
+AM_CXXFLAGS = $(HARDENED_CXXFLAGS) $(ERROR_CXXFLAGS)
 AM_CPPFLAGS = $(HARDENED_CPPFLAGS)
 EXTRA_LIBRARIES =
 
@@ -90,7 +95,6 @@ BITCOIN_CORE_H = \
   checkpoints.h \
   checkqueue.h \
   clientversion.h \
-  coincontrol.h \
   coins.h \
   compat.h \
   compat/byteswap.h \
@@ -100,6 +104,7 @@ BITCOIN_CORE_H = \
   consensus/consensus.h \
   core_io.h \
   core_memusage.h \
+  cuckoocache.h \
   evo/users.h \
   evo/subtx.h \
   evo/tsmempool.h \
@@ -143,6 +148,7 @@ BITCOIN_CORE_H = \
   netaddress.h \
   netbase.h \
   netfulfilledman.h \
+  netmessagemaker.h \
   noui.h \
   policy/fees.h \
   policy/policy.h \
@@ -165,7 +171,8 @@ BITCOIN_CORE_H = \
   support/allocators/secure.h \
   support/allocators/zeroafterfree.h \
   support/cleanse.h \
-  support/pagelocker.h \
+  support/events.h \
+  support/lockedpool.h \
   sync.h \
   threadsafety.h \
   threadinterrupt.h \
@@ -181,11 +188,13 @@ BITCOIN_CORE_H = \
   validation.h \
   validationinterface.h \
   versionbits.h \
+  wallet/coincontrol.h \
   wallet/crypter.h \
   wallet/db.h \
   wallet/rpcwallet.h \
   wallet/wallet.h \
   wallet/walletdb.h \
+  warnings.h \
   zmq/zmqabstractnotifier.h \
   zmq/zmqconfig.h\
   zmq/zmqnotificationinterface.h \
@@ -398,6 +407,7 @@ libbitcoin_common_a_SOURCES = \
   scheduler.cpp \
   script/sign.cpp \
   script/standard.cpp \
+  warnings.cpp \
   $(BITCOIN_CORE_H)
 
 # util: shared between all executables.
@@ -406,7 +416,7 @@ libbitcoin_common_a_SOURCES = \
 libbitcoin_util_a_CPPFLAGS = $(AM_CPPFLAGS) $(BITCOIN_INCLUDES)
 libbitcoin_util_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
 libbitcoin_util_a_SOURCES = \
-  support/pagelocker.cpp \
+  support/lockedpool.cpp \
   chainparamsbase.cpp \
   clientversion.cpp \
   compat/glibc_sanity.cpp \
@@ -542,6 +552,14 @@ CLEANFILES += zmq/*.gcda zmq/*.gcno
 DISTCLEANFILES = obj/build.h
 
 EXTRA_DIST = $(CTAES_DIST)
+
+
+config/dash-config.h: config/stamp-h1
+	@$(MAKE) -C $(top_builddir) $(subdir)/$(@)
+config/stamp-h1: $(top_srcdir)/$(subdir)/config/dash-config.h.in $(top_builddir)/config.status
+	$(AM_V_at)$(MAKE) -C $(top_builddir) $(subdir)/$(@)
+$(top_srcdir)/$(subdir)/config/dash-config.h.in:  $(am__configure_deps)
+	$(AM_V_at)$(MAKE) -C $(top_srcdir) $(subdir)/config/dash-config.h.in
 
 clean-local:
 	-$(MAKE) -C secp256k1 clean

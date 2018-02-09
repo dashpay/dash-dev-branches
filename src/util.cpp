@@ -75,6 +75,10 @@
 #include <sys/prctl.h>
 #endif
 
+#ifdef HAVE_MALLOPT_ARENA_MAX
+#include <malloc.h>
+#endif
+
 #include <boost/algorithm/string/case_conv.hpp> // for to_lower()
 #include <boost/algorithm/string/join.hpp>
 #include <boost/algorithm/string/predicate.hpp> // for startswith() and endswith()
@@ -105,7 +109,7 @@ namespace boost {
 using namespace std;
 
 //Dash only features
-bool fMasterNode = false;
+bool fMasternodeMode = false;
 bool fLiteMode = false;
 /**
     nWalletBackups:
@@ -119,14 +123,14 @@ int nWalletBackups = 10;
 const char * const BITCOIN_CONF_FILENAME = "dash.conf";
 const char * const BITCOIN_PID_FILENAME = "dashd.pid";
 
+CCriticalSection cs_args;
 map<string, string> mapArgs;
-map<string, vector<string> > mapMultiArgs;
+static map<string, vector<string> > _mapMultiArgs;
+const map<string, vector<string> >& mapMultiArgs = _mapMultiArgs;
 bool fDebug = false;
 bool fPrintToConsole = false;
 bool fPrintToDebugLog = true;
-bool fDaemon = false;
-bool fServer = false;
-string strMiscWarning;
+
 bool fLogTimestamps = DEFAULT_LOGTIMESTAMPS;
 bool fLogTimeMicros = DEFAULT_LOGTIMEMICROS;
 bool fLogThreadNames = DEFAULT_LOGTHREADNAMES;
@@ -232,12 +236,13 @@ void OpenDebugLog()
     assert(vMsgsBeforeOpenLog);
     boost::filesystem::path pathDebug = GetDataDir() / "debug.log";
     fileout = fopen(pathDebug.string().c_str(), "a");
-    if (fileout) setbuf(fileout, NULL); // unbuffered
-
-    // dump buffered messages from before we opened the log
-    while (!vMsgsBeforeOpenLog->empty()) {
-        FileWriteStr(vMsgsBeforeOpenLog->front(), fileout);
-        vMsgsBeforeOpenLog->pop_front();
+    if (fileout) {
+        setbuf(fileout, NULL); // unbuffered
+        // dump buffered messages from before we opened the log
+        while (!vMsgsBeforeOpenLog->empty()) {
+            FileWriteStr(vMsgsBeforeOpenLog->front(), fileout);
+            vMsgsBeforeOpenLog->pop_front();
+        }
     }
 
     delete vMsgsBeforeOpenLog;
@@ -264,22 +269,26 @@ bool LogAcceptCategory(const char* category)
 
         if (ptrCategory.get() == NULL)
         {
-            std::string strThreadName = GetThreadName();
-            LogPrintf("debug turned on:\n");
-            for (int i = 0; i < (int)mapMultiArgs["-debug"].size(); ++i)
-                LogPrintf("  thread %s category %s\n", strThreadName, mapMultiArgs["-debug"][i]);
-            const vector<string>& categories = mapMultiArgs["-debug"];
-            ptrCategory.reset(new set<string>(categories.begin(), categories.end()));
-            // thread_specific_ptr automatically deletes the set when the thread ends.
-            // "dash" is a composite category enabling all Dash-related debug output
-            if(ptrCategory->count(string("dash"))) {
-                ptrCategory->insert(string("privatesend"));
-                ptrCategory->insert(string("instantsend"));
-                ptrCategory->insert(string("masternode"));
-                ptrCategory->insert(string("spork"));
-                ptrCategory->insert(string("keepass"));
-                ptrCategory->insert(string("mnpayments"));
-                ptrCategory->insert(string("gobject"));
+            if (mapMultiArgs.count("-debug")) {
+                std::string strThreadName = GetThreadName();
+                LogPrintf("debug turned on:\n");
+                for (int i = 0; i < (int)mapMultiArgs.at("-debug").size(); ++i)
+                    LogPrintf("  thread %s category %s\n", strThreadName, mapMultiArgs.at("-debug")[i]);
+                const vector<string>& categories = mapMultiArgs.at("-debug");
+                ptrCategory.reset(new set<string>(categories.begin(), categories.end()));
+                // thread_specific_ptr automatically deletes the set when the thread ends.
+                // "dash" is a composite category enabling all Dash-related debug output
+                if(ptrCategory->count(string("dash"))) {
+                    ptrCategory->insert(string("privatesend"));
+                    ptrCategory->insert(string("instantsend"));
+                    ptrCategory->insert(string("masternode"));
+                    ptrCategory->insert(string("spork"));
+                    ptrCategory->insert(string("keepass"));
+                    ptrCategory->insert(string("mnpayments"));
+                    ptrCategory->insert(string("gobject"));
+                }
+            } else {
+                ptrCategory.reset(new set<string>());
             }
         }
         const set<string>& setCategories = *ptrCategory.get();
@@ -298,7 +307,7 @@ bool LogAcceptCategory(const char* category)
  * suppress printing of the timestamp when multiple calls are made that don't
  * end in a newline. Initialize it to true, and hold/manage it, in the calling context.
  */
-static std::string LogTimestampStr(const std::string &str, bool *fStartedNewLine)
+static std::string LogTimestampStr(const std::string &str, std::atomic_bool *fStartedNewLine)
 {
     string strStamped;
 
@@ -322,7 +331,7 @@ static std::string LogTimestampStr(const std::string &str, bool *fStartedNewLine
  * suppress printing of the thread name when multiple calls are made that don't
  * end in a newline. Initialize it to true, and hold/manage it, in the calling context.
  */
-static std::string LogThreadNameStr(const std::string &str, bool *fStartedNewLine)
+static std::string LogThreadNameStr(const std::string &str, std::atomic_bool *fStartedNewLine)
 {
     string strThreadLogged;
 
@@ -342,7 +351,7 @@ static std::string LogThreadNameStr(const std::string &str, bool *fStartedNewLin
 int LogPrintStr(const std::string &str)
 {
     int ret = 0; // Returns total number of characters written
-    static bool fStartedNewLine = true;
+    static std::atomic_bool fStartedNewLine(true);
 
     std::string strThreadLogged = LogThreadNameStr(str, &fStartedNewLine);
     std::string strTimestamped = LogTimestampStr(strThreadLogged, &fStartedNewLine);
@@ -405,8 +414,9 @@ static void InterpretNegativeSetting(std::string& strKey, std::string& strValue)
 
 void ParseParameters(int argc, const char* const argv[])
 {
+    LOCK(cs_args);
     mapArgs.clear();
-    mapMultiArgs.clear();
+    _mapMultiArgs.clear();
 
     for (int i = 1; i < argc; i++)
     {
@@ -434,12 +444,19 @@ void ParseParameters(int argc, const char* const argv[])
         InterpretNegativeSetting(str, strValue);
 
         mapArgs[str] = strValue;
-        mapMultiArgs[str].push_back(strValue);
+        _mapMultiArgs[str].push_back(strValue);
     }
+}
+
+bool IsArgSet(const std::string& strArg)
+{
+    LOCK(cs_args);
+    return mapArgs.count(strArg);
 }
 
 std::string GetArg(const std::string& strArg, const std::string& strDefault)
 {
+    LOCK(cs_args);
     if (mapArgs.count(strArg))
         return mapArgs[strArg];
     return strDefault;
@@ -447,6 +464,7 @@ std::string GetArg(const std::string& strArg, const std::string& strDefault)
 
 int64_t GetArg(const std::string& strArg, int64_t nDefault)
 {
+    LOCK(cs_args);
     if (mapArgs.count(strArg))
         return atoi64(mapArgs[strArg]);
     return nDefault;
@@ -454,6 +472,7 @@ int64_t GetArg(const std::string& strArg, int64_t nDefault)
 
 bool GetBoolArg(const std::string& strArg, bool fDefault)
 {
+    LOCK(cs_args);
     if (mapArgs.count(strArg))
         return InterpretBool(mapArgs[strArg]);
     return fDefault;
@@ -461,6 +480,7 @@ bool GetBoolArg(const std::string& strArg, bool fDefault)
 
 bool SoftSetArg(const std::string& strArg, const std::string& strValue)
 {
+    LOCK(cs_args);
     if (mapArgs.count(strArg))
         return false;
     mapArgs[strArg] = strValue;
@@ -473,6 +493,25 @@ bool SoftSetBoolArg(const std::string& strArg, bool fValue)
         return SoftSetArg(strArg, std::string("1"));
     else
         return SoftSetArg(strArg, std::string("0"));
+}
+
+void ForceSetArg(const std::string& strArg, const std::string& strValue)
+{
+    LOCK(cs_args);
+    mapArgs[strArg] = strValue;
+}
+
+void ForceSetMultiArgs(const std::string& strArg, const std::vector<std::string>& values)
+{
+    LOCK(cs_args);
+    _mapMultiArgs[strArg] = values;
+}
+
+void ForceRemoveArg(const std::string& strArg)
+{
+    LOCK(cs_args);
+    mapArgs.erase(strArg);
+    _mapMultiArgs.erase(strArg);
 }
 
 static const int screenWidth = 79;
@@ -557,8 +596,8 @@ const boost::filesystem::path &GetDataDir(bool fNetSpecific)
     if (!path.empty())
         return path;
 
-    if (mapArgs.count("-datadir")) {
-        path = fs::system_complete(mapArgs["-datadir"]);
+    if (IsArgSet("-datadir")) {
+        path = fs::system_complete(GetArg("-datadir", ""));
         if (!fs::is_directory(path)) {
             path = "";
             return path;
@@ -574,43 +613,27 @@ const boost::filesystem::path &GetDataDir(bool fNetSpecific)
     return path;
 }
 
-static boost::filesystem::path backupsDirCached;
-static CCriticalSection csBackupsDirCached;
-
-const boost::filesystem::path &GetBackupsDir()
+boost::filesystem::path GetBackupsDir()
 {
     namespace fs = boost::filesystem;
 
-    LOCK(csBackupsDirCached);
+    if (!IsArgSet("-walletbackupsdir"))
+        return GetDataDir() / "backups";
 
-    fs::path &backupsDir = backupsDirCached;
-
-    if (!backupsDir.empty())
-        return backupsDir;
-
-    if (mapArgs.count("-walletbackupsdir")) {
-        backupsDir = fs::absolute(mapArgs["-walletbackupsdir"]);
-        // Path must exist
-        if (fs::is_directory(backupsDir)) return backupsDir;
-        // Fallback to default path if it doesn't
-        LogPrintf("%s: Warning: incorrect parameter -walletbackupsdir, path must exist! Using default path.\n", __func__);
-        strMiscWarning = _("Warning: incorrect parameter -walletbackupsdir, path must exist! Using default path.");
-    }
-    // Default path
-    backupsDir = GetDataDir() / "backups";
-
-    return backupsDir;
+    return fs::absolute(GetArg("-walletbackupsdir", ""));
 }
 
 void ClearDatadirCache()
 {
+    LOCK(csPathCached);
+
     pathCached = boost::filesystem::path();
     pathCachedNetSpecific = boost::filesystem::path();
 }
 
-boost::filesystem::path GetConfigFile()
+boost::filesystem::path GetConfigFile(const std::string& confPath)
 {
-    boost::filesystem::path pathConfigFile(GetArg("-conf", BITCOIN_CONF_FILENAME));
+    boost::filesystem::path pathConfigFile(confPath);
     if (!pathConfigFile.is_complete())
         pathConfigFile = GetDataDir(false) / pathConfigFile;
 
@@ -620,34 +643,37 @@ boost::filesystem::path GetConfigFile()
 boost::filesystem::path GetMasternodeConfigFile()
 {
     boost::filesystem::path pathConfigFile(GetArg("-mnconf", "masternode.conf"));
-    if (!pathConfigFile.is_complete()) pathConfigFile = GetDataDir() / pathConfigFile;
+    if (!pathConfigFile.is_complete())
+        pathConfigFile = GetDataDir() / pathConfigFile;
     return pathConfigFile;
 }
 
-void ReadConfigFile(map<string, string>& mapSettingsRet,
-                    map<string, vector<string> >& mapMultiSettingsRet)
+void ReadConfigFile(const std::string& confPath)
 {
-    boost::filesystem::ifstream streamConfig(GetConfigFile());
+    boost::filesystem::ifstream streamConfig(GetConfigFile(confPath));
     if (!streamConfig.good()){
         // Create empty dash.conf if it does not excist
-        FILE* configFile = fopen(GetConfigFile().string().c_str(), "a");
+        FILE* configFile = fopen(GetConfigFile(confPath).string().c_str(), "a");
         if (configFile != NULL)
             fclose(configFile);
         return; // Nothing to read, so just return
     }
 
-    set<string> setOptions;
-    setOptions.insert("*");
-
-    for (boost::program_options::detail::config_file_iterator it(streamConfig, setOptions), end; it != end; ++it)
     {
-        // Don't overwrite existing settings so command line settings override dash.conf
-        string strKey = string("-") + it->string_key;
-        string strValue = it->value[0];
-        InterpretNegativeSetting(strKey, strValue);
-        if (mapSettingsRet.count(strKey) == 0)
-            mapSettingsRet[strKey] = strValue;
-        mapMultiSettingsRet[strKey].push_back(strValue);
+        LOCK(cs_args);
+        set<string> setOptions;
+        setOptions.insert("*");
+
+        for (boost::program_options::detail::config_file_iterator it(streamConfig, setOptions), end; it != end; ++it)
+        {
+            // Don't overwrite existing settings so command line settings override dash.conf
+            string strKey = string("-") + it->string_key;
+            string strValue = it->value[0];
+            InterpretNegativeSetting(strKey, strValue);
+            if (mapArgs.count(strKey) == 0)
+                mapArgs[strKey] = strValue;
+            _mapMultiArgs[strKey].push_back(strValue);
+        }
     }
     // If datadir is changed in .conf file:
     ClearDatadirCache();
@@ -702,19 +728,19 @@ bool TryCreateDirectory(const boost::filesystem::path& p)
     return false;
 }
 
-void FileCommit(FILE *fileout)
+void FileCommit(FILE *file)
 {
-    fflush(fileout); // harmless if redundantly called
+    fflush(file); // harmless if redundantly called
 #ifdef WIN32
-    HANDLE hFile = (HANDLE)_get_osfhandle(_fileno(fileout));
+    HANDLE hFile = (HANDLE)_get_osfhandle(_fileno(file));
     FlushFileBuffers(hFile);
 #else
     #if defined(__linux__) || defined(__NetBSD__)
-    fdatasync(fileno(fileout));
+    fdatasync(fileno(file));
     #elif defined(__APPLE__) && defined(F_FULLFSYNC)
-    fcntl(fileno(fileout), F_FULLFSYNC, 0);
+    fcntl(fileno(file), F_FULLFSYNC, 0);
     #else
-    fsync(fileno(fileout));
+    fsync(fileno(file));
     #endif
 #endif
 }
@@ -810,13 +836,13 @@ void ShrinkDebugFile()
         // Restart the file with some of the end
         std::vector<char> vch(RECENT_DEBUG_HISTORY_SIZE, 0);
         fseek(file, -((long)vch.size()), SEEK_END);
-        int nBytes = fread(begin_ptr(vch), 1, vch.size(), file);
+        int nBytes = fread(vch.data(), 1, vch.size(), file);
         fclose(file);
 
         file = fopen(pathLog.string().c_str(), "w");
         if (file)
         {
-            fwrite(begin_ptr(vch), 1, nBytes, file);
+            fwrite(vch.data(), 1, nBytes, file);
             fclose(file);
         }
     }
@@ -881,6 +907,16 @@ std::string GetThreadName()
 
 void SetupEnvironment()
 {
+#ifdef HAVE_MALLOPT_ARENA_MAX
+    // glibc-specific: On 32-bit systems set the number of arenas to 1.
+    // By default, since glibc 2.10, the C library will create up to two heap
+    // arenas per core. This is known to cause excessive virtual address space
+    // usage in our usage. Work around it by setting the maximum number of
+    // arenas to 1.
+    if (sizeof(void*) == 4) {
+        mallopt(M_ARENA_MAX, 1);
+    }
+#endif
     // On most POSIX systems (e.g. Linux, but not BSD) the environment's locale
     // may be invalid, in which case the "C" locale is used as fallback.
 #if !defined(WIN32) && !defined(MAC_OSX) && !defined(__FreeBSD__) && !defined(__OpenBSD__)
@@ -921,11 +957,10 @@ int GetNumCores()
 
 std::string CopyrightHolders(const std::string& strPrefix, unsigned int nStartYear, unsigned int nEndYear)
 {
-    std::string strCopyrightHolders = strPrefix + strprintf(" %u-%u ", nStartYear, nEndYear) + _(COPYRIGHT_HOLDERS);
-    if (strCopyrightHolders.find("%s") != strCopyrightHolders.npos) {
-        strCopyrightHolders = strprintf(strCopyrightHolders, _(COPYRIGHT_HOLDERS_SUBSTITUTION));
-    }
-    if (strCopyrightHolders.find("Bitcoin Core developers") == strCopyrightHolders.npos) {
+    std::string strCopyrightHolders = strPrefix + strprintf(" %u-%u ", nStartYear, nEndYear) + strprintf(_(COPYRIGHT_HOLDERS), _(COPYRIGHT_HOLDERS_SUBSTITUTION));
+
+    // Check for untranslated substitution to make sure Bitcoin Core copyright is not removed by accident
+    if (strprintf(COPYRIGHT_HOLDERS, COPYRIGHT_HOLDERS_SUBSTITUTION).find("Bitcoin Core") == std::string::npos) {
         strCopyrightHolders += "\n" + strPrefix + strprintf(" %u-%u ", 2009, nEndYear) + "The Bitcoin Core developers";
     }
     return strCopyrightHolders;

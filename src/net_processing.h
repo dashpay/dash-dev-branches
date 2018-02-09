@@ -33,6 +33,7 @@ private:
 public:
     PeerLogicValidation(CConnman* connmanIn);
 
+    virtual void SyncTransaction(const CTransaction& tx, const CBlockIndex* pindex, int nPosInBlock);
     virtual void UpdatedBlockTip(const CBlockIndex *pindexNew, const CBlockIndex *pindexFork, bool fInitialDownload);
     virtual void BlockChecked(const CBlock& block, const CValidationState& state);
 };
@@ -50,7 +51,7 @@ bool GetNodeStateStats(NodeId nodeid, CNodeStateStats &stats);
 void Misbehaving(NodeId nodeid, int howmuch);
 
 /** Process protocol messages received from a given node */
-bool ProcessMessages(CNode* pfrom, CConnman& connman, std::atomic<bool>& interrupt);
+bool ProcessMessages(CNode* pfrom, CConnman& connman, const std::atomic<bool>& interrupt);
 /**
  * Send queued protocol messages to be sent to a give node.
  *
@@ -59,6 +60,6 @@ bool ProcessMessages(CNode* pfrom, CConnman& connman, std::atomic<bool>& interru
  * @param[in]   interrupt       Interrupt condition for processing threads
  * @return                      True if there is more work to be done
  */
-bool SendMessages(CNode* pto, CConnman& connman, std::atomic<bool>& interrupt);
+bool SendMessages(CNode* pto, CConnman& connman, const std::atomic<bool>& interrupt);
 
 #endif // BITCOIN_NET_PROCESSING_H

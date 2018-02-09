@@ -42,6 +42,7 @@ import dash_hash
 BIP0031_VERSION = 60000
 MY_VERSION = 70208  # current MIN_PEER_PROTO_VERSION
 MY_SUBVERSION = b"/python-mininode-tester:0.0.3/"
+MY_RELAY = 1 # from version 70001 onwards, fRelay should be appended to version messages (BIP37)
 
 VERSIONBITS_EVO = 0x00001000
 
@@ -78,7 +79,19 @@ def hash256(s):
 def dashhash(s):
     return dash_hash.getPoWHash(s)
 
-def deser_string(f):
+def ser_compact_size(l):
+    r = b""
+    if l < 253:
+        r = struct.pack("B", l)
+    elif l < 0x10000:
+        r = struct.pack("<BH", 253, l)
+    elif l < 0x100000000:
+        r = struct.pack("<BI", 254, l)
+    else:
+        r = struct.pack("<BQ", 255, l)
+    return r
+
+def deser_compact_size(f):
     nit = struct.unpack("<B", f.read(1))[0]
     if nit == 253:
         nit = struct.unpack("<H", f.read(2))[0]
@@ -86,16 +99,14 @@ def deser_string(f):
         nit = struct.unpack("<I", f.read(4))[0]
     elif nit == 255:
         nit = struct.unpack("<Q", f.read(8))[0]
+    return nit
+
+def deser_string(f):
+    nit = deser_compact_size(f)
     return f.read(nit)
 
 def ser_string(s):
-    if len(s) < 253:
-        return struct.pack("B", len(s)) + s
-    elif len(s) < 0x10000:
-        return struct.pack("<BH", 253, len(s)) + s
-    elif len(s) < 0x100000000:
-        return struct.pack("<BI", 254, len(s)) + s
-    return struct.pack("<BQ", 255, len(s)) + s
+    return ser_compact_size(len(s)) + s
 
 def deser_uint256(f):
     r = 0
@@ -144,13 +155,7 @@ def uint256_from_compact(c):
 
 
 def deser_vector(f, c):
-    nit = struct.unpack("<B", f.read(1))[0]
-    if nit == 253:
-        nit = struct.unpack("<H", f.read(2))[0]
-    elif nit == 254:
-        nit = struct.unpack("<I", f.read(4))[0]
-    elif nit == 255:
-        nit = struct.unpack("<Q", f.read(8))[0]
+    nit = deser_compact_size(f)
     r = []
     for i in range(nit):
         t = c()
@@ -160,28 +165,14 @@ def deser_vector(f, c):
 
 
 def ser_vector(l):
-    r = b""
-    if len(l) < 253:
-        r = struct.pack("B", len(l))
-    elif len(l) < 0x10000:
-        r = struct.pack("<BH", 253, len(l))
-    elif len(l) < 0x100000000:
-        r = struct.pack("<BI", 254, len(l))
-    else:
-        r = struct.pack("<BQ", 255, len(l))
+    r = ser_compact_size(len(l))
     for i in l:
         r += i.serialize()
     return r
 
 
 def deser_uint256_vector(f):
-    nit = struct.unpack("<B", f.read(1))[0]
-    if nit == 253:
-        nit = struct.unpack("<H", f.read(2))[0]
-    elif nit == 254:
-        nit = struct.unpack("<I", f.read(4))[0]
-    elif nit == 255:
-        nit = struct.unpack("<Q", f.read(8))[0]
+    nit = deser_compact_size(f)
     r = []
     for i in range(nit):
         t = deser_uint256(f)
@@ -190,28 +181,14 @@ def deser_uint256_vector(f):
 
 
 def ser_uint256_vector(l):
-    r = b""
-    if len(l) < 253:
-        r = struct.pack("B", len(l))
-    elif len(l) < 0x10000:
-        r = struct.pack("<BH", 253, len(l))
-    elif len(l) < 0x100000000:
-        r = struct.pack("<BI", 254, len(l))
-    else:
-        r = struct.pack("<BQ", 255, len(l))
+    r = ser_compact_size(len(l))
     for i in l:
         r += ser_uint256(i)
     return r
 
 
 def deser_string_vector(f):
-    nit = struct.unpack("<B", f.read(1))[0]
-    if nit == 253:
-        nit = struct.unpack("<H", f.read(2))[0]
-    elif nit == 254:
-        nit = struct.unpack("<I", f.read(4))[0]
-    elif nit == 255:
-        nit = struct.unpack("<Q", f.read(8))[0]
+    nit = deser_compact_size(f)
     r = []
     for i in range(nit):
         t = deser_string(f)
@@ -220,28 +197,14 @@ def deser_string_vector(f):
 
 
 def ser_string_vector(l):
-    r = b""
-    if len(l) < 253:
-        r = struct.pack("B", len(l))
-    elif len(l) < 0x10000:
-        r = struct.pack("<BH", 253, len(l))
-    elif len(l) < 0x100000000:
-        r = struct.pack("<BI", 254, len(l))
-    else:
-        r = struct.pack("<BQ", 255, len(l))
+    r = ser_compact_size(len(l))
     for sv in l:
         r += ser_string(sv)
     return r
 
 
 def deser_int_vector(f):
-    nit = struct.unpack("<B", f.read(1))[0]
-    if nit == 253:
-        nit = struct.unpack("<H", f.read(2))[0]
-    elif nit == 254:
-        nit = struct.unpack("<I", f.read(4))[0]
-    elif nit == 255:
-        nit = struct.unpack("<Q", f.read(8))[0]
+    nit = deser_compact_size(f)
     r = []
     for i in range(nit):
         t = struct.unpack("<i", f.read(4))[0]
@@ -250,15 +213,7 @@ def deser_int_vector(f):
 
 
 def ser_int_vector(l):
-    r = b""
-    if len(l) < 253:
-        r = struct.pack("B", len(l))
-    elif len(l) < 0x10000:
-        r = struct.pack("<BH", 253, len(l))
-    elif len(l) < 0x100000000:
-        r = struct.pack("<BI", 254, len(l))
-    else:
-        r = struct.pack("<BQ", 255, len(l))
+    r = ser_compact_size(len(l))
     for i in l:
         r += struct.pack("<i", i)
     return r
@@ -798,6 +753,7 @@ class msg_version(object):
         self.nNonce = random.getrandbits(64)
         self.strSubVer = MY_SUBVERSION
         self.nStartingHeight = -1
+        self.nRelay = MY_RELAY
 
     def deserialize(self, f):
         self.nVersion = struct.unpack("<i", f.read(4))[0]
@@ -807,20 +763,31 @@ class msg_version(object):
         self.nTime = struct.unpack("<q", f.read(8))[0]
         self.addrTo = CAddress()
         self.addrTo.deserialize(f)
+
         if self.nVersion >= 106:
             self.addrFrom = CAddress()
             self.addrFrom.deserialize(f)
             self.nNonce = struct.unpack("<Q", f.read(8))[0]
             self.strSubVer = deser_string(f)
-            if self.nVersion >= 209:
-                self.nStartingHeight = struct.unpack("<i", f.read(4))[0]
-            else:
-                self.nStartingHeight = None
         else:
             self.addrFrom = None
             self.nNonce = None
             self.strSubVer = None
             self.nStartingHeight = None
+
+        if self.nVersion >= 209:
+            self.nStartingHeight = struct.unpack("<i", f.read(4))[0]
+        else:
+            self.nStartingHeight = None
+
+        if self.nVersion >= 70001:
+            # Relay field is optional for version 70001 onwards
+            try:
+                self.nRelay = struct.unpack("<b", f.read(1))[0]
+            except:
+                self.nRelay = 0
+        else:
+            self.nRelay = 0
 
     def serialize(self):
         r = b""
@@ -832,13 +799,14 @@ class msg_version(object):
         r += struct.pack("<Q", self.nNonce)
         r += ser_string(self.strSubVer)
         r += struct.pack("<i", self.nStartingHeight)
+        r += struct.pack("<b", self.nRelay)
         return r
 
     def __repr__(self):
-        return 'msg_version(nVersion=%i nServices=%i nTime=%s addrTo=%s addrFrom=%s nNonce=0x%016X strSubVer=%s nStartingHeight=%i)' \
+        return 'msg_version(nVersion=%i nServices=%i nTime=%s addrTo=%s addrFrom=%s nNonce=0x%016X strSubVer=%s nStartingHeight=%i nRelay=%i)' \
             % (self.nVersion, self.nServices, time.ctime(self.nTime),
                repr(self.addrTo), repr(self.addrFrom), self.nNonce,
-               self.strSubVer, self.nStartingHeight)
+               self.strSubVer, self.nStartingHeight, self.nRelay)
 
 
 class msg_verack(object):
@@ -1177,7 +1145,7 @@ class msg_reject(object):
             % (self.message, self.code, self.reason, self.data)
 
 # Helper function
-def wait_until(predicate, attempts=float('inf'), timeout=float('inf')):
+def wait_until(predicate, *, attempts=float('inf'), timeout=float('inf')):
     attempt = 0
     elapsed = 0
 
@@ -1283,6 +1251,7 @@ class NodeConnCB(object):
         if conn.ver_send > BIP0031_VERSION:
             conn.send_message(msg_pong(message.nonce))
     def on_reject(self, conn, message): pass
+    def on_open(self, conn): pass
     def on_close(self, conn): pass
     def on_mempool(self, conn): pass
     def on_pong(self, conn, message): pass
@@ -1312,7 +1281,7 @@ class SingleNodeConnCB(NodeConnCB):
         def received_pong():
             return (self.last_pong.nonce == self.ping_counter)
         self.send_message(msg_ping(nonce=self.ping_counter))
-        success = wait_until(received_pong, timeout)
+        success = wait_until(received_pong, timeout=timeout)
         self.ping_counter += 1
         return success
 
@@ -1345,7 +1314,7 @@ class NodeConn(asyncore.dispatcher):
         "regtest": b"\xfc\xc1\xb7\xdc",   # regtest
     }
 
-    def __init__(self, dstaddr, dstport, rpc, callback, net="regtest", services=NODE_NETWORK):
+    def __init__(self, dstaddr, dstport, rpc, callback, net="regtest", services=NODE_NETWORK, send_version=True):
         asyncore.dispatcher.__init__(self, map=mininode_socket_map)
         self.log = logging.getLogger("NodeConn(%s:%d)" % (dstaddr, dstport))
         self.dstaddr = dstaddr
@@ -1362,14 +1331,16 @@ class NodeConn(asyncore.dispatcher):
         self.disconnect = False
         self.nServices = 0
 
-        # stuff version msg into sendbuf
-        vt = msg_version()
-        vt.nServices = services
-        vt.addrTo.ip = self.dstaddr
-        vt.addrTo.port = self.dstport
-        vt.addrFrom.ip = "0.0.0.0"
-        vt.addrFrom.port = 0
-        self.send_message(vt, True)
+        if send_version:
+            # stuff version msg into sendbuf
+            vt = msg_version()
+            vt.nServices = services
+            vt.addrTo.ip = self.dstaddr
+            vt.addrTo.port = self.dstport
+            vt.addrFrom.ip = "0.0.0.0"
+            vt.addrFrom.port = 0
+            self.send_message(vt, True)
+
         print('MiniNode: Connecting to Dash Node IP # ' + dstaddr + ':' \
             + str(dstport))
 
@@ -1383,8 +1354,10 @@ class NodeConn(asyncore.dispatcher):
         self.log.debug(msg)
 
     def handle_connect(self):
-        self.show_debug_msg("MiniNode: Connected & Listening: \n")
-        self.state = "connected"
+        if self.state != "connected":
+            self.show_debug_msg("MiniNode: Connected & Listening: \n")
+            self.state = "connected"
+            self.cb.on_open(self)
 
     def handle_close(self):
         self.show_debug_msg("MiniNode: Closing Connection to %s:%d... "
@@ -1412,11 +1385,20 @@ class NodeConn(asyncore.dispatcher):
 
     def writable(self):
         with mininode_lock:
+            pre_connection = self.state == "connecting"
             length = len(self.sendbuf)
-        return (length > 0)
+        return (length > 0 or pre_connection)
 
     def handle_write(self):
         with mininode_lock:
+            # asyncore does not expose socket connection, only the first read/write
+            # event, thus we must check connection manually here to know when we
+            # actually connect
+            if self.state == "connecting":
+                self.handle_connect()
+            if not self.writable():
+                return
+
             try:
                 sent = self.send(self.sendbuf)
             except:

@@ -1,5 +1,13 @@
+# Copyright (c) 2013-2016 The Bitcoin Core developers
+# Copyright (c) 2014-2018 The Dash Core developers
+# Distributed under the MIT software license, see the accompanying
+# file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
 ACLOCAL_AMFLAGS = -I build-aux/m4
 SUBDIRS = src
+if ENABLE_MAN
+SUBDIRS += doc/man
+endif
 .PHONY: deploy FORCE
 
 GZIP_ENV="-9n"
@@ -32,6 +40,10 @@ OSX_PLIST=$(top_builddir)/share/qt/Info.plist #not installed
 OSX_QT_TRANSLATIONS = da,de,es,hu,ru,uk,zh_CN,zh_TW
 
 DIST_DOCS = $(wildcard doc/*.md) $(wildcard doc/release-notes/*.md)
+DIST_CONTRIB = $(top_srcdir)/contrib/dash-cli.bash-completion \
+	       $(top_srcdir)/contrib/dash-tx.bash-completion \
+	       $(top_srcdir)/contrib/dashd.bash-completion \
+	       $(top_srcdir)/contrib/init
 
 BIN_CHECKS=$(top_srcdir)/contrib/devtools/symbol-check.py \
            $(top_srcdir)/contrib/devtools/security-check.py
@@ -63,9 +75,6 @@ $(BITCOIN_WIN_INSTALLER): all-recursive
 	@test -f $(MAKENSIS) && $(MAKENSIS) -V2 $(top_builddir)/share/setup.nsi || \
 	  echo error: could not build $@
 	@echo built $@
-
-$(if $(findstring src/,$(MAKECMDGOALS)),$(MAKECMDGOALS), none): FORCE
-	$(MAKE) -C src $(patsubst src/%,%,$@)
 
 $(OSX_APP)/Contents/PkgInfo:
 	$(MKDIR_P) $(@D)
@@ -99,8 +108,15 @@ osx_volname:
 	echo $(OSX_VOLNAME) >$@
 
 if BUILD_DARWIN
-$(OSX_DMG): $(OSX_APP_BUILT) $(OSX_PACKAGING)
+$(OSX_DMG): $(OSX_APP_BUILT) $(OSX_PACKAGING) $(OSX_BACKGROUND_IMAGE)
 	$(PYTHON) $(OSX_DEPLOY_SCRIPT) $(OSX_APP) -add-qt-tr $(OSX_QT_TRANSLATIONS) -translations-dir=$(QT_TRANSLATION_DIR) -dmg -fancy $(OSX_FANCY_PLIST) -verbose 2 -volname $(OSX_VOLNAME)
+
+$(OSX_BACKGROUND_IMAGE).png: contrib/macdeploy/$(OSX_BACKGROUND_SVG)
+	sed 's/PACKAGE_NAME/$(PACKAGE_NAME)/' < "$<" | $(RSVG_CONVERT) -f png -d 36 -p 36 -o $@
+$(OSX_BACKGROUND_IMAGE)@2x.png: contrib/macdeploy/$(OSX_BACKGROUND_SVG)
+	sed 's/PACKAGE_NAME/$(PACKAGE_NAME)/' < "$<" | $(RSVG_CONVERT) -f png -d 72 -p 72 -o $@
+$(OSX_BACKGROUND_IMAGE): $(OSX_BACKGROUND_IMAGE).png $(OSX_BACKGROUND_IMAGE)@2x.png
+	tiffutil -cathidpicheck $^ -out $@
 
 deploydir: $(OSX_DMG)
 else
@@ -204,7 +220,7 @@ endif
 
 dist_noinst_SCRIPTS = autogen.sh
 
-EXTRA_DIST = $(top_srcdir)/share/genbuild.sh qa/pull-tester/rpc-tests.py qa/rpc-tests $(DIST_DOCS) $(WINDOWS_PACKAGING) $(OSX_PACKAGING) $(BIN_CHECKS)
+EXTRA_DIST = $(top_srcdir)/share/genbuild.sh qa/pull-tester/rpc-tests.py qa/rpc-tests $(DIST_CONTRIB) $(DIST_DOCS) $(WINDOWS_PACKAGING) $(OSX_PACKAGING) $(BIN_CHECKS)
 
 CLEANFILES = $(OSX_DMG) $(BITCOIN_WIN_INSTALLER)
 
@@ -212,6 +228,8 @@ CLEANFILES = $(OSX_DMG) $(BITCOIN_WIN_INSTALLER)
 DISTCLEANFILES = qa/pull-tester/tests_config.pyc
 
 .INTERMEDIATE: $(COVERAGE_INFO)
+
+DISTCHECK_CONFIGURE_FLAGS = --enable-man
 
 clean-local:
 	rm -rf coverage_percent.txt test_dash.coverage/ total.coverage/ qa/tmp/ cache/ $(OSX_APP)
