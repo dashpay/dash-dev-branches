@@ -2741,8 +2741,8 @@ bool static ConnectTip(CValidationState& state, const CChainParams& chainparams,
     // Relay transitions which got valid now
     bool containsSubTxOrTs = blockConnecting.vts.empty();
     if (!containsSubTxOrTs) {
-        for (const CTransaction &tx : blockConnecting.vtx) {
-            if (IsSubTx(tx)) {
+        for (const CTransactionRef &tx : blockConnecting.vtx) {
+            if (IsSubTx(*tx)) {
                 containsSubTxOrTs = true;
                 break;
             }

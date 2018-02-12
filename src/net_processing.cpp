@@ -1111,7 +1111,7 @@ void static ProcessGetData(CNode* pfrom, const Consensus::Params& consensusParam
                         found = true;
 
                     if (found) {
-                        connman.PushMessage(pfrom, NetMsgType::TRANSITION, ts);
+                        connman.PushMessage(pfrom, msgMaker.Make(NetMsgType::TRANSITION, ts));
                         push = true;
                     }
                 }

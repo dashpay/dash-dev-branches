@@ -576,9 +576,9 @@ public:
     void removeRecursive(const CTransaction &tx, MemPoolRemovalReason reason = MemPoolRemovalReason::UNKNOWN);
     void removeForReorg(const CCoinsViewCache *pcoins, unsigned int nMemPoolHeight, int flags);
     void removeConflicts(const CTransaction &tx);
-    void removeSubTxTopups(const uint256 &regTxId, std::list<CTransaction>& removed);
-    void removeSubTxConflicts(const CTransaction &tx, std::list<CTransaction>& removed);
-    void removeTsConflicts(const CTransition &ts, std::list<CTransaction>& removed);
+    void removeSubTxTopups(const uint256 &regTxId);
+    void removeSubTxConflicts(const CTransaction &tx);
+    void removeTsConflicts(const CTransition &ts);
     void removeForBlock(const std::vector<CTransactionRef>& vtx, const std::vector<CTransition>& vts, unsigned int nBlockHeight);
 
     void clear();
