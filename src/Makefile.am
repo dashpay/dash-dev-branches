@@ -105,6 +105,7 @@ BITCOIN_CORE_H = \
   core_io.h \
   core_memusage.h \
   cuckoocache.h \
+  evo/specialtx.h \
   evo/users.h \
   evo/subtx.h \
   evo/tsmempool.h \
@@ -219,6 +220,7 @@ libbitcoin_server_a_SOURCES = \
   chain.cpp \
   checkpoints.cpp \
   dsnotificationinterface.cpp \
+  evo/specialtx.cpp \
   evo/users.cpp \
   evo/subtx.cpp \
   evo/tsmempool.cpp \

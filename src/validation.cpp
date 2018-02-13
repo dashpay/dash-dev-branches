@@ -43,6 +43,7 @@
 #include "masternodeman.h"
 #include "masternode-payments.h"
 
+#include "evo/specialtx.h"
 #include "evo/subtx.h"
 #include "evo/tsmempool.h"
 #include "evo/tsvalidation.h"
@@ -571,6 +572,9 @@ bool CheckTransaction(const CTransaction& tx, CValidationState &state, bool fChe
             if (txin.prevout.IsNull())
                 return state.DoS(10, false, REJECT_INVALID, "bad-txns-prevout-null");
     }
+
+    if (!CheckSpecialTx(tx, nullptr, state))
+        return false;
 
     return true;
 }
@@ -1801,6 +1805,10 @@ static DisconnectResult DisconnectBlock(const CBlock& block, CValidationState& s
     std::vector<std::pair<CAddressUnspentKey, CAddressUnspentValue> > addressUnspentIndex;
     std::vector<std::pair<CSpentIndexKey, CSpentIndexValue> > spentIndex;
 
+    if (!UndoSpecialTxsInBlock(block, pindex)) {
+        return DISCONNECT_FAILED;
+    }
+
     // Evo transitions
     if (!UndoTransitionsInBlock(block, state)) {
         return DISCONNECT_FAILED;
@@ -2337,6 +2345,9 @@ static bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockInd
     }
     int64_t nTime3 = GetTimeMicros(); nTimeConnect += nTime3 - nTime2;
     LogPrint("bench", "      - Connect %u transactions: %.2fms (%.3fms/tx, %.3fms/txin) [%.2fs]\n", (unsigned)block.vtx.size(), 0.001 * (nTime3 - nTime2), 0.001 * (nTime3 - nTime2) / block.vtx.size(), nInputs <= 1 ? 0 : 0.001 * (nTime3 - nTime2) / (nInputs-1), nTimeConnect * 0.000001);
+
+    if (!ProcessSpecialTxsInBlock(block, pindex, state))
+        return false;
 
     // Evo SubTXs
     if (!ProcessSubTxsInBlock(block, state))
