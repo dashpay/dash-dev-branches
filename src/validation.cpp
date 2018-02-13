@@ -44,6 +44,7 @@
 #include "masternode-payments.h"
 
 #include "evo/specialtx.h"
+#include "evo/providertx.h"
 #include "evo/subtx.h"
 #include "evo/tsmempool.h"
 #include "evo/tsvalidation.h"
@@ -518,7 +519,8 @@ bool CheckTransaction(const CTransaction& tx, CValidationState &state, bool fChe
 {
     // check version 3 transaction types
     if (tx.nVersion >= 3) {
-        if (tx.nType != TRANSACTION_NORMAL) {
+        if (tx.nType != TRANSACTION_NORMAL &&
+                tx.nType != TRANSACTION_PROVIDER_REGISTER) {
             return state.DoS(100, false, REJECT_INVALID, "bad-txns-type");
         }
         if (tx.IsCoinBase() && tx.nType != TRANSACTION_NORMAL)
