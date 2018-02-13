@@ -17,6 +17,10 @@
 #include "wallet/wallet.h"
 #endif//ENABLE_WALLET
 
+#include "netbase.h"
+
+#include "evo/specialtx.h"
+#include "evo/providertx.h"
 #include "evo/subtx.h"
 #include "evo/users.h"
 #include "evo/tsvalidation.h"
@@ -201,9 +205,9 @@ UniValue getuser(const JSONRPCRequest& request)
 }
 
 // Allows to specify Dash address or priv key. In case of Dash address, the priv key is taken from the wallet
-static CKey ParsePrivKey(const std::string &strKeyOrAddress) {
+static CKey ParsePrivKey(const std::string &strKeyOrAddress, bool allowAddresses = true) {
     CBitcoinAddress address;
-    if (address.SetString(strKeyOrAddress) && address.IsValid()) {
+    if (allowAddresses && address.SetString(strKeyOrAddress) && address.IsValid()) {
 #ifdef ENABLE_WALLET
         CKeyID keyId;
         CKey key;
@@ -383,6 +387,8 @@ UniValue createrawtransition(const JSONRPCRequest& request) {
         ts.hashPrevTransition = GetLastTransitionFromParams(request.params, 4, ts.hashRegTx);
     } else if (action == "close") {
         ts.action = Transition_CloseAccount;
+    } else {
+        throw std::runtime_error("invalid command: " + action);
     }
 
     CDataStream ds(SER_DISK, CLIENT_VERSION);
@@ -502,6 +508,98 @@ UniValue gettransition(const JSONRPCRequest &request) {
     return result;
 }
 
+UniValue createprovidertx(const JSONRPCRequest &request) {
+    if (request.fHelp /*|| request.params.size() != 1*/)
+        throw std::runtime_error(
+                "createprovidertx \"tsHash\"\n"
+                "\nGet transition with hash \"tsHash\" and output a json object.\n"
+                "\nExamples:\n"
+                + HelpExampleCli("gettransition", "\"tsHash\"")
+                + HelpExampleRpc("gettransition", "\"tsHash\", \"false\"")
+        );
+
+    std::string action = request.params[0].get_str();
+
+    if (action == "register") {
+        CBitcoinAddress collateralAddress(request.params[1].get_str());
+        if (!collateralAddress.IsValid())
+            throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, strprintf("invalid collaterall address: %s", request.params[1].get_str()));
+        CScript collateralScript = GetScriptForDestination(collateralAddress.Get());
+
+        CAmount collateralAmount;
+        if (!ParseMoney(request.params[2].get_str(), collateralAmount))
+            throw std::runtime_error(strprintf("invalid collateral amount %s", request.params[2].get_str()));
+        if (collateralAmount != 1000 * COIN)
+            throw std::runtime_error(strprintf("invalid collateral amount %d. only 1000 DASH is supported at the moment", collateralAmount));
+
+        CTxOut collateralTxOut(collateralAmount, collateralScript);
+
+        CMutableTransaction tx;
+        tx.nVersion = 3;
+        tx.nType = TRANSACTION_PROVIDER_REGISTER;
+        tx.vout.emplace_back(collateralTxOut);
+
+        CAmount nFee;
+        CFeeRate feeRate = CFeeRate(0);
+        int nChangePos = -1;
+        std::string strFailReason;
+        std::set<int> setSubtractFeeFromOutputs;
+        if (!pwalletMain->FundTransaction(tx, nFee, false, feeRate, nChangePos, strFailReason, false, false, setSubtractFeeFromOutputs))
+            throw JSONRPCError(RPC_INTERNAL_ERROR, strFailReason);
+
+        int collateralIndex = -1;
+        for (int i = 0; i < (int)tx.vout.size(); i++) {
+            if (tx.vout[i] == collateralTxOut) {
+                collateralIndex = i;
+                break;
+            }
+        }
+        assert(collateralIndex != -1);
+
+        CProviderTXRegisterMN ptx;
+        ptx.nVersion = CProviderTXRegisterMN::CURRENT_VERSION;
+        ptx.nCollateralIndex = collateralIndex;
+
+        if (!Lookup(request.params[3].get_str().c_str(), ptx.addr, Params().GetDefaultPort(), false))
+            throw std::runtime_error(strprintf("invalid network address %s", request.params[3].get_str()));
+
+        if (!ParseInt32(request.params[4].get_str(), &ptx.nProtocolVersion))
+            throw std::runtime_error(strprintf("invalid protocol version %s", request.params[4].get_str()));
+
+        if (ptx.nProtocolVersion == 0)
+            ptx.nProtocolVersion = PROTOCOL_VERSION;
+
+        CKey keyMasternode = ParsePrivKey(request.params[5].get_str(), false);
+        CBitcoinAddress payoutAddress(request.params[6].get_str());
+        if (!payoutAddress.IsValid())
+            throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, strprintf("invalid payout address: %s", request.params[6].get_str()));
+
+        ptx.keyIDMasternode = keyMasternode.GetPubKey().GetID();
+        ptx.scriptPayout = GetScriptForDestination(payoutAddress.Get());
+        ptx.inputsHash = CalcTxInputsHash(tx);
+
+        uint256 hash = ::SerializeHash(ptx);
+        if (!CHashSigner::SignHash(hash, keyMasternode, ptx.vchSig)) {
+            throw std::runtime_error(strprintf("failed to sign provider tx"));
+        }
+
+        CDataStream ds(CLIENT_VERSION, SER_NETWORK);
+        ds << ptx;
+        tx.extraPayload.assign(ds.begin(), ds.end());
+
+        LOCK(cs_main);
+        CValidationState state;
+        if (!CheckSpecialTx(tx, chainActive.Tip(), state))
+            throw std::runtime_error(FormatStateMessage(state));
+
+        ds.clear();
+        ds << tx;
+        return HexStr(ds.begin(), ds.end());
+    } else {
+        throw std::runtime_error("invalid command: " + action);
+    }
+}
+
 static const CRPCCommand commands[] =
 { //  category              name                      actor (function)         okSafeMode
   //  --------------------- ------------------------  -----------------------  ----------
@@ -512,6 +610,8 @@ static const CRPCCommand commands[] =
     { "evo",                "signrawtransition",      &signrawtransition,      true, {"hex_ts", "key"}  },
     { "evo",                "sendrawtransition",      &sendrawtransition,      true, {"hex_ts", "relay"}  },
     { "evo",                "gettransition",          &gettransition,          true, {"ts_hash"}  },
+
+    { "evo",                "createprovidertx",      &createprovidertx,        true, {}  },
 
 #ifdef ENABLE_WALLET
         // createsubtx requires the wallet to be enabled to fund the SubTx
