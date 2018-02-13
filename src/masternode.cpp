@@ -73,7 +73,7 @@ bool CMasternode::UpdateFromNewBroadcast(CMasternodeBroadcast& mnb, CConnman& co
         mnodeman.mapSeenMasternodePing.insert(std::make_pair(lastPing.GetHash(), lastPing));
     }
     // if it matches our Masternode privkey...
-    if(fMasterNode && pubKeyMasternode == activeMasternode.pubKeyMasternode) {
+    if(fMasternodeMode && pubKeyMasternode == activeMasternode.pubKeyMasternode) {
         nPoSeBanScore = -MASTERNODE_POSE_BAN_MAX_SCORE;
         if(nProtocolVersion == PROTOCOL_VERSION) {
             // ... and PROTOCOL_VERSION, then we've been remotely activated ...
@@ -93,7 +93,7 @@ bool CMasternode::UpdateFromNewBroadcast(CMasternodeBroadcast& mnb, CConnman& co
 // the proof of work for that block. The further away they are the better, the furthest will win the election
 // and get paid this block
 //
-arith_uint256 CMasternode::CalculateScore(const uint256& blockHash)
+arith_uint256 CMasternode::CalculateScore(const uint256& blockHash) const
 {
     // Deterministically calculate a "score" for a Masternode based on any given (block)hash
     CHashWriter ss(SER_GETHASH, PROTOCOL_VERSION);
@@ -173,7 +173,7 @@ void CMasternode::Check(bool fForce)
     }
 
     int nActiveStatePrev = nActiveState;
-    bool fOurMasternode = fMasterNode && activeMasternode.pubKeyMasternode == pubKeyMasternode;
+    bool fOurMasternode = fMasternodeMode && activeMasternode.pubKeyMasternode == pubKeyMasternode;
 
                    // masternode doesn't meet payment protocol requirements ...
     bool fRequireUpdate = nProtocolVersion < mnpayments.GetMinMasternodePaymentsProto() ||
@@ -264,7 +264,7 @@ bool CMasternode::IsValidNetAddr(CService addrIn)
             (addrIn.IsIPv4() && IsReachable(addrIn) && addrIn.IsRoutable());
 }
 
-masternode_info_t CMasternode::GetInfo()
+masternode_info_t CMasternode::GetInfo() const
 {
     masternode_info_t info{*this};
     info.nTimeLastPing = lastPing.sigTime;
@@ -317,9 +317,9 @@ void CMasternode::UpdateLastPaid(const CBlockIndex *pindex, int nMaxBlocksToScan
             if(!ReadBlockFromDisk(block, BlockReading, Params().GetConsensus())) // shouldn't really happen
                 continue;
 
-            CAmount nMasternodePayment = GetMasternodePayment(BlockReading->nHeight, block.vtx[0].GetValueOut());
+            CAmount nMasternodePayment = GetMasternodePayment(BlockReading->nHeight, block.vtx[0]->GetValueOut());
 
-            BOOST_FOREACH(CTxOut txout, block.vtx[0].vout)
+            for (const auto& txout : block.vtx[0]->vout)
                 if(mnpayee == txout.scriptPubKey && nMasternodePayment == txout.nValue) {
                     nBlockLastPaid = BlockReading->nHeight;
                     nTimeLastPaid = BlockReading->nTime;
@@ -510,7 +510,7 @@ bool CMasternodeBroadcast::Update(CMasternode* pmn, int& nDos, CConnman& connman
     }
 
     // if ther was no masternode broadcast recently or if it matches our Masternode privkey...
-    if(!pmn->IsBroadcastedWithin(MASTERNODE_MIN_MNB_SECONDS) || (fMasterNode && pubKeyMasternode == activeMasternode.pubKeyMasternode)) {
+    if(!pmn->IsBroadcastedWithin(MASTERNODE_MIN_MNB_SECONDS) || (fMasternodeMode && pubKeyMasternode == activeMasternode.pubKeyMasternode)) {
         // take the newest entry
         LogPrintf("CMasternodeBroadcast::Update -- Got UPDATED Masternode entry: addr=%s\n", addr.ToString());
         if(pmn->UpdateFromNewBroadcast(*this, connman)) {
@@ -527,7 +527,7 @@ bool CMasternodeBroadcast::CheckOutpoint(int& nDos)
 {
     // we are a masternode with the same vin (i.e. already activated) and this mnb is ours (matches our Masternode privkey)
     // so nothing to do here for us
-    if(fMasterNode && vin.prevout == activeMasternode.outpoint && pubKeyMasternode == activeMasternode.pubKeyMasternode) {
+    if(fMasternodeMode && vin.prevout == activeMasternode.outpoint && pubKeyMasternode == activeMasternode.pubKeyMasternode) {
         return false;
     }
 
@@ -608,7 +608,7 @@ bool CMasternodeBroadcast::Sign(const CKey& keyCollateralAddress)
     return true;
 }
 
-bool CMasternodeBroadcast::CheckSignature(int& nDos)
+bool CMasternodeBroadcast::CheckSignature(int& nDos) const
 {
     std::string strMessage;
     std::string strError = "";
@@ -629,7 +629,7 @@ bool CMasternodeBroadcast::CheckSignature(int& nDos)
     return true;
 }
 
-void CMasternodeBroadcast::Relay(CConnman& connman)
+void CMasternodeBroadcast::Relay(CConnman& connman) const
 {
     // Do not relay until fully synced
     if(!masternodeSync.IsSynced()) {

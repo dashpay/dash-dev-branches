@@ -119,22 +119,22 @@ bool UndoSubTx(const CTransaction &tx, CValidationState &state) {
 }
 
 bool CheckSubTxsInBlock(const CBlock &block, CValidationState &state) {
-    for (const CTransaction &tx : block.vtx) {
-        if (!IsSubTx(tx))
+    for (const CTransactionRef &tx : block.vtx) {
+        if (!IsSubTx(*tx))
             continue;
-        if (!CheckSubTx(tx, state))
+        if (!CheckSubTx(*tx, state))
             return false;
     }
     return true;
 }
 
 bool ProcessSubTxsInBlock(const CBlock &block, CValidationState &state) {
-    for (const CTransaction &tx : block.vtx) {
-        if (!IsSubTx(tx))
+    for (const CTransactionRef &tx : block.vtx) {
+        if (!IsSubTx(*tx))
             continue;
-        if (!CheckSubTx(tx, state))
+        if (!CheckSubTx(*tx, state))
             return false;
-        if (!ProcessSubTx(tx, state))
+        if (!ProcessSubTx(*tx, state))
             return false;
     }
     return true;
@@ -142,10 +142,10 @@ bool ProcessSubTxsInBlock(const CBlock &block, CValidationState &state) {
 
 bool UndoSubTxsInBlock(const CBlock &block, CValidationState &state) {
     for (int i = block.vtx.size() - 1; i >= 0; i--) {
-        const CTransaction &tx = block.vtx[i];
-        if (!IsSubTx(tx))
+        const CTransactionRef &tx = block.vtx[i];
+        if (!IsSubTx(*tx))
             continue;
-        if (!UndoSubTx(tx, state))
+        if (!UndoSubTx(*tx, state))
             return false;
     }
     return true;

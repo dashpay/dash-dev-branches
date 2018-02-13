@@ -17,7 +17,7 @@ public:
 
     ADD_SERIALIZE_METHODS;
     template <typename Stream, typename Operation>
-    inline void SerializationOp(Stream& s, Operation ser_action, int nType, int nVersion)
+    inline void SerializationOp(Stream& s, Operation ser_action)
     {
         READWRITE(nExternalChainCounter);
         READWRITE(nInternalChainCounter);
@@ -58,11 +58,10 @@ public:
 
     ADD_SERIALIZE_METHODS;
     template <typename Stream, typename Operation>
-    inline void SerializationOp(Stream& s, Operation ser_action, int nType, int nVersion)
+    inline void SerializationOp(Stream& s, Operation ser_action)
     {
         LOCK(cs_accounts);
         READWRITE(this->nVersion);
-        nVersion = this->nVersion;
         READWRITE(id);
         READWRITE(fCrypted);
         READWRITE(vchSeed);
@@ -136,10 +135,9 @@ public:
 
     ADD_SERIALIZE_METHODS;
     template <typename Stream, typename Operation>
-    inline void SerializationOp(Stream& s, Operation ser_action, int nType, int nVersion)
+    inline void SerializationOp(Stream& s, Operation ser_action)
     {
         READWRITE(this->nVersion);
-        nVersion = this->nVersion;
         READWRITE(extPubKey);
         READWRITE(hdchainID);
         READWRITE(nAccountIndex);

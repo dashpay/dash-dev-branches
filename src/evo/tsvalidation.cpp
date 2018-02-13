@@ -5,6 +5,7 @@
 #include "consensus/validation.h"
 #include "net.h"
 #include "net_processing.h"
+#include "netmessagemaker.h"
 #include "tsvalidation.h"
 #include "tsmempool.h"
 #include "txmempool.h"
@@ -287,6 +288,8 @@ void HandleIncomingTransition(CNode *pfrom, const CTransition &ts) {
     if (tsMempool.Exists(ts.GetHash()))
         return;
 
+    const CNetMsgMaker msgMaker(pfrom->GetSendVersion());
+
     // We always add the TS to the mempool no matter if they are valid or invalid
     // This is because a TS may be invalid when we first see it, but may get valid later when
     // other SubTxs or transitions get mined. We however do not relay invalid transitions at first
@@ -302,8 +305,8 @@ void HandleIncomingTransition(CNode *pfrom, const CTransition &ts) {
             if (state.IsInvalid(nDoS)) {
                 LogPrint("evo-ts", "transition %s from peer=%d not valid: %s\n", ts.GetHash().ToString(), pfrom->id, FormatStateMessage(state));
                 if (state.GetRejectCode() < REJECT_INTERNAL) // Never send internal codes over P2P
-                    g_connman->PushMessage(pfrom, NetMsgType::REJECT, std::string(NetMsgType::TRANSITION), (unsigned char)state.GetRejectCode(),
-                                        state.GetRejectReason().substr(0, MAX_REJECT_MESSAGE_LENGTH), ts.GetHash());
+                    g_connman->PushMessage(pfrom, msgMaker.Make(NetMsgType::REJECT, std::string(NetMsgType::TRANSITION), (unsigned char)state.GetRejectCode(),
+                                        state.GetRejectReason().substr(0, MAX_REJECT_MESSAGE_LENGTH), ts.GetHash()));
                 if (nDoS > 0)
                     Misbehaving(pfrom->GetId(), nDoS);
 
@@ -396,7 +399,7 @@ void AddMempoolTransitionsToBlock(CBlock &block, uint64_t maxTsSpace, uint64_t m
     // add transitions one at a time per user to evenly distribute block space
     // TODO: Change this to be fee based (without loosing correct order) as miners most likely wish to maximize profits.
     uint64_t tsSpaceUsed = ::GetSerializeSize(block.vts, SER_NETWORK, CLIENT_VERSION);
-    uint64_t blockSize = block.GetSerializeSize(SER_NETWORK, CLIENT_VERSION);
+    uint64_t blockSize = ::GetSerializeSize(block, SER_NETWORK, CLIENT_VERSION);
     while (true) {
         bool stop = true;
         for (auto &p : users) {

@@ -36,7 +36,7 @@ CGovernanceObject::CGovernanceObject()
   fExpired(false),
   fUnparsable(false),
   mapCurrentMNVotes(),
-  mapOrphanVotes(),
+  cmmapOrphanVotes(),
   fileVotes()
 {
     // PARSE JSON DATA STORAGE (STRDATA)
@@ -64,7 +64,7 @@ CGovernanceObject::CGovernanceObject(uint256 nHashParentIn, int nRevisionIn, int
   fExpired(false),
   fUnparsable(false),
   mapCurrentMNVotes(),
-  mapOrphanVotes(),
+  cmmapOrphanVotes(),
   fileVotes()
 {
     // PARSE JSON DATA STORAGE (STRDATA)
@@ -92,7 +92,7 @@ CGovernanceObject::CGovernanceObject(const CGovernanceObject& other)
   fExpired(other.fExpired),
   fUnparsable(other.fUnparsable),
   mapCurrentMNVotes(other.mapCurrentMNVotes),
-  mapOrphanVotes(other.mapOrphanVotes),
+  cmmapOrphanVotes(other.cmmapOrphanVotes),
   fileVotes(other.fileVotes)
 {}
 
@@ -105,7 +105,7 @@ bool CGovernanceObject::ProcessVote(CNode* pfrom,
         std::ostringstream ostr;
         ostr << "CGovernanceObject::ProcessVote -- Masternode index not found";
         exception = CGovernanceException(ostr.str(), GOVERNANCE_EXCEPTION_WARNING);
-        if(mapOrphanVotes.Insert(vote.GetMasternodeOutpoint(), vote_time_pair_t(vote, GetAdjustedTime() + GOVERNANCE_ORPHAN_EXPIRATION_TIME))) {
+        if(cmmapOrphanVotes.Insert(vote.GetMasternodeOutpoint(), vote_time_pair_t(vote, GetAdjustedTime() + GOVERNANCE_ORPHAN_EXPIRATION_TIME))) {
             if(pfrom) {
                 mnodeman.AskForMN(pfrom, vote.GetMasternodeOutpoint(), connman);
             }
@@ -510,19 +510,19 @@ bool CGovernanceObject::IsCollateralValid(std::string& strError, bool& fMissingC
     CAmount nMinFee = GetMinCollateralFee();
     uint256 nExpectedHash = GetHash();
 
-    CTransaction txCollateral;
+    CTransactionRef txCollateral;
     uint256 nBlockHash;
 
     // RETRIEVE TRANSACTION IN QUESTION
 
     if(!GetTransaction(nCollateralHash, txCollateral, Params().GetConsensus(), nBlockHash, true)){
-        strError = strprintf("Can't find collateral tx %s", txCollateral.ToString());
+        strError = strprintf("Can't find collateral tx %s", txCollateral->ToString());
         LogPrintf("CGovernanceObject::IsCollateralValid -- %s\n", strError);
         return false;
     }
 
-    if(txCollateral.vout.size() < 1) {
-        strError = strprintf("tx vout size less than 1 | %d", txCollateral.vout.size());
+    if(txCollateral->vout.size() < 1) {
+        strError = strprintf("tx vout size less than 1 | %d", txCollateral->vout.size());
         LogPrintf("CGovernanceObject::IsCollateralValid -- %s\n", strError);
         return false;
     }
@@ -532,7 +532,7 @@ bool CGovernanceObject::IsCollateralValid(std::string& strError, bool& fMissingC
     CScript findScript;
     findScript << OP_RETURN << ToByteVector(nExpectedHash);
 
-    DBG( cout << "IsCollateralValid: txCollateral.vout.size() = " << txCollateral.vout.size() << endl; );
+    DBG( cout << "IsCollateralValid: txCollateral->vout.size() = " << txCollateral->vout.size() << endl; );
 
     DBG( cout << "IsCollateralValid: findScript = " << ScriptToAsmStr( findScript, false ) << endl; );
 
@@ -540,17 +540,17 @@ bool CGovernanceObject::IsCollateralValid(std::string& strError, bool& fMissingC
 
 
     bool foundOpReturn = false;
-    BOOST_FOREACH(const CTxOut o, txCollateral.vout) {
-        DBG( cout << "IsCollateralValid txout : " << o.ToString()
-             << ", o.nValue = " << o.nValue
-             << ", o.scriptPubKey = " << ScriptToAsmStr( o.scriptPubKey, false )
+    for (const auto& output : txCollateral->vout) {
+        DBG( cout << "IsCollateralValid txout : " << output.ToString()
+             << ", output.nValue = " << output.nValue
+             << ", output.scriptPubKey = " << ScriptToAsmStr( output.scriptPubKey, false )
              << endl; );
-        if(!o.scriptPubKey.IsPayToPublicKeyHash() && !o.scriptPubKey.IsUnspendable()) {
-            strError = strprintf("Invalid Script %s", txCollateral.ToString());
+        if(!output.scriptPubKey.IsPayToPublicKeyHash() && !output.scriptPubKey.IsUnspendable()) {
+            strError = strprintf("Invalid Script %s", txCollateral->ToString());
             LogPrintf ("CGovernanceObject::IsCollateralValid -- %s\n", strError);
             return false;
         }
-        if(o.scriptPubKey == findScript && o.nValue >= nMinFee) {
+        if(output.scriptPubKey == findScript && output.nValue >= nMinFee) {
             DBG( cout << "IsCollateralValid foundOpReturn = true" << endl; );
             foundOpReturn = true;
         }
@@ -561,7 +561,7 @@ bool CGovernanceObject::IsCollateralValid(std::string& strError, bool& fMissingC
     }
 
     if(!foundOpReturn){
-        strError = strprintf("Couldn't find opReturn %s in %s", nExpectedHash.ToString(), txCollateral.ToString());
+        strError = strprintf("Couldn't find opReturn %s in %s", nExpectedHash.ToString(), txCollateral->ToString());
         LogPrintf ("CGovernanceObject::IsCollateralValid -- %s\n", strError);
         return false;
     }
@@ -729,8 +729,8 @@ void CGovernanceObject::swap(CGovernanceObject& first, CGovernanceObject& second
 void CGovernanceObject::CheckOrphanVotes(CConnman& connman)
 {
     int64_t nNow = GetAdjustedTime();
-    const vote_mcache_t::list_t& listVotes = mapOrphanVotes.GetItemList();
-    vote_mcache_t::list_cit it = listVotes.begin();
+    const vote_cmm_t::list_t& listVotes = cmmapOrphanVotes.GetItemList();
+    vote_cmm_t::list_cit it = listVotes.begin();
     while(it != listVotes.end()) {
         bool fRemove = false;
         const COutPoint& key = it->key;
@@ -753,7 +753,7 @@ void CGovernanceObject::CheckOrphanVotes(CConnman& connman)
         }
         ++it;
         if(fRemove) {
-            mapOrphanVotes.Erase(key, pairVote);
+            cmmapOrphanVotes.Erase(key, pairVote);
         }
     }
 }

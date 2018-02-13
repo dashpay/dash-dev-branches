@@ -33,7 +33,7 @@ std::string CBlock::ToString() const
         vts.size());
     for (unsigned int i = 0; i < vtx.size(); i++)
     {
-        s << "  " << vtx[i].ToString() << "\n";
+        s << "  " << vtx[i]->ToString() << "\n";
     }
     for (unsigned int i = 0; i < vts.size(); i++)
     {

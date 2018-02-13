@@ -74,7 +74,7 @@ struct vote_instance_t {
     ADD_SERIALIZE_METHODS;
 
     template <typename Stream, typename Operation>
-    inline void SerializationOp(Stream& s, Operation ser_action, int nType, int nVersion)
+    inline void SerializationOp(Stream& s, Operation ser_action)
     {
         int nOutcome = int(eOutcome);
         READWRITE(nOutcome);
@@ -98,7 +98,7 @@ struct vote_rec_t {
     ADD_SERIALIZE_METHODS;
 
      template <typename Stream, typename Operation>
-     inline void SerializationOp(Stream& s, Operation ser_action, int nType, int nVersion)
+     inline void SerializationOp(Stream& s, Operation ser_action)
      {
          READWRITE(mapInstances);
      }
@@ -122,7 +122,7 @@ public: // Types
 
     typedef vote_m_t::const_iterator vote_m_cit;
 
-    typedef CacheMultiMap<COutPoint, vote_time_pair_t> vote_mcache_t;
+    typedef CacheMultiMap<COutPoint, vote_time_pair_t> vote_cmm_t;
 
 private:
     /// critical section to protect the inner data structures
@@ -185,7 +185,7 @@ private:
     vote_m_t mapCurrentMNVotes;
 
     /// Limited map of votes orphaned by MN
-    vote_mcache_t mapOrphanVotes;
+    vote_cmm_t cmmapOrphanVotes;
 
     CGovernanceObjectVoteFile fileVotes;
 
@@ -305,7 +305,7 @@ public:
     ADD_SERIALIZE_METHODS;
 
     template <typename Stream, typename Operation>
-    inline void SerializationOp(Stream& s, Operation ser_action, int nType, int nVersion)
+    inline void SerializationOp(Stream& s, Operation ser_action)
     {
         // SERIALIZE DATA FOR SAVING/LOADING OR NETWORK FUNCTIONS
 
@@ -317,7 +317,7 @@ public:
         READWRITE(nObjectType);
         READWRITE(vinMasternode);
         READWRITE(vchSig);
-        if(nType & SER_DISK) {
+        if(s.GetType() & SER_DISK) {
             // Only include these for the disk file format
             LogPrint("gobject", "CGovernanceObject::SerializationOp Reading/writing votes from/to disk\n");
             READWRITE(nDeletionTime);
