@@ -517,4 +517,46 @@ public:
     }
 };
 
+class CScopedDBTransaction {
+private:
+    CDBTransaction &dbTransaction;
+    std::function<void ()> commitHandler;
+    std::function<void ()> rollbackHandler;
+    bool didCommitOrRollback{};
+
+public:
+    CScopedDBTransaction(CDBTransaction &dbTx) : dbTransaction(dbTx) {}
+    ~CScopedDBTransaction() {
+        if (!didCommitOrRollback)
+            Rollback();
+    }
+    bool Commit() {
+        assert(!didCommitOrRollback);
+        didCommitOrRollback = true;
+        bool result = dbTransaction.Commit();
+        if (commitHandler)
+            commitHandler();
+        return result;
+    }
+    bool Rollback() {
+        assert(!didCommitOrRollback);
+        didCommitOrRollback = true;
+        dbTransaction.Clear();
+        if (rollbackHandler)
+            rollbackHandler();
+    }
+
+    static std::unique_ptr<CScopedDBTransaction> Begin(CDBTransaction &dbTx) {
+        assert(dbTx.IsClean());
+        return std::unique_ptr<CScopedDBTransaction>(new CScopedDBTransaction(dbTx));
+    }
+
+    void SetCommitHandler(const std::function<void ()> &h) {
+        commitHandler = h;
+    }
+    void SetRollbackHandler(const std::function<void ()> &h) {
+        rollbackHandler = h;
+    }
+};
+
 #endif // BITCOIN_DBWRAPPER_H

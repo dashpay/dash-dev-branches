@@ -143,14 +143,6 @@ class CEvoUserDB {
 public:
     CCriticalSection cs;
 
-    struct RAIITransaction {
-        CEvoUserDB &userDb;
-        RAIITransaction(CEvoUserDB &_userDb) : userDb(_userDb) {}
-        ~RAIITransaction() {
-            userDb.Rollback();
-        }
-    };
-
 private:
     CDBWrapper db;
     CDBTransaction dbTransaction;
@@ -177,13 +169,8 @@ public:
     bool GetTransitionBlockHash(const uint256 &tsHash, uint256 &blockHash);
     bool DeleteTransitionBlockHash(const uint256 &tsHash);
 
-    bool Commit();
-    void Rollback();
-    bool IsTransactionClean();
-
-    std::unique_ptr<RAIITransaction> BeginTransaction() {
-        assert(IsTransactionClean());
-        return std::unique_ptr<RAIITransaction>(new RAIITransaction(*this));
+    std::unique_ptr<CScopedDBTransaction> BeginTransaction() {
+        return CScopedDBTransaction::Begin(dbTransaction);
     }
 };
 

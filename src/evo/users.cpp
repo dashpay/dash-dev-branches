@@ -128,15 +128,3 @@ bool CEvoUserDB::DeleteTransitionBlockHash(const uint256 &tsHash) {
     dbTransaction.Erase(std::make_pair(DB_TRANSITION_BLOCK_HASH, tsHash));
     return true;
 }
-
-bool CEvoUserDB::Commit() {
-    return dbTransaction.Commit();
-}
-
-void CEvoUserDB::Rollback() {
-    dbTransaction.Clear();
-}
-
-bool CEvoUserDB::IsTransactionClean() {
-    return dbTransaction.IsClean();
-}
