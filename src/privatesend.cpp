@@ -545,7 +545,7 @@ void ThreadCheckPrivateSend(CConnman& connman)
             // check if we should activate or ping every few minutes,
             // slightly postpone first run to give net thread a chance to connect to some peers
             if(nTick % MASTERNODE_MIN_MNP_SECONDS == 15)
-                activeMasternode.ManageState(connman);
+                legacyActiveMasternodeManager.ManageState(connman);
 
             if(nTick % 60 == 0) {
                 netfulfilledman.CheckAndRemove();
