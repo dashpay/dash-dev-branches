@@ -20,6 +20,8 @@
 #include "version.h"
 #include "hash.h"
 
+#include "evo/specialtx.h"
+#include "evo/providertx.h"
 #include "evo/subtx.h"
 
 CTxMemPoolEntry::CTxMemPoolEntry(const CTransactionRef& _tx, const CAmount& _nFee,
@@ -436,6 +438,14 @@ bool CTxMemPool::addUnchecked(const uint256& hash, const CTxMemPoolEntry &entry,
     totalTxSize += entry.GetTxSize();
     minerPolicyEstimator->processTransaction(entry, validFeeEstimate);
 
+    if (tx.nType == TRANSACTION_PROVIDER_REGISTER) {
+        CProviderTXRegisterMN proTx;
+        if (!GetTxPayload(tx, proTx)) {
+            assert(false);
+        }
+        mapProTxRegisterAddresses.emplace(proTx.addr, tx.GetHash());
+    }
+
     if (IsSubTx(tx)) {
         CSubTxData subTxData;
         GetSubTxData(tx, subTxData);
@@ -753,6 +763,30 @@ void CTxMemPool::removeConflicts(const CTransaction &tx)
     }
 }
 
+void CTxMemPool::removeProviderTxConflicts(const CTransaction &tx) {
+    if (tx.nType != TRANSACTION_PROVIDER_REGISTER)
+        return;
+
+    CProviderTXRegisterMN proTx;
+    if (!GetTxPayload(tx, proTx)) {
+        assert(false);
+    }
+
+    auto it = mapProTxRegisterAddresses.find(proTx.addr);
+    if (it == mapProTxRegisterAddresses.end())
+        return;
+    auto it2 = mapTx.find(it->second);
+    mapProTxRegisterAddresses.erase(it);
+    if (it2 == mapTx.end())
+        return;
+
+    const CTransaction &txConflict = it2->GetTx();
+    if (txConflict == tx)
+        return;
+
+    removeRecursive(txConflict, MemPoolRemovalReason::CONFLICT);
+}
+
 void CTxMemPool::removeSubTxTopups(const uint256 &regTxId) {
     // first remove topups for conflicting register SubTx
     if (mapSubTxTopups.count(regTxId)) {
@@ -781,6 +815,7 @@ void CTxMemPool::removeSubTxConflicts(const CTransaction &tx)
     if (it == mapSubTxRegisterUserNames.end())
         return;
     auto it2 = mapTx.find(it->second);
+    mapSubTxRegisterUserNames.erase(it);
     if (it2 == mapTx.end())
         return;
 
@@ -836,6 +871,7 @@ void CTxMemPool::removeForBlock(const std::vector<CTransactionRef>& vtx, const s
             RemoveStaged(stage, true, MemPoolRemovalReason::BLOCK);
         }
         removeConflicts(*tx);
+        removeProviderTxConflicts(*tx);
         removeSubTxConflicts(*tx);
         ClearPrioritisation(tx->GetHash());
     }
@@ -852,6 +888,7 @@ void CTxMemPool::_clear()
     mapLinks.clear();
     mapTx.clear();
     mapNextTx.clear();
+    mapProTxRegisterAddresses.clear();
     mapSubTxRegisterUserNames.clear();
     mapSubTxTopups.clear();
     totalTxSize = 0;
