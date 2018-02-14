@@ -39,9 +39,14 @@ bool CheckProviderTxRegister(const CTransaction &tx, const CBlockIndex *pindex, 
         return state.DoS(10, false, REJECT_INVALID, "bad-provider-addr");
     if (ptx.keyIDMasternode.IsNull())
         return state.DoS(10, false, REJECT_INVALID, "bad-provider-mnkey");
-    // we may support P2SH later, but restrict it for now
+    // we may support P2SH later, but restrict it for now (while in transitioning phase from old MN list to deterministic list)
     if (!ptx.scriptPayout.IsPayToPublicKey() && !ptx.scriptPayout.IsPayToPublicKeyHash())
         return state.DoS(10, false, REJECT_INVALID, "bad-provider-payee");
+
+    // This is a temporary restriction that will be lifted later
+    // It is required while we are transitioning from the old MN list to the deterministic list
+    if (tx.vout[ptx.nCollateralIndex].scriptPubKey != ptx.scriptPayout)
+        return state.DoS(10, false, REJECT_INVALID, "bad-provider-payee-collateral");
 
     uint256 inputsHash = CalcTxInputsHash(tx);
     if (inputsHash != ptx.inputsHash)
