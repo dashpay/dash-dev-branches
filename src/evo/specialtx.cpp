@@ -7,14 +7,22 @@
 #include "consensus/validation.h"
 #include "hash.h"
 #include "clientversion.h"
+#include "validation.h"
+#include "chainparams.h"
 
 #include "specialtx.h"
 #include "providertx.h"
 #include "deterministicmns.h"
 
+
 bool CheckSpecialTx(const CTransaction& tx, const CBlockIndex *pindex, CValidationState &state) {
     if (tx.nVersion < 3 || tx.nType == TRANSACTION_NORMAL)
         return true;
+
+    bool isTip = !pindex || pindex == chainActive.Tip();
+    if ((isTip && !fDIP0003ActiveAtTip) || (!isTip && VersionBitsState(pindex->pprev, Params().GetConsensus(), Consensus::DEPLOYMENT_DIP0003, versionbitscache) != THRESHOLD_ACTIVE)) {
+        return state.DoS(100, false, REJECT_INVALID, "bad-tx-type");
+    }
 
     switch (tx.nType) {
         case TRANSACTION_PROVIDER_REGISTER:
