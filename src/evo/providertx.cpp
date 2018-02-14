@@ -4,6 +4,7 @@
 
 #include "providertx.h"
 #include "specialtx.h"
+#include "deterministicmns.h"
 
 #include "hash.h"
 #include "clientversion.h"
@@ -45,6 +46,14 @@ bool CheckProviderTxRegister(const CTransaction &tx, const CBlockIndex *pindex, 
     uint256 inputsHash = CalcTxInputsHash(tx);
     if (inputsHash != ptx.inputsHash)
         return state.DoS(100, false, REJECT_INVALID, "bad-provider-inputs-hash");
+
+    if (pindex) {
+        auto mnList = deterministicMNList->GetListAtHeight(pindex->nHeight, true);
+        for (const auto &dmn : mnList) {
+            if (dmn.proTx.addr == ptx.addr)
+                return state.DoS(10, false, REJECT_DUPLICATE, "bad-provider-dup-addr");
+        }
+    }
 
     CProviderTXRegisterMN tmpPtx(ptx);
     tmpPtx.vchSig.clear();

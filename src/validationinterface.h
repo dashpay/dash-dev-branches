@@ -45,6 +45,8 @@ protected:
     virtual void GetScriptForMining(boost::shared_ptr<CReserveScript>&) {}
     virtual void ResetRequestCount(const uint256 &hash) {}
     virtual void NewPoWValidBlock(const CBlockIndex *pindex, const std::shared_ptr<const CBlock>& block) {}
+    virtual void MasternodeAdded(const uint256 &proTxHash) {}
+    virtual void MasternodeRemoved(const uint256 &proTxHash) {}
     friend void ::RegisterValidationInterface(CValidationInterface*);
     friend void ::UnregisterValidationInterface(CValidationInterface*);
     friend void ::UnregisterAllValidationInterfaces();
@@ -88,6 +90,10 @@ struct CMainSignals {
      * Notifies listeners that a block which builds directly on our current tip
      * has been received and connected to the headers tree, though not validated yet */
     boost::signals2::signal<void (const CBlockIndex *, const std::shared_ptr<const CBlock>&)> NewPoWValidBlock;
+    /** Notifies about new deterministic masternodes found on-chain */
+    boost::signals2::signal<void (const uint256 &)> MasternodeAdded;
+    /** Notifies about deterministic masternodes being removed */
+    boost::signals2::signal<void (const uint256 &)> MasternodeRemoved;
 };
 
 CMainSignals& GetMainSignals();

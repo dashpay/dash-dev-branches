@@ -10,6 +10,7 @@
 
 #include "specialtx.h"
 #include "providertx.h"
+#include "deterministicmns.h"
 
 bool CheckSpecialTx(const CTransaction& tx, const CBlockIndex *pindex, CValidationState &state) {
     if (tx.nVersion < 3 || tx.nType == TRANSACTION_NORMAL)
@@ -56,6 +57,9 @@ bool ProcessSpecialTxsInBlock(const CBlock &block, const CBlockIndex *pindex, CV
             return false;
     }
 
+    if (!deterministicMNList->ProcessBlock(block, pindex, state))
+        return false;
+
     return true;
 }
 
@@ -65,6 +69,10 @@ bool UndoSpecialTxsInBlock(const CBlock &block, const CBlockIndex *pindex) {
         if (!UndoSpecialTx(tx, pindex))
             return false;
     }
+
+    if (!deterministicMNList->UndoBlock(block, pindex))
+        return false;
+
     return true;
 }
 

@@ -107,6 +107,7 @@ BITCOIN_CORE_H = \
   cuckoocache.h \
   evo/specialtx.h \
   evo/providertx.h \
+  evo/deterministicmns.h \
   evo/users.h \
   evo/subtx.h \
   evo/tsmempool.h \
@@ -223,6 +224,7 @@ libbitcoin_server_a_SOURCES = \
   dsnotificationinterface.cpp \
   evo/specialtx.cpp \
   evo/providertx.cpp \
+  evo/deterministicmns.cpp \
   evo/users.cpp \
   evo/subtx.cpp \
   evo/tsmempool.cpp \
