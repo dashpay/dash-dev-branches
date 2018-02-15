@@ -41,6 +41,7 @@
 #endif // ENABLE_WALLET
 #include "privatesend-server.h"
 
+#include "evo/deterministicmns.h"
 #include "evo/transition.h"
 #include "evo/tsmempool.h"
 #include "evo/tsvalidation.h"
@@ -1014,25 +1015,29 @@ void static ProcessGetData(CNode* pfrom, const Consensus::Params& consensusParam
                 }
 
                 if (!push && inv.type == MSG_MASTERNODE_PAYMENT_VOTE) {
-                    if(mnpayments.HasVerifiedPaymentVote(inv.hash)) {
-                        connman.PushMessage(pfrom, msgMaker.Make(NetMsgType::MASTERNODEPAYMENTVOTE, mnpayments.mapMasternodePaymentVotes[inv.hash]));
-                        push = true;
+                    if (!deterministicMNList->IsDeterministicMNsSporkActive()) {
+                        if (mnpayments.HasVerifiedPaymentVote(inv.hash)) {
+                            connman.PushMessage(pfrom, msgMaker.Make(NetMsgType::MASTERNODEPAYMENTVOTE, mnpayments.mapMasternodePaymentVotes[inv.hash]));
+                            push = true;
+                        }
                     }
                 }
 
                 if (!push && inv.type == MSG_MASTERNODE_PAYMENT_BLOCK) {
-                    BlockMap::iterator mi = mapBlockIndex.find(inv.hash);
-                    LOCK(cs_mapMasternodeBlocks);
-                    if (mi != mapBlockIndex.end() && mnpayments.mapMasternodeBlocks.count(mi->second->nHeight)) {
-                        BOOST_FOREACH(CMasternodePayee& payee, mnpayments.mapMasternodeBlocks[mi->second->nHeight].vecPayees) {
-                            std::vector<uint256> vecVoteHashes = payee.GetVoteHashes();
-                            BOOST_FOREACH(uint256& hash, vecVoteHashes) {
-                                if(mnpayments.HasVerifiedPaymentVote(hash)) {
-                                    connman.PushMessage(pfrom, msgMaker.Make(NetMsgType::MASTERNODEPAYMENTVOTE, mnpayments.mapMasternodePaymentVotes[hash]));
+                    if (!deterministicMNList->IsDeterministicMNsSporkActive()) {
+                        BlockMap::iterator mi = mapBlockIndex.find(inv.hash);
+                        LOCK(cs_mapMasternodeBlocks);
+                        if (mi != mapBlockIndex.end() && mnpayments.mapMasternodeBlocks.count(mi->second->nHeight)) {
+                            BOOST_FOREACH(CMasternodePayee& payee, mnpayments.mapMasternodeBlocks[mi->second->nHeight].vecPayees) {
+                                std::vector<uint256> vecVoteHashes = payee.GetVoteHashes();
+                                BOOST_FOREACH(uint256& hash, vecVoteHashes) {
+                                    if(mnpayments.HasVerifiedPaymentVote(hash)) {
+                                        connman.PushMessage(pfrom, msgMaker.Make(NetMsgType::MASTERNODEPAYMENTVOTE, mnpayments.mapMasternodePaymentVotes[hash]));
+                                    }
                                 }
                             }
+                            push = true;
                         }
-                        push = true;
                     }
                 }
 

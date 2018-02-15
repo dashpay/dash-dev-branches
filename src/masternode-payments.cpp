@@ -13,6 +13,8 @@
 #include "spork.h"
 #include "util.h"
 
+#include "evo/deterministicmns.h"
+
 #include <boost/lexical_cast.hpp>
 
 /** Object for who's going to get paid on which blocks */
@@ -225,6 +227,9 @@ void CMasternodePayments::Clear()
 
 bool CMasternodePayments::UpdateLastVote(const CMasternodePaymentVote& vote)
 {
+    if (deterministicMNList->IsDeterministicMNsSporkActive())
+        return false;
+
     LOCK(cs_mapMasternodePaymentVotes);
 
     const auto it = mapMasternodesLastVote.find(vote.masternodeOutpoint);
@@ -254,6 +259,8 @@ void CMasternodePayments::FillBlockPayee(CMutableTransaction& txNew, int nBlockH
     CScript payee;
 
     if(!GetBlockPayee(nBlockHeight, payee)) {
+        assert(!deterministicMNList->IsDeterministicMNsSporkActive(nBlockHeight));
+
         // no masternode detected...
         int nCount = 0;
         masternode_info_t mnInfo;
@@ -290,6 +297,9 @@ int CMasternodePayments::GetMinMasternodePaymentsProto() const {
 
 void CMasternodePayments::ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStream& vRecv, CConnman& connman)
 {
+    if (deterministicMNList->IsDeterministicMNsSporkActive())
+        return;
+
     if(fLiteMode) return; // disable all Dash specific functionality
 
     if (strCommand == NetMsgType::MASTERNODEPAYMENTSYNC) { //Masternode Payments Request Sync
@@ -459,10 +469,14 @@ bool CMasternodePaymentVote::Sign()
 
 bool CMasternodePayments::GetBlockPayee(int nBlockHeight, CScript& payeeRet) const
 {
-    LOCK(cs_mapMasternodeBlocks);
-
-    auto it = mapMasternodeBlocks.find(nBlockHeight);
-    return it != mapMasternodeBlocks.end() && it->second.GetBestPayee(payeeRet);
+    if (deterministicMNList->IsDeterministicMNsSporkActive(nBlockHeight)) {
+        uint256 proTxHash;
+        return deterministicMNList->GetMNPayee(nBlockHeight, proTxHash, payee);
+    } else {
+        LOCK(cs_mapMasternodeBlocks);
+        auto it = mapMasternodeBlocks.find(nBlockHeight);
+        return it != mapMasternodeBlocks.end() && it->second.GetBestPayee(payeeRet);	
+    }
 }
 
 // Is this masternode scheduled to get paid soon?
@@ -636,22 +650,56 @@ std::string CMasternodeBlockPayees::GetRequiredPaymentsString() const
 
 std::string CMasternodePayments::GetRequiredPaymentsString(int nBlockHeight) const
 {
-    LOCK(cs_mapMasternodeBlocks);
-
-    const auto it = mapMasternodeBlocks.find(nBlockHeight);
-    return it == mapMasternodeBlocks.end() ? "Unknown" : it->second.GetRequiredPaymentsString();
+    if (deterministicMNList->IsDeterministicMNsSporkActive(nBlockHeight)) {
+        uint256 proTxHash;
+        CScript payeeScript;
+        if (!deterministicMNList->GetMNPayee(nBlockHeight, proTxHash, payeeScript)) {
+            return "Unknown";
+        }
+        CTxDestination dest;
+        if (!ExtractDestination(payeeScript, dest))
+            assert(false);
+        return CBitcoinAddress(dest).ToString();
+    } else {
+        LOCK(cs_mapMasternodeBlocks);
+        const auto it = mapMasternodeBlocks.find(nBlockHeight);
+        return it == mapMasternodeBlocks.end() ? "Unknown" : it->second.GetRequiredPaymentsString();
+    }
 }
 
 bool CMasternodePayments::IsTransactionValid(const CTransaction& txNew, int nBlockHeight) const
 {
-    LOCK(cs_mapMasternodeBlocks);
+    if (deterministicMNList->IsDeterministicMNsSporkActive(nBlockHeight)) {
+        CAmount nMasternodePayment = GetMasternodePayment(nBlockHeight, txNew.GetValueOut());
+        uint256 proTxHash;
+        CScript payeeScript;
+        if (!deterministicMNList->GetMNPayee(nBlockHeight, proTxHash, payeeScript)) {
+            LogPrintf("CMasternodePayments::IsTransactionValid -- ERROR failed to get payee for block at height %s\n", nBlockHeight);
+            return false;
+        }
 
-    const auto it = mapMasternodeBlocks.find(nBlockHeight);
-    return it == mapMasternodeBlocks.end() ? true : it->second.IsTransactionValid(txNew);
+        for (const auto &txout : txNew.vout) {
+            if (nMasternodePayment == txout.nValue && txout.scriptPubKey == payeeScript) {
+                return true;
+            }
+        }
+        CTxDestination dest;
+        if (!ExtractDestination(payeeScript, dest))
+            assert(false);
+        LogPrintf("CMasternodePayments::IsTransactionValid -- ERROR failed to find expected payee %s in block at height %s\n", CBitcoinAddress(dest).ToString(), nBlockHeight);
+        return false;
+    } else {
+        LOCK(cs_mapMasternodeBlocks);
+        const auto it = mapMasternodeBlocks.find(nBlockHeight);
+        return it == mapMasternodeBlocks.end() ? true : it->second.IsTransactionValid(txNew);
+    }
 }
 
 void CMasternodePayments::CheckAndRemove()
 {
+    if (deterministicMNList->IsDeterministicMNsSporkActive())
+        return;
+
     if(!masternodeSync.IsBlockchainSynced()) return;
 
     LOCK2(cs_mapMasternodeBlocks, cs_mapMasternodePaymentVotes);
@@ -732,6 +780,9 @@ bool CMasternodePaymentVote::IsValid(CNode* pnode, int nValidationHeight, std::s
 
 bool CMasternodePayments::ProcessBlock(int nBlockHeight, CConnman& connman)
 {
+    if (deterministicMNList->IsDeterministicMNsSporkActive(nBlockHeight))
+        return true;
+
     // DETERMINE IF WE SHOULD BE VOTING FOR THE NEXT PAYEE
 
     if(fLiteMode || !fMasternodeMode) return false;
@@ -867,6 +918,9 @@ void CMasternodePayments::CheckBlockVotes(int nBlockHeight)
 
 void CMasternodePaymentVote::Relay(CConnman& connman) const
 {
+    if (deterministicMNList->IsDeterministicMNsSporkActive())
+        return;
+
     // Do not relay until fully synced
     if(!masternodeSync.IsSynced()) {
         LogPrint("mnpayments", "CMasternodePayments::Relay -- won't relay until fully synced\n");
@@ -1070,6 +1124,9 @@ int CMasternodePayments::GetStorageLimit() const
 void CMasternodePayments::UpdatedBlockTip(const CBlockIndex *pindex, CConnman& connman)
 {
     if(!pindex) return;
+
+    if (deterministicMNList->IsDeterministicMNsSporkActive(pindex->nHeight))
+        return;
 
     nCachedBlockHeight = pindex->nHeight;
     LogPrint("mnpayments", "CMasternodePayments::UpdatedBlockTip -- nCachedBlockHeight=%d\n", nCachedBlockHeight);

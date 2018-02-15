@@ -168,6 +168,7 @@ public:
     bool Get(const COutPoint& outpoint, CMasternode& masternodeRet);
     bool Has(const COutPoint& outpoint);
 
+    bool GetMasternodeInfo(const uint256& proTxHash, masternode_info_t& mnInfoRet);
     bool GetMasternodeInfo(const COutPoint& outpoint, masternode_info_t& mnInfoRet);
     bool GetMasternodeInfo(const CKeyID& pubKeyIDMasternode, masternode_info_t& mnInfoRet);
     bool GetMasternodeInfo(const CPubKey& pubKeyMasternode, masternode_info_t& mnInfoRet);

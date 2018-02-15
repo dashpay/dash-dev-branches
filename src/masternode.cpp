@@ -18,6 +18,8 @@
 #include "wallet/wallet.h"
 #endif // ENABLE_WALLET
 
+#include "evo/deterministicmns.h"
+
 #include <boost/lexical_cast.hpp>
 
 
@@ -328,6 +330,19 @@ std::string CMasternode::GetStatus() const
 void CMasternode::UpdateLastPaid(const CBlockIndex *pindex, int nMaxBlocksToScanBack)
 {
     if(!pindex) return;
+
+    if (deterministicMNList->IsDeterministicMNsSporkActive(pindex->nHeight)) {
+        int64_t lastPaidHeight;
+        if (deterministicMNList->GetMNLastPaidHeight(outpoint.hash, pindex->nHeight, lastPaidHeight)) {
+            LOCK(cs_main);
+            nBlockLastPaid = (int)lastPaidHeight;
+            nTimeLastPaid = chainActive[nBlockLastPaid]->nTime;
+            LogPrint("masternode", "CMasternode::UpdateLastPaidBlock -- searching for block with payment to %s -- found new %d\n", outpoint.ToStringShort(), nBlockLastPaid);
+        } else {
+            LogPrint("masternode", "CMasternode::UpdateLastPaidBlock -- searching for block with payment to %s -- not found\n", outpoint.ToStringShort());
+        }
+        return;
+    }
 
     const CBlockIndex *BlockReading = pindex;
 

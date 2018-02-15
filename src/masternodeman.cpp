@@ -520,6 +520,14 @@ bool CMasternodeMan::Get(const COutPoint& outpoint, CMasternode& masternodeRet)
     return true;
 }
 
+bool CMasternodeMan::GetMasternodeInfo(const uint256& proTxHash, masternode_info_t& mnInfoRet)
+{
+    CProviderTXRegisterMN proTx;
+    if (!deterministicMNList->GetRegisterMN(proTxHash, proTx))
+        return false;
+    return GetMasternodeInfo(COutPoint(proTxHash, proTx.nCollateralIndex), mnInfoRet);
+}
+
 bool CMasternodeMan::GetMasternodeInfo(const COutPoint& outpoint, masternode_info_t& mnInfoRet)
 {
     LOCK(cs);
@@ -585,6 +593,10 @@ bool CMasternodeMan::GetNextMasternodeInQueueForPayment(bool fFilterSigTime, int
 
 bool CMasternodeMan::GetNextMasternodeInQueueForPayment(int nBlockHeight, bool fFilterSigTime, int& nCountRet, masternode_info_t& mnInfoRet)
 {
+    if (deterministicMNList->IsDeterministicMNsSporkActive(nBlockHeight)) {
+        return false;
+    }
+
     mnInfoRet = masternode_info_t();
     nCountRet = 0;
 
