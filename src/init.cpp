@@ -309,6 +309,9 @@ void PrepareShutdown()
         delete pdsNotificationInterface;
         pdsNotificationInterface = NULL;
     }
+    if (fMasternodeMode) {
+        UnregisterValidationInterface(activeMasternodeManager);
+    }
 
 #ifndef WIN32
     try {
@@ -1841,6 +1844,10 @@ bool AppInitMain(boost::thread_group& threadGroup, CScheduler& scheduler)
         } else {
             return InitError(_("You must specify a masternodeprivkey in the configuration. Please see documentation for help."));
         }
+
+        // init and register activeMasternodeManager
+        activeMasternodeManager = new CActiveDeterministicMasternodeManager();
+        RegisterValidationInterface(activeMasternodeManager);
     }
 
 #ifdef ENABLE_WALLET
@@ -1952,6 +1959,9 @@ bool AppInitMain(boost::thread_group& threadGroup, CScheduler& scheduler)
     // but don't call it directly to prevent triggering of other listeners like zmq etc.
     // GetMainSignals().UpdatedBlockTip(chainActive.Tip());
     pdsNotificationInterface->InitializeCurrentBlockTip();
+
+    if (activeMasternodeManager && fDIP0003ActiveAtTip)
+        activeMasternodeManager->Init();
 
     // ********************************************************* Step 11d: start dash-ps-<smth> threads
 
