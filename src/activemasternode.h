@@ -9,9 +9,12 @@
 #include "key.h"
 #include "net.h"
 #include "primitives/transaction.h"
+#include "validationinterface.h"
+#include "evo/providertx.h"
 
 class CActiveMasternodeInfo;
 class CActiveLegacyMasternodeManager;
+class CActiveDeterministicMasternodeManager;
 
 static const int ACTIVE_MASTERNODE_INITIAL          = 0; // initial state
 static const int ACTIVE_MASTERNODE_SYNC_IN_PROCESS  = 1;
@@ -21,9 +24,12 @@ static const int ACTIVE_MASTERNODE_STARTED          = 4;
 
 extern CActiveMasternodeInfo activeMasternode;
 extern CActiveLegacyMasternodeManager legacyActiveMasternodeManager;
+extern CActiveDeterministicMasternodeManager *activeMasternodeManager;
 
 class CActiveMasternodeInfo {
 public:
+    uint256 proTxHash;
+
     // Keys for the active Masternode
     CPubKey pubKeyMasternode;
     CKey keyMasternode;
@@ -33,7 +39,35 @@ public:
     CService service;
 };
 
-// Responsible for activating the Masternode and pinging the network
+
+class CActiveDeterministicMasternodeManager : public CValidationInterface {
+public:
+    enum masternode_state_t {
+        MASTERNODE_WAITING_FOR_PROTX,
+        MASTERNODE_READY,
+        MASTERNODE_REMOVED,
+        MASTERNODE_ERROR,
+    };
+
+private:
+    CProviderTXRegisterMN proTx;
+    bool proTxFound{false};
+    masternode_state_t state{MASTERNODE_WAITING_FOR_PROTX};
+    std::string strError;
+
+public:
+    virtual void UpdatedBlockTip(const CBlockIndex *pindexNew, const CBlockIndex *pindexFork, bool fInitialDownload);
+
+    void Init();
+
+    std::string GetStateString() const;
+    std::string GetStatus() const;
+
+private:
+    bool GetLocalAddress(CService &addrRet);
+};
+
+// Responsible for activating the Masternode and pinging the network (legacy MN list)
 class CActiveLegacyMasternodeManager
 {
 public:

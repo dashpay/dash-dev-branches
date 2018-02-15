@@ -8,13 +8,138 @@
 #include "masternodeman.h"
 #include "netbase.h"
 #include "protocol.h"
+#include "warnings.h"
+#include "init.h"
+#include "evo/deterministicmns.h"
 
 // Keep track of the active Masternode
 CActiveMasternodeInfo activeMasternode;
 CActiveLegacyMasternodeManager legacyActiveMasternodeManager;
+CActiveDeterministicMasternodeManager *activeMasternodeManager;
+
+std::string CActiveDeterministicMasternodeManager::GetStateString() const
+{
+    switch (state) {
+        case MASTERNODE_WAITING_FOR_PROTX:  return "WAITING_FOR_PROTX";
+        case MASTERNODE_READY:              return "READY";
+        case MASTERNODE_REMOVED:            return "REMOVED";
+        case MASTERNODE_ERROR:              return "ERROR";
+        default:                            return "UNKNOWN";
+    }
+}
+
+std::string CActiveDeterministicMasternodeManager::GetStatus() const
+{
+    switch (state) {
+        case MASTERNODE_WAITING_FOR_PROTX:  return "Waiting for ProTx to appear on-chain";
+        case MASTERNODE_READY:              return "Ready";
+        case MASTERNODE_REMOVED:            return "Masternode removed from list";
+        case MASTERNODE_ERROR:              return "Error. " + strError;
+        default:                            return "Unknown";
+    }
+}
+
+void CActiveDeterministicMasternodeManager::Init() {
+    LOCK(cs_main);
+
+    if (!fMasternodeMode)
+        return;
+
+    if (!deterministicMNList->IsDeterministicMNsSporkActive())
+        return;
+
+    if (!GetLocalAddress(activeMasternode.service)) {
+        state = MASTERNODE_ERROR;
+        return;
+    }
+
+    if (!deterministicMNList->GetRegisterMN(activeMasternode.proTxHash, proTx)) {
+        // MN not appeared on the chain yet
+        return;
+    }
+    if (!deterministicMNList->HasMNAtChainTip(activeMasternode.proTxHash)) {
+        state = MASTERNODE_REMOVED;
+        return;
+    }
+
+    LogPrintf("CActiveDeterministicMasternodeManager::Init -- proTxHash=%s\n", activeMasternode.proTxHash.ToString());
+    LogPrintf("CActiveDeterministicMasternodeManager::Init -- proTx=%s\n", proTx.ToString());
+
+    if (activeMasternode.pubKeyIDMasternode != proTx.keyIDMasternode) {
+        state = MASTERNODE_ERROR;
+        strError = "Masternode private key does not match public key from ProTx";
+        LogPrintf("CActiveDeterministicMasternodeManager::Init -- ERROR: %s", strError);
+        return;
+    }
+
+    if (activeMasternode.service != proTx.addr) {
+        state = MASTERNODE_ERROR;
+        strError = "Local address does not match the address from ProTx";
+        LogPrintf("CActiveDeterministicMasternodeManager::Init -- ERROR: %s", strError);
+        return;
+    }
+
+    if (proTx.nProtocolVersion != PROTOCOL_VERSION) {
+        state = MASTERNODE_ERROR;
+        strError = "Local protocol version does not match version from ProTx. You may need to update the ProTx";
+        LogPrintf("CActiveDeterministicMasternodeManager::Init -- ERROR: %s", strError);
+        return;
+    }
+
+    activeMasternode.outpoint = COutPoint(activeMasternode.proTxHash, proTx.nCollateralIndex);
+    state = MASTERNODE_READY;
+}
+
+void CActiveDeterministicMasternodeManager::UpdatedBlockTip(const CBlockIndex *pindexNew, const CBlockIndex *pindexFork, bool fInitialDownload) {
+    LOCK(cs_main);
+
+    if (!fMasternodeMode)
+        return;
+
+    if (!deterministicMNList->IsDeterministicMNsSporkActive(pindexNew->nHeight)) {
+        return;
+    }
+    if (activeMasternode.proTxHash.IsNull()) {
+        std::string strWarning = "Deterministic masternodes activated but you did not specifiy -masternodeprotx. Your masternode will never be enabled.";
+        LogPrintf("CActiveDeterministicMasternodeManager::UpdatedBlockTip -- WARNING: %s\n", strWarning);
+        SetMiscWarning(strWarning);
+        return;
+    }
+
+    if (state == MASTERNODE_WAITING_FOR_PROTX) {
+        Init();
+    } else if (state == MASTERNODE_READY) {
+        if (!deterministicMNList->HasMNAtHeight(pindexNew->nHeight, activeMasternode.proTxHash)) {
+            // MN disappeared from MN list
+            state = MASTERNODE_REMOVED;
+            activeMasternode.outpoint.SetNull();
+        }
+    }
+}
+
+bool CActiveDeterministicMasternodeManager::GetLocalAddress(CService &addrRet) {
+    // First try to find whatever local address is specified by externalip option
+    bool fFoundLocal = GetLocal(addrRet) && CMasternode::IsValidNetAddr(addrRet);
+    if (!fFoundLocal && Params().NetworkIDString() == CBaseChainParams::REGTEST) {
+        if (Lookup("127.0.0.1", addrRet, GetListenPort(), false)) {
+            fFoundLocal = true;
+        }
+    }
+    if(!fFoundLocal) {
+        strError = "Can't detect valid external address. Please consider using the externalip configuration option if problem persists. Make sure to use IPv4 address only.";
+        LogPrintf("CActiveDeterministicMasternodeManager::GetLocalAddress -- ERROR: %s\n", strError);
+        return false;
+    }
+    return true;
+}
+
+/********* LEGACY *********/
 
 void CActiveLegacyMasternodeManager::ManageState(CConnman& connman)
 {
+    if (deterministicMNList->IsDeterministicMNsSporkActive())
+        return;
+
     LogPrint("masternode", "CActiveLegacyMasternodeManager::ManageState -- Start\n");
     if(!fMasternodeMode) {
         LogPrint("masternode", "CActiveLegacyMasternodeManager::ManageState -- Not a masternode, returning\n");
@@ -83,6 +208,9 @@ std::string CActiveLegacyMasternodeManager::GetTypeString() const
 
 bool CActiveLegacyMasternodeManager::SendMasternodePing(CConnman& connman)
 {
+    if (deterministicMNList->IsDeterministicMNsSporkActive())
+        return false;
+
     if(!fPingerEnabled) {
         LogPrint("masternode", "CActiveLegacyMasternodeManager::SendMasternodePing -- %s: masternode ping service is disabled, skipping...\n", GetStateString());
         return false;
@@ -128,6 +256,9 @@ bool CActiveLegacyMasternodeManager::UpdateSentinelPing(int version)
 
 void CActiveLegacyMasternodeManager::ManageStateInitial(CConnman& connman)
 {
+    if (deterministicMNList->IsDeterministicMNsSporkActive())
+        return;
+
     LogPrint("masternode", "CActiveLegacyMasternodeManager::ManageStateInitial -- status = %s, type = %s, pinger enabled = %d\n", GetStatus(), GetTypeString(), fPingerEnabled);
 
     // Check that our local network configuration is correct
@@ -202,6 +333,9 @@ void CActiveLegacyMasternodeManager::ManageStateInitial(CConnman& connman)
 
 void CActiveLegacyMasternodeManager::ManageStateRemote()
 {
+    if (deterministicMNList->IsDeterministicMNsSporkActive())
+        return;
+
     LogPrint("masternode", "CActiveLegacyMasternodeManager::ManageStateRemote -- Start status = %s, type = %s, pinger enabled = %d, pubKeyMasternode.GetID() = %s\n",
              GetStatus(), GetTypeString(), fPingerEnabled, activeMasternode.pubKeyMasternode.GetID().ToString());
 

@@ -300,6 +300,9 @@ void PrepareShutdown()
         delete pdsNotificationInterface;
         pdsNotificationInterface = NULL;
     }
+    if (fMasternodeMode) {
+        UnregisterValidationInterface(activeMasternodeManager);
+    }
 
 #ifndef WIN32
     try {
@@ -552,6 +555,7 @@ std::string HelpMessage(HelpMessageMode mode)
     strUsage += HelpMessageOpt("-mnconf=<file>", strprintf(_("Specify masternode configuration file (default: %s)"), "masternode.conf"));
     strUsage += HelpMessageOpt("-mnconflock=<n>", strprintf(_("Lock masternodes from masternode configuration file (default: %u)"), 1));
     strUsage += HelpMessageOpt("-masternodeprivkey=<n>", _("Set the masternode private key"));
+    strUsage += HelpMessageOpt("-masternodeprotx=<n>", _("Set the masternode proTx hash"));
 
 #ifdef ENABLE_WALLET
     strUsage += HelpMessageGroup(_("PrivateSend options:"));
@@ -1824,6 +1828,22 @@ bool AppInitMain(boost::thread_group& threadGroup, CScheduler& scheduler)
         } else {
             return InitError(_("You must specify a masternodeprivkey in the configuration. Please see documentation for help."));
         }
+
+        // init and register activeMasternodeManager
+        activeMasternodeManager = new CActiveDeterministicMasternodeManager();
+        RegisterValidationInterface(activeMasternodeManager);
+
+        std::string strMasternodeProTxHash = GetArg("-masternodeprotx", "");
+        if (!strMasternodeProTxHash.empty()) {
+            if (!IsHex(strMasternodeProTxHash) || strMasternodeProTxHash.size() != 64) {
+                return InitError(_("Invalid -masternodeprotx specified. Must be the hash of ProTx."));
+            }
+            activeMasternode.proTxHash.SetHex(strMasternodeProTxHash);
+            LogPrintf("  proTxHash: %s\n", activeMasternode.proTxHash.ToString());
+        } else {
+            // TODO make this a fatal error after the network has fully transitioned to deterministic MNs
+            InitWarning(_("You must specify the ProTX hash for your masternode, otherwise it won't work when the network switches to deterministic masternodes (DIP3)"));
+        }
     }
 
 #ifdef ENABLE_WALLET
@@ -1928,6 +1948,9 @@ bool AppInitMain(boost::thread_group& threadGroup, CScheduler& scheduler)
     // but don't call it directly to prevent triggering of other listeners like zmq etc.
     // GetMainSignals().UpdatedBlockTip(chainActive.Tip());
     pdsNotificationInterface->InitializeCurrentBlockTip();
+
+    if (activeMasternodeManager && fDIP0003ActiveAtTip)
+        activeMasternodeManager->Init();
 
     // ********************************************************* Step 11d: start dash-ps-<smth> threads
 
