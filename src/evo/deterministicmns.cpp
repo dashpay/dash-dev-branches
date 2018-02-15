@@ -121,6 +121,14 @@ bool CDeterministicMNList::ProcessBlockLocked(const CBlock &block, const CBlockI
     state.curHeight = pindex->nHeight;
     state.curBlockHash = block.GetHash();
 
+    int64_t oldSpork15Value = state.spork15Value;
+    state.spork15Value = sporkManager.GetSporkValue(SPORK_15_DETERMINISTIC_MNS_ENABLED);
+    if (oldSpork15Value != state.spork15Value && state.spork15Value != SPORK_15_DETERMINISTIC_MNS_DEFAULT) {
+        LogPrintf("CDeterministicMNList::ProcessBlockLocked -- Updated spork15 value to %d\n", state.spork15Value);
+    }
+    if (pindex->nHeight == state.spork15Value) {
+        LogPrintf("CDeterministicMNList::ProcessBlockLocked -- spork15 is active now. height=%d\n", pindex->nHeight);
+    }
 
     dbTransaction.Write(DB_LIST_STATE, state);
 
@@ -201,6 +209,7 @@ bool CDeterministicMNList::UndoBlockLocked(const CBlock &block, const CBlockInde
 
     state.curHeight = pindex->nHeight - 1;
     state.curBlockHash = pindex->pprev->GetBlockHash();
+    state.spork15Value = sporkManager.GetSporkValue(SPORK_15_DETERMINISTIC_MNS_ENABLED);
     if (state.firstMNHeight == pindex->nHeight) {
         state.firstMNHeight = -1;
     }
@@ -338,3 +347,15 @@ bool CDeterministicMNList::HasMNAtChainTip(const uint256 &proTxHash) {
     return mapCurMNs.count(proTxHash) != 0;
 }
 
+bool CDeterministicMNList::IsDeterministicMNsSporkActive(int64_t height) {
+    LOCK(cs);
+
+    int64_t spork15Value = sporkManager.GetSporkValue(SPORK_15_DETERMINISTIC_MNS_ENABLED);
+    if (spork15Value == SPORK_15_DETERMINISTIC_MNS_DEFAULT)
+        spork15Value = state.spork15Value;
+    if (spork15Value < 0)
+        return false;
+    if (height == -1)
+        height = state.curHeight;
+    return height >= spork15Value;
+}

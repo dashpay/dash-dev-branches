@@ -8,6 +8,7 @@
 #include "providertx.h"
 #include "dbwrapper.h"
 #include "sync.h"
+#include "spork.h"
 
 #include <map>
 
@@ -67,6 +68,7 @@ public:
     int64_t blocksWithMNsCount{0};
     int64_t curHeight{0};
     uint256 curBlockHash;
+    int64_t spork15Value{SPORK_15_DETERMINISTIC_MNS_DEFAULT};
 
     ADD_SERIALIZE_METHODS;
 
@@ -76,6 +78,7 @@ public:
         READWRITE(blocksWithMNsCount);
         READWRITE(curHeight);
         READWRITE(curBlockHash);
+        READWRITE(spork15Value);
     }
 };
 
@@ -120,6 +123,8 @@ public:
 
     bool HasMNAtHeight(int height, const uint256 &proTxHash);
     bool HasMNAtChainTip(const uint256 &proTxHash);
+
+    bool IsDeterministicMNsSporkActive(int64_t height = -1);
 
 private:
     bool RecreateListFromSnapshot(int64_t height, std::map<uint256, CDeterministicMNState> &snapshot);
