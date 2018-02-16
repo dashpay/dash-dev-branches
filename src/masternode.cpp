@@ -52,6 +52,17 @@ CMasternode::CMasternode(const CMasternodeBroadcast& mnb) :
     fAllowMixingTx(true)
 {}
 
+CMasternode::CMasternode(const uint256 &proTxHash, const CProviderTXRegisterMN& proTx) :
+    masternode_info_t{ MASTERNODE_ENABLED, proTx.nProtocolVersion, GetAdjustedTime(),
+                       COutPoint(proTxHash, proTx.nCollateralIndex), proTx.addr, CKeyID(), proTx.keyIDMasternode},
+    fAllowMixingTx(true)
+{
+    CTxDestination dest;
+    if (!ExtractDestination(proTx.scriptPayout, dest) || !boost::get<CKeyID>(&dest))
+        assert(false); // should not happen (previous verification forbids non p2pkh/p2pk
+    pubKeyIDCollateralAddress = *boost::get<CKeyID>(&dest);
+}
+
 //
 // When a new masternode broadcast is sent, update our information
 //

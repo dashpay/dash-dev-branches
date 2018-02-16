@@ -11,6 +11,7 @@
 
 class CMasternode;
 class CMasternodeBroadcast;
+class CProviderTXRegisterMN;
 class CConnman;
 
 static const int MASTERNODE_CHECK_SECONDS               =   5;
@@ -209,6 +210,7 @@ public:
     CMasternode(const CMasternode& other);
     CMasternode(const CMasternodeBroadcast& mnb);
     CMasternode(CService addrNew, COutPoint outpointNew, CPubKey pubKeyCollateralAddressNew, CPubKey pubKeyMasternodeNew, int nProtocolVersionIn);
+    CMasternode(const uint256 &proTxHash, const CProviderTXRegisterMN& proTx);
 
     ADD_SERIALIZE_METHODS;
 
