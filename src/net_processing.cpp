@@ -1037,16 +1037,20 @@ void static ProcessGetData(CNode* pfrom, const Consensus::Params& consensusParam
                 }
 
                 if (!push && inv.type == MSG_MASTERNODE_ANNOUNCE) {
-                    if(mnodeman.mapSeenMasternodeBroadcast.count(inv.hash)){
-                        connman.PushMessage(pfrom, msgMaker.Make(NetMsgType::MNANNOUNCE, mnodeman.mapSeenMasternodeBroadcast[inv.hash].second));
-                        push = true;
+                    if (!deterministicMNList->IsDeterministicMNsSporkActive()) {
+                        if (mnodeman.mapSeenMasternodeBroadcast.count(inv.hash)) {
+                            connman.PushMessage(pfrom, msgMaker.Make(NetMsgType::MNANNOUNCE, mnodeman.mapSeenMasternodeBroadcast[inv.hash].second));
+                            push = true;
+                        }
                     }
                 }
 
                 if (!push && inv.type == MSG_MASTERNODE_PING) {
-                    if(mnodeman.mapSeenMasternodePing.count(inv.hash)) {
-                        connman.PushMessage(pfrom, msgMaker.Make(NetMsgType::MNPING, mnodeman.mapSeenMasternodePing[inv.hash]));
-                        push = true;
+                    if (!deterministicMNList->IsDeterministicMNsSporkActive()) {
+                        if (mnodeman.mapSeenMasternodePing.count(inv.hash)) {
+                            connman.PushMessage(pfrom, msgMaker.Make(NetMsgType::MNPING, mnodeman.mapSeenMasternodePing[inv.hash]));
+                            push = true;
+                        }
                     }
                 }
 
