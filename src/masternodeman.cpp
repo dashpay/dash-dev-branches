@@ -21,6 +21,8 @@
 #include "util.h"
 #include "warnings.h"
 
+#include "evo/deterministicmns.h"
+
 /** Masternode manager */
 CMasternodeMan mnodeman;
 
@@ -78,6 +80,9 @@ bool CMasternodeMan::Add(CMasternode &mn)
 {
     LOCK(cs);
 
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return false;
+
     if (Has(mn.outpoint)) return false;
 
     LogPrint("masternode", "CMasternodeMan::Add -- Adding new Masternode: addr=%s, %i now\n", mn.addr.ToString(), size() + 1);
@@ -92,6 +97,9 @@ void CMasternodeMan::AskForMN(CNode* pnode, const COutPoint& outpoint, CConnman&
 
     CNetMsgMaker msgMaker(pnode->GetSendVersion());
     LOCK(cs);
+
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return;
 
     CService addrSquashed = Params().AllowMultiplePorts() ? (CService)pnode->addr : CService(pnode->addr, 0);
     auto it1 = mWeAskedForMasternodeListEntry.find(outpoint);
@@ -150,6 +158,10 @@ bool CMasternodeMan::DisallowMixing(const COutPoint &outpoint)
 bool CMasternodeMan::PoSeBan(const COutPoint &outpoint)
 {
     LOCK(cs);
+
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return true;
+
     CMasternode* pmn = Find(outpoint);
     if (!pmn) {
         return false;
@@ -163,6 +175,9 @@ void CMasternodeMan::Check()
 {
     LOCK2(cs_main, cs);
 
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return;
+
     for (auto& mnpair : mapMasternodes) {
         // NOTE: internally it checks only every MASTERNODE_CHECK_SECONDS seconds
         // since the last time, so expect some MNs to skip this
@@ -172,6 +187,9 @@ void CMasternodeMan::Check()
 
 void CMasternodeMan::CheckAndRemove(CConnman& connman)
 {
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return;
+
     if(!masternodeSync.IsMasternodeListSynced()) return;
 
     LogPrintf("CMasternodeMan::CheckAndRemove\n");
@@ -416,6 +434,9 @@ void CMasternodeMan::DsegUpdate(CNode* pnode, CConnman& connman)
 {
     CNetMsgMaker msgMaker(pnode->GetSendVersion());
     LOCK(cs);
+
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return;
 
     CService addrSquashed = Params().AllowMultiplePorts() ? (CService)pnode->addr : CService(pnode->addr, 0);
     if(Params().NetworkIDString() == CBaseChainParams::MAIN) {
@@ -732,6 +753,9 @@ void CMasternodeMan::ProcessMasternodeConnections(CConnman& connman)
 std::pair<CService, std::set<uint256> > CMasternodeMan::PopScheduledMnbRequestConnection()
 {
     LOCK(cs);
+    if (deterministicMNManager->IsDeterministicMNsSporkActive()) {
+        return std::make_pair(CService(), std::set<uint256>());
+    }
     if(listScheduledMnbRequestConnections.empty()) {
         return std::make_pair(CService(), std::set<uint256>());
     }
@@ -758,6 +782,9 @@ std::pair<CService, std::set<uint256> > CMasternodeMan::PopScheduledMnbRequestCo
 
 void CMasternodeMan::ProcessPendingMnbRequests(CConnman& connman)
 {
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return;
+
     std::pair<CService, std::set<uint256> > p = PopScheduledMnbRequestConnection();
     if (!(p.first == CService() || p.second.empty())) {
         if (connman.IsMasternodeOrDisconnectRequested(p.first)) return;
@@ -797,6 +824,9 @@ void CMasternodeMan::ProcessPendingMnbRequests(CConnman& connman)
 
 void CMasternodeMan::ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStream& vRecv, CConnman& connman)
 {
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return;
+
     if(fLiteMode) return; // disable all Dash specific functionality
 
     if (strCommand == NetMsgType::MNANNOUNCE) { //Masternode Broadcast
@@ -993,6 +1023,9 @@ void CMasternodeMan::PushDsegInvs(CNode* pnode, const CMasternode& mn)
 
 void CMasternodeMan::DoFullVerificationStep(CConnman& connman)
 {
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return;
+
     if(activeMasternode.outpoint.IsNull()) return;
     if(!masternodeSync.IsSynced()) return;
 
@@ -1070,6 +1103,9 @@ void CMasternodeMan::DoFullVerificationStep(CConnman& connman)
 
 void CMasternodeMan::CheckSameAddr()
 {
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return;
+
     if(!masternodeSync.IsSynced() || mapMasternodes.empty()) return;
 
     std::vector<CMasternode*> vBan;
@@ -1123,6 +1159,9 @@ void CMasternodeMan::CheckSameAddr()
 
 bool CMasternodeMan::SendVerifyRequest(const CAddress& addr, const std::vector<const CMasternode*>& vSortedByAddr, CConnman& connman)
 {
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return false;
+
     if(netfulfilledman.HasFulfilledRequest(addr, strprintf("%s", NetMsgType::MNVERIFY)+"-request")) {
         // we already asked for verification, not a good idea to do this too often, skip it
         LogPrint("masternode", "CMasternodeMan::SendVerifyRequest -- too many requests, skipping... addr=%s\n", addr.ToString());
@@ -1143,6 +1182,9 @@ bool CMasternodeMan::SendVerifyRequest(const CAddress& addr, const std::vector<c
 void CMasternodeMan::ProcessPendingMnvRequests(CConnman& connman)
 {
     LOCK(cs_mapPendingMNV);
+
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return;
 
     std::map<CService, std::pair<int64_t, CMasternodeVerification> >::iterator itPendingMNV = mapPendingMNV.begin();
 
@@ -1172,6 +1214,9 @@ void CMasternodeMan::ProcessPendingMnvRequests(CConnman& connman)
 void CMasternodeMan::SendVerifyReply(CNode* pnode, CMasternodeVerification& mnv, CConnman& connman)
 {
     AssertLockHeld(cs_main);
+
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return;
 
     // only masternodes can sign this, why would someone ask regular node?
     if(!fMasternodeMode) {
@@ -1229,6 +1274,9 @@ void CMasternodeMan::SendVerifyReply(CNode* pnode, CMasternodeVerification& mnv,
 void CMasternodeMan::ProcessVerifyReply(CNode* pnode, CMasternodeVerification& mnv)
 {
     AssertLockHeld(cs_main);
+
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return;
 
     std::string strError;
 
@@ -1366,6 +1414,9 @@ void CMasternodeMan::ProcessVerifyBroadcast(CNode* pnode, const CMasternodeVerif
 {
     AssertLockHeld(cs_main);
 
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return;
+
     std::string strError;
 
     if(mapSeenMasternodeVerification.find(mnv.GetHash()) != mapSeenMasternodeVerification.end()) {
@@ -1501,6 +1552,9 @@ bool CMasternodeMan::CheckMnbAndUpdateMasternodeList(CNode* pfrom, CMasternodeBr
     // Need to lock cs_main here to ensure consistent locking order because the SimpleCheck call below locks cs_main
     LOCK(cs_main);
 
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return false;
+
     {
         LOCK(cs);
         nDos = 0;
@@ -1613,6 +1667,8 @@ void CMasternodeMan::UpdateLastPaid(const CBlockIndex* pindex)
 void CMasternodeMan::UpdateLastSentinelPingTime()
 {
     LOCK(cs);
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return;
     nLastSentinelPingTime = GetTime();
 }
 
@@ -1645,6 +1701,8 @@ void CMasternodeMan::RemoveGovernanceObject(uint256 nGovernanceObjectHash)
 void CMasternodeMan::CheckMasternode(const CKeyID& keyIDOperator, bool fForce)
 {
     LOCK2(cs_main, cs);
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return;
     for (auto& mnpair : mapMasternodes) {
         if (mnpair.second.keyIDOperator == keyIDOperator) {
             mnpair.second.Check(fForce);
@@ -1663,6 +1721,8 @@ bool CMasternodeMan::IsMasternodePingedWithin(const COutPoint& outpoint, int nSe
 void CMasternodeMan::SetMasternodeLastPing(const COutPoint& outpoint, const CMasternodePing& mnp)
 {
     LOCK(cs);
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return;
     CMasternode* pmn = Find(outpoint);
     if(!pmn) {
         return;
