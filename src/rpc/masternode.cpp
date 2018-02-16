@@ -251,7 +251,7 @@ UniValue masternode(const JSONRPCRequest& request)
         obj.push_back(Pair("IP:port",       mnInfo.addr.ToString()));
         obj.push_back(Pair("protocol",      (int64_t)mnInfo.nProtocolVersion));
         obj.push_back(Pair("outpoint",      mnInfo.outpoint.ToStringShort()));
-        obj.push_back(Pair("payee",         CBitcoinAddress(mnInfo.pubKeyCollateralAddress.GetID()).ToString()));
+        obj.push_back(Pair("payee",         CBitcoinAddress(mnInfo.pubKeyIDCollateralAddress).ToString()));
         obj.push_back(Pair("lastseen",      mnInfo.nTimeLastPing));
         obj.push_back(Pair("activeseconds", mnInfo.nTimeLastPing - mnInfo.sigTime));
         return obj;
@@ -433,7 +433,7 @@ UniValue masternode(const JSONRPCRequest& request)
 
         CMasternode mn;
         if(mnodeman.Get(activeMasternode.outpoint, mn)) {
-            mnObj.push_back(Pair("payee", CBitcoinAddress(mn.pubKeyCollateralAddress.GetID()).ToString()));
+            mnObj.push_back(Pair("payee", CBitcoinAddress(mn.pubKeyIDCollateralAddress).ToString()));
         }
 
         mnObj.push_back(Pair("status", legacyActiveMasternodeManager.GetStatus()));
@@ -516,7 +516,7 @@ UniValue masternodelist(const JSONRPCRequest& request)
                 "  payee          - Print Dash address associated with a masternode (can be additionally filtered,\n"
                 "                   partial match)\n"
                 "  protocol       - Print protocol of a masternode (can be additionally filtered, exact match)\n"
-                "  pubkey         - Print the masternode (not collateral) public key\n"
+                "  pubkeyid       - Print the masternode (not collateral) public key id\n"
                 "  rank           - Print rank of a masternode based on current block\n"
                 "  sentinel       - Print sentinel version of a masternode (can be additionally filtered, exact match)\n"
                 "  status         - Print masternode status: PRE_ENABLED / ENABLED / EXPIRED / SENTINEL_PING_EXPIRED / NEW_START_REQUIRED /\n"
@@ -570,7 +570,7 @@ UniValue masternodelist(const JSONRPCRequest& request)
                 streamFull << std::setw(18) <<
                                mn.GetStatus() << " " <<
                                mn.nProtocolVersion << " " <<
-                               CBitcoinAddress(mn.pubKeyCollateralAddress.GetID()).ToString() << " " <<
+                               CBitcoinAddress(mn.pubKeyIDCollateralAddress).ToString() << " " <<
                                (int64_t)mn.lastPing.sigTime << " " << std::setw(8) <<
                                (int64_t)(mn.lastPing.sigTime - mn.sigTime) << " " << std::setw(10) <<
                                mn.GetLastPaidTime() << " "  << std::setw(6) <<
@@ -585,7 +585,7 @@ UniValue masternodelist(const JSONRPCRequest& request)
                 streamInfo << std::setw(18) <<
                                mn.GetStatus() << " " <<
                                mn.nProtocolVersion << " " <<
-                               CBitcoinAddress(mn.pubKeyCollateralAddress.GetID()).ToString() << " " <<
+                               CBitcoinAddress(mn.pubKeyIDCollateralAddress).ToString() << " " <<
                                (int64_t)mn.lastPing.sigTime << " " << std::setw(8) <<
                                (int64_t)(mn.lastPing.sigTime - mn.sigTime) << " " <<
                                SafeIntVersionToString(mn.lastPing.nSentinelVersion) << " "  <<
@@ -634,7 +634,7 @@ UniValue masternodelist(const JSONRPCRequest& request)
                 if (strFilter !="" && strOutpoint.find(strFilter) == std::string::npos) continue;
                 obj.push_back(Pair(strOutpoint, (int64_t)mn.lastPing.sigTime));
             } else if (strMode == "payee") {
-                CBitcoinAddress address(mn.pubKeyCollateralAddress.GetID());
+                CBitcoinAddress address(mn.pubKeyIDCollateralAddress);
                 std::string strPayee = address.ToString();
                 if (strFilter !="" && strPayee.find(strFilter) == std::string::npos &&
                     strOutpoint.find(strFilter) == std::string::npos) continue;
@@ -643,9 +643,9 @@ UniValue masternodelist(const JSONRPCRequest& request)
                 if (strFilter !="" && strFilter != strprintf("%d", mn.nProtocolVersion) &&
                     strOutpoint.find(strFilter) == std::string::npos) continue;
                 obj.push_back(Pair(strOutpoint, (int64_t)mn.nProtocolVersion));
-            } else if (strMode == "pubkey") {
+            } else if (strMode == "pubkeyid") {
                 if (strFilter !="" && strOutpoint.find(strFilter) == std::string::npos) continue;
-                obj.push_back(Pair(strOutpoint, HexStr(mn.pubKeyMasternode)));
+                obj.push_back(Pair(strOutpoint, HexStr(mn.pubKeyIDMasternode)));
             } else if (strMode == "status") {
                 std::string strStatus = mn.GetStatus();
                 if (strFilter !="" && strStatus.find(strFilter) == std::string::npos &&
@@ -833,8 +833,8 @@ UniValue masternodebroadcast(const JSONRPCRequest& request)
                 nSuccessful++;
                 resultObj.push_back(Pair("outpoint", mnb.outpoint.ToStringShort()));
                 resultObj.push_back(Pair("addr", mnb.addr.ToString()));
-                resultObj.push_back(Pair("pubKeyCollateralAddress", CBitcoinAddress(mnb.pubKeyCollateralAddress.GetID()).ToString()));
-                resultObj.push_back(Pair("pubKeyMasternode", CBitcoinAddress(mnb.pubKeyMasternode.GetID()).ToString()));
+                resultObj.push_back(Pair("pubKeyIDCollateralAddress", CBitcoinAddress(mnb.pubKeyIDCollateralAddress).ToString()));
+                resultObj.push_back(Pair("pubKeyIDMasternode", CBitcoinAddress(mnb.pubKeyIDMasternode).ToString()));
                 resultObj.push_back(Pair("vchSig", EncodeBase64(&mnb.vchSig[0], mnb.vchSig.size())));
                 resultObj.push_back(Pair("sigTime", mnb.sigTime));
                 resultObj.push_back(Pair("protocolVersion", mnb.nProtocolVersion));

@@ -253,8 +253,8 @@ public:
     // Signature related functions
 
     void SetMasternodeOutpoint(const COutPoint& outpoint);
-    bool Sign(const CKey& keyMasternode, const CPubKey& pubKeyMasternode);
-    bool CheckSignature(const CPubKey& pubKeyMasternode);
+    bool Sign(const CKey& keyMasternode, const CKeyID& pubKeyIDMasternode);
+    bool CheckSignature(const CKeyID& pubKeyIDMasternode);
 
     std::string GetSignatureMessage() const;
     uint256 GetSignatureHash() const;
