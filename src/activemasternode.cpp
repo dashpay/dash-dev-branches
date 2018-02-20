@@ -10,6 +10,7 @@
 #include "protocol.h"
 #include "warnings.h"
 #include "init.h"
+#include "netbase.h"
 #include "evo/deterministicmns.h"
 
 // Keep track of the active Masternode
@@ -293,6 +294,12 @@ void CActiveLegacyMasternodeManager::ManageStateInitial(CConnman& connman)
         }
     }
 
+    if (!fFoundLocal && Params().NetworkIDString() == CBaseChainParams::REGTEST) {
+        if (Lookup("127.0.0.1", activeMasternode.service, GetListenPort(), false)) {
+            fFoundLocal = true;
+        }
+    }
+
     if(!fFoundLocal) {
         nState = ACTIVE_MASTERNODE_NOT_CAPABLE;
         strNotCapableReason = "Can't detect valid external address. Please consider using the externalip configuration option if problem persists. Make sure to use IPv4 address only.";
@@ -315,19 +322,20 @@ void CActiveLegacyMasternodeManager::ManageStateInitial(CConnman& connman)
         return;
     }
 
-    // Check socket connectivity
-    LogPrintf("CActiveLegacyMasternodeManager::ManageStateInitial -- Checking inbound connection to '%s'\n", activeMasternode.service.ToString());
-    SOCKET hSocket;
-    bool fConnected = ConnectSocket(service, hSocket, nConnectTimeout) && IsSelectableSocket(hSocket);
-    CloseSocket(hSocket);
+    if(Params().NetworkIDString() != CBaseChainParams::REGTEST) {
+        // Check socket connectivity
+        LogPrintf("CActiveLegacyMasternodeManager::ManageStateInitial -- Checking inbound connection to '%s'\n", activeMasternode.service.ToString());
+        SOCKET hSocket;
+        bool fConnected = ConnectSocket(activeMasternode.service, hSocket, nConnectTimeout) && IsSelectableSocket(hSocket);
+        CloseSocket(hSocket);
 
-    if (!fConnected) {
-        nState = ACTIVE_MASTERNODE_NOT_CAPABLE;
-        strNotCapableReason = "Could not connect to " + service.ToString();
-        LogPrintf("CActiveLegacyMasternodeManager::ManageStateInitial -- %s: %s\n", GetStateString(), strNotCapableReason);
-        return;
+        if (!fConnected) {
+            nState = ACTIVE_MASTERNODE_NOT_CAPABLE;
+            strNotCapableReason = "Could not connect to " + activeMasternode.service.ToString();
+            LogPrintf("CActiveLegacyMasternodeManager::ManageStateInitial -- %s: %s\n", GetStateString(), strNotCapableReason);
+            return;
+        }
     }
-
     // Default to REMOTE
     eType = MASTERNODE_REMOTE;
 
