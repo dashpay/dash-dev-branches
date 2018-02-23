@@ -8,8 +8,6 @@
 #include "masternode.h"
 #include "sync.h"
 
-using namespace std;
-
 class CMasternodeMan;
 class CConnman;
 
@@ -82,6 +80,11 @@ private:
     CMasternode* Find(const COutPoint& outpoint);
 
     bool GetMasternodeScores(const uint256& nBlockHash, score_pair_vec_t& vecMasternodeScoresRet, int nMinProtocol = 0);
+
+    void SyncSingle(CNode* pnode, const COutPoint& outpoint, CConnman& connman);
+    void SyncAll(CNode* pnode, CConnman& connman);
+
+    void PushDsegInvs(CNode* pnode, const CMasternode& mn);
 
 public:
     // Keep track of all broadcasts I've seen
@@ -200,9 +203,7 @@ public:
 
     std::string ToString() const;
 
-    /// Update masternode list and maps using provided CMasternodeBroadcast
-    void UpdateMasternodeList(CMasternodeBroadcast mnb, CConnman& connman);
-    /// Perform complete check and only then update list and maps
+    /// Perform complete check and only then update masternode list and maps using provided CMasternodeBroadcast
     bool CheckMnbAndUpdateMasternodeList(CNode* pfrom, CMasternodeBroadcast mnb, int& nDos, CConnman& connman);
     bool IsMnbRecoveryRequested(const uint256& hash) { return mMnbRecoveryRequests.count(hash); }
 

@@ -22,6 +22,7 @@ static const int SPORK_END                                              = 10013;
 static const int SPORK_2_INSTANTSEND_ENABLED                            = 10001;
 static const int SPORK_3_INSTANTSEND_BLOCK_FILTERING                    = 10002;
 static const int SPORK_5_INSTANTSEND_MAX_VALUE                          = 10004;
+static const int SPORK_6_NEW_SIGS                                       = 10005;
 static const int SPORK_8_MASTERNODE_PAYMENT_ENFORCEMENT                 = 10007;
 static const int SPORK_9_SUPERBLOCKS_ENABLED                            = 10008;
 static const int SPORK_10_MASTERNODE_PAY_UPDATED_NODES                  = 10009;
@@ -31,6 +32,7 @@ static const int SPORK_14_REQUIRE_SENTINEL_FLAG                         = 10013;
 static const int64_t SPORK_2_INSTANTSEND_ENABLED_DEFAULT                = 0;            // ON
 static const int64_t SPORK_3_INSTANTSEND_BLOCK_FILTERING_DEFAULT        = 0;            // ON
 static const int64_t SPORK_5_INSTANTSEND_MAX_VALUE_DEFAULT              = 1000;         // 1000 DASH
+static const int64_t SPORK_6_NEW_SIGS_DEFAULT                           = 4070908800ULL;// OFF
 static const int64_t SPORK_8_MASTERNODE_PAYMENT_ENFORCEMENT_DEFAULT     = 4070908800ULL;// OFF
 static const int64_t SPORK_9_SUPERBLOCKS_ENABLED_DEFAULT                = 4070908800ULL;// OFF
 static const int64_t SPORK_10_MASTERNODE_PAY_UPDATED_NODES_DEFAULT      = 4070908800ULL;// OFF
@@ -75,20 +77,16 @@ public:
         READWRITE(nSporkID);
         READWRITE(nValue);
         READWRITE(nTimeSigned);
-        READWRITE(vchSig);
+        if (!(s.GetType() & SER_GETHASH)) {
+            READWRITE(vchSig);
+        }
     }
 
-    uint256 GetHash() const
-    {
-        CHashWriter ss(SER_GETHASH, PROTOCOL_VERSION);
-        ss << nSporkID;
-        ss << nValue;
-        ss << nTimeSigned;
-        return ss.GetHash();
-    }
+    uint256 GetHash() const;
+    uint256 GetSignatureHash() const;
 
-    bool Sign(std::string strSignKey);
-    bool CheckSignature();
+    bool Sign(const std::string& strSignKey);
+    bool CheckSignature() const;
     void Relay(CConnman& connman);
 };
 
@@ -110,10 +108,10 @@ public:
 
     bool IsSporkActive(int nSporkID);
     int64_t GetSporkValue(int nSporkID);
-    int GetSporkIDByName(std::string strName);
+    int GetSporkIDByName(const std::string& strName);
     std::string GetSporkNameByID(int nSporkID);
 
-    bool SetPrivKey(std::string strPrivKey);
+    bool SetPrivKey(const std::string& strPrivKey);
 };
 
 #endif
