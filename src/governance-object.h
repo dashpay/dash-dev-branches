@@ -15,6 +15,7 @@
 #include "net.h"
 #include "sync.h"
 #include "util.h"
+#include "utilstrencodings.h"
 
 #include <univalue.h>
 
@@ -42,8 +43,6 @@ static const int64_t GOVERNANCE_UPDATE_MIN = 60*60;
 static const int64_t GOVERNANCE_DELETION_DELAY = 10*60;
 static const int64_t GOVERNANCE_ORPHAN_EXPIRATION_TIME = 10*60;
 static const int64_t GOVERNANCE_WATCHDOG_EXPIRATION_TIME = 2*60*60;
-
-static const int GOVERNANCE_TRIGGER_EXPIRATION_BLOCKS = 576;
 
 // FOR SEEN MAP ARRAYS - GOVERNANCE OBJECTS AND VOTES
 static const int SEEN_OBJECT_IS_VALID = 0;
@@ -112,8 +111,8 @@ struct vote_rec_t {
 class CGovernanceObject
 {
     friend class CGovernanceManager;
-
     friend class CGovernanceTriggerManager;
+    friend class CSuperblock;
 
 public: // Types
     typedef std::map<COutPoint, vote_rec_t> vote_m_t;
@@ -147,10 +146,10 @@ private:
     uint256 nCollateralHash;
 
     /// Data field - can be used for anything
-    std::string strData;
+    std::vector<unsigned char> vchData;
 
     /// Masternode info for signed objects
-    CTxIn vinMasternode;
+    COutPoint masternodeOutpoint;
     std::vector<unsigned char> vchSig;
 
     /// is valid by blockchain
@@ -192,7 +191,7 @@ private:
 public:
     CGovernanceObject();
 
-    CGovernanceObject(uint256 nHashParentIn, int nRevisionIn, int64_t nTime, uint256 nCollateralHashIn, std::string strDataIn);
+    CGovernanceObject(const uint256& nHashParentIn, int nRevisionIn, int64_t nTime, const uint256& nCollateralHashIn, const std::string& strDataHexIn);
 
     CGovernanceObject(const CGovernanceObject& other);
 
@@ -216,8 +215,8 @@ public:
         return nCollateralHash;
     }
 
-    const CTxIn& GetMasternodeVin() const {
-        return vinMasternode;
+    const COutPoint& GetMasternodeOutpoint() const {
+        return masternodeOutpoint;
     }
 
     bool IsSetCachedFunding() const {
@@ -254,11 +253,12 @@ public:
 
     // Signature related functions
 
-    void SetMasternodeVin(const COutPoint& outpoint);
-    bool Sign(CKey& keyMasternode, CPubKey& pubKeyMasternode);
-    bool CheckSignature(CPubKey& pubKeyMasternode);
+    void SetMasternodeOutpoint(const COutPoint& outpoint);
+    bool Sign(const CKey& keyMasternode, const CPubKey& pubKeyMasternode);
+    bool CheckSignature(const CPubKey& pubKeyMasternode);
 
     std::string GetSignatureMessage() const;
+    uint256 GetSignatureHash() const;
 
     // CORE OBJECT FUNCTIONS
 
@@ -272,8 +272,6 @@ public:
     void UpdateLocalValidity();
 
     void UpdateSentinelVariables();
-
-    int GetObjectSubtype();
 
     CAmount GetMinCollateralFee();
 
@@ -297,8 +295,8 @@ public:
 
     // FUNCTIONS FOR DEALING WITH DATA STRING
 
-    std::string GetDataAsHex();
-    std::string GetDataAsString();
+    std::string GetDataAsHexString() const;
+    std::string GetDataAsPlainString() const;
 
     // SERIALIZER
 
@@ -308,15 +306,43 @@ public:
     inline void SerializationOp(Stream& s, Operation ser_action)
     {
         // SERIALIZE DATA FOR SAVING/LOADING OR NETWORK FUNCTIONS
-
+        int nVersion = s.GetVersion();
         READWRITE(nHashParent);
         READWRITE(nRevision);
         READWRITE(nTime);
         READWRITE(nCollateralHash);
-        READWRITE(LIMITED_STRING(strData, MAX_GOVERNANCE_OBJECT_DATA_SIZE));
+        if (nVersion == 70208 && (s.GetType() & SER_NETWORK)) {
+            // converting from/to old format
+            std::string strDataHex;
+            if (ser_action.ForRead()) {
+                READWRITE(LIMITED_STRING(strDataHex, MAX_GOVERNANCE_OBJECT_DATA_SIZE));
+                vchData = ParseHex(strDataHex);
+            } else {
+                strDataHex = HexStr(vchData);
+                READWRITE(LIMITED_STRING(strDataHex, MAX_GOVERNANCE_OBJECT_DATA_SIZE));
+            }
+        } else {
+            // using new format directly
+            READWRITE(vchData);
+        }
         READWRITE(nObjectType);
-        READWRITE(vinMasternode);
-        READWRITE(vchSig);
+        if (nVersion == 70208 && (s.GetType() & SER_NETWORK)) {
+            // converting from/to old format
+            CTxIn txin;
+            if (ser_action.ForRead()) {
+                READWRITE(txin);
+                masternodeOutpoint = txin.prevout;
+            } else {
+                txin = CTxIn(masternodeOutpoint);
+                READWRITE(txin);
+            }
+        } else {
+            // using new format directly
+            READWRITE(masternodeOutpoint);
+        }
+        if (!(s.GetType() & SER_GETHASH)) {
+            READWRITE(vchSig);
+        }
         if(s.GetType() & SER_DISK) {
             // Only include these for the disk file format
             LogPrint("gobject", "CGovernanceObject::SerializationOp Reading/writing votes from/to disk\n");

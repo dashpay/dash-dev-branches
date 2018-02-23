@@ -26,19 +26,22 @@ static const int MASTERNODE_POSE_BAN_MAX_SCORE          = 5;
 // The Masternode Ping Class : Contains a different serialize method for sending pings from masternodes throughout the network
 //
 
-// sentinel version before sentinel ping implementation
+// sentinel version before implementation of nSentinelVersion in CMasternodePing
 #define DEFAULT_SENTINEL_VERSION 0x010001
+// daemon version before implementation of nDaemonVersion in CMasternodePing
+#define DEFAULT_DAEMON_VERSION 120200
 
 class CMasternodePing
 {
 public:
-    CTxIn vin{};
+    COutPoint masternodeOutpoint{};
     uint256 blockHash{};
     int64_t sigTime{}; //mnb message times
     std::vector<unsigned char> vchSig{};
-    bool fSentinelIsCurrent = false; // true if last sentinel ping was actual
+    bool fSentinelIsCurrent = false; // true if last sentinel ping was current
     // MSB is always 0, other 3 bits corresponds to x.x.x version scheme
     uint32_t nSentinelVersion{DEFAULT_SENTINEL_VERSION};
+    uint32_t nDaemonVersion{DEFAULT_DAEMON_VERSION};
 
     CMasternodePing() = default;
 
@@ -48,44 +51,70 @@ public:
 
     template <typename Stream, typename Operation>
     inline void SerializationOp(Stream& s, Operation ser_action) {
-        READWRITE(vin);
+        int nVersion = s.GetVersion();
+        if (nVersion == 70208 && (s.GetType() & SER_NETWORK)) {
+            // converting from/to old format
+            CTxIn txin{};
+            if (ser_action.ForRead()) {
+                READWRITE(txin);
+                masternodeOutpoint = txin.prevout;
+            } else {
+                txin = CTxIn(masternodeOutpoint);
+                READWRITE(txin);
+            }
+        } else {
+            // using new format directly
+            READWRITE(masternodeOutpoint);
+        }
         READWRITE(blockHash);
         READWRITE(sigTime);
-        READWRITE(vchSig);
-        if(ser_action.ForRead() && (s.size() == 0))
-        {
+        if (!(s.GetType() & SER_GETHASH)) {
+            READWRITE(vchSig);
+        }
+        if(ser_action.ForRead() && s.size() == 0) {
+            // TODO: drop this after migration to 70209
             fSentinelIsCurrent = false;
             nSentinelVersion = DEFAULT_SENTINEL_VERSION;
+            nDaemonVersion = DEFAULT_DAEMON_VERSION;
             return;
         }
         READWRITE(fSentinelIsCurrent);
         READWRITE(nSentinelVersion);
+        if(ser_action.ForRead() && s.size() == 0) {
+            // TODO: drop this after migration to 70209
+            nDaemonVersion = DEFAULT_DAEMON_VERSION;
+            return;
+        }
+        if (!(nVersion == 70208 && (s.GetType() & SER_NETWORK))) {
+            READWRITE(nDaemonVersion);
+        }
     }
 
-    uint256 GetHash() const
-    {
-        CHashWriter ss(SER_GETHASH, PROTOCOL_VERSION);
-        ss << vin;
-        ss << sigTime;
-        return ss.GetHash();
-    }
+    uint256 GetHash() const;
+    uint256 GetSignatureHash() const;
 
     bool IsExpired() const { return GetAdjustedTime() - sigTime > MASTERNODE_NEW_START_REQUIRED_SECONDS; }
 
     bool Sign(const CKey& keyMasternode, const CPubKey& pubKeyMasternode);
-    bool CheckSignature(CPubKey& pubKeyMasternode, int &nDos);
+    bool CheckSignature(const CPubKey& pubKeyMasternode, int &nDos) const;
     bool SimpleCheck(int& nDos);
     bool CheckAndUpdate(CMasternode* pmn, bool fFromNewBroadcast, int& nDos, CConnman& connman);
     void Relay(CConnman& connman);
+
+    explicit operator bool() const;
 };
 
 inline bool operator==(const CMasternodePing& a, const CMasternodePing& b)
 {
-    return a.vin == b.vin && a.blockHash == b.blockHash;
+    return a.masternodeOutpoint == b.masternodeOutpoint && a.blockHash == b.blockHash;
 }
 inline bool operator!=(const CMasternodePing& a, const CMasternodePing& b)
 {
     return !(a == b);
+}
+inline CMasternodePing::operator bool() const
+{
+    return *this != CMasternodePing();
 }
 
 struct masternode_info_t
@@ -99,11 +128,11 @@ struct masternode_info_t
         nActiveState{activeState}, nProtocolVersion{protoVer}, sigTime{sTime} {}
 
     masternode_info_t(int activeState, int protoVer, int64_t sTime,
-                      COutPoint const& outpoint, CService const& addr,
+                      COutPoint const& outpnt, CService const& addr,
                       CPubKey const& pkCollAddr, CPubKey const& pkMN,
                       int64_t tWatchdogV = 0) :
         nActiveState{activeState}, nProtocolVersion{protoVer}, sigTime{sTime},
-        vin{outpoint}, addr{addr},
+        outpoint{outpnt}, addr{addr},
         pubKeyCollateralAddress{pkCollAddr}, pubKeyMasternode{pkMN},
         nTimeLastWatchdogVote{tWatchdogV} {}
 
@@ -111,7 +140,7 @@ struct masternode_info_t
     int nProtocolVersion = 0;
     int64_t sigTime = 0; //mnb message time
 
-    CTxIn vin{};
+    COutPoint outpoint{};
     CService addr{};
     CPubKey pubKeyCollateralAddress{};
     CPubKey pubKeyMasternode{};
@@ -177,7 +206,21 @@ public:
     template <typename Stream, typename Operation>
     inline void SerializationOp(Stream& s, Operation ser_action) {
         LOCK(cs);
-        READWRITE(vin);
+        int nVersion = s.GetVersion();
+        if (nVersion == 70208 && (s.GetType() & SER_NETWORK)) {
+            // converting from/to old format
+            CTxIn txin{};
+            if (ser_action.ForRead()) {
+                READWRITE(txin);
+                outpoint = txin.prevout;
+            } else {
+                txin = CTxIn(outpoint);
+                READWRITE(txin);
+            }
+        } else {
+            // using new format directly
+            READWRITE(outpoint);
+        }
         READWRITE(addr);
         READWRITE(pubKeyCollateralAddress);
         READWRITE(pubKeyMasternode);
@@ -212,7 +255,7 @@ public:
 
     bool IsPingedWithin(int nSeconds, int64_t nTimeToCheckAt = -1)
     {
-        if(lastPing == CMasternodePing()) return false;
+        if(!lastPing) return false;
 
         if(nTimeToCheckAt == -1) {
             nTimeToCheckAt = GetAdjustedTime();
@@ -296,11 +339,11 @@ public:
 
 inline bool operator==(const CMasternode& a, const CMasternode& b)
 {
-    return a.vin == b.vin;
+    return a.outpoint == b.outpoint;
 }
 inline bool operator!=(const CMasternode& a, const CMasternode& b)
 {
-    return !(a.vin == b.vin);
+    return !(a.outpoint == b.outpoint);
 }
 
 
@@ -323,28 +366,40 @@ public:
 
     template <typename Stream, typename Operation>
     inline void SerializationOp(Stream& s, Operation ser_action) {
-        READWRITE(vin);
+        int nVersion = s.GetVersion();
+        if (nVersion == 70208 && (s.GetType() & SER_NETWORK)) {
+            // converting from/to old format
+            CTxIn txin{};
+            if (ser_action.ForRead()) {
+                READWRITE(txin);
+                outpoint = txin.prevout;
+            } else {
+                txin = CTxIn(outpoint);
+                READWRITE(txin);
+            }
+        } else {
+            // using new format directly
+            READWRITE(outpoint);
+        }
         READWRITE(addr);
         READWRITE(pubKeyCollateralAddress);
         READWRITE(pubKeyMasternode);
-        READWRITE(vchSig);
+        if (!(s.GetType() & SER_GETHASH)) {
+            READWRITE(vchSig);
+        }
         READWRITE(sigTime);
         READWRITE(nProtocolVersion);
-        READWRITE(lastPing);
+        if (!(s.GetType() & SER_GETHASH)) {
+            READWRITE(lastPing);
+        }
     }
 
-    uint256 GetHash() const
-    {
-        CHashWriter ss(SER_GETHASH, PROTOCOL_VERSION);
-        ss << vin;
-        ss << pubKeyCollateralAddress;
-        ss << sigTime;
-        return ss.GetHash();
-    }
+    uint256 GetHash() const;
+    uint256 GetSignatureHash() const;
 
     /// Create Masternode broadcast, needs to be relayed manually after that
     static bool Create(const COutPoint& outpoint, const CService& service, const CKey& keyCollateralAddressNew, const CPubKey& pubKeyCollateralAddressNew, const CKey& keyMasternodeNew, const CPubKey& pubKeyMasternodeNew, std::string &strErrorRet, CMasternodeBroadcast &mnbRet);
-    static bool Create(std::string strService, std::string strKey, std::string strTxHash, std::string strOutputIndex, std::string& strErrorRet, CMasternodeBroadcast &mnbRet, bool fOffline = false);
+    static bool Create(const std::string& strService, const std::string& strKey, const std::string& strTxHash, const std::string& strOutputIndex, std::string& strErrorRet, CMasternodeBroadcast &mnbRet, bool fOffline = false);
 
     bool SimpleCheck(int& nDos);
     bool Update(CMasternode* pmn, int& nDos, CConnman& connman);
@@ -358,8 +413,8 @@ public:
 class CMasternodeVerification
 {
 public:
-    CTxIn vin1{};
-    CTxIn vin2{};
+    COutPoint masternodeOutpoint1{};
+    COutPoint masternodeOutpoint2{};
     CService addr{};
     int nonce{};
     int nBlockHeight{};
@@ -378,8 +433,27 @@ public:
 
     template <typename Stream, typename Operation>
     inline void SerializationOp(Stream& s, Operation ser_action) {
-        READWRITE(vin1);
-        READWRITE(vin2);
+        int nVersion = s.GetVersion();
+        if (nVersion == 70208 && (s.GetType() & SER_NETWORK)) {
+            // converting from/to old format
+            CTxIn txin1{};
+            CTxIn txin2{};
+            if (ser_action.ForRead()) {
+                READWRITE(txin1);
+                READWRITE(txin2);
+                masternodeOutpoint1 = txin1.prevout;
+                masternodeOutpoint2 = txin2.prevout;
+            } else {
+                txin1 = CTxIn(masternodeOutpoint1);
+                txin2 = CTxIn(masternodeOutpoint2);
+                READWRITE(txin1);
+                READWRITE(txin2);
+            }
+        } else {
+            // using new format directly
+            READWRITE(masternodeOutpoint1);
+            READWRITE(masternodeOutpoint2);
+        }
         READWRITE(addr);
         READWRITE(nonce);
         READWRITE(nBlockHeight);
@@ -389,12 +463,39 @@ public:
 
     uint256 GetHash() const
     {
+        // Note: doesn't match serialization
+
         CHashWriter ss(SER_GETHASH, PROTOCOL_VERSION);
-        ss << vin1;
-        ss << vin2;
+        // adding dummy values here to match old hashing format
+        ss << masternodeOutpoint1 << uint8_t{} << 0xffffffff;
+        ss << masternodeOutpoint2 << uint8_t{} << 0xffffffff;
         ss << addr;
         ss << nonce;
         ss << nBlockHeight;
+        return ss.GetHash();
+    }
+
+    uint256 GetSignatureHash1(const uint256& blockHash) const
+    {
+        // Note: doesn't match serialization
+
+        CHashWriter ss(SER_GETHASH, PROTOCOL_VERSION);
+        ss << addr;
+        ss << nonce;
+        ss << blockHash;
+        return ss.GetHash();
+    }
+
+    uint256 GetSignatureHash2(const uint256& blockHash) const
+    {
+        // Note: doesn't match serialization
+
+        CHashWriter ss(SER_GETHASH, PROTOCOL_VERSION);
+        ss << masternodeOutpoint1;
+        ss << masternodeOutpoint2;
+        ss << addr;
+        ss << nonce;
+        ss << blockHash;
         return ss.GetHash();
     }
 

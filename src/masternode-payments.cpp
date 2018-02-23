@@ -33,7 +33,7 @@ CCriticalSection cs_mapMasternodePaymentVotes;
 *   - When non-superblocks are detected, the normal schedule should be maintained
 */
 
-bool IsBlockValueValid(const CBlock& block, int nBlockHeight, CAmount blockReward, std::string &strErrorRet)
+bool IsBlockValueValid(const CBlock& block, int nBlockHeight, CAmount blockReward, std::string& strErrorRet)
 {
     strErrorRet = "";
 
@@ -295,8 +295,11 @@ void CMasternodePayments::ProcessMessage(CNode* pfrom, const std::string& strCom
         // but this is a heavy one so it's better to finish sync first.
         if (!masternodeSync.IsSynced()) return;
 
-        int nCountNeeded;
-        vRecv >> nCountNeeded;
+        // DEPRECATED, should be removed on next protocol bump
+        if(pfrom->nVersion == 70208) {
+            int nCountNeeded;
+            vRecv >> nCountNeeded;
+        }
 
         if(netfulfilledman.HasFulfilledRequest(pfrom->addr, NetMsgType::MASTERNODEPAYMENTSYNC)) {
             // Asking for the payments list multiple times in a short period of time is no good
@@ -351,16 +354,16 @@ void CMasternodePayments::ProcessMessage(CNode* pfrom, const std::string& strCom
             return;
         }
 
-        if(!CanVote(vote.vinMasternode.prevout, vote.nBlockHeight)) {
-            LogPrintf("MASTERNODEPAYMENTVOTE -- masternode already voted, masternode=%s\n", vote.vinMasternode.prevout.ToStringShort());
+        if(!CanVote(vote.masternodeOutpoint, vote.nBlockHeight)) {
+            LogPrintf("MASTERNODEPAYMENTVOTE -- masternode already voted, masternode=%s\n", vote.masternodeOutpoint.ToStringShort());
             return;
         }
 
         masternode_info_t mnInfo;
-        if(!mnodeman.GetMasternodeInfo(vote.vinMasternode.prevout, mnInfo)) {
+        if(!mnodeman.GetMasternodeInfo(vote.masternodeOutpoint, mnInfo)) {
             // mn was not found, so we can't check vote, some info is probably missing
-            LogPrintf("MASTERNODEPAYMENTVOTE -- masternode is missing %s\n", vote.vinMasternode.prevout.ToStringShort());
-            mnodeman.AskForMN(pfrom, vote.vinMasternode.prevout, connman);
+            LogPrintf("MASTERNODEPAYMENTVOTE -- masternode is missing %s\n", vote.masternodeOutpoint.ToStringShort());
+            mnodeman.AskForMN(pfrom, vote.masternodeOutpoint, connman);
             return;
         }
 
@@ -375,7 +378,7 @@ void CMasternodePayments::ProcessMessage(CNode* pfrom, const std::string& strCom
             }
             // Either our info or vote info could be outdated.
             // In case our info is outdated, ask for an update,
-            mnodeman.AskForMN(pfrom, vote.vinMasternode.prevout, connman);
+            mnodeman.AskForMN(pfrom, vote.masternodeOutpoint, connman);
             // but there is nothing we can do if vote info itself is outdated
             // (i.e. it was signed by a mn which changed its key),
             // so just quit here.
@@ -387,7 +390,7 @@ void CMasternodePayments::ProcessMessage(CNode* pfrom, const std::string& strCom
         CBitcoinAddress address2(address1);
 
         LogPrint("mnpayments", "MASTERNODEPAYMENTVOTE -- vote: address=%s, nBlockHeight=%d, nHeight=%d, prevout=%s, hash=%s new\n",
-                    address2.ToString(), vote.nBlockHeight, nCachedBlockHeight, vote.vinMasternode.prevout.ToStringShort(), nHash.ToString());
+                    address2.ToString(), vote.nBlockHeight, nCachedBlockHeight, vote.masternodeOutpoint.ToStringShort(), nHash.ToString());
 
         if(AddPaymentVote(vote)){
             vote.Relay(connman);
@@ -396,21 +399,52 @@ void CMasternodePayments::ProcessMessage(CNode* pfrom, const std::string& strCom
     }
 }
 
+uint256 CMasternodePaymentVote::GetHash() const
+{
+    // Note: doesn't match serialization
+
+    CHashWriter ss(SER_GETHASH, PROTOCOL_VERSION);
+    ss << *(CScriptBase*)(&payee);
+    ss << nBlockHeight;
+    ss << masternodeOutpoint;
+    return ss.GetHash();
+}
+
+uint256 CMasternodePaymentVote::GetSignatureHash() const
+{
+    return SerializeHash(*this);
+}
+
 bool CMasternodePaymentVote::Sign()
 {
     std::string strError;
-    std::string strMessage = vinMasternode.prevout.ToStringShort() +
-                boost::lexical_cast<std::string>(nBlockHeight) +
-                ScriptToAsmStr(payee);
 
-    if(!CMessageSigner::SignMessage(strMessage, vchSig, activeMasternode.keyMasternode)) {
-        LogPrintf("CMasternodePaymentVote::Sign -- SignMessage() failed\n");
-        return false;
-    }
+    if (sporkManager.IsSporkActive(SPORK_6_NEW_SIGS)) {
+        uint256 hash = GetSignatureHash();
 
-    if(!CMessageSigner::VerifyMessage(activeMasternode.pubKeyMasternode, vchSig, strMessage, strError)) {
-        LogPrintf("CMasternodePaymentVote::Sign -- VerifyMessage() failed, error: %s\n", strError);
-        return false;
+        if(!CHashSigner::SignHash(hash, activeMasternode.keyMasternode, vchSig)) {
+            LogPrintf("CMasternodePaymentVote::Sign -- SignHash() failed\n");
+            return false;
+        }
+
+        if (!CHashSigner::VerifyHash(hash, activeMasternode.pubKeyMasternode, vchSig, strError)) {
+            LogPrintf("CMasternodePaymentVote::Sign -- VerifyHash() failed, error: %s\n", strError);
+            return false;
+        }
+    } else {
+        std::string strMessage = masternodeOutpoint.ToStringShort() +
+                    boost::lexical_cast<std::string>(nBlockHeight) +
+                    ScriptToAsmStr(payee);
+
+        if(!CMessageSigner::SignMessage(strMessage, vchSig, activeMasternode.keyMasternode)) {
+            LogPrintf("CMasternodePaymentVote::Sign -- SignMessage() failed\n");
+            return false;
+        }
+
+        if(!CMessageSigner::VerifyMessage(activeMasternode.pubKeyMasternode, vchSig, strMessage, strError)) {
+            LogPrintf("CMasternodePaymentVote::Sign -- VerifyMessage() failed, error: %s\n", strError);
+            return false;
+        }
     }
 
     return true;
@@ -427,14 +461,14 @@ bool CMasternodePayments::GetBlockPayee(int nBlockHeight, CScript& payee)
 
 // Is this masternode scheduled to get paid soon?
 // -- Only look ahead up to 8 blocks to allow for propagation of the latest 2 blocks of votes
-bool CMasternodePayments::IsScheduled(const CMasternode& mn, int nNotBlockHeight)
+bool CMasternodePayments::IsScheduled(const masternode_info_t& mnInfo, int nNotBlockHeight)
 {
     LOCK(cs_mapMasternodeBlocks);
 
     if(!masternodeSync.IsMasternodeListSynced()) return false;
 
     CScript mnpayee;
-    mnpayee = GetScriptForDestination(mn.pubKeyCollateralAddress.GetID());
+    mnpayee = GetScriptForDestination(mnInfo.pubKeyCollateralAddress.GetID());
 
     CScript payee;
     for(int64_t h = nCachedBlockHeight; h <= nCachedBlockHeight + 8; h++){
@@ -572,7 +606,7 @@ std::string CMasternodeBlockPayees::GetRequiredPaymentsString()
 {
     LOCK(cs_vecPayees);
 
-    std::string strRequiredPayments = "Unknown";
+    std::string strRequiredPayments = "";
 
     for (const auto& payee : vecPayees)
     {
@@ -580,12 +614,14 @@ std::string CMasternodeBlockPayees::GetRequiredPaymentsString()
         ExtractDestination(payee.GetPayee(), address1);
         CBitcoinAddress address2(address1);
 
-        if (strRequiredPayments != "Unknown") {
-            strRequiredPayments += ", " + address2.ToString() + ":" + boost::lexical_cast<std::string>(payee.GetVoteCount());
-        } else {
-            strRequiredPayments = address2.ToString() + ":" + boost::lexical_cast<std::string>(payee.GetVoteCount());
-        }
+        if (!strRequiredPayments.empty())
+            strRequiredPayments += ", ";
+
+        strRequiredPayments += strprintf("%s:%d", address2.ToString(), payee.GetVoteCount());
     }
+
+    if (strRequiredPayments.empty())
+        return "Unknown";
 
     return strRequiredPayments;
 }
@@ -639,11 +675,11 @@ bool CMasternodePaymentVote::IsValid(CNode* pnode, int nValidationHeight, std::s
 {
     masternode_info_t mnInfo;
 
-    if(!mnodeman.GetMasternodeInfo(vinMasternode.prevout, mnInfo)) {
-        strError = strprintf("Unknown Masternode: prevout=%s", vinMasternode.prevout.ToStringShort());
+    if(!mnodeman.GetMasternodeInfo(masternodeOutpoint, mnInfo)) {
+        strError = strprintf("Unknown masternode=%s", masternodeOutpoint.ToStringShort());
         // Only ask if we are already synced and still have no idea about that Masternode
         if(masternodeSync.IsMasternodeListSynced()) {
-            mnodeman.AskForMN(pnode, vinMasternode.prevout, connman);
+            mnodeman.AskForMN(pnode, masternodeOutpoint, connman);
         }
 
         return false;
@@ -669,9 +705,9 @@ bool CMasternodePaymentVote::IsValid(CNode* pnode, int nValidationHeight, std::s
 
     int nRank;
 
-    if(!mnodeman.GetMasternodeRank(vinMasternode.prevout, nRank, nBlockHeight - 101, nMinRequiredProtocol)) {
+    if(!mnodeman.GetMasternodeRank(masternodeOutpoint, nRank, nBlockHeight - 101, nMinRequiredProtocol)) {
         LogPrint("mnpayments", "CMasternodePaymentVote::IsValid -- Can't calculate rank for masternode %s\n",
-                    vinMasternode.prevout.ToStringShort());
+                    masternodeOutpoint.ToStringShort());
         return false;
     }
 
@@ -729,7 +765,7 @@ bool CMasternodePayments::ProcessBlock(int nBlockHeight, CConnman& connman)
         return false;
     }
 
-    LogPrintf("CMasternodePayments::ProcessBlock -- Masternode found by GetNextMasternodeInQueueForPayment(): %s\n", mnInfo.vin.prevout.ToStringShort());
+    LogPrintf("CMasternodePayments::ProcessBlock -- Masternode found by GetNextMasternodeInQueueForPayment(): %s\n", mnInfo.outpoint.ToStringShort());
 
 
     CScript payee = GetScriptForDestination(mnInfo.pubKeyCollateralAddress.GetID());
@@ -788,7 +824,7 @@ void CMasternodePayments::CheckPreviousBlockVotes(int nPrevBlockHeight)
                         continue;
                     }
                     auto vote = mapMasternodePaymentVotes[voteHash];
-                    if (vote.vinMasternode.prevout == mn.second.vin.prevout) {
+                    if (vote.masternodeOutpoint == mn.second.outpoint) {
                         payee = vote.payee;
                         found = true;
                         break;
@@ -799,8 +835,8 @@ void CMasternodePayments::CheckPreviousBlockVotes(int nPrevBlockHeight)
 
         if (!found) {
             debugStr += strprintf("CMasternodePayments::CheckPreviousBlockVotes --   %s - no vote received\n",
-                                  mn.second.vin.prevout.ToStringShort());
-            mapMasternodesDidNotVote[mn.second.vin.prevout]++;
+                                  mn.second.outpoint.ToStringShort());
+            mapMasternodesDidNotVote[mn.second.outpoint]++;
             continue;
         }
 
@@ -809,7 +845,7 @@ void CMasternodePayments::CheckPreviousBlockVotes(int nPrevBlockHeight)
         CBitcoinAddress address2(address1);
 
         debugStr += strprintf("CMasternodePayments::CheckPreviousBlockVotes --   %s - voted for %s\n",
-                              mn.second.vin.prevout.ToStringShort(), address2.ToString());
+                              mn.second.outpoint.ToStringShort(), address2.ToString());
     }
     debugStr += "CMasternodePayments::CheckPreviousBlockVotes -- Masternodes which missed a vote in the past:\n";
     for (const auto& item : mapMasternodesDidNotVote) {
@@ -831,24 +867,47 @@ void CMasternodePaymentVote::Relay(CConnman& connman)
     connman.RelayInv(inv);
 }
 
-bool CMasternodePaymentVote::CheckSignature(const CPubKey& pubKeyMasternode, int nValidationHeight, int &nDos)
+bool CMasternodePaymentVote::CheckSignature(const CPubKey& pubKeyMasternode, int nValidationHeight, int &nDos) const
 {
     // do not ban by default
     nDos = 0;
-
-    std::string strMessage = vinMasternode.prevout.ToStringShort() +
-                boost::lexical_cast<std::string>(nBlockHeight) +
-                ScriptToAsmStr(payee);
-
     std::string strError = "";
-    if (!CMessageSigner::VerifyMessage(pubKeyMasternode, vchSig, strMessage, strError)) {
-        // Only ban for future block vote when we are already synced.
-        // Otherwise it could be the case when MN which signed this vote is using another key now
-        // and we have no idea about the old one.
-        if(masternodeSync.IsMasternodeListSynced() && nBlockHeight > nValidationHeight) {
-            nDos = 20;
+
+    if (sporkManager.IsSporkActive(SPORK_6_NEW_SIGS)) {
+        uint256 hash = GetSignatureHash();
+
+        if (!CHashSigner::VerifyHash(hash, pubKeyMasternode, vchSig, strError)) {
+            // could be a signature in old format
+            std::string strMessage = masternodeOutpoint.ToStringShort() +
+                        boost::lexical_cast<std::string>(nBlockHeight) +
+                        ScriptToAsmStr(payee);
+            if(!CMessageSigner::VerifyMessage(pubKeyMasternode, vchSig, strMessage, strError)) {
+                // nope, not in old format either
+                // Only ban for future block vote when we are already synced.
+                // Otherwise it could be the case when MN which signed this vote is using another key now
+                // and we have no idea about the old one.
+                if(masternodeSync.IsMasternodeListSynced() && nBlockHeight > nValidationHeight) {
+                    nDos = 20;
+                }
+                return error("CMasternodePaymentVote::CheckSignature -- Got bad Masternode payment signature, masternode=%s, error: %s",
+                            masternodeOutpoint.ToStringShort(), strError);
+            }
         }
-        return error("CMasternodePaymentVote::CheckSignature -- Got bad Masternode payment signature, masternode=%s, error: %s", vinMasternode.prevout.ToStringShort().c_str(), strError);
+    } else {
+        std::string strMessage = masternodeOutpoint.ToStringShort() +
+                    boost::lexical_cast<std::string>(nBlockHeight) +
+                    ScriptToAsmStr(payee);
+
+        if (!CMessageSigner::VerifyMessage(pubKeyMasternode, vchSig, strMessage, strError)) {
+            // Only ban for future block vote when we are already synced.
+            // Otherwise it could be the case when MN which signed this vote is using another key now
+            // and we have no idea about the old one.
+            if(masternodeSync.IsMasternodeListSynced() && nBlockHeight > nValidationHeight) {
+                nDos = 20;
+            }
+            return error("CMasternodePaymentVote::CheckSignature -- Got bad Masternode payment signature, masternode=%s, error: %s",
+                        masternodeOutpoint.ToStringShort(), strError);
+        }
     }
 
     return true;
@@ -858,7 +917,7 @@ std::string CMasternodePaymentVote::ToString() const
 {
     std::ostringstream info;
 
-    info << vinMasternode.prevout.ToStringShort() <<
+    info << masternodeOutpoint.ToStringShort() <<
             ", " << nBlockHeight <<
             ", " << ScriptToAsmStr(payee) <<
             ", " << (int)vchSig.size();

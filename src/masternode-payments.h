@@ -33,7 +33,7 @@ extern CCriticalSection cs_mapMasternodePayeeVotes;
 extern CMasternodePayments mnpayments;
 
 /// TODO: all 4 functions do not belong here really, they should be refactored/moved somewhere (main.cpp ?)
-bool IsBlockValueValid(const CBlock& block, int nBlockHeight, CAmount blockReward, std::string &strErrorRet);
+bool IsBlockValueValid(const CBlock& block, int nBlockHeight, CAmount blockReward, std::string& strErrorRet);
 bool IsBlockPayeeValid(const CTransaction& txNew, int nBlockHeight, CAmount blockReward);
 void FillBlockPayments(CMutableTransaction& txNew, int nBlockHeight, CAmount blockReward, CTxOut& txoutMasternodeRet, std::vector<CTxOut>& voutSuperblockRet);
 std::string GetRequiredPaymentsString(int nBlockHeight);
@@ -109,21 +109,21 @@ public:
 class CMasternodePaymentVote
 {
 public:
-    CTxIn vinMasternode;
+    COutPoint masternodeOutpoint;
 
     int nBlockHeight;
     CScript payee;
     std::vector<unsigned char> vchSig;
 
     CMasternodePaymentVote() :
-        vinMasternode(),
+        masternodeOutpoint(),
         nBlockHeight(0),
         payee(),
         vchSig()
         {}
 
-    CMasternodePaymentVote(COutPoint outpointMasternode, int nBlockHeight, CScript payee) :
-        vinMasternode(outpointMasternode),
+    CMasternodePaymentVote(COutPoint outpoint, int nBlockHeight, CScript payee) :
+        masternodeOutpoint(outpoint),
         nBlockHeight(nBlockHeight),
         payee(payee),
         vchSig()
@@ -133,22 +133,33 @@ public:
 
     template <typename Stream, typename Operation>
     inline void SerializationOp(Stream& s, Operation ser_action) {
-        READWRITE(vinMasternode);
+        int nVersion = s.GetVersion();
+        if (nVersion == 70208 && (s.GetType() & SER_NETWORK)) {
+            // converting from/to old format
+            CTxIn txin{};
+            if (ser_action.ForRead()) {
+                READWRITE(txin);
+                masternodeOutpoint = txin.prevout;
+            } else {
+                txin = CTxIn(masternodeOutpoint);
+                READWRITE(txin);
+            }
+        } else {
+            // using new format directly
+            READWRITE(masternodeOutpoint);
+        }
         READWRITE(nBlockHeight);
         READWRITE(*(CScriptBase*)(&payee));
-        READWRITE(vchSig);
+        if (!(s.GetType() & SER_GETHASH)) {
+            READWRITE(vchSig);
+        }
     }
 
-    uint256 GetHash() const {
-        CHashWriter ss(SER_GETHASH, PROTOCOL_VERSION);
-        ss << *(CScriptBase*)(&payee);
-        ss << nBlockHeight;
-        ss << vinMasternode.prevout;
-        return ss.GetHash();
-    }
+    uint256 GetHash() const;
+    uint256 GetSignatureHash() const;
 
     bool Sign();
-    bool CheckSignature(const CPubKey& pubKeyMasternode, int nValidationHeight, int &nDos);
+    bool CheckSignature(const CPubKey& pubKeyMasternode, int nValidationHeight, int &nDos) const;
 
     bool IsValid(CNode* pnode, int nValidationHeight, std::string& strError, CConnman& connman);
     void Relay(CConnman& connman);
@@ -204,7 +215,7 @@ public:
 
     bool GetBlockPayee(int nBlockHeight, CScript& payee);
     bool IsTransactionValid(const CTransaction& txNew, int nBlockHeight);
-    bool IsScheduled(const CMasternode& mn, int nNotBlockHeight);
+    bool IsScheduled(const masternode_info_t& mnInfo, int nNotBlockHeight);
 
     bool CanVote(COutPoint outMasternode, int nBlockHeight);
 

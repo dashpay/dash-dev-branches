@@ -10,8 +10,6 @@
 
 #include <boost/lexical_cast.hpp>
 
-using namespace std;
-
 class CGovernanceVote;
 class CConnman;
 
@@ -75,8 +73,8 @@ static const int MAX_SUPPORTED_VOTE_SIGNAL = VOTE_SIGNAL_ENDORSED;
 class CGovernanceVoting
 {
 public:
-    static vote_outcome_enum_t ConvertVoteOutcome(std::string strVoteOutcome);
-    static vote_signal_enum_t ConvertVoteSignal(std::string strVoteSignal);
+    static vote_outcome_enum_t ConvertVoteOutcome(const std::string& strVoteOutcome);
+    static vote_signal_enum_t ConvertVoteSignal(const std::string& strVoteSignal);
     static std::string ConvertOutcomeToString(vote_outcome_enum_t nOutcome);
     static std::string ConvertSignalToString(vote_signal_enum_t nSignal);
 };
@@ -95,15 +93,19 @@ private:
     bool fValid; //if the vote is currently valid / counted
     bool fSynced; //if we've sent this to our peers
     int nVoteSignal; // see VOTE_ACTIONS above
-    CTxIn vinMasternode;
+    COutPoint masternodeOutpoint;
     uint256 nParentHash;
     int nVoteOutcome; // see VOTE_OUTCOMES above
     int64_t nTime;
     std::vector<unsigned char> vchSig;
 
+    /** Memory only. */
+    const uint256 hash;
+    void UpdateHash() const;
+
 public:
     CGovernanceVote();
-    CGovernanceVote(COutPoint outpointMasternodeIn, uint256 nParentHashIn, vote_signal_enum_t eVoteSignalIn, vote_outcome_enum_t eVoteOutcomeIn);
+    CGovernanceVote(const COutPoint& outpointMasternodeIn, const uint256& nParentHashIn, vote_signal_enum_t eVoteSignalIn, vote_outcome_enum_t eVoteOutcomeIn);
 
     bool IsValid() const { return fValid; }
 
@@ -117,11 +119,12 @@ public:
 
     const uint256& GetParentHash() const { return nParentHash; }
 
-    void SetTime(int64_t nTimeIn) { nTime = nTimeIn; }
+    void SetTime(int64_t nTimeIn) { nTime = nTimeIn; UpdateHash(); }
 
     void SetSignature(const std::vector<unsigned char>& vchSigIn) { vchSig = vchSigIn; }
 
-    bool Sign(CKey& keyMasternode, CPubKey& pubKeyMasternode);
+    bool Sign(const CKey& keyMasternode, const CPubKey& pubKeyMasternode);
+    bool CheckSignature(const CPubKey& pubKeyMasternode) const;
     bool IsValid(bool fSignatureCheck) const;
     void Relay(CConnman& connman) const;
 
@@ -129,7 +132,7 @@ public:
         return CGovernanceVoting::ConvertOutcomeToString(GetOutcome());
     }
 
-    const COutPoint& GetMasternodeOutpoint() const { return vinMasternode.prevout; }
+    const COutPoint& GetMasternodeOutpoint() const { return masternodeOutpoint; }
 
     /**
     *   GetHash()
@@ -137,65 +140,47 @@ public:
     *   GET UNIQUE HASH WITH DETERMINISTIC VALUE OF THIS SPECIFIC VOTE
     */
 
-    uint256 GetHash() const
-    {
-        CHashWriter ss(SER_GETHASH, PROTOCOL_VERSION);
-        ss << vinMasternode;
-        ss << nParentHash;
-        ss << nVoteSignal;
-        ss << nVoteOutcome;
-        ss << nTime;
-        return ss.GetHash();
-    }
+    uint256 GetHash() const;
+    uint256 GetSignatureHash() const;
 
     std::string ToString() const
     {
         std::ostringstream ostr;
-        ostr << vinMasternode.prevout.ToStringShort() << ":"
+        ostr << masternodeOutpoint.ToStringShort() << ":"
              << nTime << ":"
              << CGovernanceVoting::ConvertOutcomeToString(GetOutcome()) << ":"
              << CGovernanceVoting::ConvertSignalToString(GetSignal());
         return ostr.str();
     }
 
-    /**
-    *   GetTypeHash()
-    *
-    *   GET HASH WITH DETERMINISTIC VALUE OF MASTERNODE-VIN/PARENT-HASH/VOTE-SIGNAL
-    *
-    *   This hash collides with previous masternode votes when they update their votes on governance objects.
-    *   With 12.1 there's various types of votes (funding, valid, delete, etc), so this is the deterministic hash
-    *   that will collide with the previous vote and allow the system to update.
-    *
-    *   --
-    *
-    *   We do not include an outcome, because that can change when a masternode updates their vote from yes to no
-    *   on funding a specific project for example.
-    *   We do not include a time because it will be updated each time the vote is updated, changing the hash
-    */
-    uint256 GetTypeHash() const
-    {
-        // CALCULATE HOW TO STORE VOTE IN governance.mapVotes
-
-        CHashWriter ss(SER_GETHASH, PROTOCOL_VERSION);
-        ss << vinMasternode;
-        ss << nParentHash;
-        ss << nVoteSignal;
-        //  -- no outcome
-        //  -- timeless
-        return ss.GetHash();
-    }
-
     ADD_SERIALIZE_METHODS;
 
     template <typename Stream, typename Operation>
     inline void SerializationOp(Stream& s, Operation ser_action) {
-        READWRITE(vinMasternode);
+        int nVersion = s.GetVersion();
+        if (nVersion == 70208 && (s.GetType() & SER_NETWORK)) {
+            // converting from/to old format
+            CTxIn txin{};
+            if (ser_action.ForRead()) {
+                READWRITE(txin);
+                masternodeOutpoint = txin.prevout;
+            } else {
+                txin = CTxIn(masternodeOutpoint);
+                READWRITE(txin);
+            }
+        } else {
+            // using new format directly
+            READWRITE(masternodeOutpoint);
+        }
         READWRITE(nParentHash);
         READWRITE(nVoteOutcome);
         READWRITE(nVoteSignal);
         READWRITE(nTime);
-        READWRITE(vchSig);
+        if (!(s.GetType() & SER_GETHASH)) {
+            READWRITE(vchSig);
+        }
+        if (ser_action.ForRead())
+            UpdateHash();
     }
 
 };

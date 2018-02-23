@@ -88,7 +88,7 @@ UniValue getpoolinfo(const JSONRPCRequest& request)
 
     masternode_info_t mnInfo;
     if (privateSendClient.GetMixingMasternodeInfo(mnInfo)) {
-        obj.push_back(Pair("outpoint",      mnInfo.vin.prevout.ToStringShort()));
+        obj.push_back(Pair("outpoint",      mnInfo.outpoint.ToStringShort()));
         obj.push_back(Pair("addr",          mnInfo.addr.ToString()));
     }
 
@@ -244,7 +244,7 @@ UniValue masternode(const JSONRPCRequest& request)
         obj.push_back(Pair("height",        nHeight));
         obj.push_back(Pair("IP:port",       mnInfo.addr.ToString()));
         obj.push_back(Pair("protocol",      (int64_t)mnInfo.nProtocolVersion));
-        obj.push_back(Pair("outpoint",      mnInfo.vin.prevout.ToStringShort()));
+        obj.push_back(Pair("outpoint",      mnInfo.outpoint.ToStringShort()));
         obj.push_back(Pair("payee",         CBitcoinAddress(mnInfo.pubKeyCollateralAddress.GetID()).ToString()));
         obj.push_back(Pair("lastseen",      mnInfo.nTimeLastPing));
         obj.push_back(Pair("activeseconds", mnInfo.nTimeLastPing - mnInfo.sigTime));
@@ -277,11 +277,14 @@ UniValue masternode(const JSONRPCRequest& request)
 
                 bool fResult = CMasternodeBroadcast::Create(mne.getIp(), mne.getPrivKey(), mne.getTxHash(), mne.getOutputIndex(), strError, mnb);
 
+                int nDoS;
+                if (fResult && !mnodeman.CheckMnbAndUpdateMasternodeList(NULL, mnb, nDoS, *g_connman)) {
+                    strError = "Failed to verify MNB";
+                    fResult = false;
+                }
+
                 statusObj.push_back(Pair("result", fResult ? "successful" : "failed"));
-                if(fResult) {
-                    mnodeman.UpdateMasternodeList(mnb, *g_connman);
-                    mnb.Relay(*g_connman);
-                } else {
+                if(!fResult) {
                     statusObj.push_back(Pair("errorMessage", strError));
                 }
                 mnodeman.NotifyMasternodeUpdates(*g_connman);
@@ -317,7 +320,7 @@ UniValue masternode(const JSONRPCRequest& request)
         for (const auto& mne : masternodeConfig.getEntries()) {
             std::string strError;
 
-            COutPoint outpoint = COutPoint(uint256S(mne.getTxHash()), uint32_t(atoi(mne.getOutputIndex().c_str())));
+            COutPoint outpoint = COutPoint(uint256S(mne.getTxHash()), (uint32_t)atoi(mne.getOutputIndex()));
             CMasternode mn;
             bool fFound = mnodeman.Get(outpoint, mn);
             CMasternodeBroadcast mnb;
@@ -327,14 +330,18 @@ UniValue masternode(const JSONRPCRequest& request)
 
             bool fResult = CMasternodeBroadcast::Create(mne.getIp(), mne.getPrivKey(), mne.getTxHash(), mne.getOutputIndex(), strError, mnb);
 
+            int nDoS;
+            if (fResult && !mnodeman.CheckMnbAndUpdateMasternodeList(NULL, mnb, nDoS, *g_connman)) {
+                strError = "Failed to verify MNB";
+                fResult = false;
+            }
+
             UniValue statusObj(UniValue::VOBJ);
             statusObj.push_back(Pair("alias", mne.getAlias()));
             statusObj.push_back(Pair("result", fResult ? "successful" : "failed"));
 
             if (fResult) {
                 nSuccessful++;
-                mnodeman.UpdateMasternodeList(mnb, *g_connman);
-                mnb.Relay(*g_connman);
             } else {
                 nFailed++;
                 statusObj.push_back(Pair("errorMessage", strError));
@@ -365,7 +372,7 @@ UniValue masternode(const JSONRPCRequest& request)
         UniValue resultObj(UniValue::VOBJ);
 
         for (const auto& mne : masternodeConfig.getEntries()) {
-            COutPoint outpoint = COutPoint(uint256S(mne.getTxHash()), uint32_t(atoi(mne.getOutputIndex().c_str())));
+            COutPoint outpoint = COutPoint(uint256S(mne.getTxHash()), (uint32_t)atoi(mne.getOutputIndex()));
             CMasternode mn;
             bool fFound = mnodeman.Get(outpoint, mn);
 
@@ -513,7 +520,7 @@ UniValue masternodelist(const JSONRPCRequest& request)
         CMasternodeMan::rank_pair_vec_t vMasternodeRanks;
         mnodeman.GetMasternodeRanks(vMasternodeRanks);
         for (const auto& rankpair : vMasternodeRanks) {
-            std::string strOutpoint = rankpair.second.vin.prevout.ToStringShort();
+            std::string strOutpoint = rankpair.second.outpoint.ToStringShort();
             if (strFilter !="" && strOutpoint.find(strFilter) == std::string::npos) continue;
             obj.push_back(Pair(strOutpoint, rankpair.first));
         }
@@ -761,7 +768,7 @@ UniValue masternodebroadcast(const JSONRPCRequest& request)
 
             if(mnb.CheckSignature(nDos)) {
                 nSuccessful++;
-                resultObj.push_back(Pair("outpoint", mnb.vin.prevout.ToStringShort()));
+                resultObj.push_back(Pair("outpoint", mnb.outpoint.ToStringShort()));
                 resultObj.push_back(Pair("addr", mnb.addr.ToString()));
                 resultObj.push_back(Pair("pubKeyCollateralAddress", CBitcoinAddress(mnb.pubKeyCollateralAddress.GetID()).ToString()));
                 resultObj.push_back(Pair("pubKeyMasternode", CBitcoinAddress(mnb.pubKeyMasternode.GetID()).ToString()));
@@ -771,7 +778,7 @@ UniValue masternodebroadcast(const JSONRPCRequest& request)
                 resultObj.push_back(Pair("nLastDsq", mnb.nLastDsq));
 
                 UniValue lastPingObj(UniValue::VOBJ);
-                lastPingObj.push_back(Pair("outpoint", mnb.lastPing.vin.prevout.ToStringShort()));
+                lastPingObj.push_back(Pair("outpoint", mnb.lastPing.masternodeOutpoint.ToStringShort()));
                 lastPingObj.push_back(Pair("blockHash", mnb.lastPing.blockHash.ToString()));
                 lastPingObj.push_back(Pair("sigTime", mnb.lastPing.sigTime));
                 lastPingObj.push_back(Pair("vchSig", EncodeBase64(&mnb.lastPing.vchSig[0], mnb.lastPing.vchSig.size())));
@@ -793,10 +800,9 @@ UniValue masternodebroadcast(const JSONRPCRequest& request)
     if (strCommand == "relay")
     {
         if (request.params.size() < 2 || request.params.size() > 3)
-            throw JSONRPCError(RPC_INVALID_PARAMETER,   "masternodebroadcast relay \"hexstring\" ( fast )\n"
+            throw JSONRPCError(RPC_INVALID_PARAMETER,   "masternodebroadcast relay \"hexstring\"\n"
                                                         "\nArguments:\n"
-                                                        "1. \"hex\"      (string, required) Broadcast messages hex string\n"
-                                                        "2. fast       (string, optional) If none, using safe method\n");
+                                                        "1. \"hex\"      (string, required) Broadcast messages hex string\n");
 
         std::vector<CMasternodeBroadcast> vecMnb;
 
@@ -805,26 +811,19 @@ UniValue masternodebroadcast(const JSONRPCRequest& request)
 
         int nSuccessful = 0;
         int nFailed = 0;
-        bool fSafe = request.params.size() == 2;
         UniValue returnObj(UniValue::VOBJ);
 
         // verify all signatures first, bailout if any of them broken
         for (const auto& mnb : vecMnb) {
             UniValue resultObj(UniValue::VOBJ);
 
-            resultObj.push_back(Pair("outpoint", mnb.vin.prevout.ToStringShort()));
+            resultObj.push_back(Pair("outpoint", mnb.outpoint.ToStringShort()));
             resultObj.push_back(Pair("addr", mnb.addr.ToString()));
 
             int nDos = 0;
             bool fResult;
             if (mnb.CheckSignature(nDos)) {
-                if (fSafe) {
-                    fResult = mnodeman.CheckMnbAndUpdateMasternodeList(NULL, mnb, nDos, *g_connman);
-                } else {
-                    mnodeman.UpdateMasternodeList(mnb, *g_connman);
-                    mnb.Relay(*g_connman);
-                    fResult = true;
-                }
+                fResult = mnodeman.CheckMnbAndUpdateMasternodeList(NULL, mnb, nDos, *g_connman);
                 mnodeman.NotifyMasternodeUpdates(*g_connman);
             } else fResult = false;
 
