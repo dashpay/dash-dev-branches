@@ -281,6 +281,8 @@ void PrepareShutdown()
         pblocktree = NULL;
         delete deterministicMNList;
         deterministicMNList = NULL;
+        delete evoUserDB;
+        evoUserDB = NULL;
     }
 #ifdef ENABLE_WALLET
     if (pwalletMain)
