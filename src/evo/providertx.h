@@ -19,7 +19,7 @@ public:
     static const int CURRENT_VERSION = 1;
 
 public:
-    int32_t nVersion{CURRENT_VERSION}; // message version
+    int16_t nVersion{CURRENT_VERSION}; // message version
     int32_t nProtocolVersion{-1};
     int32_t nCollateralIndex{-1};
     CService addr;
