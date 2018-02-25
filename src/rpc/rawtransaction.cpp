@@ -128,7 +128,7 @@ void TxToJSON(const CTransaction& tx, const uint256 hashBlock, UniValue& entry)
     entry.push_back(Pair("vout", vout));
 
     if (!tx.extraPayload.empty()) {
-        entry.push_back(Pair("extraPayloadSize", tx.extraPayload.size()));
+        entry.push_back(Pair("extraPayloadSize", (int)tx.extraPayload.size()));
         entry.push_back(Pair("extraPayload", HexStr(tx.extraPayload)));
     }
 
