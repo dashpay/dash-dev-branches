@@ -40,7 +40,7 @@ bool CheckProviderTxRegister(const CTransaction &tx, const CBlockIndex *pindex, 
     if (ptx.keyIDMasternode.IsNull())
         return state.DoS(10, false, REJECT_INVALID, "bad-provider-mnkey");
     // we may support P2SH later, but restrict it for now (while in transitioning phase from old MN list to deterministic list)
-    if (!ptx.scriptPayout.IsPayToPublicKey() && !ptx.scriptPayout.IsPayToPublicKeyHash())
+    if (!ptx.scriptPayout.IsPayToPublicKeyHash())
         return state.DoS(10, false, REJECT_INVALID, "bad-provider-payee");
 
     // This is a temporary restriction that will be lifted later

@@ -86,7 +86,6 @@ void CMasternodeSync::SwitchToNextAsset(CConnman& connman)
             } else {
                 nRequestedMasternodeAssets = MASTERNODE_SYNC_MNW;
             }
-            nRequestedMasternodeAssets = MASTERNODE_SYNC_MNW;
             LogPrintf("CMasternodeSync::SwitchToNextAsset -- Starting %s\n", GetAssetName());
             break;
         case(MASTERNODE_SYNC_MNW):
