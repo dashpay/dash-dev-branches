@@ -79,23 +79,12 @@ class DIP3Test(BitcoinTestFramework):
             mn_idx += 1
             mns.append(mn)
 
-        qt_mn = self.create_mn(self.nodes[0], self.num_nodes, 'mn-qt')
-        qt_mn.key = '93Tv3x7XMDZ2fXYxKwPYGEpRie2jvbW67gvqHRvdbGNexXtc3Gq'
-        qt_mn.p2p_port = 31001
-        p = self.nodes[0].dumpprivkey(qt_mn.collateral_address)
-        self.nodes[0].sendtoaddress(qt_mn.collateral_address, 1000)
-        self.nodes[0].sendtoaddress(qt_mn.collateral_address, 1)
-
-        print()
-        print("privkey: %s" % (p))
-        print()
-
         # mature collaterals
         for i in range(3):
             self.nodes[0].generate(1)
             time.sleep(1)
 
-        self.write_mnconf(mns + [qt_mn])
+        self.write_mnconf(mns)
 
         self.restart_controller_node()
         for mn in mns:
@@ -173,7 +162,7 @@ class DIP3Test(BitcoinTestFramework):
         for i in range(first_upgrade_count):
             mns[i] = self.upgrade_mn_protx(mns[i])
             self.nodes[0].generate(1)
-        self.write_mnconf(mns + [qt_mn])
+        self.write_mnconf(mns)
 
         print("wait for upgraded MNs to disappear from MN lists (their collateral was spent)")
         self.wait_for_mnlists(mns, True, False, check=True)
@@ -320,7 +309,7 @@ class DIP3Test(BitcoinTestFramework):
         extra_args = ['-masternode=1', '-masternodeprivkey=%s' % mn.key]
         if mn.is_protx:
             extra_args += ['-masternodeprotx=%s' % mn.collateral_txid]
-        n = start_node(mn.idx, self.options.tmpdir, self.extra_args + extra_args)
+        n = start_node(mn.idx, self.options.tmpdir, self.extra_args + extra_args, redirect_stderr=True)
         self.nodes[mn.idx] = n
         for i in range(0, self.num_nodes):
             if i < len(self.nodes) and self.nodes[i] is not None and i != mn.idx:
@@ -364,8 +353,6 @@ class DIP3Test(BitcoinTestFramework):
         with open(mnconf_file, 'w') as f:
             for mn in mns:
                 self.write_mnconf_line(mn, f)
-        shutil.copy(mnconf_file, '/home/ablock/src/dash/regtest-dash-1-masternodes.conf')
-
 
     def start_alias(self, node, alias, should_fail=False):
         start_result = node.masternode('start-alias', alias)
