@@ -14,7 +14,7 @@ from decimal import Decimal
 import re
 
 from test_framework.blocktools import create_block, create_coinbase
-from test_framework.mininode import CTransaction, ToHex, FromHex
+from test_framework.mininode import CTransaction, ToHex, FromHex, CTxOut, COIN
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import *
 
@@ -187,7 +187,7 @@ class DIP3Test(BitcoinTestFramework):
         self.wait_for_mnlists_same()
 
         print("testing MN payment votes (with mixed ProTx and legacy nodes)")
-        self.test_mn_votes(10)
+        self.test_mn_votes(10, test_enforcement=True)
 
         print("testing instant send (with mixed ProTx and legacy nodes)")
         self.test_instantsend(10, 5)
@@ -214,6 +214,10 @@ class DIP3Test(BitcoinTestFramework):
 
         print("assert that not upgraded MNs disappeared from MN list")
         self.assert_mnlists(mns, False, True)
+
+        # enable enforcement and keep it on from now on
+        self.nodes[0].spork('SPORK_8_MASTERNODE_PAYMENT_ENFORCEMENT', 0)
+        self.wait_for_sporks()
 
         print("test that MNs disappear from the list when the ProTx collateral is spent")
         spend_mns_count = 3
@@ -251,8 +255,15 @@ class DIP3Test(BitcoinTestFramework):
             self.force_finish_mnsync(mn.node)
         self.assert_mnlists(mns, False, True)
 
+        print("test mn payment enforcement")
+        for i in range(20):
+            node = self.nodes[i % len(self.nodes)]
+            self.test_invalid_mn_payment(node)
+            node.generate(1)
+            self.sync_all()
+
         print("testing instant send with deterministic MNs")
-        self.test_instantsend(20, 20)
+        self.test_instantsend(20, 10)
 
     def create_mn(self, node, idx, alias):
         mn = Masternode()
@@ -381,8 +392,13 @@ class DIP3Test(BitcoinTestFramework):
             time.sleep(0.5)
         raise AssertionError("generate_blocks_until_winners timed out: {}".format(node.masternode('winners')))
 
-    def test_mn_votes(self, block_count):
+    def test_mn_votes(self, block_count, test_enforcement=False):
         self.generate_blocks_until_winners(self.nodes[0], 10)
+
+        if test_enforcement:
+            self.nodes[0].spork('SPORK_8_MASTERNODE_PAYMENT_ENFORCEMENT', 0)
+            self.wait_for_sporks()
+            self.test_invalid_mn_payment(self.nodes[0])
 
         cur_block = 0
         while cur_block < block_count:
@@ -391,6 +407,9 @@ class DIP3Test(BitcoinTestFramework):
                     break
                 if n1 is None:
                     continue
+
+                if test_enforcement:
+                    self.test_invalid_mn_payment(n1)
 
                 n1.generate(1)
                 cur_block += 1
@@ -407,6 +426,9 @@ class DIP3Test(BitcoinTestFramework):
                         print("winner1: " + str(winners[str(height + 10)]))
                         print("winner2: " + str(winners2[str(height + 10)]))
                         raise AssertionError("winners did not match")
+
+        if test_enforcement:
+            self.nodes[0].spork('SPORK_8_MASTERNODE_PAYMENT_ENFORCEMENT', 4070908800)
 
     def test_instantsend(self, tx_count, repeat):
         self.nodes[0].spork('SPORK_2_INSTANTSEND_ENABLED', 10000)
@@ -598,10 +620,38 @@ class DIP3Test(BitcoinTestFramework):
                     return txin
         return None
 
-    def mine_double_spend(self, node, txins, target_address):
-        height = node.getblockchaininfo()['blocks']
-        tip_hash = int(node.getblockhash(height), 16)
+    def mine_block(self, node, vtx=[], miner_address=None, mn_payee=None, mn_amount=None, expected_error=None):
+        bt = node.getblocktemplate()
+        height = bt['height']
+        tip_hash = bt['previousblockhash']
 
+        coinbasevalue = float(bt['coinbasevalue']) / COIN
+        if miner_address is None:
+            miner_address = node.getnewaddress()
+        if mn_payee is None:
+            mn_payee = bt['masternode']['payee']
+        if mn_amount is None:
+            mn_amount = float(bt['masternode']['amount']) / COIN
+
+        miner_amount = coinbasevalue - float(mn_amount)
+
+        outputs = {miner_address: miner_amount}
+        if mn_amount > 0:
+            outputs[mn_payee] = mn_amount
+
+        coinbase = FromHex(CTransaction(), node.createrawtransaction([], outputs))
+        coinbase.vin = create_coinbase(height).vin
+        coinbase.calc_sha256()
+
+        block = create_block(int(tip_hash, 16), coinbase)
+        block.vtx += vtx
+        block.hashMerkleRoot = block.calc_merkle_root()
+        block.solve()
+        result = node.submitblock(ToHex(block))
+        if expected_error is not None and result != expected_error:
+            raise AssertionError('mining the block should have failed with error %s, but submitblock returned %s' % (expected_error, result))
+
+    def mine_double_spend(self, node, txins, target_address):
         amount = Decimal(0)
         for txin in txins:
             txout = node.gettxout(txin['txid'], txin['vout'], False)
@@ -612,11 +662,12 @@ class DIP3Test(BitcoinTestFramework):
         rawtx = node.signrawtransaction(rawtx)['hex']
         tx = FromHex(CTransaction(), rawtx)
 
-        block = create_block(tip_hash, create_coinbase(height))
-        block.vtx.append(tx)
-        block.hashMerkleRoot = block.calc_merkle_root()
-        block.solve()
-        result = node.submitblock(ToHex(block))
+        self.mine_block(node, [tx])
+
+    def test_invalid_mn_payment(self, node):
+        mn_payee = self.nodes[0].getnewaddress()
+        self.mine_block(node, mn_payee=mn_payee, expected_error='bad-cb-payee')
+        self.mine_block(node, mn_amount=1, expected_error='bad-cb-payee')
 
 if __name__ == '__main__':
     DIP3Test().main()
