@@ -32,7 +32,7 @@ class DIP3Test(BitcoinTestFramework):
         except:
             pass
 
-        self.extra_args = ["-debug", "-budgetparams=240:100:240"]
+        self.extra_args = ["-budgetparams=240:100:240"]
 
     def setup_network(self):
         self.start_controller_node()
@@ -126,6 +126,10 @@ class DIP3Test(BitcoinTestFramework):
         # dip0003 is in 'active' state now, but we should only be able to use ProTx in the NEXT block, so lets test if it still fails as expected
         print("testing rejection of ProTx after dip3 activation and before next block")
         self.test_fail_create_and_mine_protx(self.nodes[0])
+
+        # We have hundrets of blocks to sync here, give it more time
+        print("syncing blocks for all nodes")
+        sync_blocks(self.nodes, timeout=120)
 
         # After this block it should be possible to mine ProTx
         self.nodes[0].generate(1)
@@ -255,7 +259,7 @@ class DIP3Test(BitcoinTestFramework):
             self.force_finish_mnsync(mn.node)
         self.assert_mnlists(mns, False, True)
 
-        print("test mn payment enforcement")
+        print("test mn payment enforcement with deterministic MNs")
         for i in range(20):
             node = self.nodes[i % len(self.nodes)]
             self.test_invalid_mn_payment(node)
@@ -263,7 +267,7 @@ class DIP3Test(BitcoinTestFramework):
             self.sync_all()
 
         print("testing instant send with deterministic MNs")
-        self.test_instantsend(20, 10)
+        self.test_instantsend(20, 5)
 
     def create_mn(self, node, idx, alias):
         mn = Masternode()
