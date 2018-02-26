@@ -368,6 +368,21 @@ void CActiveLegacyMasternodeManager::ManageStateRemote()
             LogPrintf("CActiveLegacyMasternodeManager::ManageStateRemote -- %s: %s\n", GetStateString(), strNotCapableReason);
             return;
         }
+        CProviderTXRegisterMN proTx;
+        if (deterministicMNList->GetRegisterMN(infoMn.outpoint.hash, proTx)) {
+            if (proTx.keyIDMasternode != infoMn.pubKeyIDMasternode) {
+                nState = ACTIVE_MASTERNODE_NOT_CAPABLE;
+                strNotCapableReason = strprintf("Masternode collateral is a ProTx and masternode key does not match key from -masternodeprivkey");
+                LogPrintf("CActiveLegacyMasternodeManager::ManageStateRemote -- %s: %s\n", GetStateString(), strNotCapableReason);
+                return;
+            }
+            if (proTx.addr != infoMn.addr) {
+                nState = ACTIVE_MASTERNODE_NOT_CAPABLE;
+                strNotCapableReason = strprintf("Masternode collateral is a ProTx and ProTx address does not match local address");
+                LogPrintf("CActiveLegacyMasternodeManager::ManageStateRemote -- %s: %s\n", GetStateString(), strNotCapableReason);
+                return;
+            }
+        }
         if(nState != ACTIVE_MASTERNODE_STARTED) {
             LogPrintf("CActiveLegacyMasternodeManager::ManageStateRemote -- STARTED!\n");
             activeMasternode.outpoint = infoMn.outpoint;
