@@ -225,6 +225,8 @@ struct CompareByLastPaid {
                 return a.proTxHash < b.proTxHash;
             else
                 return a.state.registeredHeight < b.state.registeredHeight;
+        } else {
+            return a.state.lastPaidHeight < b.state.lastPaidHeight;
         }
     }
 };
