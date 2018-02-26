@@ -32,7 +32,7 @@ class DIP3Test(BitcoinTestFramework):
         except:
             pass
 
-        self.extra_args = ["-debug"]
+        self.extra_args = ["-debug", "-budgetparams=240:100:240"]
 
     def setup_network(self):
         self.start_controller_node()
