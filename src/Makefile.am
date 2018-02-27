@@ -142,6 +142,7 @@ BITCOIN_CORE_H = \
   net.h \
   net_processing.h \
   netaddress.h \
+  netbackend.h \
   netbase.h \
   netfulfilledman.h \
   netmessagemaker.h \
