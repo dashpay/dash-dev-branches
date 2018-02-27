@@ -508,6 +508,7 @@ UniValue gettransition(const JSONRPCRequest &request) {
     return result;
 }
 
+#ifdef ENABLE_WALLET
 void createprovidertx_help() {
     throw std::runtime_error(
             "createprovidertx type args...\n"
@@ -626,6 +627,7 @@ UniValue createprovidertx(const JSONRPCRequest &request) {
         throw std::runtime_error("invalid command: " + action);
     }
 }
+#endif//ENABLE_WALLET
 
 static const CRPCCommand commands[] =
 { //  category              name                      actor (function)         okSafeMode
@@ -638,10 +640,9 @@ static const CRPCCommand commands[] =
     { "evo",                "sendrawtransition",      &sendrawtransition,      true, {"hex_ts", "relay"}  },
     { "evo",                "gettransition",          &gettransition,          true, {"ts_hash"}  },
 
-    { "evo",                "createprovidertx",      &createprovidertx,        true, {}  },
-
 #ifdef ENABLE_WALLET
-        // createsubtx requires the wallet to be enabled to fund the SubTx
+    // these require the wallet to be enabled to fund the transactions
+    { "evo",                "createprovidertx",       &createprovidertx,       true, {}  },
     { "evo",                "createsubtx",            &createsubtx,            true, {}  },
 #endif//ENABLE_WALLET
 };

@@ -214,7 +214,7 @@ UniValue gobject(const JSONRPCRequest& request)
 
         bool fMnFound = mnodeman.Has(activeMasternode.outpoint);
 
-        DBG( std::cout << "gobject: submit activeMasternode.pubKeyIDMasternode = " << activeMasternode.pubKeyIDMasternode.GetHash().ToString()
+        DBG( std::cout << "gobject: submit activeMasternode.pubKeyIDMasternode = " << activeMasternode.pubKeyIDMasternode.ToString()
              << ", outpoint = " << activeMasternode.outpoint.ToStringShort()
              << ", params.size() = " << request.params.size()
              << ", fMnFound = " << fMnFound << std::endl; );
