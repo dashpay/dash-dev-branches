@@ -29,6 +29,8 @@
 #include "wallet/wallet.h"
 #endif
 
+#include "evo/specialtx.h"
+#include "evo/providertx.h"
 #include "evo/subtx.h"
 #include "evo/tsvalidation.h"
 
@@ -130,6 +132,15 @@ void TxToJSON(const CTransaction& tx, const uint256 hashBlock, UniValue& entry)
     if (!tx.extraPayload.empty()) {
         entry.push_back(Pair("extraPayloadSize", (int)tx.extraPayload.size()));
         entry.push_back(Pair("extraPayload", HexStr(tx.extraPayload)));
+    }
+
+    if (tx.nVersion >= 3 && tx.nType == TRANSACTION_PROVIDER_REGISTER) {
+        CProviderTXRegisterMN proTx;
+        if (GetTxPayload(tx, proTx)) {
+            UniValue proTxObj;
+            proTx.ToJson(proTxObj);
+            entry.push_back(Pair("proTx", proTxObj));
+        }
     }
 
     if (IsSubTx(tx)) {
