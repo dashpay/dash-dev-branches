@@ -652,14 +652,8 @@ bool AcceptToMemoryPoolWorker(CTxMemPool& pool, CValidationState& state, const C
     if (fRequireStandard && !IsStandardTx(tx, reason))
         return state.DoS(0, false, REJECT_NONSTANDARD, reason);
 
-    if (tx.nType == TRANSACTION_PROVIDER_REGISTER) {
-        CProviderTXRegisterMN proTx;
-        if (!GetTxPayload(tx, proTx)) {
-            assert(false); // this should not happen here as it must have been checked before
-        }
-        if (pool.existsProviderTxRegisterAddress(proTx.addr)) {
-            return state.DoS(0, false, REJECT_DUPLICATE, "protx-dup-addr");
-        }
+    if (pool.existsProviderTxConflict(tx)) {
+        return state.DoS(0, false, REJECT_DUPLICATE, "protx-dup");
     }
 
     if (IsSubTx(tx)) {

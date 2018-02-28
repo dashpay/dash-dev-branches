@@ -533,6 +533,8 @@ private:
     mapSpentIndexInserted mapSpentInserted;
 
     std::map<CService, uint256> mapProTxRegisterAddresses;
+    std::map<CKeyID, uint256> mapProTxRegisterPubKeyIDs;
+
     std::map<std::string, uint256> mapSubTxRegisterUserNames;
     std::map<uint256, std::set<uint256>> mapSubTxTopups;
 
@@ -690,10 +692,7 @@ public:
     TxMempoolInfo info(const uint256& hash) const;
     std::vector<TxMempoolInfo> infoAll() const;
 
-    bool existsProviderTxRegisterAddress(const CService &addr) const {
-        LOCK(cs);
-        return mapProTxRegisterAddresses.count(addr);
-    }
+    bool existsProviderTxConflict(const CTransaction &tx) const;
 
     bool existsSubTxRegisterUserName(const std::string &userName) const {
         LOCK(cs);

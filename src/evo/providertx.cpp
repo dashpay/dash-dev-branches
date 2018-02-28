@@ -57,6 +57,8 @@ bool CheckProviderTxRegister(const CTransaction &tx, const CBlockIndex *pindex, 
         for (const auto &dmn : mnList) {
             if (dmn.proTx.addr == ptx.addr)
                 return state.DoS(10, false, REJECT_DUPLICATE, "bad-provider-dup-addr");
+            if (dmn.proTx.keyIDMasternode == ptx.keyIDMasternode)
+                return state.DoS(10, false, REJECT_DUPLICATE, "bad-provider-dup-key");
         }
     }
 
