@@ -83,7 +83,7 @@ std::string CProviderTXRegisterMN::ToString() const {
         nVersion, nProtocolVersion, nCollateralIndex, addr.ToString(), keyIDMasternode.ToString(), payee);
 }
 
-void CProviderTXRegisterMN::ToJson(UniValue &obj) {
+void CProviderTXRegisterMN::ToJson(UniValue &obj) const {
     obj.clear();
     obj.setObject();
     obj.push_back(Pair("version", nVersion));

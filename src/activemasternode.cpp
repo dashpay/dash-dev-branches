@@ -54,16 +54,21 @@ void CActiveDeterministicMasternodeManager::Init() {
         return;
     }
 
-    if (!deterministicMNList->GetRegisterMN(activeMasternode.proTxHash, proTx)) {
+    CDeterministicMN dmn;
+    if (!deterministicMNList->GetMNByMasternodeKey(chainActive.Height(), activeMasternode.pubKeyIDMasternode, dmn)) {
         // MN not appeared on the chain yet
         return;
     }
-    if (!deterministicMNList->HasMNAtChainTip(activeMasternode.proTxHash)) {
+
+    if (!deterministicMNList->HasMNAtChainTip(dmn.proTxHash)) {
         state = MASTERNODE_REMOVED;
         return;
     }
 
-    LogPrintf("CActiveDeterministicMasternodeManager::Init -- proTxHash=%s\n", activeMasternode.proTxHash.ToString());
+    proTxHash = dmn.proTxHash;
+    proTx = dmn.proTx;
+
+    LogPrintf("CActiveDeterministicMasternodeManager::Init -- proTxHash=%s\n", proTxHash.ToString());
     LogPrintf("CActiveDeterministicMasternodeManager::Init -- proTx=%s\n", proTx.ToString());
 
     if (activeMasternode.pubKeyIDMasternode != proTx.keyIDMasternode) {
@@ -87,7 +92,7 @@ void CActiveDeterministicMasternodeManager::Init() {
         return;
     }
 
-    activeMasternode.outpoint = COutPoint(activeMasternode.proTxHash, proTx.nCollateralIndex);
+    activeMasternode.outpoint = COutPoint(proTxHash, proTx.nCollateralIndex);
     state = MASTERNODE_READY;
 }
 
@@ -100,21 +105,20 @@ void CActiveDeterministicMasternodeManager::UpdatedBlockTip(const CBlockIndex *p
     if (!deterministicMNList->IsDeterministicMNsSporkActive(pindexNew->nHeight)) {
         return;
     }
-    if (activeMasternode.proTxHash.IsNull()) {
-        std::string strWarning = "Deterministic masternodes activated but you did not specifiy -masternodeprotx. Your masternode will never be enabled.";
-        LogPrintf("CActiveDeterministicMasternodeManager::UpdatedBlockTip -- WARNING: %s\n", strWarning);
-        SetMiscWarning(strWarning);
-        return;
-    }
 
     if (state == MASTERNODE_WAITING_FOR_PROTX) {
         Init();
     } else if (state == MASTERNODE_READY) {
-        if (!deterministicMNList->HasMNAtHeight(pindexNew->nHeight, activeMasternode.proTxHash)) {
+        if (!deterministicMNList->HasMNAtHeight(pindexNew->nHeight, proTxHash)) {
             // MN disappeared from MN list
             state = MASTERNODE_REMOVED;
             activeMasternode.outpoint.SetNull();
+            // MN might have reappeared in same block with a new ProTx (with same masternode key)
+            Init();
         }
+    } else if (state == MASTERNODE_REMOVED) {
+        // MN might have reappeared with a new ProTx (with same masternode key)
+        Init();
     }
 }
 

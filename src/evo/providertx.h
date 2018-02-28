@@ -44,7 +44,7 @@ public:
     }
 
     std::string ToString() const;
-    void ToJson(UniValue &obj);
+    void ToJson(UniValue &obj) const;
 };
 
 bool CheckProviderTxRegister(const CTransaction &tx, const CBlockIndex *pindex, CValidationState &state);

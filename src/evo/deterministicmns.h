@@ -124,6 +124,8 @@ public:
     bool HasMNAtHeight(int height, const uint256 &proTxHash);
     bool HasMNAtChainTip(const uint256 &proTxHash);
 
+    bool GetMNByMasternodeKey(int64_t height, const CKeyID &keyIDMasternode, CDeterministicMN &dmnRet);
+
     bool IsDeterministicMNsSporkActive(int64_t height = -1);
 
 private:

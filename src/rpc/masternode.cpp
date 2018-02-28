@@ -455,22 +455,15 @@ UniValue masternode(const JSONRPCRequest& request)
         UniValue mnObj(UniValue::VOBJ);
 
         if (deterministicMNList->IsDeterministicMNsSporkActive()) {
-            CProviderTXRegisterMN proTx;
-            if (activeMasternode.proTxHash.IsNull()) {
-                mnObj.push_back(Pair("status", "ProTx hash is unknown. Please specify -masternodeprotx"));
-            } else {
-                mnObj.push_back(Pair("proTxHash", activeMasternode.proTxHash.ToString()));
-                mnObj.push_back(Pair("service", activeMasternode.service.ToString()));
-                CProviderTXRegisterMN proTx;
-                if (deterministicMNList->GetRegisterMN(activeMasternode.proTxHash, proTx)) {
-                    UniValue proTxObj;
-                    proTx.ToJson(proTxObj);
-                    mnObj.push_back(Pair("proTx", proTxObj));
-                }
-                mnObj.push_back(Pair("state", activeMasternodeManager->GetStateString()));
-                mnObj.push_back(Pair("status", activeMasternodeManager->GetStatus()));
+            mnObj.push_back(Pair("proTxHash", activeMasternodeManager->GetProTxHash().ToString()));
+            mnObj.push_back(Pair("service", activeMasternode.service.ToString()));
+            if (!activeMasternodeManager->GetProTxHash().IsNull()) {
+                UniValue proTxObj;
+                activeMasternodeManager->GetProTx().ToJson(proTxObj);
+                mnObj.push_back(Pair("proTx", proTxObj));
             }
-
+            mnObj.push_back(Pair("state", activeMasternodeManager->GetStateString()));
+            mnObj.push_back(Pair("status", activeMasternodeManager->GetStatus()));
         } else {
             mnObj.push_back(Pair("outpoint", activeMasternode.outpoint.ToStringShort()));
             mnObj.push_back(Pair("service", activeMasternode.service.ToString()));

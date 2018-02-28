@@ -349,6 +349,17 @@ bool CDeterministicMNList::HasMNAtChainTip(const uint256 &proTxHash) {
     return mapCurMNs.count(proTxHash) != 0;
 }
 
+bool CDeterministicMNList::GetMNByMasternodeKey(int64_t height, const CKeyID &keyIDMasternode, CDeterministicMN &dmnRet) {
+    auto mnList = GetListAtHeight(height, true);
+    for (const auto &dmn : mnList) {
+        if (dmn.proTx.keyIDMasternode == keyIDMasternode) {
+            dmnRet = dmn;
+            return true;
+        }
+    }
+    return false;
+}
+
 bool CDeterministicMNList::IsDeterministicMNsSporkActive(int64_t height) {
     LOCK(cs);
 

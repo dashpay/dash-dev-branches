@@ -1862,18 +1862,6 @@ bool AppInitMain(boost::thread_group& threadGroup, CScheduler& scheduler)
         // init and register activeMasternodeManager
         activeMasternodeManager = new CActiveDeterministicMasternodeManager();
         RegisterValidationInterface(activeMasternodeManager);
-
-        std::string strMasternodeProTxHash = GetArg("-masternodeprotx", "");
-        if (!strMasternodeProTxHash.empty()) {
-            if (!IsHex(strMasternodeProTxHash) || strMasternodeProTxHash.size() != 64) {
-                return InitError(_("Invalid -masternodeprotx specified. Must be the hash of ProTx."));
-            }
-            activeMasternode.proTxHash.SetHex(strMasternodeProTxHash);
-            LogPrintf("  proTxHash: %s\n", activeMasternode.proTxHash.ToString());
-        } else {
-            // TODO make this a fatal error after the network has fully transitioned to deterministic MNs
-            InitWarning(_("You must specify the ProTX hash for your masternode, otherwise it won't work when the network switches to deterministic masternodes (DIP3)"));
-        }
     }
 
 #ifdef ENABLE_WALLET

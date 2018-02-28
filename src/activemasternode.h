@@ -28,8 +28,6 @@ extern CActiveDeterministicMasternodeManager *activeMasternodeManager;
 
 class CActiveMasternodeInfo {
 public:
-    uint256 proTxHash;
-
     // Keys for the active Masternode
     CKeyID pubKeyIDMasternode;
     CKey keyMasternode;
@@ -50,8 +48,8 @@ public:
     };
 
 private:
+    uint256 proTxHash;
     CProviderTXRegisterMN proTx;
-    bool proTxFound{false};
     masternode_state_t state{MASTERNODE_WAITING_FOR_PROTX};
     std::string strError;
 
@@ -60,6 +58,17 @@ public:
 
     void Init();
 
+    const uint256 &GetProTxHash() const {
+        return proTxHash;
+    }
+
+    const CProviderTXRegisterMN &GetProTx() const {
+        return proTx;
+    }
+
+    masternode_state_t GetState() const {
+        return state;
+    }
     std::string GetStateString() const;
     std::string GetStatus() const;
 

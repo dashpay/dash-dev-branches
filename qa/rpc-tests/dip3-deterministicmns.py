@@ -322,8 +322,6 @@ class DIP3Test(BitcoinTestFramework):
         while len(self.nodes) <= mn.idx:
             self.nodes.append(None)
         extra_args = ['-masternode=1', '-masternodeprivkey=%s' % mn.key]
-        if mn.is_protx:
-            extra_args += ['-masternodeprotx=%s' % mn.collateral_txid]
         n = start_node(mn.idx, self.options.tmpdir, self.extra_args + extra_args, redirect_stderr=True)
         self.nodes[mn.idx] = n
         for i in range(0, self.num_nodes):
