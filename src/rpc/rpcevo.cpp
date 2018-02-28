@@ -567,26 +567,8 @@ UniValue createprovidertx(const JSONRPCRequest &request) {
         tx.nType = TRANSACTION_PROVIDER_REGISTER;
         tx.vout.emplace_back(collateralTxOut);
 
-        CAmount nFee;
-        CFeeRate feeRate = CFeeRate(0);
-        int nChangePos = -1;
-        std::string strFailReason;
-        std::set<int> setSubtractFeeFromOutputs;
-        if (!pwalletMain->FundTransaction(tx, nFee, false, feeRate, nChangePos, strFailReason, false, false, setSubtractFeeFromOutputs))
-            throw JSONRPCError(RPC_INTERNAL_ERROR, strFailReason);
-
-        int collateralIndex = -1;
-        for (int i = 0; i < (int)tx.vout.size(); i++) {
-            if (tx.vout[i] == collateralTxOut) {
-                collateralIndex = i;
-                break;
-            }
-        }
-        assert(collateralIndex != -1);
-
         CProviderTXRegisterMN ptx;
         ptx.nVersion = CProviderTXRegisterMN::CURRENT_VERSION;
-        ptx.nCollateralIndex = collateralIndex;
 
         if (!Lookup(request.params[3].get_str().c_str(), ptx.addr, Params().GetDefaultPort(), false))
             throw std::runtime_error(strprintf("invalid network address %s", request.params[3].get_str()));
@@ -604,14 +586,40 @@ UniValue createprovidertx(const JSONRPCRequest &request) {
 
         ptx.keyIDMasternode = keyMasternode.GetPubKey().GetID();
         ptx.scriptPayout = GetScriptForDestination(payoutAddress.Get());
+        ptx.vchSig.resize(65); // reserve so that fee calculation is correct
+
+        CDataStream ds(CLIENT_VERSION, SER_NETWORK);
+        ds << ptx;
+        tx.extraPayload.assign(ds.begin(), ds.end());
+
+        CAmount nFee;
+        CFeeRate feeRate = CFeeRate(0);
+        int nChangePos = -1;
+        std::string strFailReason;
+        std::set<int> setSubtractFeeFromOutputs;
+        if (!pwalletMain->FundTransaction(tx, nFee, false, feeRate, nChangePos, strFailReason, false, true, setSubtractFeeFromOutputs, true, CNoDestination()))
+            throw JSONRPCError(RPC_INTERNAL_ERROR, strFailReason);
+
+        int collateralIndex = -1;
+        for (int i = 0; i < (int)tx.vout.size(); i++) {
+            if (tx.vout[i] == collateralTxOut) {
+                collateralIndex = i;
+                break;
+            }
+        }
+        assert(collateralIndex != -1);
+
+        ptx.nCollateralIndex = collateralIndex;
         ptx.inputsHash = CalcTxInputsHash(tx);
+        ptx.vchSig.clear();
 
         uint256 hash = ::SerializeHash(ptx);
         if (!CHashSigner::SignHash(hash, keyMasternode, ptx.vchSig)) {
             throw std::runtime_error(strprintf("failed to sign provider tx"));
         }
 
-        CDataStream ds(CLIENT_VERSION, SER_NETWORK);
+        // re-serialize the payload (we only now have correct hashes and signatures)
+        ds.clear();
         ds << ptx;
         tx.extraPayload.assign(ds.begin(), ds.end());
 
