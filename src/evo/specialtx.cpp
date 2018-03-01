@@ -16,11 +16,12 @@
 
 
 bool CheckSpecialTx(const CTransaction& tx, const CBlockIndex *pindex, CValidationState &state) {
+    AssertLockHeld(cs_main);
+
     if (tx.nVersion < 3 || tx.nType == TRANSACTION_NORMAL)
         return true;
 
-    bool isTip = !pindex || pindex == chainActive.Tip();
-    if ((isTip && !fDIP0003ActiveAtTip) || (!isTip && VersionBitsState(pindex->pprev, Params().GetConsensus(), Consensus::DEPLOYMENT_DIP0003, versionbitscache) != THRESHOLD_ACTIVE)) {
+    if (pindex && VersionBitsState(pindex->pprev, Params().GetConsensus(), Consensus::DEPLOYMENT_DIP0003, versionbitscache) != THRESHOLD_ACTIVE) {
         return state.DoS(100, false, REJECT_INVALID, "bad-tx-type");
     }
 
