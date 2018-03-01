@@ -509,7 +509,7 @@ UniValue gettransition(const JSONRPCRequest &request) {
 }
 
 #ifdef ENABLE_WALLET
-void createprovidertx_help() {
+void createprotx_help() {
     throw std::runtime_error(
             "createprovidertx type args...\n"
             "\nCreates a Provider Transaction. Arguments depend on type of provider transaction to be created.\n"
@@ -539,15 +539,15 @@ void createprovidertx_help() {
     );
 }
 
-UniValue createprovidertx(const JSONRPCRequest &request) {
+UniValue createprotx(const JSONRPCRequest &request) {
     if (request.fHelp || request.params.size() < 2)
-        createprovidertx_help();
+        createprotx_help();
 
     std::string action = request.params[0].get_str();
 
     if (action == "register") {
         if (request.params.size() != 7)
-            createprovidertx_help();
+            createprotx_help();
 
         CBitcoinAddress collateralAddress(request.params[1].get_str());
         if (!collateralAddress.IsValid())
@@ -650,8 +650,8 @@ static const CRPCCommand commands[] =
 
 #ifdef ENABLE_WALLET
     // these require the wallet to be enabled to fund the transactions
-    { "evo",                "createprovidertx",       &createprovidertx,       true, {}  },
     { "evo",                "createsubtx",            &createsubtx,            true, {}  },
+    { "evo",                "createprotx",            &createprotx,            true, {}  },
 #endif//ENABLE_WALLET
 };
 
