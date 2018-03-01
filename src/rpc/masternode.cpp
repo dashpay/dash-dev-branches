@@ -19,7 +19,9 @@
 #include "rpc/server.h"
 #include "util.h"
 #include "utilmoneystr.h"
+#include "txmempool.h"
 
+#include "evo/specialtx.h"
 #include "evo/deterministicmns.h"
 
 #include <fstream>
@@ -136,7 +138,7 @@ UniValue masternode(const JSONRPCRequest& request)
 #endif // ENABLE_WALLET
          strCommand != "list" && strCommand != "list-conf" && strCommand != "count" &&
          strCommand != "debug" && strCommand != "current" && strCommand != "winner" && strCommand != "winners" && strCommand != "genkey" &&
-         strCommand != "connect" && strCommand != "status" && strCommand != "check"))
+         strCommand != "connect" && strCommand != "status" && strCommand != "info" && strCommand != "check"))
             throw std::runtime_error(
                 "masternode \"command\"...\n"
                 "Set of commands to execute masternode related actions\n"
@@ -151,7 +153,8 @@ UniValue masternode(const JSONRPCRequest& request)
                 "  start-alias  - Start single remote masternode by assigned alias configured in masternode.conf\n"
                 "  start-<mode> - Start remote masternodes configured in masternode.conf (<mode>: 'all', 'missing', 'disabled')\n"
 #endif // ENABLE_WALLET
-                "  status       - Print masternode status information\n"
+                "  status       - Print local masternode status information\n"
+                "  info         - Print masternode information of specified masternode\n"
                 "  list         - Print list of all known masternodes (see masternodelist for more info)\n"
                 "  list-conf    - Print masternode.conf in JSON format\n"
                 "  winner       - Print info on next masternode winner to vote for\n"
@@ -476,6 +479,74 @@ UniValue masternode(const JSONRPCRequest& request)
             mnObj.push_back(Pair("status", legacyActiveMasternodeManager.GetStatus()));
         }
         return mnObj;
+    }
+
+    if (strCommand == "info")
+    {
+        if (request.params.size() != 2)
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "Correct usage is 'masternode info \"proTxHash\"");
+
+        std::string strProTxHash = request.params[1].get_str();
+        if (!IsHex(strProTxHash) || strProTxHash.size() != 64)
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid \"proTxHash\"");
+
+        uint256 proTxHash;
+        proTxHash.SetHex(strProTxHash);
+
+        CTransactionRef tx;
+        uint256 hashBlock;
+        bool fromMempool = false;
+
+        CProviderTXRegisterMN proTx;
+        if (!deterministicMNList->GetRegisterMN(proTxHash, proTx)) {
+            tx = mempool.get(proTxHash);
+            if (tx) {
+                fromMempool = true;
+                if (tx->nVersion < 3 || tx->nType != TRANSACTION_PROVIDER_REGISTER)
+                    throw JSONRPCError(RPC_INVALID_PARAMETER, "TX is not a ProTx");
+                if (!GetTxPayload(*tx, proTx))
+                    throw JSONRPCError(RPC_INVALID_PARAMETER, "TX is not a valid ProTx");
+            } else {
+                throw JSONRPCError(RPC_INVALID_PARAMETER, "ProTx not found");
+            }
+        } else {
+            if (!GetTransaction(proTxHash, tx, Params().GetConsensus(), hashBlock, true))
+                throw JSONRPCError(RPC_INVALID_PARAMETER, "Parent transaction of ProTx not found");
+
+            if (!mapBlockIndex.count(hashBlock))
+                throw JSONRPCError(RPC_INVALID_PARAMETER, "Parent transaction of ProTx not found");
+        }
+
+        UniValue obj(UniValue::VOBJ);
+
+        UniValue proTxObj;
+        proTx.ToJson(proTxObj);
+        obj.push_back(Pair("proTx", proTxObj));
+
+        if (!hashBlock.IsNull()) {
+            UniValue blockObj(UniValue::VOBJ);
+            blockObj.push_back(Pair("blockhash", hashBlock.GetHex()));
+
+            LOCK(cs_main);
+            BlockMap::iterator mi = mapBlockIndex.find(hashBlock);
+            if (mi != mapBlockIndex.end() && (*mi).second) {
+                CBlockIndex *pindex = (*mi).second;
+                if (chainActive.Contains(pindex)) {
+                    blockObj.push_back(Pair("height", pindex->nHeight));
+                    blockObj.push_back(Pair("confirmations", 1 + chainActive.Height() - pindex->nHeight));
+                    blockObj.push_back(Pair("time", pindex->GetBlockTime()));
+                    blockObj.push_back(Pair("blocktime", pindex->GetBlockTime()));
+                } else {
+                    blockObj.push_back(Pair("height", -1));
+                    blockObj.push_back(Pair("confirmations", 0));
+                }
+            }
+            obj.push_back(Pair("block", blockObj));
+        } else {
+            obj.push_back(Pair("from_mempool", true));
+        }
+
+        return obj;
     }
 
     if (strCommand == "winners")
