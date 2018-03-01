@@ -597,7 +597,7 @@ UniValue createprovidertx(const JSONRPCRequest &request) {
         int nChangePos = -1;
         std::string strFailReason;
         std::set<int> setSubtractFeeFromOutputs;
-        if (!pwalletMain->FundTransaction(tx, nFee, false, feeRate, nChangePos, strFailReason, false, true, setSubtractFeeFromOutputs, true, CNoDestination()))
+        if (!pwalletMain->FundTransaction(tx, nFee, false, feeRate, nChangePos, strFailReason, false, false, setSubtractFeeFromOutputs, true, CNoDestination()))
             throw JSONRPCError(RPC_INTERNAL_ERROR, strFailReason);
 
         int collateralIndex = -1;
@@ -625,7 +625,7 @@ UniValue createprovidertx(const JSONRPCRequest &request) {
 
         LOCK(cs_main);
         CValidationState state;
-        if (!CheckSpecialTx(tx, chainActive.Tip(), state))
+        if (!CheckSpecialTx(tx, NULL, state))
             throw std::runtime_error(FormatStateMessage(state));
 
         ds.clear();

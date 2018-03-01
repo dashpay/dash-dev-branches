@@ -123,8 +123,9 @@ class DIP3Test(BitcoinTestFramework):
 
         while self.nodes[0].getblockchaininfo()['bip9_softforks']['dip0003']['status'] == 'locked_in':
             self.nodes[0].generate(1)
-        # dip0003 is in 'active' state now, but we should only be able to use ProTx in the NEXT block, so lets test if it still fails as expected
-        print("testing rejection of ProTx after dip3 activation and before next block")
+
+        print("testing rejection of ProTx right before dip3 activation")
+        self.nodes[0].invalidateblock(self.nodes[0].getbestblockhash())
         self.test_fail_create_and_mine_protx(self.nodes[0])
 
         # We have hundrets of blocks to sync here, give it more time
@@ -573,7 +574,9 @@ class DIP3Test(BitcoinTestFramework):
     def test_fail_create_and_mine_protx(self, node):
         # Try to create ProTx (should still fail)
         address = node.getnewaddress()
-        assert_raises_jsonrpc(-1, "bad-tx-type", node.createprovidertx, 'register', address, '1000', '127.0.0.1:10000', '0', node.masternode('genkey'), address)
+        protx = node.createprovidertx('register', address, '1000', '127.0.0.1:10000', '0', node.masternode('genkey'), address)
+        protx = node.signrawtransaction(protx)['hex']
+        assert_raises_jsonrpc(None, "bad-tx-type", node.sendrawtransaction, protx)
 
         mine_result = self.mine_protx(node, node.getnewaddress())
         assert_equal(mine_result, 'bad-tx-type')
@@ -586,13 +589,11 @@ class DIP3Test(BitcoinTestFramework):
         height = node.getblockchaininfo()['blocks']
         tip_hash = int(node.getblockhash(height), 16)
 
+        protx = node.createprovidertx('register', collateral_address, '1000', '127.0.0.1:10000', '0', node.masternode('genkey'), collateral_address)
+        protx = node.signrawtransaction(protx)['hex']
+
         block = create_block(tip_hash, create_coinbase(height))
-        tx = FromHex(CTransaction(), node.createrawtransaction([], {collateral_address: 1000}))
-        tx.nVersion = 3
-        tx.nType = 1
-        tx.extraPayload = hex_str_to_bytes('01000000411201000100000000000000000000000000ffff7f000001791927f5cb003eb228db95fc8f3971d92fa37bf5306a1976a9145b063cff23a3c9ca852b03bc09845a05797416f688acac450af87c837c03884bf1727dd5670659b88accd91f4f366376901a19916de2411b950d99b40ab15c57531fccf572a119838d80ff2c3ab6eb43a3f9dc0e1e9d003e684749365ae63c9d7943cee64667b0338ee989b16dc81831fdd15e7207f16b31')
-        hextx = node.fundrawtransaction(ToHex(tx))['hex']
-        tx = FromHex(tx, hextx)
+        tx = FromHex(CTransaction(), protx)
         block.vtx.append(tx)
         block.hashMerkleRoot = block.calc_merkle_root()
         block.solve()

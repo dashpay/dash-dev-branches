@@ -577,9 +577,6 @@ bool CheckTransaction(const CTransaction& tx, CValidationState &state, bool fChe
                 return state.DoS(10, false, REJECT_INVALID, "bad-txns-prevout-null");
     }
 
-    if (!CheckSpecialTx(tx, nullptr, state))
-        return false;
-
     return true;
 }
 
@@ -642,6 +639,9 @@ bool AcceptToMemoryPoolWorker(CTxMemPool& pool, CValidationState& state, const C
 
     if (!ContextualCheckTransaction(tx, state, chainActive.Tip()))
         return error("%s: ContextualCheckTransaction: %s, %s", __func__, hash.ToString(), FormatStateMessage(state));
+
+    if (!CheckSpecialTx(tx, chainActive.Tip(), state))
+        return false;
 
     // Coinbase is only valid in a block, not as a loose transaction
     if (tx.IsCoinBase())
