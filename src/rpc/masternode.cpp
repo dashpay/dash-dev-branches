@@ -457,9 +457,12 @@ UniValue masternode(const JSONRPCRequest& request)
 
         UniValue mnObj(UniValue::VOBJ);
 
+        // keep compatibility with legacy status for now (might get deprecated/removed later)
+        mnObj.push_back(Pair("outpoint", activeMasternode.outpoint.ToStringShort()));
+        mnObj.push_back(Pair("service", activeMasternode.service.ToString()));
+
         if (deterministicMNList->IsDeterministicMNsSporkActive()) {
             mnObj.push_back(Pair("proTxHash", activeMasternodeManager->GetProTxHash().ToString()));
-            mnObj.push_back(Pair("service", activeMasternode.service.ToString()));
             if (!activeMasternodeManager->GetProTxHash().IsNull()) {
                 UniValue proTxObj;
                 activeMasternodeManager->GetProTx().ToJson(proTxObj);
@@ -468,9 +471,6 @@ UniValue masternode(const JSONRPCRequest& request)
             mnObj.push_back(Pair("state", activeMasternodeManager->GetStateString()));
             mnObj.push_back(Pair("status", activeMasternodeManager->GetStatus()));
         } else {
-            mnObj.push_back(Pair("outpoint", activeMasternode.outpoint.ToStringShort()));
-            mnObj.push_back(Pair("service", activeMasternode.service.ToString()));
-
             CMasternode mn;
             if (mnodeman.Get(activeMasternode.outpoint, mn)) {
                 mnObj.push_back(Pair("payee", CBitcoinAddress(mn.pubKeyIDCollateralAddress).ToString()));
