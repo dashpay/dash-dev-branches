@@ -129,6 +129,7 @@ public:
     bool IsDeterministicMNsSporkActive(int64_t height = -1);
 
 private:
+    void UpdateSpork15Value();
     bool RecreateListFromSnapshot(int64_t height, std::map<uint256, CDeterministicMNState> &snapshot);
 };
 

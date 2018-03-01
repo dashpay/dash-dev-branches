@@ -121,11 +121,7 @@ bool CDeterministicMNList::ProcessBlockLocked(const CBlock &block, const CBlockI
     state.curHeight = pindex->nHeight;
     state.curBlockHash = block.GetHash();
 
-    int64_t oldSpork15Value = state.spork15Value;
-    state.spork15Value = sporkManager.GetSporkValue(SPORK_15_DETERMINISTIC_MNS_ENABLED);
-    if (oldSpork15Value != state.spork15Value && state.spork15Value != SPORK_15_DETERMINISTIC_MNS_DEFAULT) {
-        LogPrintf("CDeterministicMNList::ProcessBlockLocked -- Updated spork15 value to %d\n", state.spork15Value);
-    }
+    UpdateSpork15Value();
     if (pindex->nHeight == state.spork15Value) {
         LogPrintf("CDeterministicMNList::ProcessBlockLocked -- spork15 is active now. height=%d\n", pindex->nHeight);
     }
@@ -209,13 +205,18 @@ bool CDeterministicMNList::UndoBlockLocked(const CBlock &block, const CBlockInde
 
     state.curHeight = pindex->nHeight - 1;
     state.curBlockHash = pindex->pprev->GetBlockHash();
-    state.spork15Value = sporkManager.GetSporkValue(SPORK_15_DETERMINISTIC_MNS_ENABLED);
-    if (state.firstMNHeight == pindex->nHeight) {
-        state.firstMNHeight = -1;
-    }
     dbTransaction.Write(DB_LIST_STATE, state);
 
     return true;
+}
+
+void CDeterministicMNList::UpdateSpork15Value() {
+    // only update cached spork15 value when it was not set before. This is needed because spork values are very unreliable when starting the node
+    int64_t newSpork15Value = sporkManager.GetSporkValue(SPORK_15_DETERMINISTIC_MNS_ENABLED);
+    if (newSpork15Value != state.spork15Value && newSpork15Value != SPORK_15_DETERMINISTIC_MNS_DEFAULT) {
+        state.spork15Value = newSpork15Value;
+        LogPrintf("CDeterministicMNList::ProcessBlockLocked -- Updated spork15 value to %d\n", state.spork15Value);
+    }
 }
 
 struct CompareByLastPaid {
