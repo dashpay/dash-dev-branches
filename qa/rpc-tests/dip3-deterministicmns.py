@@ -396,7 +396,7 @@ class DIP3Test(BitcoinTestFramework):
         raise AssertionError("generate_blocks_until_winners timed out: {}".format(node.masternode('winners')))
 
     def test_mn_votes(self, block_count, test_enforcement=False):
-        self.generate_blocks_until_winners(self.nodes[0], 10)
+        self.generate_blocks_until_winners(self.nodes[0], self.num_nodes)
 
         if test_enforcement:
             self.nodes[0].spork('SPORK_8_MASTERNODE_PAYMENT_ENFORCEMENT', 0)
