@@ -48,5 +48,7 @@ public:
 };
 
 bool CheckProviderTxRegister(const CTransaction &tx, const CBlockIndex *pindex, CValidationState &state);
+bool IsProTxCollateral(const CTransaction &tx, int n);
+int GetProTxCollateralIndex(const CTransaction &tx);
 
 #endif//DASH_PROVIDERTX_H

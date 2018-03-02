@@ -106,3 +106,16 @@ void CProviderTXRegisterMN::ToJson(UniValue &obj) const {
     obj.push_back(Pair("payout", payoutObj));
     obj.push_back(Pair("inputsHash", inputsHash.ToString()));
 }
+
+bool IsProTxCollateral(const CTransaction &tx, int n) {
+    return GetProTxCollateralIndex(tx) == n;
+}
+
+int GetProTxCollateralIndex(const CTransaction &tx) {
+    if (tx.nVersion < 3 || tx.nType != TRANSACTION_PROVIDER_REGISTER)
+        return -1;
+    CProviderTXRegisterMN proTx;
+    if (!GetTxPayload(tx, proTx))
+        assert(false);
+    return proTx.nCollateralIndex;
+}
