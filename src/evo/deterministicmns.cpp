@@ -65,7 +65,8 @@ bool CDeterministicMNList::ProcessBlockLocked(const CBlock &block, const CBlockI
                     blockInfo.mnsRemovedInBlock.emplace(proTxHash, dmnState);
                     mapCurMNs.erase(proTxHash);
 
-                    LogPrintf("CDeterministicMNList::ProcessBlockLocked -- MN %s removed from list because collateral was spent. height=%d, mapCurMNs.size=%d\n", proTxHash.ToString(), pindex->nHeight, mapCurMNs.size());
+                    LogPrintf("CDeterministicMNList::%s -- MN %s removed from list because collateral was spent. height=%d, mapCurMNs.size=%d\n",
+                              __func__, proTxHash.ToString(), pindex->nHeight, mapCurMNs.size());
                 }
             }
         }
@@ -91,7 +92,8 @@ bool CDeterministicMNList::ProcessBlockLocked(const CBlock &block, const CBlockI
                 state.firstMNHeight = pindex->nHeight;
             }
 
-            LogPrintf("CDeterministicMNList::ProcessBlockLocked -- MN %s added to MN list. height=%d, mapCurMNs.size=%d\n", tx.GetHash().ToString(), pindex->nHeight, mapCurMNs.size());
+            LogPrintf("CDeterministicMNList::%s -- MN %s added to MN list. height=%d, mapCurMNs.size=%d\n",
+                      __func__, tx.GetHash().ToString(), pindex->nHeight, mapCurMNs.size());
         }
     }
 
@@ -113,7 +115,8 @@ bool CDeterministicMNList::ProcessBlockLocked(const CBlock &block, const CBlockI
             state.blocksWithMNsCount++;
             if ((state.blocksWithMNsCount % SNAPSHOT_LIST_PERIOD) == 0) {
                 dbTransaction.Write(std::make_pair(DB_LIST_SNAPSHOT, (int64_t) pindex->nHeight), mapCurMNs);
-                LogPrintf("CDeterministicMNList::ProcessBlockLocked -- Wrote snapshot. height=%d, mapCurMNs.size=%d\n", pindex->nHeight, mapCurMNs.size());
+                LogPrintf("CDeterministicMNList::%s -- Wrote snapshot. height=%d, mapCurMNs.size=%d\n",
+                          __func__, pindex->nHeight, mapCurMNs.size());
             }
         }
     }
@@ -123,7 +126,7 @@ bool CDeterministicMNList::ProcessBlockLocked(const CBlock &block, const CBlockI
 
     UpdateSpork15Value();
     if (pindex->nHeight == state.spork15Value) {
-        LogPrintf("CDeterministicMNList::ProcessBlockLocked -- spork15 is active now. height=%d\n", pindex->nHeight);
+        LogPrintf("CDeterministicMNList::%s -- spork15 is active now. height=%d\n", __func__, pindex->nHeight);
     }
 
     dbTransaction.Write(DB_LIST_STATE, state);
@@ -169,7 +172,8 @@ bool CDeterministicMNList::UndoBlockLocked(const CBlock &block, const CBlockInde
             assert(!mapCurMNs.count(proTxHash));
             mapCurMNs.emplace(proTxHash, p.second); // restore old state
 
-            LogPrintf("CDeterministicMNList::UndoBlockLocked -- MN %s restored and re-added to MN list. height=%d, mapCurMNs.size=%d\n", proTxHash.ToString(), pindex->nHeight, mapCurMNs.size());
+            LogPrintf("CDeterministicMNList::%s -- MN %s restored and re-added to MN list. height=%d, mapCurMNs.size=%d\n",
+                      __func__, proTxHash.ToString(), pindex->nHeight, mapCurMNs.size());
         }
 
         int foundCount = 0;
@@ -182,7 +186,8 @@ bool CDeterministicMNList::UndoBlockLocked(const CBlock &block, const CBlockInde
                 mapCurMNs.erase(tx.GetHash());
                 foundCount++;
 
-                LogPrintf("CDeterministicMNList::UndoBlockLocked -- MN %s removed from MN list due to undo. height=%d, mapCurMNs.size=%d\n", tx.GetHash().ToString(), pindex->nHeight, mapCurMNs.size());
+                LogPrintf("CDeterministicMNList::%s -- MN %s removed from MN list due to undo. height=%d, mapCurMNs.size=%d\n",
+                          __func__, tx.GetHash().ToString(), pindex->nHeight, mapCurMNs.size());
             }
         }
 
@@ -193,14 +198,15 @@ bool CDeterministicMNList::UndoBlockLocked(const CBlock &block, const CBlockInde
         if (!blockInfo.mnsInBlock.empty() || !blockInfo.mnsRemovedInBlock.empty()) {
             if ((state.blocksWithMNsCount % SNAPSHOT_LIST_PERIOD) == 0) {
                 dbTransaction.Erase(std::make_pair(DB_LIST_SNAPSHOT, (int64_t) pindex->nHeight));
-                LogPrintf("CDeterministicMNList::UndoBlockLocked -- Erased snapshot. height=%d, mapCurMNs.size=%d\n", pindex->nHeight, mapCurMNs.size());
+                LogPrintf("CDeterministicMNList::%s -- Erased snapshot. height=%d, mapCurMNs.size=%d\n",
+                          __func__, pindex->nHeight, mapCurMNs.size());
             }
             state.blocksWithMNsCount--;
         }
     }
 
     if (pindex->nHeight == state.spork15Value) {
-        LogPrintf("CDeterministicMNList::UndoBlockLocked -- spork15 is not active anymore. height=%d\n", pindex->nHeight);
+        LogPrintf("CDeterministicMNList::%s -- spork15 is not active anymore. height=%d\n", __func__, pindex->nHeight);
     }
 
     state.curHeight = pindex->nHeight - 1;
@@ -215,7 +221,7 @@ void CDeterministicMNList::UpdateSpork15Value() {
     int64_t newSpork15Value = sporkManager.GetSporkValue(SPORK_15_DETERMINISTIC_MNS_ENABLED);
     if (newSpork15Value != state.spork15Value && newSpork15Value != SPORK_15_DETERMINISTIC_MNS_DEFAULT) {
         state.spork15Value = newSpork15Value;
-        LogPrintf("CDeterministicMNList::ProcessBlockLocked -- Updated spork15 value to %d\n", state.spork15Value);
+        LogPrintf("CDeterministicMNList::%s -- Updated spork15 value to %d\n", __func__, state.spork15Value);
     }
 }
 
