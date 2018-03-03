@@ -25,6 +25,7 @@
 #include "evo/users.h"
 #include "evo/tsvalidation.h"
 #include "evo/tsmempool.h"
+#include "evo/deterministicmns.h"
 
 void TsToJSON(const CTransition& ts, const uint256 &hashBlock, UniValue& entry)
 {
@@ -633,6 +634,94 @@ UniValue protx_register(const JSONRPCRequest &request) {
     return sendrawtransaction(sendRequest);
 }
 
+void protx_list_help() {
+    throw std::runtime_error(
+            "protx list (\"type\")\n"
+            "\nLists all ProTxs in your wallet or on-chain, depending on the given type. If \"type\" is not\n"
+            "specified, it defaults to \"wallet\". All types have the optional argument \"detailed\" which if set to\n"
+            "\"true\" will result in a detailed list to be returned. If set to \"false\", only the hashes of the ProTx\n"
+            "will be returned.\n"
+            "\nAvailable types:\n"
+            "  wallet (detailed)           - List only ProTx which are found in your wallet. This will also include ProTx which\n"
+            "                                failed PoSe verfication\n"
+            "  active (height) (detailed)  - List only ProTx which are active/valid at the given chain height. If height is not\n"
+            "                                specified, it defaults to the current chain-tip\n"
+            "  unspent (height) (detaileD) - List all ProTx which are registered at the given chain height. If height is not\n"
+            "                                specified, it defaults to the current chain-tip. This will also include ProTx\n"
+            "                                which failed PoSe verification at that height\n"
+    );
+}
+
+UniValue BuildProTxListEntry(const uint256 &hash, const CProviderTXRegisterMN &proTx, bool detailed) {
+    if (!detailed)
+        return hash.ToString();
+
+    UniValue o(UniValue::VOBJ);
+
+    o.push_back(Pair("proTxHash", hash.GetHex()));
+
+    UniValue proTxObj;
+    proTx.ToJson(proTxObj);
+    o.push_back(Pair("proTx", proTxObj));
+
+    int confirmations = GetUTXOConfirmations(COutPoint(hash, proTx.nCollateralIndex));
+    o.push_back(Pair("confirmations", confirmations));
+
+    return o;
+}
+
+UniValue protx_list(const JSONRPCRequest &request) {
+    if (request.fHelp)
+        protx_list_help();
+
+    std::string type = "wallet";
+    if (request.params.size() > 1)
+        type = request.params[1].get_str();
+
+    UniValue ret(UniValue::VARR);
+
+    if (type == "wallet") {
+        if (request.params.size() > 3)
+            protx_list_help();
+
+        bool detailed = request.params.size() > 2 ? ParseBoolV(request.params[2], "detailed") : false;
+
+        LOCK2(cs_main, pwalletMain->cs_wallet);
+        std::vector<COutPoint> vOutpts;
+        pwalletMain->ListProTxCoins(vOutpts);
+
+        for (const COutPoint &outpt : vOutpts) {
+            const CWalletTx *wtx = pwalletMain->GetWalletTx(outpt.hash);
+            assert(wtx);
+
+            CProviderTXRegisterMN proTx;
+            if (!GetTxPayload(*wtx->tx, proTx))
+                assert(false);
+
+            ret.push_back(BuildProTxListEntry(wtx->GetHash(), proTx, detailed));
+        }
+    } else if (type == "active" || type == "unspent") { // both are the same atm until we implement deterministic PoSe
+        if (request.params.size() > 4)
+            protx_list_help();
+
+        LOCK(cs_main);
+        int64_t height = request.params.size() > 2 ? ParseInt64V(request.params[2], "height") : chainActive.Height();
+        if (height < 1 || height > chainActive.Height())
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "invalid height specified");
+
+        bool detailed = request.params.size() > 3 ? ParseBoolV(request.params[3], "detailed") : false;
+
+        auto mnList = deterministicMNList->GetListAtHeight(height, detailed);
+        for (const auto &dmn : mnList) {
+            ret.push_back(BuildProTxListEntry(dmn.proTxHash, dmn.proTx, detailed));
+        }
+    } else {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "invalid type specified");
+    }
+
+    return ret;
+}
+
 UniValue protx(const JSONRPCRequest &request) {
     if (request.params.empty()) {
         throw std::runtime_error(
@@ -643,6 +732,7 @@ UniValue protx(const JSONRPCRequest &request) {
                 "1. \"command\"        (string, required) The command to execute\n"
                 "\nAvailable commands:\n"
                 "  register    - Create and send ProTx to network\n"
+                "  list        - List ProTxs\n"
         );
     }
 
@@ -650,10 +740,13 @@ UniValue protx(const JSONRPCRequest &request) {
 
     if (command == "register") {
         return protx_register(request);
+    } else if (command == "list") {
+        return protx_list(request);
     } else {
         throw std::runtime_error("invalid command: " + command);
     }
 }
+
 #endif//ENABLE_WALLET
 
 static const CRPCCommand commands[] =
