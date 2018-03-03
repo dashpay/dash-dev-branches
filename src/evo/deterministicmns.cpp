@@ -269,7 +269,7 @@ bool CDeterministicMNList::GetRegisterMN(const uint256 &proTxHash, CProviderTXRe
 }
 
 bool CDeterministicMNList::RecreateListFromSnapshot(int64_t height, std::map<uint256, CDeterministicMNState> &snapshot) {
-    AssertLockHeld(cs_main);
+    AssertLockHeld(cs);
 
     snapshot.clear();
 
