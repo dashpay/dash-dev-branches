@@ -331,9 +331,9 @@ void CMasternode::UpdateLastPaid(const CBlockIndex *pindex, int nMaxBlocksToScan
 {
     if(!pindex) return;
 
-    if (deterministicMNList->IsDeterministicMNsSporkActive(pindex->nHeight)) {
+    if (deterministicMNManager->IsDeterministicMNsSporkActive(pindex->nHeight)) {
         int64_t lastPaidHeight;
-        if (deterministicMNList->GetMNLastPaidHeight(outpoint.hash, pindex->nHeight, lastPaidHeight)) {
+        if (deterministicMNManager->GetMNLastPaidHeight(outpoint.hash, pindex->nHeight, lastPaidHeight)) {
             LOCK(cs_main);
             nBlockLastPaid = (int)lastPaidHeight;
             nTimeLastPaid = chainActive[nBlockLastPaid]->nTime;

@@ -199,7 +199,7 @@ UniValue masternode(const JSONRPCRequest& request)
 
         int nCount;
         int total;
-        if (deterministicMNList->IsDeterministicMNsSporkActive()) {
+        if (deterministicMNManager->IsDeterministicMNsSporkActive()) {
             nCount = total = mnodeman.CountEnabled();
         } else {
             masternode_info_t mnInfo;
@@ -251,17 +251,17 @@ UniValue masternode(const JSONRPCRequest& request)
             pindex = chainActive.Tip();
         }
 
-        if (deterministicMNList->IsDeterministicMNsSporkActive()) {
+        if (deterministicMNManager->IsDeterministicMNsSporkActive()) {
             strCommand = "current";
         }
 
         nHeight = pindex->nHeight + (strCommand == "current" ? 1 : 10);
         mnodeman.UpdateLastPaid(pindex);
 
-        if (deterministicMNList->IsDeterministicMNsSporkActive()) {
+        if (deterministicMNManager->IsDeterministicMNsSporkActive()) {
             uint256 proTxHash;
             CScript payeeScript;
-            if (!deterministicMNList->GetMNPayee(nHeight, proTxHash, payeeScript))
+            if (!deterministicMNManager->GetMNPayee(nHeight, proTxHash, payeeScript))
                 return "unknown";
             if (!mnodeman.GetMasternodeInfo(proTxHash, mnInfo))
                 return "unknown";
@@ -285,7 +285,7 @@ UniValue masternode(const JSONRPCRequest& request)
 #ifdef ENABLE_WALLET
     if (strCommand == "start-alias")
     {
-        if (deterministicMNList->IsDeterministicMNsSporkActive())
+        if (deterministicMNManager->IsDeterministicMNsSporkActive())
             throw JSONRPCError(RPC_MISC_ERROR, "start-alias is not supported when deterministic masternode list is active (DIP3)");
         if (!EnsureWalletIsAvailable(request.fHelp))
             return NullUniValue;
@@ -339,7 +339,7 @@ UniValue masternode(const JSONRPCRequest& request)
 
     if (strCommand == "start-all" || strCommand == "start-missing" || strCommand == "start-disabled")
     {
-        if (deterministicMNList->IsDeterministicMNsSporkActive())
+        if (deterministicMNManager->IsDeterministicMNsSporkActive())
             throw JSONRPCError(RPC_MISC_ERROR, strprintf("%s is not supported when deterministic masternode list is active (DIP3)", strCommand));
         if (!EnsureWalletIsAvailable(request.fHelp))
             return NullUniValue;
@@ -461,7 +461,7 @@ UniValue masternode(const JSONRPCRequest& request)
         mnObj.push_back(Pair("outpoint", activeMasternode.outpoint.ToStringShort()));
         mnObj.push_back(Pair("service", activeMasternode.service.ToString()));
 
-        if (deterministicMNList->IsDeterministicMNsSporkActive()) {
+        if (deterministicMNManager->IsDeterministicMNsSporkActive()) {
             mnObj.push_back(Pair("proTxHash", activeMasternodeManager->GetProTxHash().ToString()));
             if (!activeMasternodeManager->GetProTxHash().IsNull()) {
                 UniValue proTxObj;
@@ -498,7 +498,7 @@ UniValue masternode(const JSONRPCRequest& request)
         bool fromMempool = false;
 
         CProviderTXRegisterMN proTx;
-        if (!deterministicMNList->GetRegisterMN(proTxHash, proTx)) {
+        if (!deterministicMNManager->GetRegisterMN(proTxHash, proTx)) {
             tx = mempool.get(proTxHash);
             if (tx) {
                 fromMempool = true;

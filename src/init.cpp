@@ -279,8 +279,8 @@ void PrepareShutdown()
         pcoinsdbview = NULL;
         delete pblocktree;
         pblocktree = NULL;
-        delete deterministicMNList;
-        deterministicMNList = NULL;
+        delete deterministicMNManager;
+        deterministicMNManager = NULL;
         delete evoUserDB;
         evoUserDB = NULL;
     }
@@ -1648,14 +1648,14 @@ bool AppInitMain(boost::thread_group& threadGroup, CScheduler& scheduler)
                 delete pcoinsdbview;
                 delete pcoinscatcher;
                 delete pblocktree;
-                delete deterministicMNList;
+                delete deterministicMNManager;
                 delete evoUserDB;
 
                 pblocktree = new CBlockTreeDB(nBlockTreeDBCache, false, fReindex);
                 pcoinsdbview = new CCoinsViewDB(nCoinDBCache, false, fReindex || fReindexChainState);
                 pcoinscatcher = new CCoinsViewErrorCatcher(pcoinsdbview);
                 pcoinsTip = new CCoinsViewCache(pcoinscatcher);
-                deterministicMNList = new CDeterministicMNList(nDeterministicMNsCache, false, fReindex || fReindexChainState);
+                deterministicMNManager = new CDeterministicMNManager(nDeterministicMNsCache, false, fReindex || fReindexChainState);
                 evoUserDB = new CEvoUserDB(nUsersDBCache, false, fReindex || fReindexChainState);
 
                 if (fReindex) {
@@ -1707,7 +1707,7 @@ bool AppInitMain(boost::thread_group& threadGroup, CScheduler& scheduler)
                 // Needs to be called after chain is initialized
                 if (chainActive.Tip() && chainActive.Tip()->pprev)
                     fDIP0003ActiveAtTip = VersionBitsState(chainActive.Tip()->pprev, Params().GetConsensus(), Consensus::DEPLOYMENT_DIP0003, versionbitscache) == THRESHOLD_ACTIVE;
-                deterministicMNList->Init();
+                deterministicMNManager->Init();
 
                 uiInterface.InitMessage(_("Verifying blocks..."));
                 if (fHavePruned && GetArg("-checkblocks", DEFAULT_CHECKBLOCKS) > MIN_BLOCKS_TO_KEEP) {

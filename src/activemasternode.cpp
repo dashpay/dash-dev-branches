@@ -46,7 +46,7 @@ void CActiveDeterministicMasternodeManager::Init() {
     if (!fMasternodeMode)
         return;
 
-    if (!deterministicMNList->IsDeterministicMNsSporkActive())
+    if (!deterministicMNManager->IsDeterministicMNsSporkActive())
         return;
 
     if (!GetLocalAddress(activeMasternode.service)) {
@@ -55,12 +55,12 @@ void CActiveDeterministicMasternodeManager::Init() {
     }
 
     CDeterministicMN dmn;
-    if (!deterministicMNList->GetMNByMasternodeKey(chainActive.Height(), activeMasternode.pubKeyIDMasternode, dmn)) {
+    if (!deterministicMNManager->GetMNByMasternodeKey(chainActive.Height(), activeMasternode.pubKeyIDMasternode, dmn)) {
         // MN not appeared on the chain yet
         return;
     }
 
-    if (!deterministicMNList->HasMNAtChainTip(dmn.proTxHash)) {
+    if (!deterministicMNManager->HasMNAtChainTip(dmn.proTxHash)) {
         state = MASTERNODE_REMOVED;
         return;
     }
@@ -102,14 +102,14 @@ void CActiveDeterministicMasternodeManager::UpdatedBlockTip(const CBlockIndex *p
     if (!fMasternodeMode)
         return;
 
-    if (!deterministicMNList->IsDeterministicMNsSporkActive(pindexNew->nHeight)) {
+    if (!deterministicMNManager->IsDeterministicMNsSporkActive(pindexNew->nHeight)) {
         return;
     }
 
     if (state == MASTERNODE_WAITING_FOR_PROTX) {
         Init();
     } else if (state == MASTERNODE_READY) {
-        if (!deterministicMNList->HasMNAtHeight(pindexNew->nHeight, proTxHash)) {
+        if (!deterministicMNManager->HasMNAtHeight(pindexNew->nHeight, proTxHash)) {
             // MN disappeared from MN list
             state = MASTERNODE_REMOVED;
             activeMasternode.outpoint.SetNull();
@@ -142,7 +142,7 @@ bool CActiveDeterministicMasternodeManager::GetLocalAddress(CService &addrRet) {
 
 void CActiveLegacyMasternodeManager::ManageState(CConnman& connman)
 {
-    if (deterministicMNList->IsDeterministicMNsSporkActive())
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
         return;
 
     LogPrint("masternode", "CActiveLegacyMasternodeManager::ManageState -- Start\n");
@@ -213,7 +213,7 @@ std::string CActiveLegacyMasternodeManager::GetTypeString() const
 
 bool CActiveLegacyMasternodeManager::SendMasternodePing(CConnman& connman)
 {
-    if (deterministicMNList->IsDeterministicMNsSporkActive())
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
         return false;
 
     if(!fPingerEnabled) {
@@ -261,7 +261,7 @@ bool CActiveLegacyMasternodeManager::UpdateSentinelPing(int version)
 
 void CActiveLegacyMasternodeManager::ManageStateInitial(CConnman& connman)
 {
-    if (deterministicMNList->IsDeterministicMNsSporkActive())
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
         return;
 
     LogPrint("masternode", "CActiveLegacyMasternodeManager::ManageStateInitial -- status = %s, type = %s, pinger enabled = %d\n", GetStatus(), GetTypeString(), fPingerEnabled);
@@ -345,7 +345,7 @@ void CActiveLegacyMasternodeManager::ManageStateInitial(CConnman& connman)
 
 void CActiveLegacyMasternodeManager::ManageStateRemote()
 {
-    if (deterministicMNList->IsDeterministicMNsSporkActive())
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
         return;
 
     LogPrint("masternode", "CActiveLegacyMasternodeManager::ManageStateRemote -- Start status = %s, type = %s, pinger enabled = %d, pubKeyIDMasternode = %s\n",
@@ -373,7 +373,7 @@ void CActiveLegacyMasternodeManager::ManageStateRemote()
             return;
         }
         CProviderTXRegisterMN proTx;
-        if (deterministicMNList->GetRegisterMN(infoMn.outpoint.hash, proTx)) {
+        if (deterministicMNManager->GetRegisterMN(infoMn.outpoint.hash, proTx)) {
             if (proTx.keyIDMasternode != infoMn.pubKeyIDMasternode) {
                 nState = ACTIVE_MASTERNODE_NOT_CAPABLE;
                 strNotCapableReason = strprintf("Masternode collateral is a ProTx and masternode key does not match key from -masternodeprivkey");

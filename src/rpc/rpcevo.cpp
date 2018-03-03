@@ -711,7 +711,7 @@ UniValue protx_list(const JSONRPCRequest &request) {
 
         bool detailed = request.params.size() > 3 ? ParseBoolV(request.params[3], "detailed") : false;
 
-        auto mnList = deterministicMNList->GetListAtHeight(height, detailed);
+        auto mnList = deterministicMNManager->GetListAtHeight(height, detailed);
         for (const auto &dmn : mnList) {
             ret.push_back(BuildProTxListEntry(dmn.proTxHash, dmn.proTx, detailed));
         }

@@ -53,7 +53,7 @@ bool CheckProviderTxRegister(const CTransaction &tx, const CBlockIndex *pindex, 
         return state.DoS(100, false, REJECT_INVALID, "bad-provider-inputs-hash");
 
     if (pindex) {
-        auto mnList = deterministicMNList->GetListAtHeight(pindex->nHeight, true);
+        auto mnList = deterministicMNManager->GetListAtHeight(pindex->nHeight, true);
         for (const auto &dmn : mnList) {
             if (dmn.proTx.addr == ptx.addr)
                 return state.DoS(10, false, REJECT_DUPLICATE, "bad-provider-dup-addr");

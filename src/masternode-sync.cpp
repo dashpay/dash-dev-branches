@@ -72,7 +72,7 @@ void CMasternodeSync::SwitchToNextAsset(CConnman& connman)
         case(MASTERNODE_SYNC_WAITING):
             ClearFulfilledRequests(connman);
             LogPrintf("CMasternodeSync::SwitchToNextAsset -- Completed %s in %llds\n", GetAssetName(), GetTime() - nTimeAssetSyncStarted);
-            if (deterministicMNList->IsDeterministicMNsSporkActive()) {
+            if (deterministicMNManager->IsDeterministicMNsSporkActive()) {
                 nRequestedMasternodeAssets = MASTERNODE_SYNC_GOVERNANCE;
             } else {
                 nRequestedMasternodeAssets = MASTERNODE_SYNC_LIST;
@@ -81,7 +81,7 @@ void CMasternodeSync::SwitchToNextAsset(CConnman& connman)
             break;
         case(MASTERNODE_SYNC_LIST):
             LogPrintf("CMasternodeSync::SwitchToNextAsset -- Completed %s in %llds\n", GetAssetName(), GetTime() - nTimeAssetSyncStarted);
-            if (deterministicMNList->IsDeterministicMNsSporkActive()) {
+            if (deterministicMNManager->IsDeterministicMNsSporkActive()) {
                 nRequestedMasternodeAssets = MASTERNODE_SYNC_GOVERNANCE;
             } else {
                 nRequestedMasternodeAssets = MASTERNODE_SYNC_MNW;
@@ -209,11 +209,11 @@ void CMasternodeSync::ProcessTick(CConnman& connman)
             if(nRequestedMasternodeAttempt <= 2) {
                 connman.PushMessage(pnode, msgMaker.Make(NetMsgType::GETSPORKS)); //get current network sporks
             } else if(nRequestedMasternodeAttempt < 4) {
-                if (!deterministicMNList->IsDeterministicMNsSporkActive()) {
+                if (!deterministicMNManager->IsDeterministicMNsSporkActive()) {
                     mnodeman.DsegUpdate(pnode, connman);
                 }
             } else if(nRequestedMasternodeAttempt < 6) {
-                if (!deterministicMNList->IsDeterministicMNsSporkActive()) {
+                if (!deterministicMNManager->IsDeterministicMNsSporkActive()) {
                     //sync payment votes
                     if(pnode->nVersion == 70208) {
                         connman.PushMessage(pnode, msgMaker.Make(NetMsgType::MASTERNODEPAYMENTSYNC, mnpayments.GetStorageLimit())); //sync payment votes
@@ -269,7 +269,7 @@ void CMasternodeSync::ProcessTick(CConnman& connman)
             // MNLIST : SYNC MASTERNODE LIST FROM OTHER CONNECTED CLIENTS
 
             if(nRequestedMasternodeAssets == MASTERNODE_SYNC_LIST) {
-                if (deterministicMNList->IsDeterministicMNsSporkActive()) {
+                if (deterministicMNManager->IsDeterministicMNsSporkActive()) {
                     SwitchToNextAsset(connman);
                     connman.ReleaseNodeVector(vNodesCopy);
                     return;
@@ -307,7 +307,7 @@ void CMasternodeSync::ProcessTick(CConnman& connman)
             // MNW : SYNC MASTERNODE PAYMENT VOTES FROM OTHER CONNECTED CLIENTS
 
             if(nRequestedMasternodeAssets == MASTERNODE_SYNC_MNW) {
-                if (deterministicMNList->IsDeterministicMNsSporkActive()) {
+                if (deterministicMNManager->IsDeterministicMNsSporkActive()) {
                     SwitchToNextAsset(connman);
                     connman.ReleaseNodeVector(vNodesCopy);
                     return;

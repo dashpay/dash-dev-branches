@@ -70,7 +70,7 @@ TestingSetup::TestingSetup(const std::string& chainName) : BasicTestingSetup(cha
         mempool.setSanityCheck(1.0);
         pblocktree = new CBlockTreeDB(1 << 20, true);
         pcoinsdbview = new CCoinsViewDB(1 << 23, true);
-        deterministicMNList = new CDeterministicMNList(1 << 20, true, true);
+        deterministicMNManager = new CDeterministicMNManager(1 << 20, true, true);
         evoUserDB = new CEvoUserDB(1 << 20, true, true);
         pcoinsTip = new CCoinsViewCache(pcoinsdbview);
         InitBlockIndex(chainparams);
@@ -94,7 +94,7 @@ TestingSetup::~TestingSetup()
         threadGroup.join_all();
         UnloadBlockIndex();
         delete pcoinsTip;
-        delete deterministicMNList;
+        delete deterministicMNManager;
         delete evoUserDB;
         delete pcoinsdbview;
         delete pblocktree;

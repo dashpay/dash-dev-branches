@@ -1015,7 +1015,7 @@ void static ProcessGetData(CNode* pfrom, const Consensus::Params& consensusParam
                 }
 
                 if (!push && inv.type == MSG_MASTERNODE_PAYMENT_VOTE) {
-                    if (!deterministicMNList->IsDeterministicMNsSporkActive()) {
+                    if (!deterministicMNManager->IsDeterministicMNsSporkActive()) {
                         if (mnpayments.HasVerifiedPaymentVote(inv.hash)) {
                             connman.PushMessage(pfrom, msgMaker.Make(NetMsgType::MASTERNODEPAYMENTVOTE, mnpayments.mapMasternodePaymentVotes[inv.hash]));
                             push = true;
@@ -1024,7 +1024,7 @@ void static ProcessGetData(CNode* pfrom, const Consensus::Params& consensusParam
                 }
 
                 if (!push && inv.type == MSG_MASTERNODE_PAYMENT_BLOCK) {
-                    if (!deterministicMNList->IsDeterministicMNsSporkActive()) {
+                    if (!deterministicMNManager->IsDeterministicMNsSporkActive()) {
                         BlockMap::iterator mi = mapBlockIndex.find(inv.hash);
                         LOCK(cs_mapMasternodeBlocks);
                         if (mi != mapBlockIndex.end() && mnpayments.mapMasternodeBlocks.count(mi->second->nHeight)) {
@@ -1042,7 +1042,7 @@ void static ProcessGetData(CNode* pfrom, const Consensus::Params& consensusParam
                 }
 
                 if (!push && inv.type == MSG_MASTERNODE_ANNOUNCE) {
-                    if (!deterministicMNList->IsDeterministicMNsSporkActive()) {
+                    if (!deterministicMNManager->IsDeterministicMNsSporkActive()) {
                         if (mnodeman.mapSeenMasternodeBroadcast.count(inv.hash)) {
                             connman.PushMessage(pfrom, msgMaker.Make(NetMsgType::MNANNOUNCE, mnodeman.mapSeenMasternodeBroadcast[inv.hash].second));
                             push = true;
@@ -1051,7 +1051,7 @@ void static ProcessGetData(CNode* pfrom, const Consensus::Params& consensusParam
                 }
 
                 if (!push && inv.type == MSG_MASTERNODE_PING) {
-                    if (!deterministicMNList->IsDeterministicMNsSporkActive()) {
+                    if (!deterministicMNManager->IsDeterministicMNsSporkActive()) {
                         if (mnodeman.mapSeenMasternodePing.count(inv.hash)) {
                             connman.PushMessage(pfrom, msgMaker.Make(NetMsgType::MNPING, mnodeman.mapSeenMasternodePing[inv.hash]));
                             push = true;

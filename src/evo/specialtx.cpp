@@ -66,7 +66,7 @@ bool ProcessSpecialTxsInBlock(const CBlock &block, const CBlockIndex *pindex, CV
             return false;
     }
 
-    if (!deterministicMNList->ProcessBlock(block, pindex, state))
+    if (!deterministicMNManager->ProcessBlock(block, pindex, state))
         return false;
 
     return true;
@@ -79,7 +79,7 @@ bool UndoSpecialTxsInBlock(const CBlock &block, const CBlockIndex *pindex) {
             return false;
     }
 
-    if (!deterministicMNList->UndoBlock(block, pindex))
+    if (!deterministicMNManager->UndoBlock(block, pindex))
         return false;
 
     return true;

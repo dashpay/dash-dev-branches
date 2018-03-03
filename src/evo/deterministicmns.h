@@ -62,7 +62,7 @@ public:
     CDeterministicMNState state;
 };
 
-class CDeterministicMNListState {
+class CDeterministicMNManagerState {
 public:
     int64_t firstMNHeight{-1};
     int64_t blocksWithMNsCount{0};
@@ -82,7 +82,7 @@ public:
     }
 };
 
-class CDeterministicMNList {
+class CDeterministicMNManager {
     static const int SNAPSHOT_LIST_PERIOD = 10;
 
 private:
@@ -92,10 +92,10 @@ private:
     CDBTransaction dbTransaction;
 
     std::map<uint256, CDeterministicMNState> mapCurMNs;
-    CDeterministicMNListState state;
+    CDeterministicMNManagerState state;
 
 public:
-    CDeterministicMNList(size_t nCacheSize, bool fMemory=false, bool fWipe=false);
+    CDeterministicMNManager(size_t nCacheSize, bool fMemory=false, bool fWipe=false);
 
     std::unique_ptr<CScopedDBTransaction> BeginTransaction() {
         auto t = CScopedDBTransaction::Begin(dbTransaction);
@@ -133,6 +133,6 @@ private:
     bool RecreateListFromSnapshot(int64_t height, std::map<uint256, CDeterministicMNState> &snapshot);
 };
 
-extern CDeterministicMNList *deterministicMNList;
+extern CDeterministicMNManager *deterministicMNManager;
 
 #endif//DASH_DETERMINISTICMNS_H
