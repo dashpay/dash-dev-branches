@@ -148,13 +148,13 @@ UniValue masternode(const JSONRPCRequest& request)
                 "  count        - Get information about number of masternodes (DEPRECATED options: 'total', 'ps', 'enabled', 'qualify', 'all')\n"
                 "  current      - Print info on current masternode winner to be paid the next block (calculated locally)\n"
                 "  genkey       - Generate new masternodeprivkey\n"
+                "  info         - Print masternode information of specified masternode\n"
 #ifdef ENABLE_WALLET
                 "  outputs      - Print masternode compatible outputs\n"
                 "  start-alias  - Start single remote masternode by assigned alias configured in masternode.conf\n"
                 "  start-<mode> - Start remote masternodes configured in masternode.conf (<mode>: 'all', 'missing', 'disabled')\n"
 #endif // ENABLE_WALLET
                 "  status       - Print local masternode status information\n"
-                "  info         - Print masternode information of specified masternode\n"
                 "  list         - Print list of all known masternodes (see masternodelist for more info)\n"
                 "  list-conf    - Print masternode.conf in JSON format\n"
                 "  winner       - Print info on next masternode winner to vote for\n"
@@ -542,8 +542,13 @@ UniValue masternode(const JSONRPCRequest& request)
                 }
             }
             obj.push_back(Pair("block", blockObj));
+
+            if (GetUTXOHeight(COutPoint(proTxHash, proTx.nCollateralIndex)) < 0) {
+                obj.push_back(Pair("isSpent", true));
+            }
+
         } else {
-            obj.push_back(Pair("from_mempool", true));
+            obj.push_back(Pair("fromMempool", true));
         }
 
         return obj;
