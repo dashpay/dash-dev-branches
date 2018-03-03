@@ -386,6 +386,7 @@ void CActiveLegacyMasternodeManager::ManageStateRemote()
                 LogPrintf("CActiveLegacyMasternodeManager::ManageStateRemote -- %s: %s\n", GetStateString(), strNotCapableReason);
                 return;
             }
+            LogPrintf("CActiveLegacyMasternodeManager::ManageStateRemote -- Collateral is a ProTx\n");
         }
         if(nState != ACTIVE_MASTERNODE_STARTED) {
             LogPrintf("CActiveLegacyMasternodeManager::ManageStateRemote -- STARTED!\n");
@@ -393,6 +394,9 @@ void CActiveLegacyMasternodeManager::ManageStateRemote()
             activeMasternode.service = infoMn.addr;
             fPingerEnabled = true;
             nState = ACTIVE_MASTERNODE_STARTED;
+        } else if (activeMasternode.outpoint != infoMn.outpoint) {
+            LogPrintf("CActiveLegacyMasternodeManager::ManageStateRemote -- STARTED with new collateral %s!\n", infoMn.outpoint.ToStringShort());
+            activeMasternode.outpoint = infoMn.outpoint;
         }
     }
     else {
