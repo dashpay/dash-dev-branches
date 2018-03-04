@@ -28,24 +28,10 @@ void CDeterministicMNManager::Init() {
     RecreateListFromSnapshot(state.curHeight, mapCurMNs);
 }
 
-bool CDeterministicMNManager::ProcessBlock(const CBlock &block, const CBlockIndex *pindex, CValidationState &state) {
-    CDeterministicMNBlockInfo blockInfo;
-    if (!ProcessBlockLocked(block, pindex, state, blockInfo))
-        return false;
-
-    // These must be called without the cs lock held
-    for (const auto &proTxHash : blockInfo.mnsInBlock) {
-        GetMainSignals().MasternodeAdded(proTxHash);
-    }
-    for (const auto &p : blockInfo.mnsRemovedInBlock) {
-        GetMainSignals().MasternodeRemoved(p.first);
-    }
-
-    return true;
-}
-
-bool CDeterministicMNManager::ProcessBlockLocked(const CBlock &block, const CBlockIndex *pindex, CValidationState &_state, CDeterministicMNBlockInfo &blockInfo) {
+bool CDeterministicMNManager::ProcessBlock(const CBlock &block, const CBlockIndex *pindex, CValidationState &_state) {
     LOCK(cs);
+
+    CDeterministicMNBlockInfo blockInfo;
 
     auto prevMNList = GetListAtHeight(pindex->nHeight - 1, true);
     std::set<CService> prevMNAddrs;
@@ -135,23 +121,9 @@ bool CDeterministicMNManager::ProcessBlockLocked(const CBlock &block, const CBlo
 }
 
 bool CDeterministicMNManager::UndoBlock(const CBlock &block, const CBlockIndex *pindex) {
-    CDeterministicMNBlockInfo blockInfo;
-    if (!UndoBlockLocked(block, pindex, blockInfo))
-        return false;
-
-    // These must be called without the cs lock held
-    for (const auto &proTxHash : blockInfo.mnsInBlock) {
-        GetMainSignals().MasternodeRemoved(proTxHash);
-    }
-    for (const auto &p : blockInfo.mnsRemovedInBlock) {
-        GetMainSignals().MasternodeAdded(p.first);
-    }
-
-    return true;
-}
-
-bool CDeterministicMNManager::UndoBlockLocked(const CBlock &block, const CBlockIndex *pindex, CDeterministicMNBlockInfo &blockInfo) {
     LOCK(cs);
+
+    CDeterministicMNBlockInfo blockInfo;
 
     assert(state.curHeight == pindex->nHeight && state.curBlockHash == block.GetHash());
 

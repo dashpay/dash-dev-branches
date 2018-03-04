@@ -108,9 +108,7 @@ public:
     void Init();
 
     bool ProcessBlock(const CBlock &block, const CBlockIndex *pindex, CValidationState &state);
-    bool ProcessBlockLocked(const CBlock &block, const CBlockIndex *pindex, CValidationState &state, CDeterministicMNBlockInfo &blockInfo);
     bool UndoBlock(const CBlock &block, const CBlockIndex *pindex);
-    bool UndoBlockLocked(const CBlock &block, const CBlockIndex *pindex, CDeterministicMNBlockInfo &blockInfo);
 
     bool GetMNPayee(int64_t height, uint256 &proTxHashRet, CScript &payeeScriptRet);
     bool GetMNLastPaidHeight(const uint256 &proTxHash, int64_t height, int64_t &lastPaidHeightRet);
