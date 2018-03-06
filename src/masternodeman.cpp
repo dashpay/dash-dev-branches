@@ -573,7 +573,7 @@ bool CMasternodeMan::GetMasternodeInfo(const COutPoint& outpoint, masternode_inf
     CMasternode *mn = Find(outpoint);
     if (!mn)
         return false;
-    mnInfoRet = *mn;
+    mnInfoRet = mn->GetInfo();
     return true;
 }
 
