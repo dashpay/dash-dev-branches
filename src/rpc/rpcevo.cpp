@@ -700,7 +700,7 @@ UniValue protx_list(const JSONRPCRequest &request) {
 
             ret.push_back(BuildProTxListEntry(wtx->GetHash(), proTx, detailed));
         }
-    } else if (type == "active" || type == "unspent") { // both are the same atm until we implement deterministic PoSe
+    } else if (type == "active" || type == "unspent") {
         if (request.params.size() > 4)
             protx_list_help();
 
@@ -711,9 +711,16 @@ UniValue protx_list(const JSONRPCRequest &request) {
 
         bool detailed = request.params.size() > 3 ? ParseBoolV(request.params[3], "detailed") : false;
 
-        auto mnList = deterministicMNManager->GetListAtHeight(height, detailed);
-        for (const auto &dmn : mnList) {
-            ret.push_back(BuildProTxListEntry(dmn.proTxHash, dmn.proTx, detailed));
+        CDeterministicMNList mnList = deterministicMNManager->GetListAtHeight(height);
+        CDeterministicMNList::range_type range;
+
+        if (type == "active") {
+            range = mnList.valid_range();
+        } else if (type == "unspent") {
+            range = mnList.all_range();
+        }
+        for (const auto &dmn : range) {
+            ret.push_back(BuildProTxListEntry(dmn->proTxHash, *dmn->proTx, detailed));
         }
     } else {
         throw JSONRPCError(RPC_INVALID_PARAMETER, "invalid type specified");

@@ -151,7 +151,7 @@ bool IsBlockValueValid(const CBlock& block, int nBlockHeight, CAmount blockRewar
 
 bool IsBlockPayeeValid(const CTransaction& txNew, int nBlockHeight, CAmount blockReward)
 {
-    if(!masternodeSync.IsSynced()) {
+    if(!masternodeSync.IsSynced() && !deterministicMNManager->IsDeterministicMNsSporkActive(nBlockHeight)) {
         //there is no budget data to use to check anything, let's just accept the longest chain
         if(fDebug) LogPrintf("IsBlockPayeeValid -- WARNING: Client not synced, skipping block payee checks\n");
         return true;
@@ -509,7 +509,12 @@ bool CMasternodePayments::GetBlockPayee(int nBlockHeight, CScript& payeeRet) con
 {
     if (deterministicMNManager->IsDeterministicMNsSporkActive(nBlockHeight)) {
         uint256 proTxHash;
-        return deterministicMNManager->GetMNPayee(nBlockHeight, proTxHash, payee);
+        auto dmnPayee = deterministicMNManager->GetListAtHeight(nBlockHeight - 1).GetMNPayee();
+        if (!dmnPayee) {
+            return false;
+        }
+        payeeRet = dmnPayee->proTx->scriptPayout;
+        return true;
     } else {
         LOCK(cs_mapMasternodeBlocks);
         auto it = mapMasternodeBlocks.find(nBlockHeight);
@@ -689,13 +694,12 @@ std::string CMasternodeBlockPayees::GetRequiredPaymentsString() const
 std::string CMasternodePayments::GetRequiredPaymentsString(int nBlockHeight) const
 {
     if (deterministicMNManager->IsDeterministicMNsSporkActive(nBlockHeight)) {
-        uint256 proTxHash;
-        CScript payeeScript;
-        if (!deterministicMNManager->GetMNPayee(nBlockHeight, proTxHash, payeeScript)) {
+        auto payee = deterministicMNManager->GetListAtHeight(nBlockHeight - 1).GetMNPayee();
+        if (!payee) {
             return "Unknown";
         }
         CTxDestination dest;
-        if (!ExtractDestination(payeeScript, dest))
+        if (!ExtractDestination(payee->proTx->scriptPayout, dest))
             assert(false);
         return CBitcoinAddress(dest).ToString();
     } else {
@@ -709,20 +713,19 @@ bool CMasternodePayments::IsTransactionValid(const CTransaction& txNew, int nBlo
 {
     if (deterministicMNManager->IsDeterministicMNsSporkActive(nBlockHeight)) {
         CAmount nMasternodePayment = GetMasternodePayment(nBlockHeight, blockReward);
-        uint256 proTxHash;
-        CScript payeeScript;
-        if (!deterministicMNManager->GetMNPayee(nBlockHeight, proTxHash, payeeScript)) {
+        auto payee = deterministicMNManager->GetListAtHeight(nBlockHeight - 1).GetMNPayee();
+        if (!payee) {
             LogPrintf("CMasternodePayments::IsTransactionValid -- ERROR failed to get payee for block at height %s\n", nBlockHeight);
             return false;
         }
 
         for (const auto &txout : txNew.vout) {
-            if (nMasternodePayment == txout.nValue && txout.scriptPubKey == payeeScript) {
+            if (nMasternodePayment == txout.nValue && txout.scriptPubKey == payee->proTx->scriptPayout) {
                 return true;
             }
         }
         CTxDestination dest;
-        if (!ExtractDestination(payeeScript, dest))
+        if (!ExtractDestination(payee->proTx->scriptPayout, dest))
             assert(false);
         LogPrintf("CMasternodePayments::IsTransactionValid -- ERROR failed to find expected payee %s in block at height %s\n", CBitcoinAddress(dest).ToString(), nBlockHeight);
         return false;

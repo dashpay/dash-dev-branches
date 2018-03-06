@@ -259,11 +259,10 @@ UniValue masternode(const JSONRPCRequest& request)
         mnodeman.UpdateLastPaid(pindex);
 
         if (deterministicMNManager->IsDeterministicMNsSporkActive()) {
-            uint256 proTxHash;
-            CScript payeeScript;
-            if (!deterministicMNManager->GetMNPayee(nHeight, proTxHash, payeeScript))
+            auto payee = deterministicMNManager->GetListAtChainTip().GetMNPayee();
+            if (!payee)
                 return "unknown";
-            if (!mnodeman.GetMasternodeInfo(proTxHash, mnInfo))
+            if (!mnodeman.GetMasternodeInfo(payee->proTxHash, mnInfo))
                 return "unknown";
         } else {
             if(!mnodeman.GetNextMasternodeInQueueForPayment(nHeight, true, nCount, mnInfo))
@@ -462,10 +461,11 @@ UniValue masternode(const JSONRPCRequest& request)
         mnObj.push_back(Pair("service", activeMasternode.service.ToString()));
 
         if (deterministicMNManager->IsDeterministicMNsSporkActive()) {
-            mnObj.push_back(Pair("proTxHash", activeMasternodeManager->GetProTxHash().ToString()));
-            if (!activeMasternodeManager->GetProTxHash().IsNull()) {
+            auto dmn = activeMasternodeManager->GetDMN();
+            if (dmn) {
+                mnObj.push_back(Pair("proTxHash", dmn->proTxHash.ToString()));
                 UniValue proTxObj;
-                activeMasternodeManager->GetProTx().ToJson(proTxObj);
+                dmn->proTx->ToJson(proTxObj);
                 mnObj.push_back(Pair("proTx", proTxObj));
             }
             mnObj.push_back(Pair("state", activeMasternodeManager->GetStateString()));
@@ -497,15 +497,17 @@ UniValue masternode(const JSONRPCRequest& request)
         uint256 hashBlock;
         bool fromMempool = false;
 
-        CProviderTXRegisterMN proTx;
-        if (!deterministicMNManager->GetRegisterMN(proTxHash, proTx)) {
+        auto proTx = deterministicMNManager->GetProTx(proTxHash);
+        if (!proTx) {
             tx = mempool.get(proTxHash);
             if (tx) {
                 fromMempool = true;
                 if (tx->nVersion < 3 || tx->nType != TRANSACTION_PROVIDER_REGISTER)
                     throw JSONRPCError(RPC_INVALID_PARAMETER, "TX is not a ProTx");
-                if (!GetTxPayload(*tx, proTx))
+                CProviderTXRegisterMN tmpProTx;
+                if (!GetTxPayload(*tx, tmpProTx))
                     throw JSONRPCError(RPC_INVALID_PARAMETER, "TX is not a valid ProTx");
+                proTx = std::make_shared<CProviderTXRegisterMN>(tmpProTx);
             } else {
                 throw JSONRPCError(RPC_INVALID_PARAMETER, "ProTx not found");
             }
@@ -520,7 +522,7 @@ UniValue masternode(const JSONRPCRequest& request)
         UniValue obj(UniValue::VOBJ);
 
         UniValue proTxObj;
-        proTx.ToJson(proTxObj);
+        proTx->ToJson(proTxObj);
         obj.push_back(Pair("proTx", proTxObj));
 
         if (!hashBlock.IsNull()) {
@@ -543,7 +545,7 @@ UniValue masternode(const JSONRPCRequest& request)
             }
             obj.push_back(Pair("block", blockObj));
 
-            if (GetUTXOHeight(COutPoint(proTxHash, proTx.nCollateralIndex)) < 0) {
+            if (GetUTXOHeight(COutPoint(proTxHash, proTx->nCollateralIndex)) < 0) {
                 obj.push_back(Pair("isSpent", true));
             }
 

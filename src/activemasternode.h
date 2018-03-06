@@ -10,7 +10,9 @@
 #include "net.h"
 #include "primitives/transaction.h"
 #include "validationinterface.h"
+
 #include "evo/providertx.h"
+#include "evo/deterministicmns.h"
 
 class CActiveMasternodeInfo;
 class CActiveLegacyMasternodeManager;
@@ -42,14 +44,15 @@ class CActiveDeterministicMasternodeManager : public CValidationInterface {
 public:
     enum masternode_state_t {
         MASTERNODE_WAITING_FOR_PROTX,
-        MASTERNODE_READY,
+        MASTERNODE_NOT_MATURE,
+        MASTERNODE_POSE_BANNED,
         MASTERNODE_REMOVED,
+        MASTERNODE_READY,
         MASTERNODE_ERROR,
     };
 
 private:
-    uint256 proTxHash;
-    CProviderTXRegisterMN proTx;
+    CDeterministicMNCPtr mnListEntry;
     masternode_state_t state{MASTERNODE_WAITING_FOR_PROTX};
     std::string strError;
 
@@ -58,12 +61,8 @@ public:
 
     void Init();
 
-    const uint256 &GetProTxHash() const {
-        return proTxHash;
-    }
-
-    const CProviderTXRegisterMN &GetProTx() const {
-        return proTx;
+    CDeterministicMNCPtr GetDMN() const {
+        return mnListEntry;
     }
 
     masternode_state_t GetState() const {

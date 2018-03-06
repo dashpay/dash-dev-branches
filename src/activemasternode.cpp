@@ -22,8 +22,10 @@ std::string CActiveDeterministicMasternodeManager::GetStateString() const
 {
     switch (state) {
         case MASTERNODE_WAITING_FOR_PROTX:  return "WAITING_FOR_PROTX";
-        case MASTERNODE_READY:              return "READY";
+        case MASTERNODE_NOT_MATURE:         return "NOT_MATURE";
+        case MASTERNODE_POSE_BANNED:        return "POSE_BANNED";
         case MASTERNODE_REMOVED:            return "REMOVED";
+        case MASTERNODE_READY:              return "READY";
         case MASTERNODE_ERROR:              return "ERROR";
         default:                            return "UNKNOWN";
     }
@@ -33,8 +35,10 @@ std::string CActiveDeterministicMasternodeManager::GetStatus() const
 {
     switch (state) {
         case MASTERNODE_WAITING_FOR_PROTX:  return "Waiting for ProTx to appear on-chain";
-        case MASTERNODE_READY:              return "Ready";
+        case MASTERNODE_NOT_MATURE:         return "Waiting for ProTx to mature";
+        case MASTERNODE_POSE_BANNED:        return "Masternode was PoSe banned";
         case MASTERNODE_REMOVED:            return "Masternode removed from list";
+        case MASTERNODE_READY:              return "Ready";
         case MASTERNODE_ERROR:              return "Error. " + strError;
         default:                            return "Unknown";
     }
@@ -54,45 +58,45 @@ void CActiveDeterministicMasternodeManager::Init() {
         return;
     }
 
-    CDeterministicMN dmn;
-    if (!deterministicMNManager->GetMNByMasternodeKey(chainActive.Height(), activeMasternode.pubKeyIDMasternode, dmn)) {
+    CDeterministicMNList mnList = deterministicMNManager->GetListAtChainTip();
+
+    CDeterministicMNCPtr dmn = mnList.GetMNByMasternodeKey(activeMasternode.pubKeyIDMasternode);
+    if (!dmn) {
         // MN not appeared on the chain yet
         return;
     }
 
-    if (!deterministicMNManager->HasMNAtChainTip(dmn.proTxHash)) {
-        state = MASTERNODE_REMOVED;
+    if (!mnList.IsMNValid(dmn->proTxHash)) {
+        if (mnList.IsMNMature(dmn->proTxHash)) {
+            state = MASTERNODE_NOT_MATURE;
+        } else if (mnList.IsMNPoSeBanned(dmn->proTxHash)) {
+            state = MASTERNODE_POSE_BANNED;
+        } else {
+            state = MASTERNODE_REMOVED;
+        }
         return;
     }
 
-    proTxHash = dmn.proTxHash;
-    proTx = dmn.proTx;
+    mnListEntry = dmn;
 
-    LogPrintf("CActiveDeterministicMasternodeManager::Init -- proTxHash=%s\n", proTxHash.ToString());
-    LogPrintf("CActiveDeterministicMasternodeManager::Init -- proTx=%s\n", proTx.ToString());
+    LogPrintf("CActiveDeterministicMasternodeManager::Init -- proTxHash=%s\n", mnListEntry->proTxHash.ToString());
+    LogPrintf("CActiveDeterministicMasternodeManager::Init -- proTx=%s\n", mnListEntry->proTx->ToString());
 
-    if (activeMasternode.pubKeyIDMasternode != proTx.keyIDMasternode) {
-        state = MASTERNODE_ERROR;
-        strError = "Masternode private key does not match public key from ProTx";
-        LogPrintf("CActiveDeterministicMasternodeManager::Init -- ERROR: %s", strError);
-        return;
-    }
-
-    if (activeMasternode.service != proTx.addr) {
+    if (activeMasternode.service != mnListEntry->proTx->addr) {
         state = MASTERNODE_ERROR;
         strError = "Local address does not match the address from ProTx";
         LogPrintf("CActiveDeterministicMasternodeManager::Init -- ERROR: %s", strError);
         return;
     }
 
-    if (proTx.nProtocolVersion != PROTOCOL_VERSION) {
+    if (mnListEntry->proTx->nProtocolVersion != PROTOCOL_VERSION) {
         state = MASTERNODE_ERROR;
         strError = "Local protocol version does not match version from ProTx. You may need to update the ProTx";
         LogPrintf("CActiveDeterministicMasternodeManager::Init -- ERROR: %s", strError);
         return;
     }
 
-    activeMasternode.outpoint = COutPoint(proTxHash, proTx.nCollateralIndex);
+    activeMasternode.outpoint = COutPoint(mnListEntry->proTxHash, mnListEntry->proTx->nCollateralIndex);
     state = MASTERNODE_READY;
 }
 
@@ -106,17 +110,17 @@ void CActiveDeterministicMasternodeManager::UpdatedBlockTip(const CBlockIndex *p
         return;
     }
 
-    if (state == MASTERNODE_WAITING_FOR_PROTX) {
+    if (state == MASTERNODE_WAITING_FOR_PROTX || state == MASTERNODE_NOT_MATURE) {
         Init();
     } else if (state == MASTERNODE_READY) {
-        if (!deterministicMNManager->HasMNAtHeight(pindexNew->nHeight, proTxHash)) {
+        if (!deterministicMNManager->HasValidMNAtHeight(pindexNew->nHeight, mnListEntry->proTxHash)) {
             // MN disappeared from MN list
             state = MASTERNODE_REMOVED;
             activeMasternode.outpoint.SetNull();
             // MN might have reappeared in same block with a new ProTx (with same masternode key)
             Init();
         }
-    } else if (state == MASTERNODE_REMOVED) {
+    } else if (state == MASTERNODE_REMOVED || state == MASTERNODE_POSE_BANNED) {
         // MN might have reappeared with a new ProTx (with same masternode key)
         Init();
     }
@@ -372,15 +376,15 @@ void CActiveLegacyMasternodeManager::ManageStateRemote()
             LogPrintf("CActiveLegacyMasternodeManager::ManageStateRemote -- %s: %s\n", GetStateString(), strNotCapableReason);
             return;
         }
-        CProviderTXRegisterMN proTx;
-        if (deterministicMNManager->GetRegisterMN(infoMn.outpoint.hash, proTx)) {
-            if (proTx.keyIDMasternode != infoMn.pubKeyIDMasternode) {
+        CProviderTXRegisterMNCPtr proTx = deterministicMNManager->GetProTx(infoMn.outpoint.hash);
+        if (proTx) {
+            if (proTx->keyIDMasternode != infoMn.pubKeyIDMasternode) {
                 nState = ACTIVE_MASTERNODE_NOT_CAPABLE;
                 strNotCapableReason = strprintf("Masternode collateral is a ProTx and masternode key does not match key from -masternodeprivkey");
                 LogPrintf("CActiveLegacyMasternodeManager::ManageStateRemote -- %s: %s\n", GetStateString(), strNotCapableReason);
                 return;
             }
-            if (proTx.addr != infoMn.addr) {
+            if (proTx->addr != infoMn.addr) {
                 nState = ACTIVE_MASTERNODE_NOT_CAPABLE;
                 strNotCapableReason = strprintf("Masternode collateral is a ProTx and ProTx address does not match local address");
                 LogPrintf("CActiveLegacyMasternodeManager::ManageStateRemote -- %s: %s\n", GetStateString(), strNotCapableReason);

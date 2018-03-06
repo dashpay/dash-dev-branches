@@ -378,10 +378,10 @@ void CMasternodeMan::AddDeterministicMasternodes()
 
     unsigned int oldMnCount = mapMasternodes.size();
 
-    auto mnList = deterministicMNManager->GetListAtChainTip(true);
-    for (const auto &dmn : mnList) {
+    auto mnList = deterministicMNManager->GetListAtChainTip();
+    for (const auto &dmn : mnList.valid_range()) {
         // call Find() on each deterministic MN to force creation of CMasternode object
-        Find(COutPoint(dmn.proTxHash, dmn.proTx.nCollateralIndex));
+        Find(COutPoint(dmn->proTxHash, dmn->proTx->nCollateralIndex));
     }
 
     if (oldMnCount != mapMasternodes.size()) {
@@ -397,9 +397,9 @@ void CMasternodeMan::RemoveNonDeterministicMasternodes()
         return;
 
     std::set<COutPoint> mnSet;
-    auto mnList = deterministicMNManager->GetListAtChainTip(true);
-    for (const auto &dmn : mnList) {
-        mnSet.insert(COutPoint(dmn.proTxHash, dmn.proTx.nCollateralIndex));
+    auto mnList = deterministicMNManager->GetListAtChainTip();
+    for (const auto &dmn : mnList.valid_range()) {
+        mnSet.insert(COutPoint(dmn->proTxHash, dmn->proTx->nCollateralIndex));
     }
     bool erased = false;
     auto it = mapMasternodes.begin();
@@ -437,9 +437,9 @@ int CMasternodeMan::CountMasternodes(int nProtocolVersion)
     nProtocolVersion = nProtocolVersion == -1 ? mnpayments.GetMinMasternodePaymentsProto() : nProtocolVersion;
 
     if (deterministicMNManager->IsDeterministicMNsSporkActive()) {
-        auto mnList = deterministicMNManager->GetListAtChainTip(true);
-        for (const auto &dmn : mnList) {
-            if (dmn.proTx.nProtocolVersion < nProtocolVersion) continue;
+        auto mnList = deterministicMNManager->GetListAtChainTip();
+        for (const auto &dmn : mnList.valid_range()) {
+            if (dmn->proTx->nProtocolVersion < nProtocolVersion) continue;
             nCount++;
         }
     } else {
@@ -527,28 +527,20 @@ CMasternode* CMasternodeMan::Find(const COutPoint &outpoint)
         // for these and return them here. This is needed because we also need to track some data per MN that is not
         // on-chain, like vote counts
 
-        CProviderTXRegisterMN proTx;
-        bool proTxFound = false;
-        if (deterministicMNManager->HasMNAtChainTip(outpoint.hash) && deterministicMNManager->GetRegisterMN(outpoint.hash, proTx))
-            proTxFound = true;
+        auto mnList = deterministicMNManager->GetListAtChainTip();
+        auto dmn = mnList.GetMN(outpoint.hash);
+        if (!dmn) {
+            return NULL;
+        }
 
         auto it = mapMasternodes.find(outpoint);
         if (it != mapMasternodes.end()) {
-            if (proTxFound) {
-                return &(it->second);
-            } else {
-                // we might have found the MN in mapMasternodes, but if it's not in the deterministic list at the same time, treat it as not found
-                return NULL;
-            }
+            return &(it->second);
         } else {
-            if (proTxFound) {
-                // MN is not in mapMasternodes but in the deterministic list. Create an entry in mapMasternodes for compatibility with legacy code
-                CMasternode mn(outpoint.hash, proTx);
-                it = mapMasternodes.emplace(outpoint, mn).first;
-                return &(it->second);
-            } else {
-                return NULL;
-            }
+            // MN is not in mapMasternodes but in the deterministic list. Create an entry in mapMasternodes for compatibility with legacy code
+            CMasternode mn(outpoint.hash, *dmn->proTx);
+            it = mapMasternodes.emplace(outpoint, mn).first;
+            return &(it->second);
         }
     } else {
         auto it = mapMasternodes.find(outpoint);
@@ -569,10 +561,10 @@ bool CMasternodeMan::Get(const COutPoint& outpoint, CMasternode& masternodeRet)
 
 bool CMasternodeMan::GetMasternodeInfo(const uint256& proTxHash, masternode_info_t& mnInfoRet)
 {
-    CProviderTXRegisterMN proTx;
-    if (!deterministicMNManager->GetRegisterMN(proTxHash, proTx))
+    auto proTx = deterministicMNManager->GetProTx(proTxHash);
+    if (!proTx)
         return false;
-    return GetMasternodeInfo(COutPoint(proTxHash, proTx.nCollateralIndex), mnInfoRet);
+    return GetMasternodeInfo(COutPoint(proTxHash, proTx->nCollateralIndex), mnInfoRet);
 }
 
 bool CMasternodeMan::GetMasternodeInfo(const COutPoint& outpoint, masternode_info_t& mnInfoRet)
@@ -588,11 +580,10 @@ bool CMasternodeMan::GetMasternodeInfo(const COutPoint& outpoint, masternode_inf
 bool CMasternodeMan::GetMasternodeInfo(const CKeyID& pubKeyIDMasternode, masternode_info_t& mnInfoRet) {
     LOCK(cs);
     if (deterministicMNManager->IsDeterministicMNsSporkActive()) {
-        auto mnList = deterministicMNManager->GetListAtChainTip(true);
-        for (const auto &dmn : mnList) {
-            if (dmn.proTx.keyIDMasternode == pubKeyIDMasternode) {
-                return GetMasternodeInfo(COutPoint(dmn.proTxHash, dmn.proTx.nCollateralIndex), mnInfoRet);
-            }
+        auto mnList = deterministicMNManager->GetListAtChainTip();
+        auto dmn = mnList.GetMNByMasternodeKey(pubKeyIDMasternode);
+        if (dmn) {
+            return GetMasternodeInfo(COutPoint(dmn->proTxHash, dmn->proTx->nCollateralIndex), mnInfoRet);
         }
         return false;
     } else {
@@ -624,7 +615,7 @@ bool CMasternodeMan::Has(const COutPoint& outpoint)
 {
     LOCK(cs);
     if (deterministicMNManager->IsDeterministicMNsSporkActive()) {
-        return deterministicMNManager->HasMNAtChainTip(outpoint.hash);
+        return deterministicMNManager->HasValidMNAtChainTip(outpoint.hash);
     } else {
         return mapMasternodes.find(outpoint) != mapMasternodes.end();
     }
@@ -754,7 +745,7 @@ masternode_info_t CMasternodeMan::FindRandomNotInVec(const std::vector<COutPoint
             }
         }
         if(fExclude) continue;
-        if (deterministicMNManager->IsDeterministicMNsSporkActive() && !deterministicMNManager->HasMNAtChainTip(pmn->outpoint.hash))
+        if (deterministicMNManager->IsDeterministicMNsSporkActive() && !deterministicMNManager->HasValidMNAtChainTip(pmn->outpoint.hash))
             continue;
         // found the one not in vecToExclude
         LogPrint("masternode", "CMasternodeMan::FindRandomNotInVec -- found, masternode=%s\n", pmn->outpoint.ToStringShort());
@@ -773,7 +764,7 @@ std::map<COutPoint, CMasternode> CMasternodeMan::GetFullMasternodeMap() {
 
         std::map<COutPoint, CMasternode> result;
         for (const auto &p : mapMasternodes) {
-            if (deterministicMNManager->HasMNAtChainTip(p.first.hash)) {
+            if (deterministicMNManager->HasValidMNAtChainTip(p.first.hash)) {
                 result.emplace(p.first, p.second);
             }
         }
@@ -799,7 +790,7 @@ bool CMasternodeMan::GetMasternodeScores(const uint256& nBlockHash, CMasternodeM
 
     // calculate scores
     for (const auto& mnpair : mapMasternodes) {
-        if (deterministicMNManager->IsDeterministicMNsSporkActive() && !deterministicMNManager->HasMNAtChainTip(mnpair.second.outpoint.hash))
+        if (deterministicMNManager->IsDeterministicMNsSporkActive() && !deterministicMNManager->HasValidMNAtChainTip(mnpair.second.outpoint.hash))
             continue;
 
         if (mnpair.second.nProtocolVersion >= nMinProtocol) {
@@ -1680,7 +1671,7 @@ std::string CMasternodeMan::ToString() const
 
     if (deterministicMNManager->IsDeterministicMNsSporkActive()) {
         info << "Masternodes: masternode object count: " << (int)mapMasternodes.size() <<
-                ", deterministic masternode count: " << deterministicMNManager->GetListAtChainTip(false).size() <<
+                ", deterministic masternode count: " << deterministicMNManager->GetListAtChainTip().size() <<
                 ", nDsqCount: " << (int)nDsqCount;
     } else {
         info << "Masternodes: " << (int)mapMasternodes.size() <<

@@ -7,13 +7,148 @@
 
 #include "validation.h"
 #include "validationinterface.h"
+#include "chainparams.h"
 
 static const char DB_MN = 'M';
+static const char DB_MANAGER_STATE = 's';
 static const char DB_LIST_SNAPSHOT = 'S';
-static const char DB_LIST_STATE = 's';
-static const char DB_BLOCK_INFO = 'B';
+static const char DB_LIST_DIFF = 'D';
 
 CDeterministicMNManager *deterministicMNManager;
+
+bool CDeterministicMNList::IsMNValid(const uint256 &proTxHash) const {
+    auto it = mnMap->find(proTxHash);
+    if (it == mnMap->end()) {
+        return false;
+    }
+    return IsMNValid(it->second);
+}
+
+bool CDeterministicMNList::IsMNMature(const uint256 &proTxHash) const {
+    auto it = mnMap->find(proTxHash);
+    if (it == mnMap->end()) {
+        return false;
+    }
+    return IsMNMature(it->second);
+}
+
+bool CDeterministicMNList::IsMNPoSeBanned(const uint256 &proTxHash) const {
+    auto it = mnMap->find(proTxHash);
+    if (it == mnMap->end()) {
+        return false;
+    }
+    return IsMNPoSeBanned(it->second);
+}
+
+bool CDeterministicMNList::IsMNValid(const CDeterministicMNCPtr &dmn) const {
+    return IsMNMature(dmn) && !IsMNPoSeBanned(dmn);
+}
+
+bool CDeterministicMNList::IsMNMature(const CDeterministicMNCPtr &dmn) const {
+    assert(dmn);
+    const CDeterministicMNState &state = *dmn->state;
+
+    int64_t checkHeight = state.registeredHeight;
+    if (state.PoSeRevivedHeight != -1) {
+        // MN was PoSe banned in the past and then revived with a ProUpTx
+        checkHeight = state.PoSeRevivedHeight;
+    }
+    int64_t confirmations = height - checkHeight + 1;
+    return confirmations >= Params().GetConsensus().nMasternodeMinimumConfirmations;
+}
+
+bool CDeterministicMNList::IsMNPoSeBanned(const CDeterministicMNCPtr &dmn) const {
+    assert(dmn);
+    const CDeterministicMNState &state = *dmn->state;
+    return state.PoSeBanHeight != -1;
+}
+
+CDeterministicMNCPtr CDeterministicMNList::GetMN(const uint256 &proTxHash) const {
+    auto it = mnMap->find(proTxHash);
+    if (it == mnMap->end()) {
+        return nullptr;
+    }
+    return it->second;
+}
+
+CDeterministicMNCPtr CDeterministicMNList::GetValidMN(const uint256 &proTxHash) const {
+    auto dmn = GetMN(proTxHash);
+    if (dmn && !IsMNValid(dmn)) {
+        return nullptr;
+    }
+    return dmn;
+}
+
+CDeterministicMNCPtr CDeterministicMNList::GetMNByMasternodeKey(const CKeyID &keyIDMasternode) {
+    for (const auto &p : *mnMap) {
+        if (p.second->proTx->keyIDMasternode == keyIDMasternode) {
+            return p.second;
+        }
+    }
+    return nullptr;
+}
+
+static bool CompareByLastPaid(const CDeterministicMNCPtr &_a, const CDeterministicMNCPtr &_b) {
+    const CDeterministicMNState &as = *_a->state;
+    const CDeterministicMNState &bs = *_b->state;
+    if (as.lastPaidHeight == bs.lastPaidHeight) {
+        if (as.registeredHeight == bs.registeredHeight)
+            return _a->proTxHash < _b->proTxHash;
+        else
+            return as.registeredHeight < bs.registeredHeight;
+    } else {
+        return as.lastPaidHeight < bs.lastPaidHeight;
+    }
+}
+
+CDeterministicMNCPtr CDeterministicMNList::GetMNPayee() const {
+    if (mnMap->empty())
+        return nullptr;
+
+    CDeterministicMNCPtr best;
+    for (const auto &dmn : valid_range()) {
+        if (!best || CompareByLastPaid(dmn, best))
+            best = dmn;
+    }
+
+    return best;
+}
+
+void CDeterministicMNList::BuildDiff(const CDeterministicMNList &to, CDeterministicMNListDiff &diffRet) const {
+    diffRet.height = to.height;
+
+    for (const auto &p : *to.mnMap) {
+        const auto &fromIt = mnMap->find(p.first);
+        if (fromIt == mnMap->end() || *p.second->state != *fromIt->second->state) {
+            diffRet.addedOrUpdatedMns.emplace(p.first, p.second->state);
+        }
+    }
+    for (const auto &p : *mnMap) {
+        const auto &toIt = to.mnMap->find(p.first);
+        if (toIt == to.mnMap->end()) {
+            diffRet.removedMns.insert(p.first);
+        }
+    }
+}
+
+CDeterministicMNList CDeterministicMNList::ApplyDiff(const CDeterministicMNListDiff &diff, const std::map<uint256, CProviderTXRegisterMNCPtr> &proTxMap) const {
+    assert(diff.height == height + 1);
+
+    CDeterministicMNList result = Clone();
+    result.height = diff.height;
+
+    for (const auto &hash : diff.removedMns) {
+        result.mnMap->erase(hash);
+    }
+    for (const auto &p : diff.addedOrUpdatedMns) {
+        auto proTxIt = proTxMap.find(p.first);
+        assert(proTxIt != proTxMap.end());
+        result.AddOrUpdateMN(p.first, p.second, proTxIt->second);
+    }
+
+    return result;
+}
+
 
 CDeterministicMNManager::CDeterministicMNManager(size_t nCacheSize, bool fMemory, bool fWipe)
         : db(GetDataDir() / "masternodes", nCacheSize, fMemory, fWipe),
@@ -22,21 +157,39 @@ CDeterministicMNManager::CDeterministicMNManager(size_t nCacheSize, bool fMemory
 
 void CDeterministicMNManager::Init() {
     LOCK(cs);
-    if (!dbTransaction.Read(DB_LIST_STATE, state)) {
+    if (!dbTransaction.Read(DB_MANAGER_STATE, state)) {
         state = CDeterministicMNManagerState();
     }
-    RecreateListFromSnapshot(state.curHeight, mapCurMNs);
+
+    if (state.firstMNHeight != -1) {
+        RebuildLists(state.curHeight - LISTS_CACHE_SIZE, state.curHeight);
+    }
 }
 
 bool CDeterministicMNManager::ProcessBlock(const CBlock &block, const CBlockIndex *pindex, CValidationState &_state) {
     LOCK(cs);
 
-    CDeterministicMNBlockInfo blockInfo;
+    int64_t height = pindex->nHeight;
 
-    auto prevMNList = GetListAtHeight(pindex->nHeight - 1, true);
-    std::set<CService> prevMNAddrs;
-    for (const auto &p : prevMNList)
-        prevMNAddrs.emplace(p.proTx.addr);
+    CDeterministicMNList newList(height);
+    CDeterministicMNList oldList;
+    if (lists.count(state.curHeight)) {
+        oldList = lists[state.curHeight];
+        newList = oldList.Clone();
+        newList.SetHeight(height);
+        assert(oldList.GetHeight() + 1 == height);
+    } else {
+        assert(state.firstMNHeight == -1 || state.curHeight < state.firstMNHeight);
+    }
+
+    auto payee = oldList.GetMNPayee();
+
+    std::set<CService> addrs;
+    std::set<CKeyID> pubKeyIDs;
+    for (const auto &dmn : newList.all_range()) {
+        addrs.emplace(dmn->proTx->addr);
+        pubKeyIDs.emplace(dmn->proTx->keyIDMasternode);
+    }
 
     for (int i = 1; i < (int)block.vtx.size(); i++) {
         const CTransaction &tx = *block.vtx[i];
@@ -44,16 +197,12 @@ bool CDeterministicMNManager::ProcessBlock(const CBlock &block, const CBlockInde
         // check if any existing MN collateral is spent by this transaction
         for (const auto &in : tx.vin) {
             const uint256 &proTxHash = in.prevout.hash;
-            if (mapCurMNs.count(proTxHash)) {
-                CProviderTXRegisterMN proTx;
-                if (dbTransaction.Read(std::make_pair(DB_MN, proTxHash), proTx) && proTx.nCollateralIndex == in.prevout.n) {
-                    const CDeterministicMNState &dmnState = mapCurMNs[proTxHash];
-                    blockInfo.mnsRemovedInBlock.emplace(proTxHash, dmnState);
-                    mapCurMNs.erase(proTxHash);
+            auto dmn = newList.GetMN(proTxHash);
+            if (dmn && dmn->proTx->nCollateralIndex == in.prevout.n) {
+                newList.RemoveMN(proTxHash);
 
-                    LogPrintf("CDeterministicMNManager::%s -- MN %s removed from list because collateral was spent. height=%d, mapCurMNs.size=%d\n",
-                              __func__, proTxHash.ToString(), pindex->nHeight, mapCurMNs.size());
-                }
+                LogPrintf("CDeterministicMNManager::%s -- MN %s removed from list because collateral was spent. height=%d, mapCurMNs.size=%d\n",
+                          __func__, proTxHash.ToString(), height, newList.size());
             }
         }
 
@@ -63,59 +212,73 @@ bool CDeterministicMNManager::ProcessBlock(const CBlock &block, const CBlockInde
                 assert(false); // this should have been handled already
             }
 
-
-            if (blockInfo.mnsInBlock.count(tx.GetHash()) || prevMNAddrs.count(proTx.addr))
+            if (addrs.count(proTx.addr))
                 return _state.DoS(100, false, REJECT_CONFLICT, "bad-provider-dup-addr");
+            if (pubKeyIDs.count(proTx.keyIDMasternode))
+                return _state.DoS(100, false, REJECT_CONFLICT, "bad-provider-dup-key");
+            addrs.emplace(proTx.addr);
+            pubKeyIDs.emplace(proTx.keyIDMasternode);
 
-            blockInfo.mnsInBlock.emplace(tx.GetHash());
             dbTransaction.Write(std::make_pair(DB_MN, tx.GetHash()), proTx);
 
+            CDeterministicMN dmn;
             CDeterministicMNState dmnState;
-            dmnState.registeredHeight = pindex->nHeight;
-            mapCurMNs.emplace(tx.GetHash(), dmnState);
+            dmnState.registeredHeight = height;
+            dmn.proTxHash = tx.GetHash();
+            dmn.state = std::make_shared<CDeterministicMNState>(dmnState);
+            // Use the result from GetProTx instead of making a new shared_ptr from proTx so that we actually use the cached version
+            dmn.proTx = GetProTx(tx.GetHash());
+            newList.AddOrUpdateMN(dmn);
 
             if (state.firstMNHeight == -1) {
-                state.firstMNHeight = pindex->nHeight;
+                state.firstMNHeight = height;
             }
 
             LogPrintf("CDeterministicMNManager::%s -- MN %s added to MN list. height=%d, mapCurMNs.size=%d\n",
-                      __func__, tx.GetHash().ToString(), pindex->nHeight, mapCurMNs.size());
+                      __func__, tx.GetHash().ToString(), height, newList.size());
         }
     }
 
-    uint256 payeeProTxHash;
-    CScript payeeScript;
-    if (GetMNPayee(pindex->nHeight, payeeProTxHash, payeeScript)) {
-        assert(mapCurMNs.count(payeeProTxHash));
-        auto &dmnState = mapCurMNs[payeeProTxHash];
-        // we store the payee + previous lastPaidHeight so that we can restore the value in UndoBlock
-        blockInfo.payeeProTxHash = payeeProTxHash;
-        blockInfo.prevPayeeHeight = dmnState.lastPaidHeight;
-        dmnState.lastPaidHeight = pindex->nHeight;
+    // The payee for the current block was determined by the previous block's list but it might have disappeared in the
+    // current block. We still pay that MN one last time however.
+    if (payee && newList.HasMN(payee->proTxHash)) {
+        auto newState = std::make_shared<CDeterministicMNState>(*newList.GetMN(payee->proTxHash)->state);
+        newState->lastPaidHeight = height;
+        newList.AddOrUpdateMN(payee->proTxHash, newState, nullptr);
     }
 
-    if (!blockInfo.IsNull()) {
-        dbTransaction.Write(std::make_pair(DB_BLOCK_INFO, (int64_t) pindex->nHeight), blockInfo);
+    CDeterministicMNListDiff diff;
+    oldList.BuildDiff(newList, diff);
 
-        if (!blockInfo.mnsInBlock.empty() || !blockInfo.mnsRemovedInBlock.empty()) {
-            state.blocksWithMNsCount++;
-            if ((state.blocksWithMNsCount % SNAPSHOT_LIST_PERIOD) == 0) {
-                dbTransaction.Write(std::make_pair(DB_LIST_SNAPSHOT, (int64_t) pindex->nHeight), mapCurMNs);
-                LogPrintf("CDeterministicMNManager::%s -- Wrote snapshot. height=%d, mapCurMNs.size=%d\n",
-                          __func__, pindex->nHeight, mapCurMNs.size());
-            }
-        }
+    if (diff.HasChanges()) {
+        dbTransaction.Write(std::make_pair(DB_LIST_DIFF, (int64_t) height), diff);
+    }
+    if ((height % SNAPSHOT_LIST_PERIOD) == 0) {
+        dbTransaction.Write(std::make_pair(DB_LIST_SNAPSHOT, (int64_t) height), newList);
+        LogPrintf("CDeterministicMNManager::%s -- Wrote snapshot. height=%d, mapCurMNs.size=%d\n",
+                  __func__, pindex->nHeight, newList.size());
     }
 
-    state.curHeight = pindex->nHeight;
+    if (!diff.HasChanges()) {
+        // nothing has changed, so lets instead point to the previous one
+        std::swap(newList, oldList);
+        newList.SetHeight(height);
+    }
+    lists[height] = newList;
+
+    if (lists.size() > LISTS_CACHE_SIZE) {
+        lists.erase(height - LISTS_CACHE_SIZE);
+    }
+
+    state.curHeight = height;
     state.curBlockHash = block.GetHash();
 
     UpdateSpork15Value();
-    if (pindex->nHeight == state.spork15Value) {
-        LogPrintf("CDeterministicMNManager::%s -- spork15 is active now. height=%d\n", __func__, pindex->nHeight);
+    if (height == state.spork15Value) {
+        LogPrintf("CDeterministicMNManager::%s -- spork15 is active now. height=%d\n", __func__, height);
     }
 
-    dbTransaction.Write(DB_LIST_STATE, state);
+    dbTransaction.Write(DB_MANAGER_STATE, state);
 
     return true;
 }
@@ -123,69 +286,65 @@ bool CDeterministicMNManager::ProcessBlock(const CBlock &block, const CBlockInde
 bool CDeterministicMNManager::UndoBlock(const CBlock &block, const CBlockIndex *pindex) {
     LOCK(cs);
 
-    CDeterministicMNBlockInfo blockInfo;
+    int64_t height = pindex->nHeight;
 
-    assert(state.curHeight == pindex->nHeight && state.curBlockHash == block.GetHash());
+    assert(state.curHeight == -1 || (state.curHeight == height && state.curBlockHash == block.GetHash()));
 
-    if (dbTransaction.Read(std::make_pair(DB_BLOCK_INFO, (int64_t) pindex->nHeight), blockInfo)) {
-        if (!blockInfo.payeeProTxHash.IsNull()) {
-            assert(mapCurMNs.count(blockInfo.payeeProTxHash));
-            auto &dmnState = mapCurMNs[blockInfo.payeeProTxHash];
-            dmnState.lastPaidHeight = blockInfo.prevPayeeHeight;
-        }
+    dbTransaction.Erase(std::make_pair(DB_LIST_DIFF, height));
+    dbTransaction.Erase(std::make_pair(DB_LIST_SNAPSHOT, height));
 
-        for (const auto &p : blockInfo.mnsRemovedInBlock) {
-            const uint256 &proTxHash = p.first;
+    lists.erase(height);
 
-            CProviderTXRegisterMN proTx;
-            if (!dbTransaction.Read(std::make_pair(DB_MN, proTxHash), proTx))
-                assert(false);
-
-            assert(!mapCurMNs.count(proTxHash));
-            mapCurMNs.emplace(proTxHash, p.second); // restore old state
-
-            LogPrintf("CDeterministicMNManager::%s -- MN %s restored and re-added to MN list. height=%d, mapCurMNs.size=%d\n",
-                      __func__, proTxHash.ToString(), pindex->nHeight, mapCurMNs.size());
-        }
-
-        int foundCount = 0;
-        for (int i = (int) block.vtx.size() - 1; i >= 1; --i) {
-            const CTransaction &tx = *block.vtx[i];
-            if (tx.nType == TRANSACTION_PROVIDER_REGISTER) {
-                assert(blockInfo.mnsInBlock.count(tx.GetHash()));
-                assert(dbTransaction.Exists(std::make_pair(DB_MN, tx.GetHash())));
-                dbTransaction.Erase(std::make_pair(DB_MN, tx.GetHash()));
-                mapCurMNs.erase(tx.GetHash());
-                foundCount++;
-
-                LogPrintf("CDeterministicMNManager::%s -- MN %s removed from MN list due to undo. height=%d, mapCurMNs.size=%d\n",
-                          __func__, tx.GetHash().ToString(), pindex->nHeight, mapCurMNs.size());
-            }
-        }
-
-        assert(foundCount == blockInfo.mnsInBlock.size());
-
-        dbTransaction.Erase(std::make_pair(DB_BLOCK_INFO, (int64_t) pindex->nHeight));
-
-        if (!blockInfo.mnsInBlock.empty() || !blockInfo.mnsRemovedInBlock.empty()) {
-            if ((state.blocksWithMNsCount % SNAPSHOT_LIST_PERIOD) == 0) {
-                dbTransaction.Erase(std::make_pair(DB_LIST_SNAPSHOT, (int64_t) pindex->nHeight));
-                LogPrintf("CDeterministicMNManager::%s -- Erased snapshot. height=%d, mapCurMNs.size=%d\n",
-                          __func__, pindex->nHeight, mapCurMNs.size());
-            }
-            state.blocksWithMNsCount--;
-        }
+    if (height == state.firstMNHeight) {
+        state.firstMNHeight = -1;
+    }
+    if (height == state.spork15Value) {
+        LogPrintf("CDeterministicMNManager::%s -- spork15 is not active anymore. height=%d\n", __func__, height);
     }
 
-    if (pindex->nHeight == state.spork15Value) {
-        LogPrintf("CDeterministicMNManager::%s -- spork15 is not active anymore. height=%d\n", __func__, pindex->nHeight);
-    }
-
-    state.curHeight = pindex->nHeight - 1;
+    state.curHeight = height - 1;
     state.curBlockHash = pindex->pprev->GetBlockHash();
-    dbTransaction.Write(DB_LIST_STATE, state);
+    dbTransaction.Write(DB_MANAGER_STATE, state);
 
     return true;
+}
+
+void CDeterministicMNManager::RebuildLists(int64_t startHeight, int64_t endHeight) {
+    AssertLockHeld(cs);
+
+    CDeterministicMNList snapshot;
+
+    int64_t snapshotHeight = -1;
+    for (int64_t h = startHeight; h >= state.firstMNHeight && h < endHeight; --h) {
+        if (dbTransaction.Read(std::make_pair(DB_LIST_SNAPSHOT, (int64_t)h), snapshot)) {
+            for (const auto &p : snapshot.all_range()) {
+                snapshot.AddOrUpdateMN(p->proTxHash, nullptr, GetProTx(p->proTxHash));
+            }
+            snapshotHeight = h;
+            break;
+        }
+    }
+    if (snapshotHeight == -1) {
+        snapshotHeight = state.firstMNHeight - 1;
+        snapshot = CDeterministicMNList(snapshotHeight);
+    }
+
+    for (int64_t h = snapshotHeight; h <= endHeight; h++) {
+        if (h >= startHeight) {
+            lists[h] = CDeterministicMNList(h, snapshot.GetMap());;
+        }
+
+        if (h < endHeight) {
+            CDeterministicMNListDiff diff;
+            if (!dbTransaction.Read(std::make_pair(DB_LIST_DIFF, (int64_t) h + 1), diff))
+                continue;
+            std::map<uint256, CProviderTXRegisterMNCPtr> proTxMap;
+            for (const auto &p : diff.addedOrUpdatedMns) {
+                proTxMap[p.first] = GetProTx(p.first);
+            }
+            snapshot = snapshot.ApplyDiff(diff, proTxMap);
+        }
+    }
 }
 
 void CDeterministicMNManager::UpdateSpork15Value() {
@@ -197,146 +356,68 @@ void CDeterministicMNManager::UpdateSpork15Value() {
     }
 }
 
-struct CompareByLastPaid {
-    bool operator()(const CDeterministicMN &a, const CDeterministicMN &b) const {
-        if (a.state.lastPaidHeight == b.state.lastPaidHeight) {
-            if (a.state.registeredHeight == b.state.registeredHeight)
-                return a.proTxHash < b.proTxHash;
-            else
-                return a.state.registeredHeight < b.state.registeredHeight;
-        } else {
-            return a.state.lastPaidHeight < b.state.lastPaidHeight;
-        }
-    }
-};
-
-bool CDeterministicMNManager::GetMNPayee(int64_t height, uint256 &proTxHashRet, CScript &payeeScriptRet) {
+CProviderTXRegisterMNCPtr CDeterministicMNManager::GetProTx(const uint256 &proTxHash) {
     LOCK(cs);
-    auto mnList = GetListAtHeight(height - 1, false);
-    if (mnList.empty())
-        return false;
-    const auto &it = std::min_element(mnList.begin(), mnList.end(), CompareByLastPaid());
-    CProviderTXRegisterMN proTx;
-    if (!GetRegisterMN(it->proTxHash, proTx))
-        assert(false);
-    proTxHashRet = it->proTxHash;
-    payeeScriptRet = proTx.scriptPayout;
-    return true;
-}
 
-bool CDeterministicMNManager::GetMNLastPaidHeight(const uint256 &proTxHash, int64_t height, int64_t &lastPaidHeightRet) {
-    auto mnList = GetListAtHeight(height, false);
-    for (const auto &dmn : mnList) {
-        if (dmn.proTxHash == proTxHash) {
-            lastPaidHeightRet = dmn.state.lastPaidHeight;
-            return true;
+    CProviderTXRegisterMNCPtr proTx;
+
+    auto it = proTxCache.find(proTxHash);
+    if (it != proTxCache.end()) {
+        proTx = it->second.lock();
+        if (!proTx) {
+            proTxCache.erase(it);
         }
     }
-    return false;
-}
-
-bool CDeterministicMNManager::GetRegisterMN(const uint256 &proTxHash, CProviderTXRegisterMN &proTx) {
-    LOCK(cs);
-    return dbTransaction.Read(std::make_pair(DB_MN, proTxHash), proTx);
-}
-
-bool CDeterministicMNManager::RecreateListFromSnapshot(int64_t height, std::map<uint256, CDeterministicMNState> &snapshot) {
-    AssertLockHeld(cs);
-
-    snapshot.clear();
-
-    if (state.firstMNHeight < 0)
-        return false;
-
-    int64_t snapshotHeight = -1;
-    for (int64_t h = height; h >= state.firstMNHeight; --h) {
-        if (dbTransaction.Read(std::make_pair(DB_LIST_SNAPSHOT, (int64_t)h), snapshot)) {
-            snapshotHeight = h;
-            break;
+    if (!proTx) {
+        CProviderTXRegisterMN tmpProTx;
+        if (dbTransaction.Read(std::make_pair(DB_MN, proTxHash), tmpProTx)) {
+            proTx = std::make_shared<CProviderTXRegisterMN>(tmpProTx);
+            proTxCache.emplace(proTxHash, proTx);
         }
     }
-    if (snapshotHeight == -1)
-        snapshotHeight = state.firstMNHeight - 1;
 
-    for (int64_t h = snapshotHeight + 1; h <= height; h++) {
-        CDeterministicMNBlockInfo blockInfo;
-        if (!dbTransaction.Read(std::make_pair(DB_BLOCK_INFO, (int64_t) h), blockInfo))
-            continue;
-        for (const auto &p : blockInfo.mnsRemovedInBlock) {
-            snapshot.erase(p.first);
-        }
-        for (const auto &proTxHash : blockInfo.mnsInBlock) {
-            CDeterministicMNState dmnState;
-            dmnState.registeredHeight = h;
-            snapshot.emplace(proTxHash, dmnState);
-        }
-        if (!blockInfo.payeeProTxHash.IsNull()) {
-            assert(snapshot.count(blockInfo.payeeProTxHash));
-            snapshot[blockInfo.payeeProTxHash].lastPaidHeight = h;
-        }
-    }
-    return true;
+    return proTx;
 }
 
-std::vector<CDeterministicMN> CDeterministicMNManager::GetListAtHeight(int64_t height, bool detailed) {
+CDeterministicMNList CDeterministicMNManager::GetListAtHeight(int64_t height) {
     LOCK(cs);
 
     if (height < state.firstMNHeight || state.firstMNHeight < 0 || height > state.curHeight) {
-        return std::vector<CDeterministicMN>();
+        return CDeterministicMNList(height);
     }
 
-    std::map<uint256, CDeterministicMNState> *snapshot = NULL, localSnapshot;
-    if (height == state.curHeight) {
-        snapshot = &mapCurMNs;
-    } else {
-        RecreateListFromSnapshot(height, localSnapshot);
-        snapshot = &localSnapshot;
+    auto it = lists.find(height);
+    if (it == lists.end()) {
+        // this must be a very old entry, rebuild the list for it
+        RebuildLists(height, height);
+        it = lists.find(height);
     }
-    std::vector<CDeterministicMN> mnList;
-    for (const auto &p : *snapshot) {
-        CDeterministicMN dmn;
-        dmn.proTxHash = p.first;
-        dmn.state = p.second;
-        if (detailed && !dbTransaction.Read(std::make_pair(DB_MN, dmn.proTxHash), dmn.proTx))
-            assert(false);
-        mnList.emplace_back(dmn);
+    if (it == lists.end()) {
+        return CDeterministicMNList(height);
     }
-
-    return mnList;
+    return it->second;
 }
 
-std::vector<CDeterministicMN> CDeterministicMNManager::GetListAtChainTip(bool detailed) {
+CDeterministicMNList CDeterministicMNManager::GetListAtChainTip() {
     LOCK(cs);
-    return GetListAtHeight(state.curHeight, detailed);
+    return GetListAtHeight(state.curHeight);
 }
 
-bool CDeterministicMNManager::HasMNAtHeight(int height, const uint256 &proTxHash) {
+CDeterministicMNCPtr CDeterministicMNManager::GetMN(int64_t height, const uint256 &proTxHash) {
     LOCK(cs);
-    if (height == state.curHeight)
-        return HasMNAtChainTip(proTxHash);
-
-    auto mnList = GetListAtHeight(height, false);
-    for (const auto &dmn : mnList) {
-        if (dmn.proTxHash == proTxHash)
-            return true;
-    }
-    return false;
+    auto mnList = GetListAtHeight(height);
+    return mnList.GetMN(proTxHash);
 }
 
-bool CDeterministicMNManager::HasMNAtChainTip(const uint256 &proTxHash) {
+bool CDeterministicMNManager::HasValidMNAtHeight(int64_t height, const uint256 &proTxHash) {
     LOCK(cs);
-    return mapCurMNs.count(proTxHash) != 0;
+    auto mnList = GetListAtHeight(height);
+    return mnList.IsMNValid(proTxHash);
 }
 
-bool CDeterministicMNManager::GetMNByMasternodeKey(int64_t height, const CKeyID &keyIDMasternode, CDeterministicMN &dmnRet) {
-    auto mnList = GetListAtHeight(height, true);
-    for (const auto &dmn : mnList) {
-        if (dmn.proTx.keyIDMasternode == keyIDMasternode) {
-            dmnRet = dmn;
-            return true;
-        }
-    }
-    return false;
+bool CDeterministicMNManager::HasValidMNAtChainTip(const uint256 &proTxHash) {
+    LOCK(cs);
+    return HasValidMNAtHeight(state.curHeight, proTxHash);
 }
 
 bool CDeterministicMNManager::IsDeterministicMNsSporkActive(int64_t height) {
