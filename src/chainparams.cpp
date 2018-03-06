@@ -456,7 +456,7 @@ public:
         consensus.vDeployments[Consensus::DEPLOYMENT_DIP0003].bit = 3;
         consensus.vDeployments[Consensus::DEPLOYMENT_DIP0003].nStartTime = 1518649200; // Feb 15th, 2018
         consensus.vDeployments[Consensus::DEPLOYMENT_DIP0003].nTimeout = 1897340400; // Feb 15th, 2030
-        consensus.vDeployments[Consensus::DEPLOYMENT_DIP0003].nWindowSize = 400;
+        consensus.vDeployments[Consensus::DEPLOYMENT_DIP0003].nWindowSize = 200;
         consensus.vDeployments[Consensus::DEPLOYMENT_DIP0003].nThreshold = 50; // 50% of 100
 
         // The best chain should have at least this much work.
