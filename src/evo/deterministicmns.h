@@ -23,6 +23,7 @@ class CDeterministicMNState {
 public:
     int64_t registeredHeight{-1};
     int64_t lastPaidHeight{0};
+    int64_t maturityHeight{-1};
     int32_t PoSePenality{0};
     int64_t PoSeRevivedHeight{-1};
     int64_t PoSeBanHeight{-1};
@@ -38,6 +39,7 @@ public:
     inline void SerializationOp(Stream& s, Operation ser_action) {
         READWRITE(registeredHeight);
         READWRITE(lastPaidHeight);
+        READWRITE(maturityHeight);
         READWRITE(PoSePenality);
         READWRITE(PoSeRevivedHeight);
         READWRITE(PoSeBanHeight);
@@ -46,6 +48,7 @@ public:
     bool operator==(const CDeterministicMNState &rhs) const {
         return registeredHeight == rhs.registeredHeight &&
                lastPaidHeight == rhs.lastPaidHeight &&
+               maturityHeight == rhs.maturityHeight &&
                PoSePenality == rhs.PoSePenality &&
                PoSeRevivedHeight == rhs.PoSeRevivedHeight &&
                PoSeBanHeight == rhs.PoSeBanHeight;
@@ -134,6 +137,20 @@ public:
         return boost::adaptors::filter(all_range(), [&] (const CDeterministicMNCPtr &dmn) -> bool {
             return IsMNValid(dmn);
         });
+    }
+
+    size_t all_count() const {
+        return mnMap->size();
+    }
+
+    size_t valid_count() const {
+        size_t c = 0;
+        for (const auto &p : *mnMap) {
+            if (IsMNValid(p.second)) {
+                c++;
+            }
+        }
+        return c;
     }
 
 public:

@@ -47,14 +47,7 @@ bool CDeterministicMNList::IsMNValid(const CDeterministicMNCPtr &dmn) const {
 bool CDeterministicMNList::IsMNMature(const CDeterministicMNCPtr &dmn) const {
     assert(dmn);
     const CDeterministicMNState &state = *dmn->state;
-
-    int64_t checkHeight = state.registeredHeight;
-    if (state.PoSeRevivedHeight != -1) {
-        // MN was PoSe banned in the past and then revived with a ProUpTx
-        checkHeight = state.PoSeRevivedHeight;
-    }
-    int64_t confirmations = height - checkHeight + 1;
-    return confirmations >= Params().GetConsensus().nMasternodeMinimumConfirmations;
+    return height >= state.maturityHeight;
 }
 
 bool CDeterministicMNList::IsMNPoSeBanned(const CDeterministicMNCPtr &dmn) const {
@@ -221,9 +214,12 @@ bool CDeterministicMNManager::ProcessBlock(const CBlock &block, const CBlockInde
 
             dbTransaction.Write(std::make_pair(DB_MN, tx.GetHash()), proTx);
 
-            CDeterministicMN dmn;
             CDeterministicMNState dmnState;
             dmnState.registeredHeight = height;
+            // MN becomes mature after at least one full payment cycle
+            dmnState.maturityHeight = height + Params().GetConsensus().nMasternodeMinimumConfirmations + oldList.valid_count();
+
+            CDeterministicMN dmn;
             dmn.proTxHash = tx.GetHash();
             dmn.state = std::make_shared<CDeterministicMNState>(dmnState);
             // Use the result from GetProTx instead of making a new shared_ptr from proTx so that we actually use the cached version
