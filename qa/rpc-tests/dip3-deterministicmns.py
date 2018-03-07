@@ -13,7 +13,7 @@ import time
 from decimal import Decimal
 import re
 
-from test_framework.blocktools import create_block, create_coinbase
+from test_framework.blocktools import create_block, create_coinbase, get_masternode_payment
 from test_framework.mininode import CTransaction, ToHex, FromHex, CTxOut, COIN
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import *
@@ -70,7 +70,7 @@ class DIP3Test(BitcoinTestFramework):
         dip3_deployment = self.nodes[0].getblockchaininfo()['bip9_softforks']['dip0003']
         assert_equal(dip3_deployment['status'], 'defined')
 
-        self.test_fail_create_and_mine_protx(self.nodes[0])
+        self.test_fail_create_protx(self.nodes[0])
 
         mns = []
         mn_idx = 1
@@ -111,10 +111,10 @@ class DIP3Test(BitcoinTestFramework):
         print("testing rejection of ProTx before dip3 activation (in states defined, started and locked_in)")
         while self.nodes[0].getblockchaininfo()['bip9_softforks']['dip0003']['status'] == 'defined':
             self.nodes[0].generate(1)
-        self.test_fail_create_and_mine_protx(self.nodes[0])
+        self.test_fail_create_protx(self.nodes[0])
         while self.nodes[0].getblockchaininfo()['bip9_softforks']['dip0003']['status'] == 'started':
             self.nodes[0].generate(1)
-        self.test_fail_create_and_mine_protx(self.nodes[0])
+        self.test_fail_create_protx(self.nodes[0])
 
         # prepare mn which should still be accepted later when dip3 activates (because it is funded before final activation)
         print("creating collateral for mn-before-dip3")
@@ -125,10 +125,9 @@ class DIP3Test(BitcoinTestFramework):
             self.nodes[0].generate(1)
 
         print("testing rejection of ProTx right before dip3 activation")
-        self.nodes[0].invalidateblock(self.nodes[0].getbestblockhash())
-        self.test_fail_create_and_mine_protx(self.nodes[0])
+        self.test_fail_create_protx(self.nodes[0])
 
-        # We have hundrets of blocks to sync here, give it more time
+        # We have hundreds of blocks to sync here, give it more time
         print("syncing blocks for all nodes")
         sync_blocks(self.nodes, timeout=120)
 
@@ -303,9 +302,7 @@ class DIP3Test(BitcoinTestFramework):
         mn.key = node.masternode('genkey')
         mn.collateral_address = node.getnewaddress()
 
-        rawtx = node.createprovidertx('register', mn.collateral_address, '1000', '127.0.0.1:%d' % mn.p2p_port, '0', mn.key, mn.collateral_address)
-        rawtx = node.signrawtransaction(rawtx)['hex']
-        mn.collateral_txid = node.sendrawtransaction(rawtx)
+        mn.collateral_txid = node.protx('register', mn.collateral_address, '1000', '127.0.0.1:%d' % mn.p2p_port, '0', mn.key, mn.collateral_address)
         rawtx = node.getrawtransaction(mn.collateral_txid, 1)
 
         mn.collateral_vout = -1
@@ -314,8 +311,6 @@ class DIP3Test(BitcoinTestFramework):
                 mn.collateral_vout = txout['n']
                 break
         assert(mn.collateral_vout != -1)
-
-        lock = node.lockunspent(False, [{'txid': mn.collateral_txid, 'vout': mn.collateral_vout}])
 
         return mn
 
@@ -571,34 +566,17 @@ class DIP3Test(BitcoinTestFramework):
             time.sleep(0.5)
         raise AssertionError("wait_for_mnlists_same timed out")
 
-    def test_fail_create_and_mine_protx(self, node):
+    def test_fail_create_protx(self, node):
         # Try to create ProTx (should still fail)
         address = node.getnewaddress()
-        protx = node.createprovidertx('register', address, '1000', '127.0.0.1:10000', '0', node.masternode('genkey'), address)
-        protx = node.signrawtransaction(protx)['hex']
-        assert_raises_jsonrpc(None, "bad-tx-type", node.sendrawtransaction, protx)
-
-        mine_result = self.mine_protx(node, node.getnewaddress())
-        assert_equal(mine_result, 'bad-tx-type')
+        assert_raises_jsonrpc(None, "bad-tx-type", node.protx, 'register', address, '1000', '127.0.0.1:10000', '0', node.masternode('genkey'), address)
 
     def test_success_create_protx(self, node):
         address = node.getnewaddress()
-        node.createprovidertx('register', address, '1000', '127.0.0.1:10000', '0', node.masternode('genkey'), address)
-
-    def mine_protx(self, node, collateral_address):
-        height = node.getblockchaininfo()['blocks']
-        tip_hash = int(node.getblockhash(height), 16)
-
-        protx = node.createprovidertx('register', collateral_address, '1000', '127.0.0.1:10000', '0', node.masternode('genkey'), collateral_address)
-        protx = node.signrawtransaction(protx)['hex']
-
-        block = create_block(tip_hash, create_coinbase(height))
-        tx = FromHex(CTransaction(), protx)
-        block.vtx.append(tx)
-        block.hashMerkleRoot = block.calc_merkle_root()
-        block.solve()
-        result = node.submitblock(ToHex(block))
-        return result
+        txid = node.protx('register', address, '1000', '127.0.0.1:10000', '0', node.masternode('genkey'), address)
+        rawtx = node.getrawtransaction(txid, 1)
+        self.mine_double_spend(node, rawtx['vin'], address)
+        self.sync_all()
 
     def spend_input(self, txid, vout, amount, with_dummy_input_output=False):
         # with_dummy_input_output is useful if you want to test reorgs with double spends of the TX without touching the actual txid/vout
@@ -628,19 +606,41 @@ class DIP3Test(BitcoinTestFramework):
         height = bt['height']
         tip_hash = bt['previousblockhash']
 
-        coinbasevalue = float(bt['coinbasevalue']) / COIN
+        coinbasevalue = bt['coinbasevalue']
         if miner_address is None:
             miner_address = node.getnewaddress()
         if mn_payee is None:
             mn_payee = bt['masternode']['payee']
+        # we can't take the masternode payee amount from the template here as we might have additional fees in vtx
+
+        # calculate fees that the block template included (we'll have to remove it from the coinbase as we won't
+        # include the template's transactions
+        bt_fees = 0
+        for tx in bt['transactions']:
+            bt_fees += tx['fee']
+
+        new_fees = 0
+        for tx in vtx:
+            in_value = 0
+            out_value = 0
+            for txin in tx.vin:
+                txout = node.gettxout("%064x" % txin.prevout.hash, txin.prevout.n, False)
+                in_value += int(txout['value'] * COIN)
+            for txout in tx.vout:
+                out_value += txout.nValue
+            new_fees += in_value - out_value
+
+        # fix fees
+        coinbasevalue -= bt_fees
+        coinbasevalue += new_fees
+
         if mn_amount is None:
-            mn_amount = float(bt['masternode']['amount']) / COIN
+            mn_amount = get_masternode_payment(height, coinbasevalue)
+        miner_amount = coinbasevalue - mn_amount
 
-        miner_amount = coinbasevalue - float(mn_amount)
-
-        outputs = {miner_address: miner_amount}
+        outputs = {miner_address: str(Decimal(miner_amount) / COIN)}
         if mn_amount > 0:
-            outputs[mn_payee] = mn_amount
+            outputs[mn_payee] = str(Decimal(mn_amount) / COIN)
 
         coinbase = FromHex(CTransaction(), node.createrawtransaction([], outputs))
         coinbase.vin = create_coinbase(height).vin
@@ -653,15 +653,17 @@ class DIP3Test(BitcoinTestFramework):
         result = node.submitblock(ToHex(block))
         if expected_error is not None and result != expected_error:
             raise AssertionError('mining the block should have failed with error %s, but submitblock returned %s' % (expected_error, result))
+        elif expected_error is None and result is not None:
+            raise AssertionError('submitblock returned %s' % (result))
 
     def mine_double_spend(self, node, txins, target_address):
         amount = Decimal(0)
         for txin in txins:
             txout = node.gettxout(txin['txid'], txin['vout'], False)
             amount += txout['value']
-        amount -= Decimal(0.001) # fee
+        amount -= Decimal("0.001") # fee
 
-        rawtx = node.createrawtransaction(txins, {target_address: float(amount)})
+        rawtx = node.createrawtransaction(txins, {target_address: amount})
         rawtx = node.signrawtransaction(rawtx)['hex']
         tx = FromHex(CTransaction(), rawtx)
 
