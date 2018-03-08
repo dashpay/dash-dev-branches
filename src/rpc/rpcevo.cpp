@@ -642,13 +642,13 @@ void protx_list_help() {
             "\"true\" will result in a detailed list to be returned. If set to \"false\", only the hashes of the ProTx\n"
             "will be returned.\n"
             "\nAvailable types:\n"
-            "  wallet (detailed)           - List only ProTx which are found in your wallet. This will also include ProTx which\n"
-            "                                failed PoSe verfication\n"
-            "  active (height) (detailed)  - List only ProTx which are active/valid at the given chain height. If height is not\n"
-            "                                specified, it defaults to the current chain-tip\n"
-            "  unspent (height) (detaileD) - List all ProTx which are registered at the given chain height. If height is not\n"
-            "                                specified, it defaults to the current chain-tip. This will also include ProTx\n"
-            "                                which failed PoSe verification at that height\n"
+            "  wallet (detailed)              - List only ProTx which are found in your wallet. This will also include ProTx which\n"
+            "                                   failed PoSe verfication\n"
+            "  valid (height) (detailed)      - List only ProTx which are active/valid at the given chain height. If height is not\n"
+            "                                   specified, it defaults to the current chain-tip\n"
+            "  registered (height) (detaileD) - List all ProTx which are registered at the given chain height. If height is not\n"
+            "                                   specified, it defaults to the current chain-tip. This will also include ProTx\n"
+            "                                   which failed PoSe verification at that height\n"
     );
 }
 
@@ -700,7 +700,7 @@ UniValue protx_list(const JSONRPCRequest &request) {
 
             ret.push_back(BuildProTxListEntry(wtx->GetHash(), proTx, detailed));
         }
-    } else if (type == "active" || type == "unspent") {
+    } else if (type == "valid" || type == "registered") {
         if (request.params.size() > 4)
             protx_list_help();
 
@@ -714,9 +714,9 @@ UniValue protx_list(const JSONRPCRequest &request) {
         CDeterministicMNList mnList = deterministicMNManager->GetListAtHeight(height);
         CDeterministicMNList::range_type range;
 
-        if (type == "active") {
+        if (type == "valid") {
             range = mnList.valid_range();
-        } else if (type == "unspent") {
+        } else if (type == "registered") {
             range = mnList.all_range();
         }
         for (const auto &dmn : range) {
