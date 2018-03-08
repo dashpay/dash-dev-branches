@@ -81,17 +81,20 @@ CDeterministicMNCPtr CDeterministicMNList::GetMNByMasternodeKey(const CKeyID& ke
     return nullptr;
 }
 
-static bool CompareByLastPaid(const CDeterministicMNCPtr &_a, const CDeterministicMNCPtr &_b) {
-    const CDeterministicMNState& as = *_a->state;
-    const CDeterministicMNState& bs = *_b->state;
+static bool CompareByLastPaid(const CDeterministicMN &_a, const CDeterministicMN &_b) {
+    const CDeterministicMNState& as = *_a.state;
+    const CDeterministicMNState& bs = *_b.state;
     if (as.lastPaidHeight == bs.lastPaidHeight) {
         if (as.registeredHeight == bs.registeredHeight)
-            return _a->proTxHash < _b->proTxHash;
+            return _a.proTxHash < _b.proTxHash;
         else
             return as.registeredHeight < bs.registeredHeight;
     } else {
         return as.lastPaidHeight < bs.lastPaidHeight;
     }
+}
+static bool CompareByLastPaid(const CDeterministicMNCPtr &_a, const CDeterministicMNCPtr &_b) {
+    return CompareByLastPaid(*_a, *_b);
 }
 
 CDeterministicMNCPtr CDeterministicMNList::GetMNPayee() const {
@@ -105,6 +108,26 @@ CDeterministicMNCPtr CDeterministicMNList::GetMNPayee() const {
     }
 
     return best;
+}
+
+std::vector<CDeterministicMNCPtr> CDeterministicMNList::GetProjectedMNPayees(int count) const {
+    std::vector<CDeterministicMNCPtr> result;
+    result.reserve(count);
+
+    CDeterministicMNList tmpMNList = Clone();
+    for (int h = height; h < height + count; h++) {
+        tmpMNList.SetHeight(h);
+
+        CDeterministicMNCPtr payee = tmpMNList.GetMNPayee();
+        // push the original MN object instead of the one from the temporary list
+        result.push_back(GetMN(payee->proTxHash));
+
+        CDeterministicMNStatePtr newState = std::make_shared<CDeterministicMNState>(*payee->state);
+        newState->lastPaidHeight = h;
+        tmpMNList.AddOrUpdateMN(payee->proTxHash, newState, nullptr);
+    }
+
+    return result;
 }
 
 void CDeterministicMNList::BuildDiff(const CDeterministicMNList& to, CDeterministicMNListDiff& diffRet) const {

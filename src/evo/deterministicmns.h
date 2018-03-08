@@ -176,6 +176,14 @@ public:
     CDeterministicMNCPtr GetMNByMasternodeKey(const CKeyID& keyIDMasternode);
     CDeterministicMNCPtr GetMNPayee() const;
 
+    /**
+     * Calculates the projected MN payees for the next *count* blocks. The result is not guaranteed to be correct
+     * as PoSe banning might occur later
+     * @param count
+     * @return
+     */
+    std::vector<CDeterministicMNCPtr> GetProjectedMNPayees(int count) const;
+
     void BuildDiff(const CDeterministicMNList& to, CDeterministicMNListDiff& diffRet) const;
     CDeterministicMNList ApplyDiff(const CDeterministicMNListDiff& diff, const std::map<uint256, CProviderTXRegisterMNCPtr>& proTxMap) const;
 
