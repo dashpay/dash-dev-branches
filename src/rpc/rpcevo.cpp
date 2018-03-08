@@ -705,7 +705,7 @@ UniValue protx_list(const JSONRPCRequest &request) {
             protx_list_help();
 
         LOCK(cs_main);
-        int64_t height = request.params.size() > 2 ? ParseInt64V(request.params[2], "height") : chainActive.Height();
+        int height = request.params.size() > 2 ? ParseInt32V(request.params[2], "height") : chainActive.Height();
         if (height < 1 || height > chainActive.Height())
             throw JSONRPCError(RPC_INVALID_PARAMETER, "invalid height specified");
 

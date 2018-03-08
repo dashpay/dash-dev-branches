@@ -21,12 +21,12 @@ class CValidationState;
 
 class CDeterministicMNState {
 public:
-    int64_t registeredHeight{-1};
-    int64_t lastPaidHeight{0};
-    int64_t maturityHeight{-1};
-    int32_t PoSePenality{0};
-    int64_t PoSeRevivedHeight{-1};
-    int64_t PoSeBanHeight{-1};
+    int registeredHeight{-1};
+    int lastPaidHeight{0};
+    int maturityHeight{-1};
+    int PoSePenality{0};
+    int PoSeRevivedHeight{-1};
+    int PoSeBanHeight{-1};
 
 public:
     CDeterministicMNState() {}
@@ -78,12 +78,12 @@ public:
     typedef std::shared_ptr<MnMap> MnMapPtr;
 
 private:
-    int64_t height{-1};
+    int height{-1};
     MnMapPtr mnMap;
 
 public:
     CDeterministicMNList() : mnMap(std::make_shared<MnMap>()) {}
-    explicit CDeterministicMNList(int64_t _height, MnMapPtr _mnMap = std::make_shared<MnMap>()) :
+    explicit CDeterministicMNList(int _height, MnMapPtr _mnMap = std::make_shared<MnMap>()) :
             height(_height),
             mnMap(_mnMap)
     {}
@@ -154,10 +154,10 @@ public:
     }
 
 public:
-    int64_t GetHeight() const {
+    int GetHeight() const {
         return height;
     }
-    void SetHeight(int64_t _height) {
+    void SetHeight(int _height) {
         height = _height;
     }
     MnMapPtr GetMap() {
@@ -213,7 +213,7 @@ private:
 
 class CDeterministicMNListDiff {
 public:
-    int64_t height;
+    int height;
     std::map<uint256, CDeterministicMNStateCPtr> addedOrUpdatedMns;
     std::set<uint256> removedMns;
 
@@ -235,8 +235,8 @@ public:
 
 class CDeterministicMNManagerState {
 public:
-    int64_t firstMNHeight{-1};
-    int64_t curHeight{0};
+    int firstMNHeight{-1};
+    int curHeight{0};
     uint256 curBlockHash;
     int64_t spork15Value{SPORK_15_DETERMINISTIC_MNS_DEFAULT};
 
@@ -266,8 +266,8 @@ private:
 
     // stores a list per block.
     // Mutliple consecutive entries might internally point to the same list in case nothing changed in a block
-    std::map<int64_t, CDeterministicMNList> lists;
-    std::map<int64_t, CDeterministicMNList> listsBackup; // for rollback
+    std::map<int, CDeterministicMNList> lists;
+    std::map<int, CDeterministicMNList> listsBackup; // for rollback
 
     std::map<uint256, std::weak_ptr<const CProviderTXRegisterMN>> proTxCache;
 
@@ -297,18 +297,18 @@ public:
 
     CProviderTXRegisterMNCPtr GetProTx(const uint256 &proTxHash);
 
-    CDeterministicMNList GetListAtHeight(int64_t height);
+    CDeterministicMNList GetListAtHeight(int height);
     CDeterministicMNList GetListAtChainTip();
 
-    CDeterministicMNCPtr GetMN(int64_t height, const uint256 &proTxHash);
-    bool HasValidMNAtHeight(int64_t height, const uint256 &proTxHash);
+    CDeterministicMNCPtr GetMN(int height, const uint256 &proTxHash);
+    bool HasValidMNAtHeight(int height, const uint256 &proTxHash);
     bool HasValidMNAtChainTip(const uint256 &proTxHash);
 
-    bool IsDeterministicMNsSporkActive(int64_t height = -1);
+    bool IsDeterministicMNsSporkActive(int height = -1);
 
 private:
     void UpdateSpork15Value();
-    void RebuildLists(int64_t startHeight, int64_t endHeight);
+    void RebuildLists(int startHeight, int endHeight);
 };
 
 extern CDeterministicMNManager *deterministicMNManager;
