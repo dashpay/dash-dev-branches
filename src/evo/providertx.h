@@ -23,7 +23,8 @@ public:
     int32_t nProtocolVersion{-1};
     int32_t nCollateralIndex{-1};
     CService addr;
-    CKeyID keyIDMasternode;
+    CKeyID keyIDOperator;
+    CKeyID keyIDOwner;
     CScript scriptPayout;
     uint256 inputsHash; // replay protection
     std::vector<unsigned char> vchSig;
@@ -37,7 +38,8 @@ public:
         READWRITE(nProtocolVersion);
         READWRITE(nCollateralIndex);
         READWRITE(addr);
-        READWRITE(keyIDMasternode);
+        READWRITE(keyIDOperator);
+        READWRITE(keyIDOwner);
         READWRITE(*(CScriptBase*)(&scriptPayout));
         READWRITE(inputsHash);
         READWRITE(vchSig);

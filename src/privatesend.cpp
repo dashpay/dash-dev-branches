@@ -52,12 +52,12 @@ bool CDarksendQueue::Sign()
     if (sporkManager.IsSporkActive(SPORK_6_NEW_SIGS)) {
         uint256 hash = GetSignatureHash();
 
-        if (!CHashSigner::SignHash(hash, activeMasternode.keyMasternode, vchSig)) {
+        if (!CHashSigner::SignHash(hash, activeMasternode.keyOperator, vchSig)) {
             LogPrintf("CDarksendQueue::Sign -- SignHash() failed\n");
             return false;
         }
 
-        if (!CHashSigner::VerifyHash(hash, activeMasternode.pubKeyIDMasternode, vchSig, strError)) {
+        if (!CHashSigner::VerifyHash(hash, activeMasternode.keyIDOperator, vchSig, strError)) {
             LogPrintf("CDarksendQueue::Sign -- VerifyHash() failed, error: %s\n", strError);
             return false;
         }
@@ -67,12 +67,12 @@ bool CDarksendQueue::Sign()
                         boost::lexical_cast<std::string>(nTime) +
                         boost::lexical_cast<std::string>(fReady);
 
-        if(!CMessageSigner::SignMessage(strMessage, vchSig, activeMasternode.keyMasternode)) {
+        if(!CMessageSigner::SignMessage(strMessage, vchSig, activeMasternode.keyOperator)) {
             LogPrintf("CDarksendQueue::Sign -- SignMessage() failed, %s\n", ToString());
             return false;
         }
 
-        if(!CMessageSigner::VerifyMessage(activeMasternode.pubKeyIDMasternode, vchSig, strMessage, strError)) {
+        if(!CMessageSigner::VerifyMessage(activeMasternode.keyIDOperator, vchSig, strMessage, strError)) {
             LogPrintf("CDarksendQueue::Sign -- VerifyMessage() failed, error: %s\n", strError);
             return false;
         }
@@ -81,14 +81,14 @@ bool CDarksendQueue::Sign()
     return true;
 }
 
-bool CDarksendQueue::CheckSignature(const CKeyID& pubKeyIDMasternode) const
+bool CDarksendQueue::CheckSignature(const CKeyID& keyIDOperator) const
 {
     std::string strError = "";
 
     if (sporkManager.IsSporkActive(SPORK_6_NEW_SIGS)) {
         uint256 hash = GetSignatureHash();
 
-        if (!CHashSigner::VerifyHash(hash, pubKeyIDMasternode, vchSig, strError)) {
+        if (!CHashSigner::VerifyHash(hash, keyIDOperator, vchSig, strError)) {
             // we don't care about queues with old signature format
             LogPrintf("CDarksendQueue::CheckSignature -- VerifyHash() failed, error: %s\n", strError);
             return false;
@@ -99,7 +99,7 @@ bool CDarksendQueue::CheckSignature(const CKeyID& pubKeyIDMasternode) const
                         boost::lexical_cast<std::string>(nTime) +
                         boost::lexical_cast<std::string>(fReady);
 
-        if(!CMessageSigner::VerifyMessage(pubKeyIDMasternode, vchSig, strMessage, strError)) {
+        if(!CMessageSigner::VerifyMessage(keyIDOperator, vchSig, strMessage, strError)) {
             LogPrintf("CDarksendQueue::CheckSignature -- Got bad Masternode queue signature: %s; error: %s\n", ToString(), strError);
             return false;
         }
@@ -132,24 +132,24 @@ bool CDarksendBroadcastTx::Sign()
     if (sporkManager.IsSporkActive(SPORK_6_NEW_SIGS)) {
         uint256 hash = GetSignatureHash();
 
-        if (!CHashSigner::SignHash(hash, activeMasternode.keyMasternode, vchSig)) {
+        if (!CHashSigner::SignHash(hash, activeMasternode.keyOperator, vchSig)) {
             LogPrintf("CDarksendBroadcastTx::Sign -- SignHash() failed\n");
             return false;
         }
 
-        if (!CHashSigner::VerifyHash(hash, activeMasternode.pubKeyIDMasternode, vchSig, strError)) {
+        if (!CHashSigner::VerifyHash(hash, activeMasternode.keyIDOperator, vchSig, strError)) {
             LogPrintf("CDarksendBroadcastTx::Sign -- VerifyHash() failed, error: %s\n", strError);
             return false;
         }
     } else {
         std::string strMessage = tx->GetHash().ToString() + boost::lexical_cast<std::string>(sigTime);
 
-        if(!CMessageSigner::SignMessage(strMessage, vchSig, activeMasternode.keyMasternode)) {
+        if(!CMessageSigner::SignMessage(strMessage, vchSig, activeMasternode.keyOperator)) {
             LogPrintf("CDarksendBroadcastTx::Sign -- SignMessage() failed\n");
             return false;
         }
 
-        if(!CMessageSigner::VerifyMessage(activeMasternode.pubKeyIDMasternode, vchSig, strMessage, strError)) {
+        if(!CMessageSigner::VerifyMessage(activeMasternode.keyIDOperator, vchSig, strMessage, strError)) {
             LogPrintf("CDarksendBroadcastTx::Sign -- VerifyMessage() failed, error: %s\n", strError);
             return false;
         }
@@ -158,14 +158,14 @@ bool CDarksendBroadcastTx::Sign()
     return true;
 }
 
-bool CDarksendBroadcastTx::CheckSignature(const CKeyID& pubKeyIDMasternode) const
+bool CDarksendBroadcastTx::CheckSignature(const CKeyID& keyIDOperator) const
 {
     std::string strError = "";
 
     if (sporkManager.IsSporkActive(SPORK_6_NEW_SIGS)) {
         uint256 hash = GetSignatureHash();
 
-        if (!CHashSigner::VerifyHash(hash, pubKeyIDMasternode, vchSig, strError)) {
+        if (!CHashSigner::VerifyHash(hash, keyIDOperator, vchSig, strError)) {
             // we don't care about dstxes with old signature format
             LogPrintf("CDarksendBroadcastTx::CheckSignature -- VerifyHash() failed, error: %s\n", strError);
             return false;
@@ -173,7 +173,7 @@ bool CDarksendBroadcastTx::CheckSignature(const CKeyID& pubKeyIDMasternode) cons
     } else {
         std::string strMessage = tx->GetHash().ToString() + boost::lexical_cast<std::string>(sigTime);
 
-        if(!CMessageSigner::VerifyMessage(pubKeyIDMasternode, vchSig, strMessage, strError)) {
+        if(!CMessageSigner::VerifyMessage(keyIDOperator, vchSig, strMessage, strError)) {
             LogPrintf("CDarksendBroadcastTx::CheckSignature -- Got bad dstx signature, error: %s\n", strError);
             return false;
         }

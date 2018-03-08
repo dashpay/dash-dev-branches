@@ -37,8 +37,10 @@ bool CheckProviderTxRegister(const CTransaction& tx, const CBlockIndex* pindex, 
         return state.DoS(10, false, REJECT_INVALID, "bad-provider-addr");
     if (Params().NetworkIDString() != CBaseChainParams::REGTEST && !ptx.addr.IsRoutable())
         return state.DoS(10, false, REJECT_INVALID, "bad-provider-addr");
-    if (ptx.keyIDMasternode.IsNull())
-        return state.DoS(10, false, REJECT_INVALID, "bad-provider-mnkey");
+    if (ptx.keyIDOperator.IsNull())
+        return state.DoS(10, false, REJECT_INVALID, "bad-provider-key-operator");
+    if (ptx.keyIDOwner.IsNull())
+        return state.DoS(10, false, REJECT_INVALID, "bad-provider-key-owner");
     // we may support P2SH later, but restrict it for now (while in transitioning phase from old MN list to deterministic list)
     if (!ptx.scriptPayout.IsPayToPublicKeyHash())
         return state.DoS(10, false, REJECT_INVALID, "bad-provider-payee");
@@ -54,11 +56,19 @@ bool CheckProviderTxRegister(const CTransaction& tx, const CBlockIndex* pindex, 
 
     if (pindex) {
         auto mnList = deterministicMNManager->GetListAtHeight(pindex->nHeight);
+        std::set<CKeyID> keyIDs;
         for (const auto& dmn : mnList.all_range()) {
             if (dmn->proTx->addr == ptx.addr)
                 return state.DoS(10, false, REJECT_DUPLICATE, "bad-provider-dup-addr");
-            if (dmn->proTx->keyIDMasternode == ptx.keyIDMasternode)
-                return state.DoS(10, false, REJECT_DUPLICATE, "bad-provider-dup-key");
+            keyIDs.emplace(dmn->proTx->keyIDOperator);
+            keyIDs.emplace(dmn->proTx->keyIDOwner);
+        }
+        if (keyIDs.count(ptx.keyIDOperator) || keyIDs.count(ptx.keyIDOwner)) {
+            return state.DoS(10, false, REJECT_DUPLICATE, "bad-provider-dup-key");
+        }
+
+        if (ptx.keyIDOperator != ptx.keyIDOwner && !deterministicMNManager->IsDeterministicMNsSporkActive(pindex->nHeight)) {
+            return state.DoS(10, false, REJECT_INVALID, "bad-provider-owner-key-not-same");
         }
     }
 
@@ -66,7 +76,7 @@ bool CheckProviderTxRegister(const CTransaction& tx, const CBlockIndex* pindex, 
     tmpPtx.vchSig.clear();
 
     std::string strError;
-    if (!CHashSigner::VerifyHash(::SerializeHash(tmpPtx), ptx.keyIDMasternode, ptx.vchSig, strError))
+    if (!CHashSigner::VerifyHash(::SerializeHash(tmpPtx), ptx.keyIDOwner, ptx.vchSig, strError))
         return state.DoS(100, false, REJECT_INVALID, "bad-provider-sig", false, strError);
 
     return true;
@@ -79,8 +89,8 @@ std::string CProviderTXRegisterMN::ToString() const {
         payee = CBitcoinAddress(dest).ToString();
     }
 
-    return strprintf("CProviderTXRegisterMN(nVersion=%d, nProtocolVersion=%d, nCollateralIndex=%d, addr=%s, keyIDMasternode=%s, scriptPayout=%s)",
-        nVersion, nProtocolVersion, nCollateralIndex, addr.ToString(), keyIDMasternode.ToString(), payee);
+    return strprintf("CProviderTXRegisterMN(nVersion=%d, nProtocolVersion=%d, nCollateralIndex=%d, addr=%s, keyIDOperator=%s, keyIDOwner=%s, scriptPayout=%s)",
+        nVersion, nProtocolVersion, nCollateralIndex, addr.ToString(), keyIDOperator.ToString(), keyIDOwner.ToString(), payee);
 }
 
 void CProviderTXRegisterMN::ToJson(UniValue& obj) const {
@@ -90,7 +100,8 @@ void CProviderTXRegisterMN::ToJson(UniValue& obj) const {
     obj.push_back(Pair("protocolVersion", nProtocolVersion));
     obj.push_back(Pair("collateralIndex", nCollateralIndex));
     obj.push_back(Pair("service", addr.ToString(false)));
-    obj.push_back(Pair("keyIDMasternode", keyIDMasternode.ToString()));
+    obj.push_back(Pair("keyIDOperator", keyIDOperator.ToString()));
+    obj.push_back(Pair("keyIDOwner", keyIDOwner.ToString()));
 
     UniValue payoutObj(UniValue::VOBJ);
     payoutObj.push_back(Pair("scriptHex", HexStr(scriptPayout)));

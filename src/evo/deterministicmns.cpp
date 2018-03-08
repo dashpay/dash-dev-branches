@@ -72,9 +72,9 @@ CDeterministicMNCPtr CDeterministicMNList::GetValidMN(const uint256& proTxHash) 
     return dmn;
 }
 
-CDeterministicMNCPtr CDeterministicMNList::GetMNByMasternodeKey(const CKeyID& keyIDMasternode) {
+CDeterministicMNCPtr CDeterministicMNList::GetMNByOperatorKey(const CKeyID& keyID) {
     for (const auto& p : *mnMap) {
-        if (p.second->proTx->keyIDMasternode == keyIDMasternode) {
+        if (p.second->proTx->keyIDOperator == keyID) {
             return p.second;
         }
     }
@@ -204,7 +204,8 @@ bool CDeterministicMNManager::ProcessBlock(const CBlock& block, const CBlockInde
     std::set<CKeyID> pubKeyIDs;
     for (const auto& dmn : newList.all_range()) {
         addrs.emplace(dmn->proTx->addr);
-        pubKeyIDs.emplace(dmn->proTx->keyIDMasternode);
+        pubKeyIDs.emplace(dmn->proTx->keyIDOperator);
+        pubKeyIDs.emplace(dmn->proTx->keyIDOwner);
     }
 
     for (int i = 1; i < (int)block.vtx.size(); i++) {
@@ -230,10 +231,11 @@ bool CDeterministicMNManager::ProcessBlock(const CBlock& block, const CBlockInde
 
             if (addrs.count(proTx.addr))
                 return _state.DoS(100, false, REJECT_CONFLICT, "bad-provider-dup-addr");
-            if (pubKeyIDs.count(proTx.keyIDMasternode))
+            if (pubKeyIDs.count(proTx.keyIDOperator) || pubKeyIDs.count(proTx.keyIDOwner))
                 return _state.DoS(100, false, REJECT_CONFLICT, "bad-provider-dup-key");
             addrs.emplace(proTx.addr);
-            pubKeyIDs.emplace(proTx.keyIDMasternode);
+            pubKeyIDs.emplace(proTx.keyIDOperator);
+            pubKeyIDs.emplace(proTx.keyIDOwner);
 
             dbTransaction.Write(std::make_pair(DB_MN, tx.GetHash()), proTx);
 

@@ -31,8 +31,8 @@ extern CActiveDeterministicMasternodeManager* activeMasternodeManager;
 class CActiveMasternodeInfo {
 public:
     // Keys for the active Masternode
-    CKeyID pubKeyIDMasternode;
-    CKey keyMasternode;
+    CKeyID keyIDOperator;
+    CKey keyOperator;
 
     // Initialized while registering Masternode
     COutPoint outpoint;

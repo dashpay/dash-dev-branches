@@ -173,7 +173,7 @@ public:
     }
     CDeterministicMNCPtr GetMN(const uint256& proTxHash) const;
     CDeterministicMNCPtr GetValidMN(const uint256& proTxHash) const;
-    CDeterministicMNCPtr GetMNByMasternodeKey(const CKeyID& keyIDMasternode);
+    CDeterministicMNCPtr GetMNByOperatorKey(const CKeyID& keyID);
     CDeterministicMNCPtr GetMNPayee() const;
 
     /**
