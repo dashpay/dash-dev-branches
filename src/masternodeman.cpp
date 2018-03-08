@@ -1881,8 +1881,11 @@ void CMasternodeMan::UpdatedBlockTip(const CBlockIndex *pindex)
     nCachedBlockHeight = pindex->nHeight;
     LogPrint("masternode", "CMasternodeMan::UpdatedBlockTip -- nCachedBlockHeight=%d\n", nCachedBlockHeight);
 
-    AddDeterministicMasternodes();
-    RemoveNonDeterministicMasternodes();
+    {
+        LOCK(cs);
+        AddDeterministicMasternodes();
+        RemoveNonDeterministicMasternodes();
+    }
 
     CheckSameAddr();
 
