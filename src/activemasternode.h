@@ -26,7 +26,7 @@ static const int ACTIVE_MASTERNODE_STARTED          = 4;
 
 extern CActiveMasternodeInfo activeMasternode;
 extern CActiveLegacyMasternodeManager legacyActiveMasternodeManager;
-extern CActiveDeterministicMasternodeManager *activeMasternodeManager;
+extern CActiveDeterministicMasternodeManager* activeMasternodeManager;
 
 class CActiveMasternodeInfo {
 public:
@@ -57,7 +57,7 @@ private:
     std::string strError;
 
 public:
-    virtual void UpdatedBlockTip(const CBlockIndex *pindexNew, const CBlockIndex *pindexFork, bool fInitialDownload);
+    virtual void UpdatedBlockTip(const CBlockIndex* pindexNew, const CBlockIndex* pindexFork, bool fInitialDownload);
 
     void Init();
 

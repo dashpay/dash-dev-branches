@@ -537,7 +537,7 @@ void protx_register_help() {
     );
 }
 
-UniValue protx_register(const JSONRPCRequest &request) {
+UniValue protx_register(const JSONRPCRequest& request) {
     if (request.fHelp || request.params.size() != 7)
         protx_register_help();
 
@@ -652,7 +652,7 @@ void protx_list_help() {
     );
 }
 
-UniValue BuildProTxListEntry(const uint256 &hash, const CProviderTXRegisterMN &proTx, bool detailed) {
+UniValue BuildProTxListEntry(const uint256& hash, const CProviderTXRegisterMN& proTx, bool detailed) {
     if (!detailed)
         return hash.ToString();
 
@@ -670,7 +670,7 @@ UniValue BuildProTxListEntry(const uint256 &hash, const CProviderTXRegisterMN &p
     return o;
 }
 
-UniValue protx_list(const JSONRPCRequest &request) {
+UniValue protx_list(const JSONRPCRequest& request) {
     if (request.fHelp)
         protx_list_help();
 
@@ -690,7 +690,7 @@ UniValue protx_list(const JSONRPCRequest &request) {
         std::vector<COutPoint> vOutpts;
         pwalletMain->ListProTxCoins(vOutpts);
 
-        for (const COutPoint &outpt : vOutpts) {
+        for (const COutPoint& outpt : vOutpts) {
             const CWalletTx *wtx = pwalletMain->GetWalletTx(outpt.hash);
             assert(wtx);
 
@@ -719,7 +719,7 @@ UniValue protx_list(const JSONRPCRequest &request) {
         } else if (type == "registered") {
             range = mnList.all_range();
         }
-        for (const auto &dmn : range) {
+        for (const auto& dmn : range) {
             ret.push_back(BuildProTxListEntry(dmn->proTxHash, *dmn->proTx, detailed));
         }
     } else {
@@ -729,7 +729,7 @@ UniValue protx_list(const JSONRPCRequest &request) {
     return ret;
 }
 
-UniValue protx(const JSONRPCRequest &request) {
+UniValue protx(const JSONRPCRequest& request) {
     if (request.params.empty()) {
         throw std::runtime_error(
                 "protx \"command\" ...\n"

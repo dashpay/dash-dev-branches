@@ -44,14 +44,14 @@ public:
     }
 
     std::string ToString() const;
-    void ToJson(UniValue &obj) const;
+    void ToJson(UniValue& obj) const;
 };
 
 typedef std::shared_ptr<CProviderTXRegisterMN> CProviderTXRegisterMNPtr;
 typedef std::shared_ptr<const CProviderTXRegisterMN> CProviderTXRegisterMNCPtr;
 
-bool CheckProviderTxRegister(const CTransaction &tx, const CBlockIndex *pindex, CValidationState &state);
-bool IsProTxCollateral(const CTransaction &tx, int n);
-int GetProTxCollateralIndex(const CTransaction &tx);
+bool CheckProviderTxRegister(const CTransaction& tx, const CBlockIndex* pindex, CValidationState& state);
+bool IsProTxCollateral(const CTransaction& tx, int n);
+int GetProTxCollateralIndex(const CTransaction& tx);
 
 #endif//DASH_PROVIDERTX_H

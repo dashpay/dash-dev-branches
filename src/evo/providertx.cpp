@@ -17,7 +17,7 @@
 #include "script/standard.h"
 #include "base58.h"
 
-bool CheckProviderTxRegister(const CTransaction &tx, const CBlockIndex *pindex, CValidationState &state) {
+bool CheckProviderTxRegister(const CTransaction& tx, const CBlockIndex* pindex, CValidationState& state) {
     AssertLockHeld(cs_main);
 
     CProviderTXRegisterMN ptx;
@@ -54,7 +54,7 @@ bool CheckProviderTxRegister(const CTransaction &tx, const CBlockIndex *pindex, 
 
     if (pindex) {
         auto mnList = deterministicMNManager->GetListAtHeight(pindex->nHeight);
-        for (const auto &dmn : mnList.all_range()) {
+        for (const auto& dmn : mnList.all_range()) {
             if (dmn->proTx->addr == ptx.addr)
                 return state.DoS(10, false, REJECT_DUPLICATE, "bad-provider-dup-addr");
             if (dmn->proTx->keyIDMasternode == ptx.keyIDMasternode)
@@ -83,7 +83,7 @@ std::string CProviderTXRegisterMN::ToString() const {
         nVersion, nProtocolVersion, nCollateralIndex, addr.ToString(), keyIDMasternode.ToString(), payee);
 }
 
-void CProviderTXRegisterMN::ToJson(UniValue &obj) const {
+void CProviderTXRegisterMN::ToJson(UniValue& obj) const {
     obj.clear();
     obj.setObject();
     obj.push_back(Pair("version", nVersion));
@@ -107,11 +107,11 @@ void CProviderTXRegisterMN::ToJson(UniValue &obj) const {
     obj.push_back(Pair("inputsHash", inputsHash.ToString()));
 }
 
-bool IsProTxCollateral(const CTransaction &tx, int n) {
+bool IsProTxCollateral(const CTransaction& tx, int n) {
     return GetProTxCollateralIndex(tx) == n;
 }
 
-int GetProTxCollateralIndex(const CTransaction &tx) {
+int GetProTxCollateralIndex(const CTransaction& tx) {
     if (tx.nVersion < 3 || tx.nType != TRANSACTION_PROVIDER_REGISTER)
         return -1;
     CProviderTXRegisterMN proTx;

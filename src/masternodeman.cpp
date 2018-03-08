@@ -379,7 +379,7 @@ void CMasternodeMan::AddDeterministicMasternodes()
     unsigned int oldMnCount = mapMasternodes.size();
 
     auto mnList = deterministicMNManager->GetListAtChainTip();
-    for (const auto &dmn : mnList.valid_range()) {
+    for (const auto& dmn : mnList.valid_range()) {
         // call Find() on each deterministic MN to force creation of CMasternode object
         Find(COutPoint(dmn->proTxHash, dmn->proTx->nCollateralIndex));
     }
@@ -398,7 +398,7 @@ void CMasternodeMan::RemoveNonDeterministicMasternodes()
 
     std::set<COutPoint> mnSet;
     auto mnList = deterministicMNManager->GetListAtChainTip();
-    for (const auto &dmn : mnList.valid_range()) {
+    for (const auto& dmn : mnList.valid_range()) {
         mnSet.insert(COutPoint(dmn->proTxHash, dmn->proTx->nCollateralIndex));
     }
     bool erased = false;
@@ -438,7 +438,7 @@ int CMasternodeMan::CountMasternodes(int nProtocolVersion)
 
     if (deterministicMNManager->IsDeterministicMNsSporkActive()) {
         auto mnList = deterministicMNManager->GetListAtChainTip();
-        for (const auto &dmn : mnList.valid_range()) {
+        for (const auto& dmn : mnList.valid_range()) {
             if (dmn->proTx->nProtocolVersion < nProtocolVersion) continue;
             nCount++;
         }
@@ -552,7 +552,7 @@ bool CMasternodeMan::Get(const COutPoint& outpoint, CMasternode& masternodeRet)
 {
     // Theses mutexes are recursive so double locking by the same thread is safe.
     LOCK(cs);
-    CMasternode *mn = Find(outpoint);
+    CMasternode* mn = Find(outpoint);
     if (!mn)
         return false;
     masternodeRet = *mn;
@@ -570,7 +570,7 @@ bool CMasternodeMan::GetMasternodeInfo(const uint256& proTxHash, masternode_info
 bool CMasternodeMan::GetMasternodeInfo(const COutPoint& outpoint, masternode_info_t& mnInfoRet)
 {
     LOCK(cs);
-    CMasternode *mn = Find(outpoint);
+    CMasternode* mn = Find(outpoint);
     if (!mn)
         return false;
     mnInfoRet = mn->GetInfo();

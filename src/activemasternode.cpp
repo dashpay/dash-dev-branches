@@ -16,7 +16,7 @@
 // Keep track of the active Masternode
 CActiveMasternodeInfo activeMasternode;
 CActiveLegacyMasternodeManager legacyActiveMasternodeManager;
-CActiveDeterministicMasternodeManager *activeMasternodeManager;
+CActiveDeterministicMasternodeManager* activeMasternodeManager;
 
 std::string CActiveDeterministicMasternodeManager::GetStateString() const
 {
@@ -100,7 +100,7 @@ void CActiveDeterministicMasternodeManager::Init() {
     state = MASTERNODE_READY;
 }
 
-void CActiveDeterministicMasternodeManager::UpdatedBlockTip(const CBlockIndex *pindexNew, const CBlockIndex *pindexFork, bool fInitialDownload) {
+void CActiveDeterministicMasternodeManager::UpdatedBlockTip(const CBlockIndex* pindexNew, const CBlockIndex* pindexFork, bool fInitialDownload) {
     LOCK(cs_main);
 
     if (!fMasternodeMode)

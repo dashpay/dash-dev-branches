@@ -45,7 +45,7 @@ public:
         READWRITE(PoSeBanHeight);
     }
 
-    bool operator==(const CDeterministicMNState &rhs) const {
+    bool operator==(const CDeterministicMNState& rhs) const {
         return registeredHeight == rhs.registeredHeight &&
                lastPaidHeight == rhs.lastPaidHeight &&
                maturityHeight == rhs.maturityHeight &&
@@ -54,7 +54,7 @@ public:
                PoSeBanHeight == rhs.PoSeBanHeight;
     }
 
-    bool operator!=(const CDeterministicMNState &rhs) const {
+    bool operator!=(const CDeterministicMNState& rhs) const {
         return !(rhs == *this);
     }
 };
@@ -98,7 +98,7 @@ public:
     void Serialize(Stream& s) const {
         s << height;
         s << (int32_t)mnMap->size();
-        for (const auto &p : *mnMap) {
+        for (const auto& p : *mnMap) {
             s << p.first;
             s << p.second->state;
         }
@@ -128,13 +128,13 @@ public:
     typedef boost::any_range<const CDeterministicMNCPtr&, boost::forward_traversal_tag> range_type;
 
     range_type all_range() const {
-        return boost::adaptors::transform(*mnMap, [] (const MnMap::value_type &p) -> const CDeterministicMNCPtr& {
+        return boost::adaptors::transform(*mnMap, [] (const MnMap::value_type& p) -> const CDeterministicMNCPtr& {
             return p.second;
         });
     }
 
     range_type valid_range() const {
-        return boost::adaptors::filter(all_range(), [&] (const CDeterministicMNCPtr &dmn) -> bool {
+        return boost::adaptors::filter(all_range(), [&] (const CDeterministicMNCPtr& dmn) -> bool {
             return IsMNValid(dmn);
         });
     }
@@ -145,7 +145,7 @@ public:
 
     size_t valid_count() const {
         size_t c = 0;
-        for (const auto &p : *mnMap) {
+        for (const auto& p : *mnMap) {
             if (IsMNValid(p.second)) {
                 c++;
             }
@@ -164,31 +164,31 @@ public:
         return mnMap;
     }
 
-    bool IsMNValid(const uint256 &proTxHash) const;
-    bool IsMNMature(const uint256 &proTxHash) const;
-    bool IsMNPoSeBanned(const uint256 &proTxHash) const;
+    bool IsMNValid(const uint256& proTxHash) const;
+    bool IsMNMature(const uint256& proTxHash) const;
+    bool IsMNPoSeBanned(const uint256& proTxHash) const;
 
-    bool HasMN(const uint256 &proTxHash) const {
+    bool HasMN(const uint256& proTxHash) const {
         return GetMN(proTxHash) != nullptr;
     }
-    CDeterministicMNCPtr GetMN(const uint256 &proTxHash) const;
-    CDeterministicMNCPtr GetValidMN(const uint256 &proTxHash) const;
-    CDeterministicMNCPtr GetMNByMasternodeKey(const CKeyID &keyIDMasternode);
+    CDeterministicMNCPtr GetMN(const uint256& proTxHash) const;
+    CDeterministicMNCPtr GetValidMN(const uint256& proTxHash) const;
+    CDeterministicMNCPtr GetMNByMasternodeKey(const CKeyID& keyIDMasternode);
     CDeterministicMNCPtr GetMNPayee() const;
 
-    void BuildDiff(const CDeterministicMNList &to, CDeterministicMNListDiff &diffRet) const;
-    CDeterministicMNList ApplyDiff(const CDeterministicMNListDiff &diff, const std::map<uint256, CProviderTXRegisterMNCPtr> &proTxMap) const;
+    void BuildDiff(const CDeterministicMNList& to, CDeterministicMNListDiff& diffRet) const;
+    CDeterministicMNList ApplyDiff(const CDeterministicMNListDiff& diff, const std::map<uint256, CProviderTXRegisterMNCPtr>& proTxMap) const;
 
-    void AddOrUpdateMN(const CDeterministicMN &dmn) {
+    void AddOrUpdateMN(const CDeterministicMN& dmn) {
         auto p = std::make_shared<CDeterministicMN>(dmn);
         auto i = mnMap->emplace(dmn.proTxHash, p);
         if (!i.second)
             i.first->second = p;
     }
-    void RemoveMN(const uint256 &proTxHash) {
+    void RemoveMN(const uint256& proTxHash) {
         mnMap->erase(proTxHash);
     }
-    void AddOrUpdateMN(const uint256 &proTxHash, const CDeterministicMNStateCPtr &state, const CProviderTXRegisterMNCPtr &proTx) {
+    void AddOrUpdateMN(const uint256& proTxHash, const CDeterministicMNStateCPtr& state, const CProviderTXRegisterMNCPtr& proTx) {
         auto dmnPtr = GetMN(proTxHash);
         CDeterministicMN dmn;
         if (dmnPtr) {
@@ -206,9 +206,9 @@ public:
     }
 
 private:
-    bool IsMNValid(const CDeterministicMNCPtr &dmn) const;
-    bool IsMNMature(const CDeterministicMNCPtr &dmn) const;
-    bool IsMNPoSeBanned(const CDeterministicMNCPtr &dmn) const;
+    bool IsMNValid(const CDeterministicMNCPtr& dmn) const;
+    bool IsMNMature(const CDeterministicMNCPtr& dmn) const;
+    bool IsMNPoSeBanned(const CDeterministicMNCPtr& dmn) const;
 };
 
 class CDeterministicMNListDiff {
@@ -292,17 +292,17 @@ public:
 
     void Init();
 
-    bool ProcessBlock(const CBlock &block, const CBlockIndex *pindex, CValidationState &state);
-    bool UndoBlock(const CBlock &block, const CBlockIndex *pindex);
+    bool ProcessBlock(const CBlock& block, const CBlockIndex* pindex, CValidationState& state);
+    bool UndoBlock(const CBlock& block, const CBlockIndex* pindex);
 
-    CProviderTXRegisterMNCPtr GetProTx(const uint256 &proTxHash);
+    CProviderTXRegisterMNCPtr GetProTx(const uint256& proTxHash);
 
     CDeterministicMNList GetListAtHeight(int height);
     CDeterministicMNList GetListAtChainTip();
 
-    CDeterministicMNCPtr GetMN(int height, const uint256 &proTxHash);
-    bool HasValidMNAtHeight(int height, const uint256 &proTxHash);
-    bool HasValidMNAtChainTip(const uint256 &proTxHash);
+    CDeterministicMNCPtr GetMN(int height, const uint256& proTxHash);
+    bool HasValidMNAtHeight(int height, const uint256& proTxHash);
+    bool HasValidMNAtChainTip(const uint256& proTxHash);
 
     bool IsDeterministicMNsSporkActive(int height = -1);
 
@@ -311,6 +311,6 @@ private:
     void RebuildLists(int startHeight, int endHeight);
 };
 
-extern CDeterministicMNManager *deterministicMNManager;
+extern CDeterministicMNManager* deterministicMNManager;
 
 #endif//DASH_DETERMINISTICMNS_H

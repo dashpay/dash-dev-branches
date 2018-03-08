@@ -13,16 +13,16 @@ class CBlock;
 class CBlockIndex;
 class CValidationState;
 
-bool CheckSpecialTx(const CTransaction& tx, const CBlockIndex *pindex, CValidationState &state);
-bool ProcessSpecialTxsInBlock(const CBlock &block, const CBlockIndex *pindex, CValidationState &state);
-bool UndoSpecialTxsInBlock(const CBlock &block, const CBlockIndex *pindex);
+bool CheckSpecialTx(const CTransaction& tx, const CBlockIndex* pindex, CValidationState& state);
+bool ProcessSpecialTxsInBlock(const CBlock& block, const CBlockIndex* pindex, CValidationState& state);
+bool UndoSpecialTxsInBlock(const CBlock& block, const CBlockIndex* pindex);
 
 template <typename T>
-inline bool GetTxPayload(const std::vector<unsigned char> &payload, T &obj) {
+inline bool GetTxPayload(const std::vector<unsigned char>& payload, T& obj) {
     CDataStream ds(payload, CLIENT_VERSION, SER_NETWORK);
     try {
         ds >> obj;
-    } catch (std::exception &e) {
+    } catch (std::exception& e) {
         return false;
     }
     if (!ds.empty())
@@ -30,14 +30,14 @@ inline bool GetTxPayload(const std::vector<unsigned char> &payload, T &obj) {
     return true;
 }
 template <typename T>
-inline bool GetTxPayload(const CMutableTransaction &tx, T &obj) {
+inline bool GetTxPayload(const CMutableTransaction& tx, T& obj) {
     return GetTxPayload(tx.extraPayload, obj);
 }
 template <typename T>
-inline bool GetTxPayload(const CTransaction &tx, T &obj) {
+inline bool GetTxPayload(const CTransaction& tx, T& obj) {
     return GetTxPayload(tx.extraPayload, obj);
 }
 
-uint256 CalcTxInputsHash(const CTransaction &tx);
+uint256 CalcTxInputsHash(const CTransaction& tx);
 
 #endif//DASH_SPECIALTX_H
