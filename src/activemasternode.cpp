@@ -79,8 +79,7 @@ void CActiveDeterministicMasternodeManager::Init() {
 
     mnListEntry = dmn;
 
-    LogPrintf("CActiveDeterministicMasternodeManager::Init -- proTxHash=%s\n", mnListEntry->proTxHash.ToString());
-    LogPrintf("CActiveDeterministicMasternodeManager::Init -- proTx=%s\n", mnListEntry->proTx->ToString());
+    LogPrintf("CActiveDeterministicMasternodeManager::Init -- proTxHash=%s, proTx=%s\n", mnListEntry->proTxHash.ToString(), mnListEntry->proTx->ToString());
 
     if (activeMasternode.service != mnListEntry->proTx->addr) {
         state = MASTERNODE_ERROR;
