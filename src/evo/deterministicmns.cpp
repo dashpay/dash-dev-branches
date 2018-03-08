@@ -355,8 +355,10 @@ void CDeterministicMNManager::RebuildLists(int startHeight, int endHeight) {
 
         if (h < endHeight) {
             CDeterministicMNListDiff diff;
-            if (!dbTransaction.Read(std::make_pair(DB_LIST_DIFF, h + 1), diff))
+            if (!dbTransaction.Read(std::make_pair(DB_LIST_DIFF, h + 1), diff)) {
+                snapshot.SetHeight(h + 1);
                 continue;
+            }
             std::map<uint256, CProviderTXRegisterMNCPtr> proTxMap;
             for (const auto& p : diff.addedOrUpdatedMns) {
                 proTxMap[p.first] = GetProTx(p.first);
