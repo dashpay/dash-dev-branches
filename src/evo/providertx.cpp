@@ -26,7 +26,7 @@ bool CheckProviderTxRegister(const CTransaction& tx, const CBlockIndex* pindex, 
 
     if (ptx.nVersion != CProviderTXRegisterMN::CURRENT_VERSION)
         return state.DoS(100, false, REJECT_INVALID, "bad-provider-version");
-    if (ptx.nProtocolVersion < MIN_EVO_PROTO_VERSION || ptx.nProtocolVersion > PROTOCOL_VERSION)
+    if (ptx.nProtocolVersion < MIN_EVO_PROTO_VERSION || ptx.nProtocolVersion > MAX_PROTX_PROTO_VERSION)
         return state.DoS(10, false, REJECT_INVALID, "bad-provider-proto-version");
 
     if (ptx.nCollateralIndex < 0 || ptx.nCollateralIndex >= tx.vout.size())
