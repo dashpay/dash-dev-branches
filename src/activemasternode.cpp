@@ -67,10 +67,10 @@ void CActiveDeterministicMasternodeManager::Init() {
     }
 
     if (!mnList.IsMNValid(dmn->proTxHash)) {
-        if (mnList.IsMNMature(dmn->proTxHash)) {
-            state = MASTERNODE_NOT_MATURE;
-        } else if (mnList.IsMNPoSeBanned(dmn->proTxHash)) {
+        if (mnList.IsMNPoSeBanned(dmn->proTxHash)) {
             state = MASTERNODE_POSE_BANNED;
+        } else if (!mnList.IsMNMature(dmn->proTxHash)) {
+            state = MASTERNODE_NOT_MATURE;
         } else {
             state = MASTERNODE_REMOVED;
         }
