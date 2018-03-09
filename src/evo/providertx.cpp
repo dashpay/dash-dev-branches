@@ -45,6 +45,16 @@ bool CheckProviderTxRegister(const CTransaction& tx, const CBlockIndex* pindex, 
     if (!ptx.scriptPayout.IsPayToPublicKeyHash())
         return state.DoS(10, false, REJECT_INVALID, "bad-provider-payee");
 
+    CTxDestination payoutDest;
+    if (!ExtractDestination(ptx.scriptPayout, payoutDest)) {
+        // should not happen as we checked script types before
+        return state.DoS(10, false, REJECT_INVALID, "bad-provider-payee");
+    }
+    // don't allow reuse of keys for different purposes
+    if (payoutDest == CTxDestination(ptx.keyIDOperator) || payoutDest == CTxDestination(ptx.keyIDOwner)) {
+        return state.DoS(10, false, REJECT_INVALID, "bad-provider-payee");
+    }
+
     // This is a temporary restriction that will be lifted later
     // It is required while we are transitioning from the old MN list to the deterministic list
     if (tx.vout[ptx.nCollateralIndex].scriptPubKey != ptx.scriptPayout)
