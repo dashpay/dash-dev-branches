@@ -24,6 +24,8 @@
 #include "wallet/wallet.h"
 #endif // ENABLE_WALLET
 
+bool EnsureWalletIsAvailable(bool avoidException);
+
 UniValue gobject(const JSONRPCRequest& request)
 {
     std::string strCommand;
@@ -125,6 +127,9 @@ UniValue gobject(const JSONRPCRequest& request)
     // PREPARE THE GOVERNANCE OBJECT BY CREATING A COLLATERAL TRANSACTION
     if(strCommand == "prepare")
     {
+        if (!EnsureWalletIsAvailable(request.fHelp))
+            return NullUniValue;
+
         if (request.params.size() != 5) {
             throw JSONRPCError(RPC_INVALID_PARAMETER, "Correct usage is 'gobject prepare <parent-hash> <revision> <time> <data-hex>'");
         }
@@ -157,17 +162,21 @@ UniValue gobject(const JSONRPCRequest& request)
             }
         }
 
-        if((govobj.GetObjectType() == GOVERNANCE_OBJECT_TRIGGER) ||
-           (govobj.GetObjectType() == GOVERNANCE_OBJECT_WATCHDOG)) {
-            throw JSONRPCError(RPC_INVALID_PARAMETER, "Trigger and watchdog objects need not be prepared (however only masternodes can create them)");
+        if(govobj.GetObjectType() == GOVERNANCE_OBJECT_TRIGGER) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "Trigger objects need not be prepared (however only masternodes can create them)");
         }
 
-        {
-            LOCK(cs_main);
-            std::string strError = "";
-            if(!govobj.IsValidLocally(strError, false))
-                throw JSONRPCError(RPC_INTERNAL_ERROR, "Governance object is not valid - " + govobj.GetHash().ToString() + " - " + strError);
+        if(govobj.GetObjectType() == GOVERNANCE_OBJECT_WATCHDOG) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "Watchdogs are deprecated");
         }
+
+        LOCK2(cs_main, pwalletMain->cs_wallet);
+
+        std::string strError = "";
+        if(!govobj.IsValidLocally(strError, false))
+            throw JSONRPCError(RPC_INTERNAL_ERROR, "Governance object is not valid - " + govobj.GetHash().ToString() + " - " + strError);
+
+        EnsureWalletIsUnlocked();
 
         CWalletTx wtx;
         if(!pwalletMain->GetBudgetSystemCollateralTX(wtx, govobj.GetHash(), govobj.GetMinCollateralFee(), false)) {
@@ -247,9 +256,12 @@ UniValue gobject(const JSONRPCRequest& request)
             }
         }
 
+        if(govobj.GetObjectType() == GOVERNANCE_OBJECT_WATCHDOG) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "Watchdogs are deprecated");
+        }
+
         // Attempt to sign triggers if we are a MN
-        if((govobj.GetObjectType() == GOVERNANCE_OBJECT_TRIGGER) ||
-           (govobj.GetObjectType() == GOVERNANCE_OBJECT_WATCHDOG)) {
+        if(govobj.GetObjectType() == GOVERNANCE_OBJECT_TRIGGER) {
             if(fMnFound) {
                 govobj.SetMasternodeOutpoint(activeMasternode.outpoint);
                 govobj.Sign(activeMasternode.keyMasternode, activeMasternode.pubKeyMasternode);
@@ -622,8 +634,8 @@ UniValue gobject(const JSONRPCRequest& request)
 
         std::string strType = "all";
         if (request.params.size() == 3) strType = request.params[2].get_str();
-        if (strType != "proposals" && strType != "triggers" && strType != "watchdogs" && strType != "all")
-            return "Invalid type, should be 'proposals', 'triggers', 'watchdogs' or 'all'";
+        if (strType != "proposals" && strType != "triggers" && strType != "all")
+            return "Invalid type, should be 'proposals', 'triggers' or 'all'";
 
         // GET STARTING TIME TO QUERY SYSTEM WITH
 
@@ -652,7 +664,6 @@ UniValue gobject(const JSONRPCRequest& request)
 
             if(strType == "proposals" && pGovObj->GetObjectType() != GOVERNANCE_OBJECT_PROPOSAL) continue;
             if(strType == "triggers" && pGovObj->GetObjectType() != GOVERNANCE_OBJECT_TRIGGER) continue;
-            if(strType == "watchdogs" && pGovObj->GetObjectType() != GOVERNANCE_OBJECT_WATCHDOG) continue;
 
             UniValue bObj(UniValue::VOBJ);
             bObj.push_back(Pair("DataHex",  pGovObj->GetDataAsHexString()));
@@ -915,7 +926,8 @@ UniValue getgovernanceinfo(const JSONRPCRequest& request)
             "\nResult:\n"
             "{\n"
             "  \"governanceminquorum\": xxxxx,           (numeric) the absolute minimum number of votes needed to trigger a governance action\n"
-            "  \"masternodewatchdogmaxseconds\": xxxxx,  (numeric) sentinel watchdog expiration time in seconds\n"
+            "  \"masternodewatchdogmaxseconds\": xxxxx,  (numeric) sentinel watchdog expiration time in seconds (DEPRECATED)\n"
+            "  \"sentinelpingmaxseconds\": xxxxx,        (numeric) sentinel ping expiration time in seconds\n"
             "  \"proposalfee\": xxx.xx,                  (numeric) the collateral transaction fee which must be paid to create a proposal in " + CURRENCY_UNIT + "\n"
             "  \"superblockcycle\": xxxxx,               (numeric) the number of blocks between superblocks\n"
             "  \"lastsuperblock\": xxxxx,                (numeric) the block number of the last superblock\n"
@@ -937,7 +949,8 @@ UniValue getgovernanceinfo(const JSONRPCRequest& request)
 
     UniValue obj(UniValue::VOBJ);
     obj.push_back(Pair("governanceminquorum", Params().GetConsensus().nGovernanceMinQuorum));
-    obj.push_back(Pair("masternodewatchdogmaxseconds", MASTERNODE_WATCHDOG_MAX_SECONDS));
+    obj.push_back(Pair("masternodewatchdogmaxseconds", MASTERNODE_SENTINEL_PING_MAX_SECONDS));
+    obj.push_back(Pair("sentinelpingmaxseconds", MASTERNODE_SENTINEL_PING_MAX_SECONDS));
     obj.push_back(Pair("proposalfee", ValueFromAmount(GOVERNANCE_PROPOSAL_FEE_TX)));
     obj.push_back(Pair("superblockcycle", Params().GetConsensus().nSuperblockCycle));
     obj.push_back(Pair("lastsuperblock", nLastSuperblock));
