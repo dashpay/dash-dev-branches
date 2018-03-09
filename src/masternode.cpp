@@ -46,8 +46,7 @@ CMasternode::CMasternode(const CMasternode& other) :
 
 CMasternode::CMasternode(const CMasternodeBroadcast& mnb) :
     masternode_info_t{ mnb.nActiveState, mnb.nProtocolVersion, mnb.sigTime,
-                       mnb.outpoint, mnb.addr, mnb.pubKeyCollateralAddress, mnb.pubKeyMasternode,
-                       mnb.sigTime /*nTimeLastWatchdogVote*/},
+                       mnb.outpoint, mnb.addr, mnb.pubKeyCollateralAddress, mnb.pubKeyMasternode},
     lastPing(mnb.lastPing),
     vchSig(mnb.vchSig),
     fAllowMixingTx(true)
@@ -131,6 +130,7 @@ CMasternode::CollateralStatus CMasternode::CheckCollateral(const COutPoint& outp
 
 void CMasternode::Check(bool fForce)
 {
+    AssertLockHeld(cs_main);
     LOCK(cs);
 
     if(ShutdownRequested()) return;
@@ -145,9 +145,6 @@ void CMasternode::Check(bool fForce)
 
     int nHeight = 0;
     if(!fUnitTest) {
-        TRY_LOCK(cs_main, lockMain);
-        if(!lockMain) return;
-
         Coin coin;
         if(!GetUTXOCoin(outpoint, coin)) {
             nActiveState = MASTERNODE_OUTPOINT_SPENT;
@@ -194,7 +191,7 @@ void CMasternode::Check(bool fForce)
 
     if(fWaitForPing && !fOurMasternode) {
         // ...but if it was already expired before the initial check - return right away
-        if(IsExpired() || IsWatchdogExpired() || IsNewStartRequired()) {
+        if(IsExpired() || IsSentinelPingExpired() || IsNewStartRequired()) {
             LogPrint("masternode", "CMasternode::Check -- Masternode %s is in %s state, waiting for ping\n", outpoint.ToStringShort(), GetStateString());
             return;
         }
@@ -211,20 +208,6 @@ void CMasternode::Check(bool fForce)
             return;
         }
 
-        bool fWatchdogActive = masternodeSync.IsSynced() && mnodeman.IsWatchdogActive();
-        bool fWatchdogExpired = (fWatchdogActive && ((GetAdjustedTime() - nTimeLastWatchdogVote) > MASTERNODE_WATCHDOG_MAX_SECONDS));
-
-        LogPrint("masternode", "CMasternode::Check -- outpoint=%s, nTimeLastWatchdogVote=%d, GetAdjustedTime()=%d, fWatchdogExpired=%d\n",
-                outpoint.ToStringShort(), nTimeLastWatchdogVote, GetAdjustedTime(), fWatchdogExpired);
-
-        if(fWatchdogExpired) {
-            nActiveState = MASTERNODE_WATCHDOG_EXPIRED;
-            if(nActiveStatePrev != nActiveState) {
-                LogPrint("masternode", "CMasternode::Check -- Masternode %s is in %s state now\n", outpoint.ToStringShort(), GetStateString());
-            }
-            return;
-        }
-
         if(!IsPingedWithin(MASTERNODE_EXPIRATION_SECONDS)) {
             nActiveState = MASTERNODE_EXPIRED;
             if(nActiveStatePrev != nActiveState) {
@@ -232,6 +215,21 @@ void CMasternode::Check(bool fForce)
             }
             return;
         }
+
+        bool fSentinelPingActive = masternodeSync.IsSynced() && mnodeman.IsSentinelPingActive();
+        bool fSentinelPingExpired = fSentinelPingActive && (!lastPing.fSentinelIsCurrent || !IsPingedWithin(MASTERNODE_SENTINEL_PING_MAX_SECONDS));
+
+        LogPrint("masternode", "CMasternode::Check -- outpoint=%s, GetAdjustedTime()=%d, fSentinelPingExpired=%d\n",
+                outpoint.ToStringShort(), GetAdjustedTime(), fSentinelPingExpired);
+
+        if(fSentinelPingExpired) {
+            nActiveState = MASTERNODE_SENTINEL_PING_EXPIRED;
+            if(nActiveStatePrev != nActiveState) {
+                LogPrint("masternode", "CMasternode::Check -- Masternode %s is in %s state now\n", outpoint.ToStringShort(), GetStateString());
+            }
+            return;
+        }
+
     }
 
     // Allow MNs to become ENABLED immediately in regtest/devnet
@@ -281,7 +279,7 @@ std::string CMasternode::StateToString(int nStateIn)
         case MASTERNODE_EXPIRED:                return "EXPIRED";
         case MASTERNODE_OUTPOINT_SPENT:         return "OUTPOINT_SPENT";
         case MASTERNODE_UPDATE_REQUIRED:        return "UPDATE_REQUIRED";
-        case MASTERNODE_WATCHDOG_EXPIRED:       return "WATCHDOG_EXPIRED";
+        case MASTERNODE_SENTINEL_PING_EXPIRED:  return "SENTINEL_PING_EXPIRED";
         case MASTERNODE_NEW_START_REQUIRED:     return "NEW_START_REQUIRED";
         case MASTERNODE_POSE_BAN:               return "POSE_BAN";
         default:                                return "UNKNOWN";
@@ -415,6 +413,8 @@ bool CMasternodeBroadcast::SimpleCheck(int& nDos)
 {
     nDos = 0;
 
+    AssertLockHeld(cs_main);
+
     // make sure addr is valid
     if(!IsValidNetAddr()) {
         LogPrintf("CMasternodeBroadcast::SimpleCheck -- Invalid addr, rejected: masternode=%s  addr=%s\n",
@@ -469,6 +469,8 @@ bool CMasternodeBroadcast::SimpleCheck(int& nDos)
 bool CMasternodeBroadcast::Update(CMasternode* pmn, int& nDos, CConnman& connman)
 {
     nDos = 0;
+
+    AssertLockHeld(cs_main);
 
     if(pmn->sigTime == sigTime && !fRecovery) {
         // mapSeenMasternodeBroadcast in CMasternodeMan::CheckMnbAndUpdateMasternodeList should filter legit duplicates
@@ -820,6 +822,8 @@ bool CMasternodePing::SimpleCheck(int& nDos)
 
 bool CMasternodePing::CheckAndUpdate(CMasternode* pmn, bool fFromNewBroadcast, int& nDos, CConnman& connman)
 {
+    AssertLockHeld(cs_main);
+
     // don't ban by default
     nDos = 0;
 
@@ -845,7 +849,6 @@ bool CMasternodePing::CheckAndUpdate(CMasternode* pmn, bool fFromNewBroadcast, i
     }
 
     {
-        LOCK(cs_main);
         BlockMap::iterator mi = mapBlockIndex.find(blockHash);
         if ((*mi).second && (*mi).second->nHeight < chainActive.Height() - 24) {
             LogPrintf("CMasternodePing::CheckAndUpdate -- Masternode ping is invalid, block hash is too old: masternode=%s  blockHash=%s\n", masternodeOutpoint.ToStringShort(), blockHash.ToString());
@@ -890,8 +893,8 @@ bool CMasternodePing::CheckAndUpdate(CMasternode* pmn, bool fFromNewBroadcast, i
 
     // force update, ignoring cache
     pmn->Check(true);
-    // relay ping for nodes in ENABLED/EXPIRED/WATCHDOG_EXPIRED state only, skip everyone else
-    if (!pmn->IsEnabled() && !pmn->IsExpired() && !pmn->IsWatchdogExpired()) return false;
+    // relay ping for nodes in ENABLED/EXPIRED/SENTINEL_PING_EXPIRED state only, skip everyone else
+    if (!pmn->IsEnabled() && !pmn->IsExpired() && !pmn->IsSentinelPingExpired()) return false;
 
     LogPrint("masternode", "CMasternodePing::CheckAndUpdate -- Masternode ping acceepted and relayed, masternode=%s\n", masternodeOutpoint.ToStringShort());
     Relay(connman);
@@ -927,12 +930,6 @@ void CMasternode::RemoveGovernanceObject(uint256 nGovernanceObjectHash)
         return;
     }
     mapGovernanceObjectsVotedOn.erase(it);
-}
-
-void CMasternode::UpdateWatchdogVoteTime(uint64_t nVoteTime)
-{
-    LOCK(cs);
-    nTimeLastWatchdogVote = (nVoteTime == 0) ? GetAdjustedTime() : nVoteTime;
 }
 
 /**

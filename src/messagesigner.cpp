@@ -35,7 +35,7 @@ bool CMessageSigner::VerifyMessage(const CPubKey &pubkey, const std::vector<unsi
     return VerifyMessage(pubkey.GetID(), vchSig, strMessage, strErrorRet);
 }
 
-bool CMessageSigner::VerifyMessage(const CKeyID &keyID, const std::vector<unsigned char>& vchSig, const std::string &strMessage, std::string& strErrorRet)
+bool CMessageSigner::VerifyMessage(const CKeyID& keyID, const std::vector<unsigned char>& vchSig, const std::string& strMessage, std::string& strErrorRet)
 {
     CHashWriter ss(SER_GETHASH, 0);
     ss << strMessageMagic;
@@ -54,7 +54,7 @@ bool CHashSigner::VerifyHash(const uint256& hash, const CPubKey &pubkey, const s
     return VerifyHash(hash, pubkey.GetID(), vchSig, strErrorRet);
 }
 
-bool CHashSigner::VerifyHash(const uint256& hash, const CKeyID &keyID, const std::vector<unsigned char>& vchSig, std::string& strErrorRet)
+bool CHashSigner::VerifyHash(const uint256& hash, const CKeyID& keyID, const std::vector<unsigned char>& vchSig, std::string& strErrorRet)
 {
     CPubKey pubkeyFromSig;
     if(!pubkeyFromSig.RecoverCompact(hash, vchSig)) {

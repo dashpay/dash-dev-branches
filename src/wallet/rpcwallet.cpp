@@ -456,7 +456,7 @@ UniValue instantsendtoaddress(const JSONRPCRequest& request)
             + HelpRequiringPassphrase() +
             "\nArguments:\n"
             "1. \"address\"     (string, required) The dash address to send to.\n"
-            "2. \"amount\"      (numeric, required) The amount in btc to send. eg 0.1\n"
+            "2. \"amount\"      (numeric, required) The amount in " + CURRENCY_UNIT + " to send. eg 0.1\n"
             "3. \"comment\"     (string, optional) A comment used to store what the transaction is for. \n"
             "                             This is not part of the transaction, just kept in your wallet.\n"
             "4. \"comment_to\"  (string, optional) A comment to store the name of the person or organization \n"
@@ -551,6 +551,45 @@ UniValue listaddressgroupings(const JSONRPCRequest& request)
         jsonGroupings.push_back(jsonGrouping);
     }
     return jsonGroupings;
+}
+
+UniValue listaddressbalances(const JSONRPCRequest& request)
+{
+    if (!EnsureWalletIsAvailable(request.fHelp))
+        return NullUniValue;
+
+    if (request.fHelp || request.params.size() > 1)
+        throw std::runtime_error(
+            "listaddressbalances ( minamount )\n"
+            "\nLists addresses of this wallet and their balances\n"
+            "\nArguments:\n"
+            "1. minamount               (numeric, optional, default=0) Minimum balance in " + CURRENCY_UNIT + " an address should have to be shown in the list\n"
+            "\nResult:\n"
+            "{\n"
+            "  \"address\": amount,       (string) The dash address and the amount in " + CURRENCY_UNIT + "\n"
+            "  ,...\n"
+            "}\n"
+            "\nExamples:\n"
+            + HelpExampleCli("listaddressbalances", "")
+            + HelpExampleCli("listaddressbalances", "10")
+            + HelpExampleRpc("listaddressbalances", "")
+            + HelpExampleRpc("listaddressbalances", "10")
+        );
+
+    LOCK2(cs_main, pwalletMain->cs_wallet);
+
+    // Whether to include addresses with zero balances
+    CAmount nMinAmount = 0;
+    if (request.params.size() > 0)
+        nMinAmount = request.params[0].get_int64() * COIN;
+
+    UniValue jsonBalances(UniValue::VOBJ);
+    std::map<CTxDestination, CAmount> balances = pwalletMain->GetAddressBalances();
+    for (auto& balance : balances)
+        if (balance.second >= nMinAmount)
+            jsonBalances.push_back(Pair(CBitcoinAddress(balance.first).ToString(), ValueFromAmount(balance.second)));
+
+    return jsonBalances;
 }
 
 UniValue signmessage(const JSONRPCRequest& request)
@@ -957,7 +996,7 @@ UniValue sendmany(const JSONRPCRequest& request)
             "3. minconf                 (numeric, optional, default=1) Only use the balance confirmed at least this many times.\n"
             "4. addlockconf             (bool, optional, default=false) Whether to add " + std::to_string(nInstantSendDepth) + " confirmations to transactions locked via InstantSend.\n"
             "5. \"comment\"               (string, optional) A comment\n"
-            "6. subtractfeefrom         (array, optional) A json array with addresses.\n"
+            "6. subtractfeefromamount   (array, optional) A json array with addresses.\n"
             "                           The fee will be equally deducted from the amount of each selected address.\n"
             "                           Those recipients will receive less dashs than you enter in their corresponding amount field.\n"
             "                           If no addresses are specified here, the sender pays the fee.\n"
@@ -1962,7 +2001,7 @@ UniValue walletpassphrase(const JSONRPCRequest& request)
             "\nArguments:\n"
             "1. \"passphrase\"        (string, required) The wallet passphrase\n"
             "2. timeout             (numeric, required) The time to keep the decryption key in seconds.\n"
-            "3. mixingonly          (boolean, optional, default=false) If is true sending functions are disabled."
+            "3. mixingonly          (boolean, optional, default=false) If is true sending functions are disabled.\n"
             "\nNote:\n"
             "Issuing the walletpassphrase command while the wallet is already unlocked will set a new unlock\n"
             "time that overrides the old one.\n"
@@ -2336,6 +2375,8 @@ UniValue getwalletinfo(const JSONRPCRequest& request)
             "{\n"
             "  \"walletversion\": xxxxx,     (numeric) the wallet version\n"
             "  \"balance\": xxxxxxx,         (numeric) the total confirmed balance of the wallet in " + CURRENCY_UNIT + "\n"
+            + (!fLiteMode ?
+            "  \"privatesend_balance\": xxxxxx, (numeric) the anonymized dash balance of the wallet in " + CURRENCY_UNIT + "\n" : "") +
             "  \"unconfirmed_balance\": xxx, (numeric) the total unconfirmed balance of the wallet in " + CURRENCY_UNIT + "\n"
             "  \"immature_balance\": xxxxxx, (numeric) the total immature balance of the wallet in " + CURRENCY_UNIT + "\n"
             "  \"txcount\": xxxxxxx,         (numeric) the total number of transactions in the wallet\n"
@@ -2368,6 +2409,8 @@ UniValue getwalletinfo(const JSONRPCRequest& request)
     UniValue obj(UniValue::VOBJ);
     obj.push_back(Pair("walletversion", pwalletMain->GetVersion()));
     obj.push_back(Pair("balance",       ValueFromAmount(pwalletMain->GetBalance())));
+    if(!fLiteMode)
+        obj.push_back(Pair("privatesend_balance",       ValueFromAmount(pwalletMain->GetAnonymizedBalance())));
     obj.push_back(Pair("unconfirmed_balance", ValueFromAmount(pwalletMain->GetUnconfirmedBalance())));
     obj.push_back(Pair("immature_balance",    ValueFromAmount(pwalletMain->GetImmatureBalance())));
     obj.push_back(Pair("txcount",       (int)pwalletMain->mapWallet.size()));
@@ -2402,7 +2445,11 @@ UniValue getwalletinfo(const JSONRPCRequest& request)
     return obj;
 }
 
-UniValue keepass(const JSONRPCRequest& request) {
+UniValue keepass(const JSONRPCRequest& request)
+{
+    if (!EnsureWalletIsAvailable(request.fHelp))
+        return NullUniValue;
+
     std::string strCommand;
 
     if (request.params.size() >= 1)
@@ -2449,7 +2496,6 @@ UniValue keepass(const JSONRPCRequest& request) {
     }
 
     return "Invalid command";
-
 }
 
 UniValue resendwallettransactions(const JSONRPCRequest& request)
@@ -2763,6 +2809,9 @@ UniValue fundrawtransaction(const JSONRPCRequest& request)
 
 UniValue setbip69enabled(const JSONRPCRequest& request)
 {
+    if (!EnsureWalletIsAvailable(request.fHelp))
+        return NullUniValue;
+
     if (request.fHelp || request.params.size() != 1)
         throw std::runtime_error(
             "setbip69enabled enable\n"
@@ -2822,6 +2871,7 @@ static const CRPCCommand commands[] =
     { "wallet",             "keypoolrefill",            &keypoolrefill,            true,   {"newsize"} },
     { "wallet",             "listaccounts",             &listaccounts,             false,  {"minconf","addlockconf","include_watchonly"} },
     { "wallet",             "listaddressgroupings",     &listaddressgroupings,     false,  {} },
+    { "wallet",             "listaddressbalances",      &listaddressbalances,      false,  {"minamount"} },
     { "wallet",             "listlockunspent",          &listlockunspent,          false,  {} },
     { "wallet",             "listreceivedbyaccount",    &listreceivedbyaccount,    false,  {"minconf","addlockconf","include_empty","include_watchonly"} },
     { "wallet",             "listreceivedbyaddress",    &listreceivedbyaddress,    false,  {"minconf","addlockconf","include_empty","include_watchonly"} },
