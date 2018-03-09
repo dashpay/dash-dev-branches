@@ -457,6 +457,43 @@ UniValue gobject(const JSONRPCRequest& request)
         std::vector<CMasternodeConfig::CMasternodeEntry> mnEntries;
         mnEntries = masternodeConfig.getEntries();
 
+#ifdef ENABLE_WALLET
+        // This is a hack to maintain code-level backwards compatibility with the masternode.conf based code below
+        // It allows voting on proposals when you have the MN owner key in your wallet
+        // We can remove this when we remove support for masternode.conf and only support wallet based masternode
+        // management
+        if (deterministicMNManager->IsDeterministicMNsSporkActive()) {
+            auto mnList = deterministicMNManager->GetListAtChainTip();
+            for (const auto &dmn : mnList.valid_range()) {
+                bool found = false;
+                for (const auto &mne : mnEntries) {
+                    uint256 nTxHash;
+                    nTxHash.SetHex(mne.getTxHash());
+
+                    int nOutputIndex = 0;
+                    if(!ParseInt32(mne.getOutputIndex(), &nOutputIndex)) {
+                        continue;
+                    }
+
+                    if (nTxHash == dmn->proTxHash && nOutputIndex == dmn->proTx->nCollateralIndex) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    continue;
+                }
+
+                CKey ownerKey;
+                if (pwalletMain->GetKey(dmn->proTx->keyIDOwner, ownerKey)) {
+                    CBitcoinSecret secret(ownerKey);
+                    CMasternodeConfig::CMasternodeEntry mne(dmn->proTxHash.ToString(), dmn->proTx->addr.ToStringIPPort(false), secret.ToString(), dmn->proTxHash.ToString(), itostr(dmn->proTx->nCollateralIndex));
+                    mnEntries.push_back(mne);
+                }
+            }
+        }
+#endif
+
         UniValue resultsObj(UniValue::VOBJ);
 
         for (const auto& mne : mnEntries) {
