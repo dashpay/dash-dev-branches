@@ -387,6 +387,9 @@ void CMasternodeMan::AddDeterministicMasternodes()
         // make sure we use the splitted keys from now on
         mn->keyIDOwner = dmn->proTx->keyIDOwner;
         mn->keyIDOperator = dmn->proTx->keyIDOperator;
+
+        // If it appeared in the valid list, it is enabled no matter what
+        mn->nActiveState = CMasternode::MASTERNODE_ENABLED;
     }
 
     if (oldMnCount != mapMasternodes.size()) {
