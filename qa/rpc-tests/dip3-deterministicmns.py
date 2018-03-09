@@ -284,7 +284,7 @@ class DIP3Test(BitcoinTestFramework):
         mn.is_protx = False
         mn.p2p_port = p2p_port(mn.idx)
 
-        mn.key = node.masternode('genkey')
+        mn.mnkey = node.masternode('genkey')
         mn.collateral_address = node.getnewaddress()
         mn.collateral_txid = node.sendtoaddress(mn.collateral_address, 1000)
         rawtx = node.getrawtransaction(mn.collateral_txid, 1)
@@ -308,10 +308,12 @@ class DIP3Test(BitcoinTestFramework):
         mn.p2p_port = p2p_port(mn.idx)
         mn.maturity_height = node.getblockchaininfo()['blocks'] + 2 + len(self.nodes[0].masternode('list'))
 
-        mn.key = node.masternode('genkey')
+        mn.ownerAddr = node.getnewaddress()
+        mn.operatorAddr = mn.ownerAddr
+        mn.mnkey = node.dumpprivkey(mn.operatorAddr)
         mn.collateral_address = node.getnewaddress()
 
-        mn.collateral_txid = node.protx('register', mn.collateral_address, '1000', '127.0.0.1:%d' % mn.p2p_port, '0', mn.key, mn.collateral_address)
+        mn.collateral_txid = node.protx('register', mn.collateral_address, '1000', '127.0.0.1:%d' % mn.p2p_port, '0', mn.ownerAddr, mn.operatorAddr, mn.collateral_address)
         rawtx = node.getrawtransaction(mn.collateral_txid, 1)
 
         mn.collateral_vout = -1
@@ -326,7 +328,7 @@ class DIP3Test(BitcoinTestFramework):
     def start_mn(self, mn):
         while len(self.nodes) <= mn.idx:
             self.nodes.append(None)
-        extra_args = ['-masternode=1', '-masternodeprivkey=%s' % mn.key]
+        extra_args = ['-masternode=1', '-masternodeprivkey=%s' % mn.mnkey]
         n = start_node(mn.idx, self.options.tmpdir, self.extra_args + extra_args, redirect_stderr=True)
         self.nodes[mn.idx] = n
         for i in range(0, self.num_nodes):
@@ -363,7 +365,7 @@ class DIP3Test(BitcoinTestFramework):
             time.sleep(0.1)
 
     def write_mnconf_line(self, mn, f):
-        conf_line = "%s %s:%d %s %s %d\n" % (mn.alias, '127.0.0.1', mn.p2p_port, mn.key, mn.collateral_txid, mn.collateral_vout)
+        conf_line = "%s %s:%d %s %s %d\n" % (mn.alias, '127.0.0.1', mn.p2p_port, mn.mnkey, mn.collateral_txid, mn.collateral_vout)
         f.write(conf_line)
 
     def write_mnconf(self, mns):
@@ -587,11 +589,13 @@ class DIP3Test(BitcoinTestFramework):
     def test_fail_create_protx(self, node):
         # Try to create ProTx (should still fail)
         address = node.getnewaddress()
-        assert_raises_jsonrpc(None, "bad-tx-type", node.protx, 'register', address, '1000', '127.0.0.1:10000', '0', node.masternode('genkey'), address)
+        key = node.getnewaddress()
+        assert_raises_jsonrpc(None, "bad-tx-type", node.protx, 'register', address, '1000', '127.0.0.1:10000', '0', key, key, address)
 
     def test_success_create_protx(self, node):
         address = node.getnewaddress()
-        txid = node.protx('register', address, '1000', '127.0.0.1:10000', '0', node.masternode('genkey'), address)
+        key = node.getnewaddress()
+        txid = node.protx('register', address, '1000', '127.0.0.1:10000', '0', key, key, address)
         rawtx = node.getrawtransaction(txid, 1)
         self.mine_double_spend(node, rawtx['vin'], address)
         self.sync_all()
