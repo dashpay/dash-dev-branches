@@ -592,7 +592,7 @@ UniValue protx_register(const JSONRPCRequest& request) {
     ptx.scriptPayout = GetScriptForDestination(payoutAddress.Get());
     ptx.vchSig.resize(65); // reserve so that fee calculation is correct
 
-    CDataStream ds(CLIENT_VERSION, SER_NETWORK);
+    CDataStream ds(SER_NETWORK, CLIENT_VERSION);
     ds << ptx;
     tx.extraPayload.assign(ds.begin(), ds.end());
 

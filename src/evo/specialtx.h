@@ -19,7 +19,7 @@ bool UndoSpecialTxsInBlock(const CBlock& block, const CBlockIndex* pindex);
 
 template <typename T>
 inline bool GetTxPayload(const std::vector<unsigned char>& payload, T& obj) {
-    CDataStream ds(payload, CLIENT_VERSION, SER_NETWORK);
+    CDataStream ds(payload, SER_NETWORK, CLIENT_VERSION);
     try {
         ds >> obj;
     } catch (std::exception& e) {
