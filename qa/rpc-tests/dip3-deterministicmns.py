@@ -307,7 +307,7 @@ class DIP3Test(BitcoinTestFramework):
         mn.alias = alias
         mn.is_protx = True
         mn.p2p_port = p2p_port(mn.idx)
-        mn.maturity_height = node.getblockchaininfo()['blocks'] + 2 + len(self.nodes[0].masternode('list'))
+        mn.maturity_height = node.getblockchaininfo()['blocks'] + 2 + len(self.nodes[0].masternode('list', 'status'))
 
         mn.ownerAddr = node.getnewaddress()
         mn.operatorAddr = mn.ownerAddr
@@ -358,7 +358,7 @@ class DIP3Test(BitcoinTestFramework):
             node.mnsync('next')
 
         while True:
-            mnlist = node.masternode('list')
+            mnlist = node.masternode('list', 'status')
             if len(mnlist) != 0:
                 time.sleep(0.5)
                 self.force_finish_mnsync(node)
@@ -521,7 +521,7 @@ class DIP3Test(BitcoinTestFramework):
             for mn in mns:
                 if (mn.is_protx and include_protx) or (not mn.is_protx and include_legacy):
                     expected.append('%s-%d' % (mn.collateral_txid, mn.collateral_vout))
-            print('mnlist: ' + str(node.masternode('list')))
+            print('mnlist: ' + str(node.masternode('list', 'status')))
             print('expected: ' + str(expected))
             raise AssertionError("mnlists does not match provided mns")
 
