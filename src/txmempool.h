@@ -532,7 +532,7 @@ private:
     typedef std::map<uint256, std::vector<CSpentIndexKey> > mapSpentIndexInserted;
     mapSpentIndexInserted mapSpentInserted;
 
-    std::map<CService, uint256> mapProTxRegisterAddresses;
+    std::map<CService, uint256> mapProTxAddresses;
     std::map<CKeyID, uint256> mapProTxRegisterPubKeyIDs;
 
     std::map<std::string, uint256> mapSubTxRegisterUserNames;

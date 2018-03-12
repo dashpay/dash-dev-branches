@@ -17,6 +17,39 @@
 #include "script/standard.h"
 #include "base58.h"
 
+template <typename ProTx>
+static bool CheckService(const ProTx& proTx, const CBlockIndex* pindex, CValidationState& state) {
+    if (proTx.nProtocolVersion < MIN_EVO_PROTO_VERSION || proTx.nProtocolVersion > MAX_PROTX_PROTO_VERSION)
+        return state.DoS(10, false, REJECT_INVALID, "bad-protx-proto-version");
+
+    if (!proTx.addr.IsValid() || (Params().NetworkIDString() != CBaseChainParams::REGTEST && !proTx.addr.IsRoutable()))
+        return state.DoS(10, false, REJECT_INVALID, "bad-protx-addr");
+    if (Params().NetworkIDString() != CBaseChainParams::REGTEST && !proTx.addr.IsRoutable())
+        return state.DoS(10, false, REJECT_INVALID, "bad-protx-addr");
+
+    if (pindex) {
+        auto mnList = deterministicMNManager->GetListAtHeight(pindex->nHeight);
+        for (const auto& dmn : mnList.all_range()) {
+            if (dmn->proTx->addr == proTx.addr)
+                return state.DoS(10, false, REJECT_DUPLICATE, "bad-protx-dup-addr");
+        }
+    }
+    return true;
+}
+
+template <typename ProTx>
+static bool CheckInputsHashAndSig(const CTransaction &tx, const ProTx& proTx, const CKeyID &keyID, CValidationState& state) {
+    uint256 inputsHash = CalcTxInputsHash(tx);
+    if (inputsHash != proTx.inputsHash)
+        return state.DoS(100, false, REJECT_INVALID, "bad-protx-inputs-hash");
+
+    std::string strError;
+    if (!CHashSigner::VerifyHash(::SerializeHash(proTx), keyID, proTx.vchSig, strError))
+        return state.DoS(100, false, REJECT_INVALID, "bad-protx-sig", false, strError);
+
+    return true;
+}
+
 bool CheckProRegTx(const CTransaction& tx, const CBlockIndex* pindex, CValidationState& state) {
     AssertLockHeld(cs_main);
 
@@ -26,17 +59,14 @@ bool CheckProRegTx(const CTransaction& tx, const CBlockIndex* pindex, CValidatio
 
     if (ptx.nVersion != CProRegTX::CURRENT_VERSION)
         return state.DoS(100, false, REJECT_INVALID, "bad-protx-version");
-    if (ptx.nProtocolVersion < MIN_EVO_PROTO_VERSION || ptx.nProtocolVersion > MAX_PROTX_PROTO_VERSION)
-        return state.DoS(10, false, REJECT_INVALID, "bad-protx-proto-version");
+
+    if (!CheckService(ptx, pindex, state))
+        return false;
 
     if (ptx.nCollateralIndex >= tx.vout.size())
         return state.DoS(10, false, REJECT_INVALID, "bad-protx-collateral-index");
     if (tx.vout[ptx.nCollateralIndex].nValue != 1000 * COIN)
         return state.DoS(10, false, REJECT_INVALID, "bad-protx-collateral");
-    if (!ptx.addr.IsValid() || (Params().NetworkIDString() != CBaseChainParams::REGTEST && !ptx.addr.IsRoutable()))
-        return state.DoS(10, false, REJECT_INVALID, "bad-protx-addr");
-    if (Params().NetworkIDString() != CBaseChainParams::REGTEST && !ptx.addr.IsRoutable())
-        return state.DoS(10, false, REJECT_INVALID, "bad-protx-addr");
     if (ptx.keyIDOperator.IsNull())
         return state.DoS(10, false, REJECT_INVALID, "bad-protx-key-operator");
     if (ptx.keyIDOwner.IsNull())
@@ -60,16 +90,10 @@ bool CheckProRegTx(const CTransaction& tx, const CBlockIndex* pindex, CValidatio
     if (tx.vout[ptx.nCollateralIndex].scriptPubKey != ptx.scriptPayout)
         return state.DoS(10, false, REJECT_INVALID, "bad-protx-payee-collateral");
 
-    uint256 inputsHash = CalcTxInputsHash(tx);
-    if (inputsHash != ptx.inputsHash)
-        return state.DoS(100, false, REJECT_INVALID, "bad-protx-inputs-hash");
-
     if (pindex) {
         auto mnList = deterministicMNManager->GetListAtHeight(pindex->nHeight);
         std::set<CKeyID> keyIDs;
         for (const auto& dmn : mnList.all_range()) {
-            if (dmn->proTx->addr == ptx.addr)
-                return state.DoS(10, false, REJECT_DUPLICATE, "bad-protx-dup-addr");
             keyIDs.emplace(dmn->proTx->keyIDOperator);
             keyIDs.emplace(dmn->proTx->keyIDOwner);
         }
@@ -82,12 +106,33 @@ bool CheckProRegTx(const CTransaction& tx, const CBlockIndex* pindex, CValidatio
         }
     }
 
-    CProRegTX tmpPtx(ptx);
-    tmpPtx.vchSig.clear();
+    if (!CheckInputsHashAndSig(tx, ptx, ptx.keyIDOwner, state))
+        return false;
 
-    std::string strError;
-    if (!CHashSigner::VerifyHash(::SerializeHash(tmpPtx), ptx.keyIDOwner, ptx.vchSig, strError))
-        return state.DoS(100, false, REJECT_INVALID, "bad-protx-sig", false, strError);
+    return true;
+}
+
+bool CheckProUpServTx(const CTransaction& tx, const CBlockIndex* pindex, CValidationState& state) {
+    AssertLockHeld(cs_main);
+
+    CProUpServTX ptx;
+    if (!GetTxPayload(tx, ptx))
+        return state.DoS(100, false, REJECT_INVALID, "bad-tx-payload");
+
+    if (ptx.nVersion != CProRegTX::CURRENT_VERSION)
+        return state.DoS(100, false, REJECT_INVALID, "bad-protx-version");
+
+    if (!CheckService(ptx, pindex, state))
+        return false;
+
+    if (pindex) {
+        auto mn = deterministicMNManager->GetMN(pindex->nHeight, ptx.proTxHash);
+        if (!mn)
+            return state.DoS(100, false, REJECT_INVALID, "bad-protx-hash");
+        // we can only check the signature if pindex != NULL and the MN is known
+        if (!CheckInputsHashAndSig(tx, ptx, mn->proTx->keyIDOperator, state))
+            return false;
+    }
 
     return true;
 }
@@ -126,6 +171,20 @@ void CProRegTX::ToJson(UniValue& obj) const {
 
     obj.push_back(Pair("payout", payoutObj));
     obj.push_back(Pair("inputsHash", inputsHash.ToString()));
+}
+
+std::string CProUpServTX::ToString() const {
+    return strprintf("CProUpServTX(nVersion=%d, proTxHash=%s, nProtocolVersion=%d, addr=%s)",
+                     nVersion, proTxHash.ToString(), nProtocolVersion, addr.ToString());
+}
+
+void CProUpServTX::ToJson(UniValue& obj) const {
+    obj.clear();
+    obj.setObject();
+    obj.push_back(Pair("version", nVersion));
+    obj.push_back(Pair("proTxHash", proTxHash.ToString()));
+    obj.push_back(Pair("protocolVersion", nProtocolVersion));
+    obj.push_back(Pair("service", addr.ToString(false)));
 }
 
 bool IsProTxCollateral(const CTransaction& tx, uint32_t n) {

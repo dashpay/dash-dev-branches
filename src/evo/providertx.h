@@ -42,17 +42,52 @@ public:
         READWRITE(keyIDOwner);
         READWRITE(*(CScriptBase*)(&scriptPayout));
         READWRITE(inputsHash);
-        READWRITE(vchSig);
+        if (!(s.GetType() & SER_GETHASH)) {
+            READWRITE(vchSig);
+        }
     }
 
     std::string ToString() const;
     void ToJson(UniValue& obj) const;
 };
-
 typedef std::shared_ptr<CProRegTX> CProRegTXPtr;
 typedef std::shared_ptr<const CProRegTX> CProRegTXCPtr;
 
+class CProUpServTX {
+public:
+    static const int CURRENT_VERSION = 1;
+
+public:
+    int16_t nVersion{CURRENT_VERSION}; // message version
+    uint256 proTxHash;
+    int32_t nProtocolVersion{-1};
+    CService addr;
+    uint256 inputsHash; // replay protection
+    std::vector<unsigned char> vchSig;
+
+public:
+    ADD_SERIALIZE_METHODS;
+
+    template <typename Stream, typename Operation>
+    inline void SerializationOp(Stream& s, Operation ser_action) {
+        READWRITE(nVersion);
+        READWRITE(proTxHash);
+        READWRITE(nProtocolVersion);
+        READWRITE(addr);
+        READWRITE(inputsHash);
+        if (!(s.GetType() & SER_GETHASH)) {
+            READWRITE(vchSig);
+        }
+    }
+
+public:
+    std::string ToString() const;
+    void ToJson(UniValue& obj) const;
+};
+
 bool CheckProRegTx(const CTransaction& tx, const CBlockIndex* pindex, CValidationState& state);
+bool CheckProUpServTx(const CTransaction& tx, const CBlockIndex* pindex, CValidationState& state);
+
 bool IsProTxCollateral(const CTransaction& tx, uint32_t n);
 uint32_t GetProTxCollateralIndex(const CTransaction& tx);
 
