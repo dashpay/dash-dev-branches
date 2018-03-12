@@ -79,23 +79,23 @@ void CActiveDeterministicMasternodeManager::Init() {
 
     mnListEntry = dmn;
 
-    LogPrintf("CActiveDeterministicMasternodeManager::Init -- proTxHash=%s, proTx=%s\n", mnListEntry->proTxHash.ToString(), mnListEntry->proTx->ToString());
+    LogPrintf("CActiveDeterministicMasternodeManager::Init -- proTxHash=%s, proTx=%s\n", mnListEntry->proTxHash.ToString(), mnListEntry->ToString());
 
-    if (activeMasternode.service != mnListEntry->proTx->addr) {
+    if (activeMasternode.service != mnListEntry->state->addr) {
         state = MASTERNODE_ERROR;
         strError = "Local address does not match the address from ProTx";
         LogPrintf("CActiveDeterministicMasternodeManager::Init -- ERROR: %s", strError);
         return;
     }
 
-    if (mnListEntry->proTx->nProtocolVersion != PROTOCOL_VERSION) {
+    if (mnListEntry->state->nProtocolVersion != PROTOCOL_VERSION) {
         state = MASTERNODE_ERROR;
         strError = "Local protocol version does not match version from ProTx. You may need to update the ProTx";
         LogPrintf("CActiveDeterministicMasternodeManager::Init -- ERROR: %s", strError);
         return;
     }
 
-    activeMasternode.outpoint = COutPoint(mnListEntry->proTxHash, mnListEntry->proTx->nCollateralIndex);
+    activeMasternode.outpoint = COutPoint(mnListEntry->proTxHash, mnListEntry->nCollateralIndex);
     state = MASTERNODE_READY;
 }
 
@@ -375,15 +375,15 @@ void CActiveLegacyMasternodeManager::ManageStateRemote()
             LogPrintf("CActiveLegacyMasternodeManager::ManageStateRemote -- %s: %s\n", GetStateString(), strNotCapableReason);
             return;
         }
-        CProRegTXCPtr proTx = deterministicMNManager->GetProTx(infoMn.outpoint.hash);
-        if (proTx) {
-            if (proTx->keyIDOperator != infoMn.keyIDOperator) {
+        auto dmn = deterministicMNManager->GetListAtChainTip().GetMN(infoMn.outpoint.hash);
+        if (dmn) {
+            if (dmn->state->keyIDOperator != infoMn.keyIDOperator) {
                 nState = ACTIVE_MASTERNODE_NOT_CAPABLE;
                 strNotCapableReason = strprintf("Masternode collateral is a ProTx and masternode key does not match key from -masternodeprivkey");
                 LogPrintf("CActiveLegacyMasternodeManager::ManageStateRemote -- %s: %s\n", GetStateString(), strNotCapableReason);
                 return;
             }
-            if (proTx->addr != infoMn.addr) {
+            if (dmn->state->addr != infoMn.addr) {
                 nState = ACTIVE_MASTERNODE_NOT_CAPABLE;
                 strNotCapableReason = strprintf("Masternode collateral is a ProTx and ProTx address does not match local address");
                 LogPrintf("CActiveLegacyMasternodeManager::ManageStateRemote -- %s: %s\n", GetStateString(), strNotCapableReason);

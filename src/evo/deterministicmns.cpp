@@ -8,6 +8,11 @@
 #include "validation.h"
 #include "validationinterface.h"
 #include "chainparams.h"
+#include "script/standard.h"
+#include "base58.h"
+#include "core_io.h"
+
+#include <univalue.h>
 
 static const char DB_MN = 'M';
 static const char DB_MANAGER_STATE = 's';
@@ -15,6 +20,62 @@ static const char DB_LIST_SNAPSHOT = 'S';
 static const char DB_LIST_DIFF = 'D';
 
 CDeterministicMNManager* deterministicMNManager;
+
+std::string CDeterministicMNState::ToString() const {
+    CTxDestination dest;
+    std::string payee = "unknown";
+    if (ExtractDestination(scriptPayout, dest)) {
+        payee = CBitcoinAddress(dest).ToString();
+    }
+
+    return strprintf("CDeterministicMNState(registeredHeight=%d, lastPaidHeight=%d, maturityHeight=%d, PoSePenality=%d, PoSeRevivedHeight=%d, PoSeBanHeight=%d, "
+                     "keyIDOperator=%s, keyIDOwner=%s, addr=%s, nProtocolVersion=%d, payee=%s)",
+                     registeredHeight, lastPaidHeight, maturityHeight, PoSePenality, PoSeRevivedHeight, PoSeBanHeight,
+                     keyIDOperator.ToString(), keyIDOwner.ToString(), addr.ToStringIPPort(false), nProtocolVersion, payee);
+}
+
+void CDeterministicMNState::ToJson(UniValue& obj) const {
+    obj.clear();
+    obj.setObject();
+    obj.push_back(Pair("registeredHeight", registeredHeight));
+    obj.push_back(Pair("lastPaidHeight", lastPaidHeight));
+    obj.push_back(Pair("maturityHeight", maturityHeight));
+    obj.push_back(Pair("PoSePenality", PoSePenality));
+    obj.push_back(Pair("PoSeRevivedHeight", PoSeRevivedHeight));
+    obj.push_back(Pair("PoSeBanHeight", PoSeBanHeight));
+    obj.push_back(Pair("keyIDOperator", keyIDOperator.ToString()));
+    obj.push_back(Pair("keyIDOwner", keyIDOwner.ToString()));
+    obj.push_back(Pair("addr", addr.ToStringIPPort(false)));
+    obj.push_back(Pair("nProtocolVersion", nProtocolVersion));
+
+    UniValue payoutObj(UniValue::VOBJ);
+    payoutObj.push_back(Pair("scriptHex", HexStr(scriptPayout)));
+    payoutObj.push_back(Pair("scriptAsm", ScriptToAsmStr(scriptPayout)));
+
+    CTxDestination dest;
+    if (ExtractDestination(scriptPayout, dest)) {
+        CBitcoinAddress bitcoinAddress(dest);
+        payoutObj.push_back(Pair("address", bitcoinAddress.ToString()));
+    }
+
+    obj.push_back(Pair("payout", payoutObj));
+}
+
+std::string CDeterministicMN::ToString() const {
+    return strprintf("CDeterministicMN(proTxHash=%s, nCollateralIndex=%d, state=%s", proTxHash.ToString(), nCollateralIndex, state->ToString());
+}
+
+void CDeterministicMN::ToJson(UniValue& obj) const {
+    obj.clear();
+    obj.setObject();
+
+    UniValue stateObj;
+    state->ToJson(stateObj);
+
+    obj.push_back(Pair("proTxHash", proTxHash.ToString()));
+    obj.push_back(Pair("collateralIndex", (int)nCollateralIndex));
+    obj.push_back(Pair("state", stateObj));
+}
 
 bool CDeterministicMNList::IsMNValid(const uint256& proTxHash) const {
     auto it = mnMap->find(proTxHash);
@@ -74,7 +135,7 @@ CDeterministicMNCPtr CDeterministicMNList::GetValidMN(const uint256& proTxHash) 
 
 CDeterministicMNCPtr CDeterministicMNList::GetMNByOperatorKey(const CKeyID& keyID) {
     for (const auto& p : *mnMap) {
-        if (p.second->proTx->keyIDOperator == keyID) {
+        if (p.second->state->keyIDOperator == keyID) {
             return p.second;
         }
     }
@@ -124,7 +185,7 @@ std::vector<CDeterministicMNCPtr> CDeterministicMNList::GetProjectedMNPayees(int
 
         CDeterministicMNStatePtr newState = std::make_shared<CDeterministicMNState>(*payee->state);
         newState->lastPaidHeight = h;
-        tmpMNList.AddOrUpdateMN(payee->proTxHash, newState, nullptr);
+        tmpMNList.UpdateMN(payee->proTxHash, newState);
     }
 
     return result;
@@ -135,8 +196,10 @@ void CDeterministicMNList::BuildDiff(const CDeterministicMNList& to, CDeterminis
 
     for (const auto& p : *to.mnMap) {
         const auto& fromIt = mnMap->find(p.first);
-        if (fromIt == mnMap->end() || *p.second->state != *fromIt->second->state) {
-            diffRet.addedOrUpdatedMns.emplace(p.first, p.second->state);
+        if (fromIt == mnMap->end()) {
+            diffRet.addedMNs.emplace(p.first, p.second);
+        } else if (*p.second->state != *fromIt->second->state) {
+            diffRet.updatedMNs.emplace(p.first, p.second->state);
         }
     }
     for (const auto& p : *mnMap) {
@@ -147,7 +210,7 @@ void CDeterministicMNList::BuildDiff(const CDeterministicMNList& to, CDeterminis
     }
 }
 
-CDeterministicMNList CDeterministicMNList::ApplyDiff(const CDeterministicMNListDiff& diff, const std::map<uint256, CProRegTXCPtr>& proTxMap) const {
+CDeterministicMNList CDeterministicMNList::ApplyDiff(const CDeterministicMNListDiff& diff) const {
     assert(diff.height == height + 1);
 
     CDeterministicMNList result = Clone();
@@ -156,10 +219,11 @@ CDeterministicMNList CDeterministicMNList::ApplyDiff(const CDeterministicMNListD
     for (const auto& hash : diff.removedMns) {
         result.mnMap->erase(hash);
     }
-    for (const auto& p : diff.addedOrUpdatedMns) {
-        auto proTxIt = proTxMap.find(p.first);
-        assert(proTxIt != proTxMap.end());
-        result.AddOrUpdateMN(p.first, p.second, proTxIt->second);
+    for (const auto& p : diff.addedMNs) {
+        result.AddMN(p.second);
+    }
+    for (const auto& p : diff.updatedMNs) {
+        result.UpdateMN(p.first, p.second);
     }
 
     return result;
@@ -203,9 +267,9 @@ bool CDeterministicMNManager::ProcessBlock(const CBlock& block, const CBlockInde
     std::set<CService> addrs;
     std::set<CKeyID> pubKeyIDs;
     for (const auto& dmn : newList.all_range()) {
-        addrs.emplace(dmn->proTx->addr);
-        pubKeyIDs.emplace(dmn->proTx->keyIDOperator);
-        pubKeyIDs.emplace(dmn->proTx->keyIDOwner);
+        addrs.emplace(dmn->state->addr);
+        pubKeyIDs.emplace(dmn->state->keyIDOperator);
+        pubKeyIDs.emplace(dmn->state->keyIDOwner);
     }
 
     for (int i = 1; i < (int)block.vtx.size(); i++) {
@@ -215,7 +279,7 @@ bool CDeterministicMNManager::ProcessBlock(const CBlock& block, const CBlockInde
         for (const auto& in : tx.vin) {
             const uint256& proTxHash = in.prevout.hash;
             auto dmn = newList.GetMN(proTxHash);
-            if (dmn && dmn->proTx->nCollateralIndex == in.prevout.n) {
+            if (dmn && dmn->nCollateralIndex == in.prevout.n) {
                 newList.RemoveMN(proTxHash);
 
                 LogPrintf("CDeterministicMNManager::%s -- MN %s removed from list because collateral was spent. height=%d, mapCurMNs.size=%d\n",
@@ -239,17 +303,17 @@ bool CDeterministicMNManager::ProcessBlock(const CBlock& block, const CBlockInde
 
             dbTransaction.Write(std::make_pair(DB_MN, tx.GetHash()), proTx);
 
-            CDeterministicMNState dmnState;
+            // Use the result from GetProTx instead of making a new shared_ptr from proTx so that we actually use the cached version
+            auto _proTx = GetProTx(tx.GetHash());
+            auto dmn = std::make_shared<CDeterministicMN>(tx.GetHash(), _proTx);
+
+            CDeterministicMNState dmnState = *dmn->state;
             dmnState.registeredHeight = height;
             // MN becomes mature after at least one full payment cycle
-            dmnState.maturityHeight = height + Params().GetConsensus().nMasternodeMinimumConfirmations + oldList.valid_count();
+            dmnState.maturityHeight = (int)(height + Params().GetConsensus().nMasternodeMinimumConfirmations + oldList.valid_count());
+            dmn->state = std::make_shared<CDeterministicMNState>(dmnState);
 
-            CDeterministicMN dmn;
-            dmn.proTxHash = tx.GetHash();
-            dmn.state = std::make_shared<CDeterministicMNState>(dmnState);
-            // Use the result from GetProTx instead of making a new shared_ptr from proTx so that we actually use the cached version
-            dmn.proTx = GetProTx(tx.GetHash());
-            newList.AddOrUpdateMN(dmn);
+            newList.AddMN(dmn);
 
             if (state.firstMNHeight == -1) {
                 state.firstMNHeight = height;
@@ -265,7 +329,7 @@ bool CDeterministicMNManager::ProcessBlock(const CBlock& block, const CBlockInde
     if (payee && newList.HasMN(payee->proTxHash)) {
         auto newState = std::make_shared<CDeterministicMNState>(*newList.GetMN(payee->proTxHash)->state);
         newState->lastPaidHeight = height;
-        newList.AddOrUpdateMN(payee->proTxHash, newState, nullptr);
+        newList.UpdateMN(payee->proTxHash, newState);
     }
 
     CDeterministicMNListDiff diff;
@@ -338,9 +402,6 @@ void CDeterministicMNManager::RebuildLists(int startHeight, int endHeight) {
     int snapshotHeight = -1;
     for (int h = startHeight; h >= state.firstMNHeight && h < endHeight; --h) {
         if (dbTransaction.Read(std::make_pair(DB_LIST_SNAPSHOT, h), snapshot)) {
-            for (const auto& p : snapshot.all_range()) {
-                snapshot.AddOrUpdateMN(p->proTxHash, nullptr, GetProTx(p->proTxHash));
-            }
             snapshotHeight = h;
             break;
         }
@@ -361,11 +422,7 @@ void CDeterministicMNManager::RebuildLists(int startHeight, int endHeight) {
                 snapshot.SetHeight(h + 1);
                 continue;
             }
-            std::map<uint256, CProRegTXCPtr> proTxMap;
-            for (const auto& p : diff.addedOrUpdatedMns) {
-                proTxMap[p.first] = GetProTx(p.first);
-            }
-            snapshot = snapshot.ApplyDiff(diff, proTxMap);
+            snapshot = snapshot.ApplyDiff(diff);
         }
     }
 }

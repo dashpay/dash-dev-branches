@@ -475,7 +475,7 @@ UniValue gobject(const JSONRPCRequest& request)
                         continue;
                     }
 
-                    if (nTxHash == dmn->proTxHash && (uint32_t)nOutputIndex == dmn->proTx->nCollateralIndex) {
+                    if (nTxHash == dmn->proTxHash && (uint32_t)nOutputIndex == dmn->nCollateralIndex) {
                         found = true;
                         break;
                     }
@@ -485,9 +485,9 @@ UniValue gobject(const JSONRPCRequest& request)
                 }
 
                 CKey ownerKey;
-                if (pwalletMain->GetKey(dmn->proTx->keyIDOwner, ownerKey)) {
+                if (pwalletMain->GetKey(dmn->state->keyIDOwner, ownerKey)) {
                     CBitcoinSecret secret(ownerKey);
-                    CMasternodeConfig::CMasternodeEntry mne(dmn->proTxHash.ToString(), dmn->proTx->addr.ToStringIPPort(false), secret.ToString(), dmn->proTxHash.ToString(), itostr(dmn->proTx->nCollateralIndex));
+                    CMasternodeConfig::CMasternodeEntry mne(dmn->proTxHash.ToString(), dmn->state->addr.ToStringIPPort(false), secret.ToString(), dmn->proTxHash.ToString(), itostr(dmn->nCollateralIndex));
                     mnEntries.push_back(mne);
                 }
             }

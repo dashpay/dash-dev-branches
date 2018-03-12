@@ -28,8 +28,21 @@ public:
     int PoSeRevivedHeight{-1};
     int PoSeBanHeight{-1};
 
+    CKeyID keyIDOperator;
+    CKeyID keyIDOwner;
+    CService addr;
+    int32_t nProtocolVersion;
+    CScript scriptPayout;
+
 public:
     CDeterministicMNState() {}
+    CDeterministicMNState(const CProRegTX& proTx) {
+        keyIDOperator = proTx.keyIDOperator;
+        keyIDOwner = proTx.keyIDOwner;
+        addr = proTx.addr;
+        nProtocolVersion = proTx.nProtocolVersion;
+        scriptPayout = proTx.scriptPayout;
+    }
     template<typename Stream>
     CDeterministicMNState(deserialize_type, Stream& s) { s >> *this;}
 
@@ -43,6 +56,11 @@ public:
         READWRITE(PoSePenality);
         READWRITE(PoSeRevivedHeight);
         READWRITE(PoSeBanHeight);
+        READWRITE(keyIDOperator);
+        READWRITE(keyIDOwner);
+        READWRITE(addr);
+        READWRITE(nProtocolVersion);
+        READWRITE(*(CScriptBase*)(&scriptPayout));
     }
 
     bool operator==(const CDeterministicMNState& rhs) const {
@@ -51,21 +69,53 @@ public:
                maturityHeight == rhs.maturityHeight &&
                PoSePenality == rhs.PoSePenality &&
                PoSeRevivedHeight == rhs.PoSeRevivedHeight &&
-               PoSeBanHeight == rhs.PoSeBanHeight;
+               PoSeBanHeight == rhs.PoSeBanHeight &&
+               keyIDOperator == rhs.keyIDOperator &&
+               keyIDOwner == rhs.keyIDOwner &&
+               addr == rhs.addr &&
+               nProtocolVersion == rhs.nProtocolVersion &&
+               scriptPayout == rhs.scriptPayout;
     }
 
     bool operator!=(const CDeterministicMNState& rhs) const {
         return !(rhs == *this);
     }
+
+public:
+    std::string ToString() const;
+    void ToJson(UniValue& obj) const;
 };
 typedef std::shared_ptr<CDeterministicMNState> CDeterministicMNStatePtr;
 typedef std::shared_ptr<const CDeterministicMNState> CDeterministicMNStateCPtr;
 
 class CDeterministicMN {
 public:
+    CDeterministicMN() {}
+    CDeterministicMN(const uint256& _proTxHash, const CProRegTXCPtr& _proTx) {
+        proTxHash = _proTxHash;
+        nCollateralIndex = _proTx->nCollateralIndex;
+        state = std::make_shared<CDeterministicMNState>(*_proTx);
+    }
+    template<typename Stream>
+    CDeterministicMN(deserialize_type, Stream& s) { s >> *this;}
+
     uint256 proTxHash;
-    CProRegTXCPtr proTx;
+    uint32_t nCollateralIndex;
     CDeterministicMNStateCPtr state;
+
+public:
+    ADD_SERIALIZE_METHODS;
+
+    template <typename Stream, typename Operation>
+    inline void SerializationOp(Stream& s, Operation ser_action) {
+        READWRITE(proTxHash);
+        READWRITE(nCollateralIndex);
+        READWRITE(state);
+    }
+
+public:
+    std::string ToString() const;
+    void ToJson(UniValue& obj) const;
 };
 typedef std::shared_ptr<CDeterministicMN> CDeterministicMNPtr;
 typedef std::shared_ptr<const CDeterministicMN> CDeterministicMNCPtr;
@@ -93,30 +143,13 @@ public:
         return CDeterministicMNList(height, newMnMap);
     }
 
-    // we don't serialize the ProTx (would result in too much duplicate data)
-    template<typename Stream>
-    void Serialize(Stream& s) const {
-        s << height;
-        s << (int32_t)mnMap->size();
-        for (const auto& p : *mnMap) {
-            s << p.first;
-            s << p.second->state;
-        }
-    }
-    template<typename Stream>
-    void Unserialize(Stream& s) {
-        mnMap = std::make_shared<MnMap>();
+    ADD_SERIALIZE_METHODS;
 
-        s >> height;
-        int32_t size;
-        s >> size;
-        for (int32_t i = 0; i < size; i++) {
-            CDeterministicMNPtr dmn = std::make_shared<CDeterministicMN>();
-            s >> dmn->proTxHash;
-            s >> dmn->state;
-
-            mnMap->emplace(dmn->proTxHash, dmn);
-        }
+    template <typename Stream, typename Operation>
+    inline void SerializationOp(Stream& s, Operation ser_action)
+    {
+        READWRITE(height);
+        READWRITE(*mnMap);
     }
 
 public:
@@ -185,32 +218,20 @@ public:
     std::vector<CDeterministicMNCPtr> GetProjectedMNPayees(int count) const;
 
     void BuildDiff(const CDeterministicMNList& to, CDeterministicMNListDiff& diffRet) const;
-    CDeterministicMNList ApplyDiff(const CDeterministicMNListDiff& diff, const std::map<uint256, CProRegTXCPtr>& proTxMap) const;
+    CDeterministicMNList ApplyDiff(const CDeterministicMNListDiff& diff) const;
 
-    void AddOrUpdateMN(const CDeterministicMN& dmn) {
-        auto p = std::make_shared<CDeterministicMN>(dmn);
-        auto i = mnMap->emplace(dmn.proTxHash, p);
-        if (!i.second)
-            i.first->second = p;
+    void AddMN(const CDeterministicMNCPtr &dmn) {
+        mnMap->emplace(dmn->proTxHash, dmn);
+    }
+    void UpdateMN(const uint256 &proTxHash, const CDeterministicMNStateCPtr &state) {
+        auto it = mnMap->find(proTxHash);
+        assert(it != mnMap->end());
+        auto dmn = std::make_shared<CDeterministicMN>(*it->second);
+        dmn->state = state;
+        it->second = dmn;
     }
     void RemoveMN(const uint256& proTxHash) {
         mnMap->erase(proTxHash);
-    }
-    void AddOrUpdateMN(const uint256& proTxHash, const CDeterministicMNStateCPtr& state, const CProRegTXCPtr& proTx) {
-        auto dmnPtr = GetMN(proTxHash);
-        CDeterministicMN dmn;
-        if (dmnPtr) {
-            dmn = *dmnPtr;
-        } else {
-            dmn.proTxHash = proTxHash;
-        }
-        if (state) {
-            dmn.state = state;
-        }
-        if (proTx) {
-            dmn.proTx = proTx;
-        }
-        AddOrUpdateMN(dmn);
     }
 
 private:
@@ -222,7 +243,8 @@ private:
 class CDeterministicMNListDiff {
 public:
     int height;
-    std::map<uint256, CDeterministicMNStateCPtr> addedOrUpdatedMns;
+    std::map<uint256, CDeterministicMNCPtr> addedMNs;
+    std::map<uint256, CDeterministicMNStateCPtr> updatedMNs;
     std::set<uint256> removedMns;
 
 public:
@@ -231,13 +253,14 @@ public:
     template <typename Stream, typename Operation>
     inline void SerializationOp(Stream& s, Operation ser_action) {
         READWRITE(height);
-        READWRITE(addedOrUpdatedMns);
+        READWRITE(addedMNs);
+        READWRITE(updatedMNs);
         READWRITE(removedMns);
     }
 
 public:
     bool HasChanges() const {
-        return !addedOrUpdatedMns.empty() || !removedMns.empty();
+        return !addedMNs.empty() || !updatedMNs.empty() || !removedMns.empty();
     }
 };
 

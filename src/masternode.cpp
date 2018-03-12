@@ -54,13 +54,13 @@ CMasternode::CMasternode(const CMasternodeBroadcast& mnb) :
     fAllowMixingTx(true)
 {}
 
-CMasternode::CMasternode(const uint256 &proTxHash, const CProRegTX& proTx) :
-    masternode_info_t{ MASTERNODE_ENABLED, proTx.nProtocolVersion, GetAdjustedTime(),
-                       COutPoint(proTxHash, proTx.nCollateralIndex), proTx.addr, CKeyID(), proTx.keyIDOperator, proTx.keyIDOwner},
+CMasternode::CMasternode(const uint256 &proTxHash, const CDeterministicMNCPtr& dmn) :
+    masternode_info_t{ MASTERNODE_ENABLED, dmn->state->nProtocolVersion, GetAdjustedTime(),
+                       COutPoint(proTxHash, dmn->nCollateralIndex), dmn->state->addr, CKeyID(), dmn->state->keyIDOperator, dmn->state->keyIDOwner},
     fAllowMixingTx(true)
 {
     CTxDestination dest;
-    if (!ExtractDestination(proTx.scriptPayout, dest) || !boost::get<CKeyID>(&dest))
+    if (!ExtractDestination(dmn->state->scriptPayout, dest) || !boost::get<CKeyID>(&dest))
         assert(false); // should not happen (previous verification forbids non p2pkh/p2pk
     pubKeyIDCollateralAddress = *boost::get<CKeyID>(&dest);
 }

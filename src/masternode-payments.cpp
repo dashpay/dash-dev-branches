@@ -261,7 +261,7 @@ std::string GetRequiredPaymentsString(int nBlockHeight, const CDeterministicMNCP
     std::string strPayee = "Unknown";
     if (payee) {
         CTxDestination dest;
-        if (!ExtractDestination(payee->proTx->scriptPayout, dest))
+        if (!ExtractDestination(payee->state->scriptPayout, dest))
             assert(false);
         strPayee = CBitcoinAddress(dest).ToString();
     }
@@ -561,7 +561,7 @@ bool CMasternodePayments::GetBlockPayee(int nBlockHeight, CScript& payeeRet) con
         if (!dmnPayee) {
             return false;
         }
-        payeeRet = dmnPayee->proTx->scriptPayout;
+        payeeRet = dmnPayee->state->scriptPayout;
         return true;
     } else {
         LOCK(cs_mapMasternodeBlocks);
@@ -767,12 +767,12 @@ bool CMasternodePayments::IsTransactionValid(const CTransaction& txNew, int nBlo
         }
 
         for (const auto &txout : txNew.vout) {
-            if (nMasternodePayment == txout.nValue && txout.scriptPubKey == payee->proTx->scriptPayout) {
+            if (nMasternodePayment == txout.nValue && txout.scriptPubKey == payee->state->scriptPayout) {
                 return true;
             }
         }
         CTxDestination dest;
-        if (!ExtractDestination(payee->proTx->scriptPayout, dest))
+        if (!ExtractDestination(payee->state->scriptPayout, dest))
             assert(false);
         LogPrintf("CMasternodePayments::IsTransactionValid -- ERROR failed to find expected payee %s in block at height %s\n", CBitcoinAddress(dest).ToString(), nBlockHeight);
         return false;

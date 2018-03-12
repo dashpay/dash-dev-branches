@@ -664,19 +664,20 @@ void protx_list_help() {
     );
 }
 
-UniValue BuildProTxListEntry(const uint256& hash, const CProRegTX& proTx, bool detailed) {
+UniValue BuildDMNListEntry(const uint256& hash, const CDeterministicMNCPtr& dmn, bool detailed) {
     if (!detailed)
         return hash.ToString();
 
     UniValue o(UniValue::VOBJ);
 
     o.push_back(Pair("proTxHash", hash.GetHex()));
+    o.push_back(Pair("collateralIndex", (int)dmn->nCollateralIndex));
 
-    UniValue proTxObj;
-    proTx.ToJson(proTxObj);
-    o.push_back(Pair("proTx", proTxObj));
+    UniValue stateObj;
+    dmn->state->ToJson(stateObj);
+    o.push_back(Pair("state", stateObj));
 
-    int confirmations = GetUTXOConfirmations(COutPoint(hash, proTx.nCollateralIndex));
+    int confirmations = GetUTXOConfirmations(COutPoint(hash, dmn->nCollateralIndex));
     o.push_back(Pair("confirmations", confirmations));
 
     return o;
@@ -706,11 +707,11 @@ UniValue protx_list(const JSONRPCRequest& request) {
             const CWalletTx *wtx = pwalletMain->GetWalletTx(outpt.hash);
             assert(wtx);
 
-            CProRegTX proTx;
-            if (!GetTxPayload(*wtx->tx, proTx))
-                assert(false);
+            auto dmn = deterministicMNManager->GetListAtChainTip().GetMN(outpt.hash);
+            if (!dmn)
+                continue;
 
-            ret.push_back(BuildProTxListEntry(wtx->GetHash(), proTx, detailed));
+            ret.push_back(BuildDMNListEntry(wtx->GetHash(), dmn, detailed));
         }
     } else if (type == "valid" || type == "registered") {
         if (request.params.size() > 4)
@@ -732,7 +733,7 @@ UniValue protx_list(const JSONRPCRequest& request) {
             range = mnList.all_range();
         }
         for (const auto& dmn : range) {
-            ret.push_back(BuildProTxListEntry(dmn->proTxHash, *dmn->proTx, detailed));
+            ret.push_back(BuildDMNListEntry(dmn->proTxHash, dmn, detailed));
         }
     } else {
         throw JSONRPCError(RPC_INVALID_PARAMETER, "invalid type specified");

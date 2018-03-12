@@ -464,9 +464,10 @@ UniValue masternode(const JSONRPCRequest& request)
             auto dmn = activeMasternodeManager->GetDMN();
             if (dmn) {
                 mnObj.push_back(Pair("proTxHash", dmn->proTxHash.ToString()));
-                UniValue proTxObj;
-                dmn->proTx->ToJson(proTxObj);
-                mnObj.push_back(Pair("proTx", proTxObj));
+                mnObj.push_back(Pair("collateralIndex", (int)dmn->nCollateralIndex));
+                UniValue stateObj;
+                dmn->state->ToJson(stateObj);
+                mnObj.push_back(Pair("dmnState", stateObj));
             }
             mnObj.push_back(Pair("state", activeMasternodeManager->GetStateString()));
             mnObj.push_back(Pair("status", activeMasternodeManager->GetStatus()));
@@ -497,8 +498,8 @@ UniValue masternode(const JSONRPCRequest& request)
         uint256 hashBlock;
         bool fromMempool = false;
 
-        auto proTx = deterministicMNManager->GetProTx(proTxHash);
-        if (!proTx) {
+        auto dmn = deterministicMNManager->GetListAtChainTip().GetMN(proTxHash);
+        if (!dmn) {
             tx = mempool.get(proTxHash);
             if (tx) {
                 fromMempool = true;
@@ -507,7 +508,7 @@ UniValue masternode(const JSONRPCRequest& request)
                 CProRegTX tmpProTx;
                 if (!GetTxPayload(*tx, tmpProTx))
                     throw JSONRPCError(RPC_INVALID_PARAMETER, "TX is not a valid ProTx");
-                proTx = std::make_shared<CProRegTX>(tmpProTx);
+                dmn = std::make_shared<CDeterministicMN>(tx->GetHash(), std::make_shared<CProRegTX>(tmpProTx));
             } else {
                 throw JSONRPCError(RPC_INVALID_PARAMETER, "ProTx not found");
             }
@@ -521,9 +522,9 @@ UniValue masternode(const JSONRPCRequest& request)
 
         UniValue obj(UniValue::VOBJ);
 
-        UniValue proTxObj;
-        proTx->ToJson(proTxObj);
-        obj.push_back(Pair("proTx", proTxObj));
+        UniValue stateObj;
+        dmn->state->ToJson(stateObj);
+        obj.push_back(Pair("state", stateObj));
 
         if (!hashBlock.IsNull()) {
             UniValue blockObj(UniValue::VOBJ);
@@ -545,7 +546,7 @@ UniValue masternode(const JSONRPCRequest& request)
             }
             obj.push_back(Pair("block", blockObj));
 
-            if (GetUTXOHeight(COutPoint(proTxHash, proTx->nCollateralIndex)) < 0) {
+            if (GetUTXOHeight(COutPoint(proTxHash, dmn->nCollateralIndex)) < 0) {
                 obj.push_back(Pair("isSpent", true));
             }
 

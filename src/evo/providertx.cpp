@@ -30,7 +30,7 @@ static bool CheckService(const ProTx& proTx, const CBlockIndex* pindex, CValidat
     if (pindex) {
         auto mnList = deterministicMNManager->GetListAtHeight(pindex->nHeight);
         for (const auto& dmn : mnList.all_range()) {
-            if (dmn->proTx->addr == proTx.addr)
+            if (dmn->state->addr == proTx.addr)
                 return state.DoS(10, false, REJECT_DUPLICATE, "bad-protx-dup-addr");
         }
     }
@@ -94,8 +94,8 @@ bool CheckProRegTx(const CTransaction& tx, const CBlockIndex* pindex, CValidatio
         auto mnList = deterministicMNManager->GetListAtHeight(pindex->nHeight);
         std::set<CKeyID> keyIDs;
         for (const auto& dmn : mnList.all_range()) {
-            keyIDs.emplace(dmn->proTx->keyIDOperator);
-            keyIDs.emplace(dmn->proTx->keyIDOwner);
+            keyIDs.emplace(dmn->state->keyIDOperator);
+            keyIDs.emplace(dmn->state->keyIDOwner);
         }
         if (keyIDs.count(ptx.keyIDOperator) || keyIDs.count(ptx.keyIDOwner)) {
             return state.DoS(10, false, REJECT_DUPLICATE, "bad-protx-dup-key");
@@ -130,7 +130,7 @@ bool CheckProUpServTx(const CTransaction& tx, const CBlockIndex* pindex, CValida
         if (!mn)
             return state.DoS(100, false, REJECT_INVALID, "bad-protx-hash");
         // we can only check the signature if pindex != NULL and the MN is known
-        if (!CheckInputsHashAndSig(tx, ptx, mn->proTx->keyIDOperator, state))
+        if (!CheckInputsHashAndSig(tx, ptx, mn->state->keyIDOperator, state))
             return false;
     }
 
