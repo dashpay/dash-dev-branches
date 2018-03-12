@@ -563,8 +563,8 @@ UniValue protx_register(const JSONRPCRequest& request) {
     tx.nType = TRANSACTION_PROVIDER_REGISTER;
     tx.vout.emplace_back(collateralTxOut);
 
-    CProviderTXRegisterMN ptx;
-    ptx.nVersion = CProviderTXRegisterMN::CURRENT_VERSION;
+    CProRegTX ptx;
+    ptx.nVersion = CProRegTX::CURRENT_VERSION;
 
     if (!Lookup(request.params[3].get_str().c_str(), ptx.addr, Params().GetDefaultPort(), false))
         throw std::runtime_error(strprintf("invalid network address %s", request.params[3].get_str()));
@@ -664,7 +664,7 @@ void protx_list_help() {
     );
 }
 
-UniValue BuildProTxListEntry(const uint256& hash, const CProviderTXRegisterMN& proTx, bool detailed) {
+UniValue BuildProTxListEntry(const uint256& hash, const CProRegTX& proTx, bool detailed) {
     if (!detailed)
         return hash.ToString();
 
@@ -706,7 +706,7 @@ UniValue protx_list(const JSONRPCRequest& request) {
             const CWalletTx *wtx = pwalletMain->GetWalletTx(outpt.hash);
             assert(wtx);
 
-            CProviderTXRegisterMN proTx;
+            CProRegTX proTx;
             if (!GetTxPayload(*wtx->tx, proTx))
                 assert(false);
 

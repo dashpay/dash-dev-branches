@@ -147,7 +147,7 @@ void CDeterministicMNList::BuildDiff(const CDeterministicMNList& to, CDeterminis
     }
 }
 
-CDeterministicMNList CDeterministicMNList::ApplyDiff(const CDeterministicMNListDiff& diff, const std::map<uint256, CProviderTXRegisterMNCPtr>& proTxMap) const {
+CDeterministicMNList CDeterministicMNList::ApplyDiff(const CDeterministicMNListDiff& diff, const std::map<uint256, CProRegTXCPtr>& proTxMap) const {
     assert(diff.height == height + 1);
 
     CDeterministicMNList result = Clone();
@@ -224,15 +224,15 @@ bool CDeterministicMNManager::ProcessBlock(const CBlock& block, const CBlockInde
         }
 
         if (tx.nType == TRANSACTION_PROVIDER_REGISTER) {
-            CProviderTXRegisterMN proTx;
+            CProRegTX proTx;
             if (!GetTxPayload(tx, proTx)) {
                 assert(false); // this should have been handled already
             }
 
             if (addrs.count(proTx.addr))
-                return _state.DoS(100, false, REJECT_CONFLICT, "bad-provider-dup-addr");
+                return _state.DoS(100, false, REJECT_CONFLICT, "bad-protx-dup-addr");
             if (pubKeyIDs.count(proTx.keyIDOperator) || pubKeyIDs.count(proTx.keyIDOwner))
-                return _state.DoS(100, false, REJECT_CONFLICT, "bad-provider-dup-key");
+                return _state.DoS(100, false, REJECT_CONFLICT, "bad-protx-dup-key");
             addrs.emplace(proTx.addr);
             pubKeyIDs.emplace(proTx.keyIDOperator);
             pubKeyIDs.emplace(proTx.keyIDOwner);
@@ -361,7 +361,7 @@ void CDeterministicMNManager::RebuildLists(int startHeight, int endHeight) {
                 snapshot.SetHeight(h + 1);
                 continue;
             }
-            std::map<uint256, CProviderTXRegisterMNCPtr> proTxMap;
+            std::map<uint256, CProRegTXCPtr> proTxMap;
             for (const auto& p : diff.addedOrUpdatedMns) {
                 proTxMap[p.first] = GetProTx(p.first);
             }
@@ -379,10 +379,10 @@ void CDeterministicMNManager::UpdateSpork15Value() {
     }
 }
 
-CProviderTXRegisterMNCPtr CDeterministicMNManager::GetProTx(const uint256& proTxHash) {
+CProRegTXCPtr CDeterministicMNManager::GetProTx(const uint256& proTxHash) {
     LOCK(cs);
 
-    CProviderTXRegisterMNCPtr proTx;
+    CProRegTXCPtr proTx;
 
     auto it = proTxCache.find(proTxHash);
     if (it != proTxCache.end()) {
@@ -392,9 +392,9 @@ CProviderTXRegisterMNCPtr CDeterministicMNManager::GetProTx(const uint256& proTx
         }
     }
     if (!proTx) {
-        CProviderTXRegisterMN tmpProTx;
+        CProRegTX tmpProTx;
         if (dbTransaction.Read(std::make_pair(DB_MN, proTxHash), tmpProTx)) {
-            proTx = std::make_shared<CProviderTXRegisterMN>(tmpProTx);
+            proTx = std::make_shared<CProRegTX>(tmpProTx);
             proTxCache.emplace(proTxHash, proTx);
         }
     }

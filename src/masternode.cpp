@@ -54,7 +54,7 @@ CMasternode::CMasternode(const CMasternodeBroadcast& mnb) :
     fAllowMixingTx(true)
 {}
 
-CMasternode::CMasternode(const uint256 &proTxHash, const CProviderTXRegisterMN& proTx) :
+CMasternode::CMasternode(const uint256 &proTxHash, const CProRegTX& proTx) :
     masternode_info_t{ MASTERNODE_ENABLED, proTx.nProtocolVersion, GetAdjustedTime(),
                        COutPoint(proTxHash, proTx.nCollateralIndex), proTx.addr, CKeyID(), proTx.keyIDOperator, proTx.keyIDOwner},
     fAllowMixingTx(true)

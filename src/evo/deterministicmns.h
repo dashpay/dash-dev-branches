@@ -64,7 +64,7 @@ typedef std::shared_ptr<const CDeterministicMNState> CDeterministicMNStateCPtr;
 class CDeterministicMN {
 public:
     uint256 proTxHash;
-    CProviderTXRegisterMNCPtr proTx;
+    CProRegTXCPtr proTx;
     CDeterministicMNStateCPtr state;
 };
 typedef std::shared_ptr<CDeterministicMN> CDeterministicMNPtr;
@@ -185,7 +185,7 @@ public:
     std::vector<CDeterministicMNCPtr> GetProjectedMNPayees(int count) const;
 
     void BuildDiff(const CDeterministicMNList& to, CDeterministicMNListDiff& diffRet) const;
-    CDeterministicMNList ApplyDiff(const CDeterministicMNListDiff& diff, const std::map<uint256, CProviderTXRegisterMNCPtr>& proTxMap) const;
+    CDeterministicMNList ApplyDiff(const CDeterministicMNListDiff& diff, const std::map<uint256, CProRegTXCPtr>& proTxMap) const;
 
     void AddOrUpdateMN(const CDeterministicMN& dmn) {
         auto p = std::make_shared<CDeterministicMN>(dmn);
@@ -196,7 +196,7 @@ public:
     void RemoveMN(const uint256& proTxHash) {
         mnMap->erase(proTxHash);
     }
-    void AddOrUpdateMN(const uint256& proTxHash, const CDeterministicMNStateCPtr& state, const CProviderTXRegisterMNCPtr& proTx) {
+    void AddOrUpdateMN(const uint256& proTxHash, const CDeterministicMNStateCPtr& state, const CProRegTXCPtr& proTx) {
         auto dmnPtr = GetMN(proTxHash);
         CDeterministicMN dmn;
         if (dmnPtr) {
@@ -277,7 +277,7 @@ private:
     std::map<int, CDeterministicMNList> lists;
     std::map<int, CDeterministicMNList> listsBackup; // for rollback
 
-    std::map<uint256, std::weak_ptr<const CProviderTXRegisterMN>> proTxCache;
+    std::map<uint256, std::weak_ptr<const CProRegTX>> proTxCache;
 
 public:
     CDeterministicMNManager(size_t nCacheSize, bool fMemory=false, bool fWipe=false);
@@ -303,7 +303,7 @@ public:
     bool ProcessBlock(const CBlock& block, const CBlockIndex* pindex, CValidationState& state);
     bool UndoBlock(const CBlock& block, const CBlockIndex* pindex);
 
-    CProviderTXRegisterMNCPtr GetProTx(const uint256& proTxHash);
+    CProRegTXCPtr GetProTx(const uint256& proTxHash);
 
     CDeterministicMNList GetListAtHeight(int height);
     CDeterministicMNList GetListAtChainTip();

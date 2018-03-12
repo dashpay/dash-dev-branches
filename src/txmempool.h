@@ -580,7 +580,7 @@ public:
     void removeRecursive(const CTransaction &tx, MemPoolRemovalReason reason = MemPoolRemovalReason::UNKNOWN);
     void removeForReorg(const CCoinsViewCache *pcoins, unsigned int nMemPoolHeight, int flags);
     void removeConflicts(const CTransaction &tx);
-    void removeProviderTxConflicts(const CTransaction &tx);
+    void removeProTxConflicts(const CTransaction &tx);
     void removeSubTxTopups(const uint256 &regTxId);
     void removeSubTxConflicts(const CTransaction &tx);
     void removeTsConflicts(const CTransition &ts);

@@ -375,7 +375,7 @@ void CActiveLegacyMasternodeManager::ManageStateRemote()
             LogPrintf("CActiveLegacyMasternodeManager::ManageStateRemote -- %s: %s\n", GetStateString(), strNotCapableReason);
             return;
         }
-        CProviderTXRegisterMNCPtr proTx = deterministicMNManager->GetProTx(infoMn.outpoint.hash);
+        CProRegTXCPtr proTx = deterministicMNManager->GetProTx(infoMn.outpoint.hash);
         if (proTx) {
             if (proTx->keyIDOperator != infoMn.keyIDOperator) {
                 nState = ACTIVE_MASTERNODE_NOT_CAPABLE;

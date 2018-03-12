@@ -439,7 +439,7 @@ bool CTxMemPool::addUnchecked(const uint256& hash, const CTxMemPoolEntry &entry,
     minerPolicyEstimator->processTransaction(entry, validFeeEstimate);
 
     if (tx.nType == TRANSACTION_PROVIDER_REGISTER) {
-        CProviderTXRegisterMN proTx;
+        CProRegTX proTx;
         if (!GetTxPayload(tx, proTx)) {
             assert(false);
         }
@@ -625,7 +625,7 @@ void CTxMemPool::removeUnchecked(txiter it, MemPoolRemovalReason reason)
         mapNextTx.erase(txin.prevout);
 
     if (it->GetTx().nVersion >= 3 && it->GetTx().nType == TRANSACTION_PROVIDER_REGISTER) {
-        CProviderTXRegisterMN proTx;
+        CProRegTX proTx;
         if (!GetTxPayload(it->GetTx(), proTx)) {
             assert(false);
         }
@@ -775,11 +775,11 @@ void CTxMemPool::removeConflicts(const CTransaction &tx)
     }
 }
 
-void CTxMemPool::removeProviderTxConflicts(const CTransaction &tx) {
+void CTxMemPool::removeProTxConflicts(const CTransaction &tx) {
     if (tx.nType != TRANSACTION_PROVIDER_REGISTER)
         return;
 
-    CProviderTXRegisterMN proTx;
+    CProRegTX proTx;
     if (!GetTxPayload(tx, proTx)) {
         assert(false);
     }
@@ -1150,7 +1150,7 @@ bool CTxMemPool::existsProviderTxConflict(const CTransaction &tx) const {
     LOCK(cs);
     if (tx.nVersion < 3 || tx.nType != TRANSACTION_PROVIDER_REGISTER)
         return false;
-    CProviderTXRegisterMN proTx;
+    CProRegTX proTx;
     if (!GetTxPayload(tx, proTx))
         assert(false);
     return mapProTxRegisterAddresses.count(proTx.addr) || mapProTxRegisterPubKeyIDs.count(proTx.keyIDOperator) || mapProTxRegisterPubKeyIDs.count(proTx.keyIDOwner);

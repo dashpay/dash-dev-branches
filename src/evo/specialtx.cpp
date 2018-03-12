@@ -27,7 +27,7 @@ bool CheckSpecialTx(const CTransaction& tx, const CBlockIndex* pindex, CValidati
 
     switch (tx.nType) {
         case TRANSACTION_PROVIDER_REGISTER:
-            return CheckProviderTxRegister(tx, pindex, state);
+            return CheckProRegTx(tx, pindex, state);
     }
 
     return state.DoS(100, false, REJECT_INVALID, "bad-tx-type");

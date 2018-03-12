@@ -135,7 +135,7 @@ void TxToJSON(const CTransaction& tx, const uint256 hashBlock, UniValue& entry)
     }
 
     if (tx.nVersion >= 3 && tx.nType == TRANSACTION_PROVIDER_REGISTER) {
-        CProviderTXRegisterMN proTx;
+        CProRegTX proTx;
         if (GetTxPayload(tx, proTx)) {
             UniValue proTxObj;
             proTx.ToJson(proTxObj);

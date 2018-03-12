@@ -504,10 +504,10 @@ UniValue masternode(const JSONRPCRequest& request)
                 fromMempool = true;
                 if (tx->nVersion < 3 || tx->nType != TRANSACTION_PROVIDER_REGISTER)
                     throw JSONRPCError(RPC_INVALID_PARAMETER, "TX is not a ProTx");
-                CProviderTXRegisterMN tmpProTx;
+                CProRegTX tmpProTx;
                 if (!GetTxPayload(*tx, tmpProTx))
                     throw JSONRPCError(RPC_INVALID_PARAMETER, "TX is not a valid ProTx");
-                proTx = std::make_shared<CProviderTXRegisterMN>(tmpProTx);
+                proTx = std::make_shared<CProRegTX>(tmpProTx);
             } else {
                 throw JSONRPCError(RPC_INVALID_PARAMETER, "ProTx not found");
             }
