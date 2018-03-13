@@ -18,7 +18,8 @@ bool ProcessSpecialTxsInBlock(const CBlock& block, const CBlockIndex* pindex, CV
 bool UndoSpecialTxsInBlock(const CBlock& block, const CBlockIndex* pindex);
 
 template <typename T>
-inline bool GetTxPayload(const std::vector<unsigned char>& payload, T& obj) {
+inline bool GetTxPayload(const std::vector<unsigned char>& payload, T& obj)
+{
     CDataStream ds(payload, SER_NETWORK, CLIENT_VERSION);
     try {
         ds >> obj;
@@ -30,11 +31,13 @@ inline bool GetTxPayload(const std::vector<unsigned char>& payload, T& obj) {
     return true;
 }
 template <typename T>
-inline bool GetTxPayload(const CMutableTransaction& tx, T& obj) {
+inline bool GetTxPayload(const CMutableTransaction& tx, T& obj)
+{
     return GetTxPayload(tx.extraPayload, obj);
 }
 template <typename T>
-inline bool GetTxPayload(const CTransaction& tx, T& obj) {
+inline bool GetTxPayload(const CTransaction& tx, T& obj)
+{
     return GetTxPayload(tx.extraPayload, obj);
 }
 

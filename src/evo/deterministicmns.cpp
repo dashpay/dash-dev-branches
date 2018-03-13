@@ -21,7 +21,8 @@ static const char DB_LIST_DIFF = 'D';
 
 CDeterministicMNManager* deterministicMNManager;
 
-std::string CDeterministicMNState::ToString() const {
+std::string CDeterministicMNState::ToString() const
+{
     CTxDestination dest;
     std::string payee = "unknown";
     if (ExtractDestination(scriptPayout, dest)) {
@@ -34,7 +35,8 @@ std::string CDeterministicMNState::ToString() const {
                      keyIDOperator.ToString(), keyIDOwner.ToString(), addr.ToStringIPPort(false), nProtocolVersion, payee);
 }
 
-void CDeterministicMNState::ToJson(UniValue& obj) const {
+void CDeterministicMNState::ToJson(UniValue& obj) const
+{
     obj.clear();
     obj.setObject();
     obj.push_back(Pair("registeredHeight", registeredHeight));
@@ -61,11 +63,13 @@ void CDeterministicMNState::ToJson(UniValue& obj) const {
     obj.push_back(Pair("payout", payoutObj));
 }
 
-std::string CDeterministicMN::ToString() const {
+std::string CDeterministicMN::ToString() const
+{
     return strprintf("CDeterministicMN(proTxHash=%s, nCollateralIndex=%d, state=%s", proTxHash.ToString(), nCollateralIndex, state->ToString());
 }
 
-void CDeterministicMN::ToJson(UniValue& obj) const {
+void CDeterministicMN::ToJson(UniValue& obj) const
+{
     obj.clear();
     obj.setObject();
 
@@ -77,7 +81,8 @@ void CDeterministicMN::ToJson(UniValue& obj) const {
     obj.push_back(Pair("state", stateObj));
 }
 
-bool CDeterministicMNList::IsMNValid(const uint256& proTxHash) const {
+bool CDeterministicMNList::IsMNValid(const uint256& proTxHash) const
+{
     auto it = mnMap->find(proTxHash);
     if (it == mnMap->end()) {
         return false;
@@ -85,7 +90,8 @@ bool CDeterministicMNList::IsMNValid(const uint256& proTxHash) const {
     return IsMNValid(it->second);
 }
 
-bool CDeterministicMNList::IsMNMature(const uint256& proTxHash) const {
+bool CDeterministicMNList::IsMNMature(const uint256& proTxHash) const
+{
     auto it = mnMap->find(proTxHash);
     if (it == mnMap->end()) {
         return false;
@@ -93,7 +99,8 @@ bool CDeterministicMNList::IsMNMature(const uint256& proTxHash) const {
     return IsMNMature(it->second);
 }
 
-bool CDeterministicMNList::IsMNPoSeBanned(const uint256& proTxHash) const {
+bool CDeterministicMNList::IsMNPoSeBanned(const uint256& proTxHash) const
+{
     auto it = mnMap->find(proTxHash);
     if (it == mnMap->end()) {
         return false;
@@ -101,23 +108,27 @@ bool CDeterministicMNList::IsMNPoSeBanned(const uint256& proTxHash) const {
     return IsMNPoSeBanned(it->second);
 }
 
-bool CDeterministicMNList::IsMNValid(const CDeterministicMNCPtr& dmn) const {
+bool CDeterministicMNList::IsMNValid(const CDeterministicMNCPtr& dmn) const
+{
     return IsMNMature(dmn) && !IsMNPoSeBanned(dmn);
 }
 
-bool CDeterministicMNList::IsMNMature(const CDeterministicMNCPtr& dmn) const {
+bool CDeterministicMNList::IsMNMature(const CDeterministicMNCPtr& dmn) const
+{
     assert(dmn);
     const CDeterministicMNState& state = *dmn->state;
     return height >= state.maturityHeight;
 }
 
-bool CDeterministicMNList::IsMNPoSeBanned(const CDeterministicMNCPtr& dmn) const {
+bool CDeterministicMNList::IsMNPoSeBanned(const CDeterministicMNCPtr& dmn) const
+{
     assert(dmn);
     const CDeterministicMNState& state = *dmn->state;
     return state.PoSeBanHeight != -1;
 }
 
-CDeterministicMNCPtr CDeterministicMNList::GetMN(const uint256& proTxHash) const {
+CDeterministicMNCPtr CDeterministicMNList::GetMN(const uint256& proTxHash) const
+{
     auto it = mnMap->find(proTxHash);
     if (it == mnMap->end()) {
         return nullptr;
@@ -125,7 +136,8 @@ CDeterministicMNCPtr CDeterministicMNList::GetMN(const uint256& proTxHash) const
     return it->second;
 }
 
-CDeterministicMNCPtr CDeterministicMNList::GetValidMN(const uint256& proTxHash) const {
+CDeterministicMNCPtr CDeterministicMNList::GetValidMN(const uint256& proTxHash) const
+{
     auto dmn = GetMN(proTxHash);
     if (dmn && !IsMNValid(dmn)) {
         return nullptr;
@@ -133,7 +145,8 @@ CDeterministicMNCPtr CDeterministicMNList::GetValidMN(const uint256& proTxHash) 
     return dmn;
 }
 
-CDeterministicMNCPtr CDeterministicMNList::GetMNByOperatorKey(const CKeyID& keyID) {
+CDeterministicMNCPtr CDeterministicMNList::GetMNByOperatorKey(const CKeyID& keyID)
+{
     for (const auto& p : *mnMap) {
         if (p.second->state->keyIDOperator == keyID) {
             return p.second;
@@ -142,7 +155,8 @@ CDeterministicMNCPtr CDeterministicMNList::GetMNByOperatorKey(const CKeyID& keyI
     return nullptr;
 }
 
-static bool CompareByLastPaid(const CDeterministicMN &_a, const CDeterministicMN &_b) {
+static bool CompareByLastPaid(const CDeterministicMN &_a, const CDeterministicMN &_b)
+{
     const CDeterministicMNState& as = *_a.state;
     const CDeterministicMNState& bs = *_b.state;
     if (as.lastPaidHeight == bs.lastPaidHeight) {
@@ -154,11 +168,13 @@ static bool CompareByLastPaid(const CDeterministicMN &_a, const CDeterministicMN
         return as.lastPaidHeight < bs.lastPaidHeight;
     }
 }
-static bool CompareByLastPaid(const CDeterministicMNCPtr &_a, const CDeterministicMNCPtr &_b) {
+static bool CompareByLastPaid(const CDeterministicMNCPtr &_a, const CDeterministicMNCPtr &_b)
+{
     return CompareByLastPaid(*_a, *_b);
 }
 
-CDeterministicMNCPtr CDeterministicMNList::GetMNPayee() const {
+CDeterministicMNCPtr CDeterministicMNList::GetMNPayee() const
+{
     if (mnMap->empty())
         return nullptr;
 
@@ -171,7 +187,8 @@ CDeterministicMNCPtr CDeterministicMNList::GetMNPayee() const {
     return best;
 }
 
-std::vector<CDeterministicMNCPtr> CDeterministicMNList::GetProjectedMNPayees(int count) const {
+std::vector<CDeterministicMNCPtr> CDeterministicMNList::GetProjectedMNPayees(int count) const
+{
     std::vector<CDeterministicMNCPtr> result;
     result.reserve(count);
 
@@ -191,7 +208,8 @@ std::vector<CDeterministicMNCPtr> CDeterministicMNList::GetProjectedMNPayees(int
     return result;
 }
 
-void CDeterministicMNList::BuildDiff(const CDeterministicMNList& to, CDeterministicMNListDiff& diffRet) const {
+void CDeterministicMNList::BuildDiff(const CDeterministicMNList& to, CDeterministicMNListDiff& diffRet) const
+{
     diffRet.height = to.height;
 
     for (const auto& p : *to.mnMap) {
@@ -210,7 +228,8 @@ void CDeterministicMNList::BuildDiff(const CDeterministicMNList& to, CDeterminis
     }
 }
 
-CDeterministicMNList CDeterministicMNList::ApplyDiff(const CDeterministicMNListDiff& diff) const {
+CDeterministicMNList CDeterministicMNList::ApplyDiff(const CDeterministicMNListDiff& diff) const
+{
     assert(diff.height == height + 1);
 
     CDeterministicMNList result = Clone();
@@ -232,10 +251,12 @@ CDeterministicMNList CDeterministicMNList::ApplyDiff(const CDeterministicMNListD
 
 CDeterministicMNManager::CDeterministicMNManager(size_t nCacheSize, bool fMemory, bool fWipe)
         : db(GetDataDir() / "masternodes", nCacheSize, fMemory, fWipe),
-          dbTransaction(db) {
+          dbTransaction(db)
+{
 }
 
-void CDeterministicMNManager::Init() {
+void CDeterministicMNManager::Init()
+{
     LOCK(cs);
     if (!dbTransaction.Read(DB_MANAGER_STATE, state)) {
         state = CDeterministicMNManagerState();
@@ -246,7 +267,8 @@ void CDeterministicMNManager::Init() {
     }
 }
 
-bool CDeterministicMNManager::ProcessBlock(const CBlock& block, const CBlockIndex* pindex, CValidationState& _state) {
+bool CDeterministicMNManager::ProcessBlock(const CBlock& block, const CBlockIndex* pindex, CValidationState& _state)
+{
     LOCK(cs);
 
     int height = pindex->nHeight;
@@ -368,7 +390,8 @@ bool CDeterministicMNManager::ProcessBlock(const CBlock& block, const CBlockInde
     return true;
 }
 
-bool CDeterministicMNManager::UndoBlock(const CBlock& block, const CBlockIndex* pindex) {
+bool CDeterministicMNManager::UndoBlock(const CBlock& block, const CBlockIndex* pindex)
+{
     LOCK(cs);
 
     int height = pindex->nHeight;
@@ -394,7 +417,8 @@ bool CDeterministicMNManager::UndoBlock(const CBlock& block, const CBlockIndex* 
     return true;
 }
 
-void CDeterministicMNManager::RebuildLists(int startHeight, int endHeight) {
+void CDeterministicMNManager::RebuildLists(int startHeight, int endHeight)
+{
     AssertLockHeld(cs);
 
     CDeterministicMNList snapshot;
@@ -427,7 +451,8 @@ void CDeterministicMNManager::RebuildLists(int startHeight, int endHeight) {
     }
 }
 
-void CDeterministicMNManager::UpdateSpork15Value() {
+void CDeterministicMNManager::UpdateSpork15Value()
+{
     // only update cached spork15 value when it was not set before. This is needed because spork values are very unreliable when starting the node
     int64_t newSpork15Value = sporkManager.GetSporkValue(SPORK_15_DETERMINISTIC_MNS_ENABLED);
     if (newSpork15Value != state.spork15Value && newSpork15Value != SPORK_15_DETERMINISTIC_MNS_DEFAULT) {
@@ -436,7 +461,8 @@ void CDeterministicMNManager::UpdateSpork15Value() {
     }
 }
 
-CProRegTXCPtr CDeterministicMNManager::GetProTx(const uint256& proTxHash) {
+CProRegTXCPtr CDeterministicMNManager::GetProTx(const uint256& proTxHash)
+{
     LOCK(cs);
 
     CProRegTXCPtr proTx;
@@ -459,7 +485,8 @@ CProRegTXCPtr CDeterministicMNManager::GetProTx(const uint256& proTxHash) {
     return proTx;
 }
 
-CDeterministicMNList CDeterministicMNManager::GetListAtHeight(int height) {
+CDeterministicMNList CDeterministicMNManager::GetListAtHeight(int height)
+{
     LOCK(cs);
 
     if (height < state.firstMNHeight || state.firstMNHeight < 0 || height > state.curHeight) {
@@ -478,29 +505,34 @@ CDeterministicMNList CDeterministicMNManager::GetListAtHeight(int height) {
     return it->second;
 }
 
-CDeterministicMNList CDeterministicMNManager::GetListAtChainTip() {
+CDeterministicMNList CDeterministicMNManager::GetListAtChainTip()
+{
     LOCK(cs);
     return GetListAtHeight(state.curHeight);
 }
 
-CDeterministicMNCPtr CDeterministicMNManager::GetMN(int height, const uint256& proTxHash) {
+CDeterministicMNCPtr CDeterministicMNManager::GetMN(int height, const uint256& proTxHash)
+{
     LOCK(cs);
     auto mnList = GetListAtHeight(height);
     return mnList.GetMN(proTxHash);
 }
 
-bool CDeterministicMNManager::HasValidMNAtHeight(int height, const uint256& proTxHash) {
+bool CDeterministicMNManager::HasValidMNAtHeight(int height, const uint256& proTxHash)
+{
     LOCK(cs);
     auto mnList = GetListAtHeight(height);
     return mnList.IsMNValid(proTxHash);
 }
 
-bool CDeterministicMNManager::HasValidMNAtChainTip(const uint256& proTxHash) {
+bool CDeterministicMNManager::HasValidMNAtChainTip(const uint256& proTxHash)
+{
     LOCK(cs);
     return HasValidMNAtHeight(state.curHeight, proTxHash);
 }
 
-bool CDeterministicMNManager::IsDeterministicMNsSporkActive(int height) {
+bool CDeterministicMNManager::IsDeterministicMNsSporkActive(int height)
+{
     LOCK(cs);
 
     int64_t spork15Value = sporkManager.GetSporkValue(SPORK_15_DETERMINISTIC_MNS_ENABLED);

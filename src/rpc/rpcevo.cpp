@@ -511,7 +511,8 @@ UniValue gettransition(const JSONRPCRequest &request) {
 }
 
 #ifdef ENABLE_WALLET
-void protx_register_help() {
+void protx_register_help()
+{
     throw std::runtime_error(
             "protx register \"collateralAddress\" collateralAmount \"ipAndPort\" protocolVersion \"masternodeKey\" \"payoutAddress\"\n"
             "\nCreates and sends a ProTx to the network. The resulting transaction will move the specified amount\n"
@@ -541,7 +542,8 @@ void protx_register_help() {
     );
 }
 
-UniValue protx_register(const JSONRPCRequest& request) {
+UniValue protx_register(const JSONRPCRequest& request)
+{
     if (request.fHelp || request.params.size() != 8)
         protx_register_help();
 
@@ -646,7 +648,8 @@ UniValue protx_register(const JSONRPCRequest& request) {
     return sendrawtransaction(sendRequest);
 }
 
-void protx_list_help() {
+void protx_list_help()
+{
     throw std::runtime_error(
             "protx list (\"type\")\n"
             "\nLists all ProTxs in your wallet or on-chain, depending on the given type. If \"type\" is not\n"
@@ -664,7 +667,8 @@ void protx_list_help() {
     );
 }
 
-UniValue BuildDMNListEntry(const uint256& hash, const CDeterministicMNCPtr& dmn, bool detailed) {
+UniValue BuildDMNListEntry(const uint256& hash, const CDeterministicMNCPtr& dmn, bool detailed)
+{
     if (!detailed)
         return hash.ToString();
 
@@ -683,7 +687,8 @@ UniValue BuildDMNListEntry(const uint256& hash, const CDeterministicMNCPtr& dmn,
     return o;
 }
 
-UniValue protx_list(const JSONRPCRequest& request) {
+UniValue protx_list(const JSONRPCRequest& request)
+{
     if (request.fHelp)
         protx_list_help();
 
@@ -742,7 +747,8 @@ UniValue protx_list(const JSONRPCRequest& request) {
     return ret;
 }
 
-UniValue protx(const JSONRPCRequest& request) {
+UniValue protx(const JSONRPCRequest& request)
+{
     if (request.params.empty()) {
         throw std::runtime_error(
                 "protx \"command\" ...\n"

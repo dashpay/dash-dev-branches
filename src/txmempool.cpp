@@ -787,7 +787,8 @@ void CTxMemPool::removeConflicts(const CTransaction &tx)
     }
 }
 
-void CTxMemPool::removeProTxConflicts(const CTransaction &tx) {
+void CTxMemPool::removeProTxConflicts(const CTransaction &tx)
+{
     if (tx.nType == TRANSACTION_PROVIDER_REGISTER) {
         CProRegTX proTx;
         if (!GetTxPayload(tx, proTx)) {

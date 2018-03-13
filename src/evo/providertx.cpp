@@ -18,7 +18,8 @@
 #include "base58.h"
 
 template <typename ProTx>
-static bool CheckService(const ProTx& proTx, const CBlockIndex* pindex, CValidationState& state) {
+static bool CheckService(const ProTx& proTx, const CBlockIndex* pindex, CValidationState& state)
+{
     if (proTx.nProtocolVersion < MIN_EVO_PROTO_VERSION || proTx.nProtocolVersion > MAX_PROTX_PROTO_VERSION)
         return state.DoS(10, false, REJECT_INVALID, "bad-protx-proto-version");
 
@@ -38,7 +39,8 @@ static bool CheckService(const ProTx& proTx, const CBlockIndex* pindex, CValidat
 }
 
 template <typename ProTx>
-static bool CheckInputsHashAndSig(const CTransaction &tx, const ProTx& proTx, const CKeyID &keyID, CValidationState& state) {
+static bool CheckInputsHashAndSig(const CTransaction &tx, const ProTx& proTx, const CKeyID &keyID, CValidationState& state)
+{
     uint256 inputsHash = CalcTxInputsHash(tx);
     if (inputsHash != proTx.inputsHash)
         return state.DoS(100, false, REJECT_INVALID, "bad-protx-inputs-hash");
@@ -50,7 +52,8 @@ static bool CheckInputsHashAndSig(const CTransaction &tx, const ProTx& proTx, co
     return true;
 }
 
-bool CheckProRegTx(const CTransaction& tx, const CBlockIndex* pindex, CValidationState& state) {
+bool CheckProRegTx(const CTransaction& tx, const CBlockIndex* pindex, CValidationState& state)
+{
     AssertLockHeld(cs_main);
 
     CProRegTX ptx;
@@ -112,7 +115,8 @@ bool CheckProRegTx(const CTransaction& tx, const CBlockIndex* pindex, CValidatio
     return true;
 }
 
-bool CheckProUpServTx(const CTransaction& tx, const CBlockIndex* pindex, CValidationState& state) {
+bool CheckProUpServTx(const CTransaction& tx, const CBlockIndex* pindex, CValidationState& state)
+{
     AssertLockHeld(cs_main);
 
     CProUpServTX ptx;
@@ -137,7 +141,8 @@ bool CheckProUpServTx(const CTransaction& tx, const CBlockIndex* pindex, CValida
     return true;
 }
 
-std::string CProRegTX::ToString() const {
+std::string CProRegTX::ToString() const
+{
     CTxDestination dest;
     std::string payee = "unknown";
     if (ExtractDestination(scriptPayout, dest)) {
@@ -148,7 +153,8 @@ std::string CProRegTX::ToString() const {
         nVersion, nProtocolVersion, nCollateralIndex, addr.ToString(), keyIDOperator.ToString(), keyIDOwner.ToString(), payee);
 }
 
-void CProRegTX::ToJson(UniValue& obj) const {
+void CProRegTX::ToJson(UniValue& obj) const
+{
     obj.clear();
     obj.setObject();
     obj.push_back(Pair("version", nVersion));
@@ -173,12 +179,14 @@ void CProRegTX::ToJson(UniValue& obj) const {
     obj.push_back(Pair("inputsHash", inputsHash.ToString()));
 }
 
-std::string CProUpServTX::ToString() const {
+std::string CProUpServTX::ToString() const
+{
     return strprintf("CProUpServTX(nVersion=%d, proTxHash=%s, nProtocolVersion=%d, addr=%s)",
                      nVersion, proTxHash.ToString(), nProtocolVersion, addr.ToString());
 }
 
-void CProUpServTX::ToJson(UniValue& obj) const {
+void CProUpServTX::ToJson(UniValue& obj) const
+{
     obj.clear();
     obj.setObject();
     obj.push_back(Pair("version", nVersion));
@@ -187,11 +195,13 @@ void CProUpServTX::ToJson(UniValue& obj) const {
     obj.push_back(Pair("service", addr.ToString(false)));
 }
 
-bool IsProTxCollateral(const CTransaction& tx, uint32_t n) {
+bool IsProTxCollateral(const CTransaction& tx, uint32_t n)
+{
     return GetProTxCollateralIndex(tx) == n;
 }
 
-uint32_t GetProTxCollateralIndex(const CTransaction& tx) {
+uint32_t GetProTxCollateralIndex(const CTransaction& tx)
+{
     if (tx.nVersion < 3 || tx.nType != TRANSACTION_PROVIDER_REGISTER)
         return (uint32_t) - 1;
     CProRegTX proTx;

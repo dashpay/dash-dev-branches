@@ -14,7 +14,8 @@
 class CBlockIndex;
 class UniValue;
 
-class CProRegTX {
+class CProRegTX
+{
 public:
     static const int CURRENT_VERSION = 1;
 
@@ -33,7 +34,8 @@ public:
     ADD_SERIALIZE_METHODS;
 
     template <typename Stream, typename Operation>
-    inline void SerializationOp(Stream& s, Operation ser_action) {
+    inline void SerializationOp(Stream& s, Operation ser_action)
+    {
         READWRITE(nVersion);
         READWRITE(nProtocolVersion);
         READWRITE(nCollateralIndex);
@@ -53,7 +55,8 @@ public:
 typedef std::shared_ptr<CProRegTX> CProRegTXPtr;
 typedef std::shared_ptr<const CProRegTX> CProRegTXCPtr;
 
-class CProUpServTX {
+class CProUpServTX
+{
 public:
     static const int CURRENT_VERSION = 1;
 
@@ -69,7 +72,8 @@ public:
     ADD_SERIALIZE_METHODS;
 
     template <typename Stream, typename Operation>
-    inline void SerializationOp(Stream& s, Operation ser_action) {
+    inline void SerializationOp(Stream& s, Operation ser_action)
+    {
         READWRITE(nVersion);
         READWRITE(proTxHash);
         READWRITE(nProtocolVersion);

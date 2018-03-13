@@ -19,7 +19,8 @@ class CBlock;
 class CBlockIndex;
 class CValidationState;
 
-class CDeterministicMNState {
+class CDeterministicMNState
+{
 public:
     int registeredHeight{-1};
     int lastPaidHeight{0};
@@ -36,7 +37,8 @@ public:
 
 public:
     CDeterministicMNState() {}
-    CDeterministicMNState(const CProRegTX& proTx) {
+    CDeterministicMNState(const CProRegTX& proTx)
+    {
         keyIDOperator = proTx.keyIDOperator;
         keyIDOwner = proTx.keyIDOwner;
         addr = proTx.addr;
@@ -49,7 +51,8 @@ public:
     ADD_SERIALIZE_METHODS;
 
     template <typename Stream, typename Operation>
-    inline void SerializationOp(Stream& s, Operation ser_action) {
+    inline void SerializationOp(Stream& s, Operation ser_action)
+    {
         READWRITE(registeredHeight);
         READWRITE(lastPaidHeight);
         READWRITE(maturityHeight);
@@ -63,7 +66,8 @@ public:
         READWRITE(*(CScriptBase*)(&scriptPayout));
     }
 
-    bool operator==(const CDeterministicMNState& rhs) const {
+    bool operator==(const CDeterministicMNState& rhs) const
+    {
         return registeredHeight == rhs.registeredHeight &&
                lastPaidHeight == rhs.lastPaidHeight &&
                maturityHeight == rhs.maturityHeight &&
@@ -77,7 +81,8 @@ public:
                scriptPayout == rhs.scriptPayout;
     }
 
-    bool operator!=(const CDeterministicMNState& rhs) const {
+    bool operator!=(const CDeterministicMNState& rhs) const
+    {
         return !(rhs == *this);
     }
 
@@ -88,10 +93,12 @@ public:
 typedef std::shared_ptr<CDeterministicMNState> CDeterministicMNStatePtr;
 typedef std::shared_ptr<const CDeterministicMNState> CDeterministicMNStateCPtr;
 
-class CDeterministicMN {
+class CDeterministicMN
+{
 public:
     CDeterministicMN() {}
-    CDeterministicMN(const uint256& _proTxHash, const CProRegTXCPtr& _proTx) {
+    CDeterministicMN(const uint256& _proTxHash, const CProRegTXCPtr& _proTx)
+    {
         proTxHash = _proTxHash;
         nCollateralIndex = _proTx->nCollateralIndex;
         state = std::make_shared<CDeterministicMNState>(*_proTx);
@@ -122,7 +129,8 @@ typedef std::shared_ptr<const CDeterministicMN> CDeterministicMNCPtr;
 
 class CDeterministicMNListDiff;
 
-class CDeterministicMNList {
+class CDeterministicMNList
+{
 public:
     typedef std::map<uint256, CDeterministicMNCPtr> MnMap;
     typedef std::shared_ptr<MnMap> MnMapPtr;
@@ -138,7 +146,8 @@ public:
             mnMap(_mnMap)
     {}
 
-    CDeterministicMNList Clone() const {
+    CDeterministicMNList Clone() const
+    {
         MnMapPtr newMnMap = std::make_shared<MnMap>(mnMap->begin(), mnMap->end());
         return CDeterministicMNList(height, newMnMap);
     }
@@ -154,29 +163,34 @@ public:
 
 public:
 
-    size_t size() const {
+    size_t size() const
+    {
         return mnMap->size();
     }
 
     typedef boost::any_range<const CDeterministicMNCPtr&, boost::forward_traversal_tag> range_type;
 
-    range_type all_range() const {
+    range_type all_range() const
+    {
         return boost::adaptors::transform(*mnMap, [] (const MnMap::value_type& p) -> const CDeterministicMNCPtr& {
             return p.second;
         });
     }
 
-    range_type valid_range() const {
+    range_type valid_range() const
+    {
         return boost::adaptors::filter(all_range(), [&] (const CDeterministicMNCPtr& dmn) -> bool {
             return IsMNValid(dmn);
         });
     }
 
-    size_t all_count() const {
+    size_t all_count() const
+    {
         return mnMap->size();
     }
 
-    size_t valid_count() const {
+    size_t valid_count() const
+    {
         size_t c = 0;
         for (const auto& p : *mnMap) {
             if (IsMNValid(p.second)) {
@@ -187,13 +201,16 @@ public:
     }
 
 public:
-    int GetHeight() const {
+    int GetHeight() const
+    {
         return height;
     }
-    void SetHeight(int _height) {
+    void SetHeight(int _height)
+    {
         height = _height;
     }
-    MnMapPtr GetMap() {
+    MnMapPtr GetMap()
+    {
         return mnMap;
     }
 
@@ -220,17 +237,20 @@ public:
     void BuildDiff(const CDeterministicMNList& to, CDeterministicMNListDiff& diffRet) const;
     CDeterministicMNList ApplyDiff(const CDeterministicMNListDiff& diff) const;
 
-    void AddMN(const CDeterministicMNCPtr &dmn) {
+    void AddMN(const CDeterministicMNCPtr &dmn)
+    {
         mnMap->emplace(dmn->proTxHash, dmn);
     }
-    void UpdateMN(const uint256 &proTxHash, const CDeterministicMNStateCPtr &state) {
+    void UpdateMN(const uint256 &proTxHash, const CDeterministicMNStateCPtr &state)
+    {
         auto it = mnMap->find(proTxHash);
         assert(it != mnMap->end());
         auto dmn = std::make_shared<CDeterministicMN>(*it->second);
         dmn->state = state;
         it->second = dmn;
     }
-    void RemoveMN(const uint256& proTxHash) {
+    void RemoveMN(const uint256& proTxHash)
+    {
         mnMap->erase(proTxHash);
     }
 
@@ -240,7 +260,8 @@ private:
     bool IsMNPoSeBanned(const CDeterministicMNCPtr& dmn) const;
 };
 
-class CDeterministicMNListDiff {
+class CDeterministicMNListDiff
+{
 public:
     int height;
     std::map<uint256, CDeterministicMNCPtr> addedMNs;
@@ -251,7 +272,8 @@ public:
     ADD_SERIALIZE_METHODS;
 
     template <typename Stream, typename Operation>
-    inline void SerializationOp(Stream& s, Operation ser_action) {
+    inline void SerializationOp(Stream& s, Operation ser_action)
+    {
         READWRITE(height);
         READWRITE(addedMNs);
         READWRITE(updatedMNs);
@@ -259,12 +281,14 @@ public:
     }
 
 public:
-    bool HasChanges() const {
+    bool HasChanges() const
+    {
         return !addedMNs.empty() || !updatedMNs.empty() || !removedMns.empty();
     }
 };
 
-class CDeterministicMNManagerState {
+class CDeterministicMNManagerState
+{
 public:
     int firstMNHeight{-1};
     int curHeight{0};
@@ -274,7 +298,8 @@ public:
     ADD_SERIALIZE_METHODS;
 
     template <typename Stream, typename Operation>
-    inline void SerializationOp(Stream& s, Operation ser_action) {
+    inline void SerializationOp(Stream& s, Operation ser_action)
+    {
         READWRITE(firstMNHeight);
         READWRITE(curHeight);
         READWRITE(curBlockHash);
@@ -282,7 +307,8 @@ public:
     }
 };
 
-class CDeterministicMNManager {
+class CDeterministicMNManager
+{
     static const int SNAPSHOT_LIST_PERIOD = 576; // once per day
     static const int LISTS_CACHE_SIZE = 576;
 
@@ -305,7 +331,8 @@ private:
 public:
     CDeterministicMNManager(size_t nCacheSize, bool fMemory=false, bool fWipe=false);
 
-    std::unique_ptr<CScopedDBTransaction> BeginTransaction() {
+    std::unique_ptr<CScopedDBTransaction> BeginTransaction()
+    {
         LOCK(cs);
         stateBackup = state;
         listsBackup = lists;
