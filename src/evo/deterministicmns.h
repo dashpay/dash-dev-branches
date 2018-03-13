@@ -29,8 +29,9 @@ public:
     int PoSeRevivedHeight{-1};
     int PoSeBanHeight{-1};
 
-    CKeyID keyIDOperator;
     CKeyID keyIDOwner;
+    CKeyID keyIDOperator;
+    CKeyID keyIDVoting;
     CService addr;
     int32_t nProtocolVersion;
     CScript scriptPayout;
@@ -39,8 +40,9 @@ public:
     CDeterministicMNState() {}
     CDeterministicMNState(const CProRegTX& proTx)
     {
-        keyIDOperator = proTx.keyIDOperator;
         keyIDOwner = proTx.keyIDOwner;
+        keyIDOperator = proTx.keyIDOperator;
+        keyIDVoting = proTx.keyIDVoting;
         addr = proTx.addr;
         nProtocolVersion = proTx.nProtocolVersion;
         scriptPayout = proTx.scriptPayout;
@@ -59,8 +61,9 @@ public:
         READWRITE(PoSePenality);
         READWRITE(PoSeRevivedHeight);
         READWRITE(PoSeBanHeight);
-        READWRITE(keyIDOperator);
         READWRITE(keyIDOwner);
+        READWRITE(keyIDOperator);
+        READWRITE(keyIDVoting);
         READWRITE(addr);
         READWRITE(nProtocolVersion);
         READWRITE(*(CScriptBase*)(&scriptPayout));
@@ -74,8 +77,9 @@ public:
                PoSePenality == rhs.PoSePenality &&
                PoSeRevivedHeight == rhs.PoSeRevivedHeight &&
                PoSeBanHeight == rhs.PoSeBanHeight &&
-               keyIDOperator == rhs.keyIDOperator &&
                keyIDOwner == rhs.keyIDOwner &&
+               keyIDOperator == rhs.keyIDOperator &&
+               keyIDVoting == rhs.keyIDVoting &&
                addr == rhs.addr &&
                nProtocolVersion == rhs.nProtocolVersion &&
                scriptPayout == rhs.scriptPayout;

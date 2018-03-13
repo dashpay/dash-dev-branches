@@ -369,10 +369,10 @@ UniValue gobject(const JSONRPCRequest& request)
         }
 
         if (deterministicMNManager->IsDeterministicMNsSporkActive()) {
-            if (govObjType == GOVERNANCE_OBJECT_PROPOSAL && mn.keyIDOwner != activeMasternode.keyIDOperator) {
+            if (govObjType == GOVERNANCE_OBJECT_PROPOSAL && mn.keyIDVoting != activeMasternode.keyIDOperator) {
                 nFailed++;
                 statusObj.push_back(Pair("result", "failed"));
-                statusObj.push_back(Pair("errorMessage", "Can't vote on proposal when operator key does not match owner key"));
+                statusObj.push_back(Pair("errorMessage", "Can't vote on proposal when operator key does not match voting key"));
                 resultsObj.push_back(Pair("dash.conf", statusObj));
                 returnObj.push_back(Pair("overall", strprintf("Voted successfully %d time(s) and failed %d time(s).", nSuccessful, nFailed)));
                 returnObj.push_back(Pair("detail", resultsObj));
@@ -485,7 +485,7 @@ UniValue gobject(const JSONRPCRequest& request)
                 }
 
                 CKey ownerKey;
-                if (pwalletMain->GetKey(dmn->state->keyIDOwner, ownerKey)) {
+                if (pwalletMain->GetKey(dmn->state->keyIDVoting, ownerKey)) {
                     CBitcoinSecret secret(ownerKey);
                     CMasternodeConfig::CMasternodeEntry mne(dmn->proTxHash.ToString(), dmn->state->addr.ToStringIPPort(false), secret.ToString(), dmn->proTxHash.ToString(), itostr(dmn->nCollateralIndex));
                     mnEntries.push_back(mne);
@@ -539,10 +539,10 @@ UniValue gobject(const JSONRPCRequest& request)
             }
 
             if (deterministicMNManager->IsDeterministicMNsSporkActive()) {
-                if (govObjType == GOVERNANCE_OBJECT_PROPOSAL && mn.keyIDOwner != pubKeyOperator.GetID()) {
+                if (govObjType == GOVERNANCE_OBJECT_PROPOSAL && mn.keyIDVoting != pubKeyOperator.GetID()) {
                     nFailed++;
                     statusObj.push_back(Pair("result", "failed"));
-                    statusObj.push_back(Pair("errorMessage", "Can't vote on proposal when operator key does not match owner key"));
+                    statusObj.push_back(Pair("errorMessage", "Can't vote on proposal when key does not match voting key"));
                     resultsObj.push_back(Pair(mne.getAlias(), statusObj));
                     continue;
                 }

@@ -778,12 +778,15 @@ UniValue masternodelist(const JSONRPCRequest& request)
                 if (strFilter !="" && strFilter != strprintf("%d", mn.nProtocolVersion) &&
                     strOutpoint.find(strFilter) == std::string::npos) continue;
                 obj.push_back(Pair(strOutpoint, (int64_t)mn.nProtocolVersion));
-            } else if (strMode == "keyIDOperator") {
-                if (strFilter !="" && strOutpoint.find(strFilter) == std::string::npos) continue;
-                obj.push_back(Pair(strOutpoint, HexStr(mn.keyIDOperator)));
             } else if (strMode == "keyIDOwner") {
                 if (strFilter !="" && strOutpoint.find(strFilter) == std::string::npos) continue;
                 obj.push_back(Pair(strOutpoint, HexStr(mn.keyIDOwner)));
+            } else if (strMode == "keyIDOperator") {
+                if (strFilter !="" && strOutpoint.find(strFilter) == std::string::npos) continue;
+                obj.push_back(Pair(strOutpoint, HexStr(mn.keyIDOperator)));
+            } else if (strMode == "keyIDVoting") {
+                if (strFilter !="" && strOutpoint.find(strFilter) == std::string::npos) continue;
+                obj.push_back(Pair(strOutpoint, HexStr(mn.keyIDVoting)));
             } else if (strMode == "status") {
                 std::string strStatus = mn.GetStatus();
                 if (strFilter !="" && strStatus.find(strFilter) == std::string::npos &&

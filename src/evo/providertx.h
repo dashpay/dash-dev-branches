@@ -24,8 +24,9 @@ public:
     int32_t nProtocolVersion{0};
     uint32_t nCollateralIndex{(uint32_t) - 1};
     CService addr;
-    CKeyID keyIDOperator;
     CKeyID keyIDOwner;
+    CKeyID keyIDOperator;
+    CKeyID keyIDVoting;
     CScript scriptPayout;
     uint256 inputsHash; // replay protection
     std::vector<unsigned char> vchSig;
@@ -40,8 +41,9 @@ public:
         READWRITE(nProtocolVersion);
         READWRITE(nCollateralIndex);
         READWRITE(addr);
-        READWRITE(keyIDOperator);
         READWRITE(keyIDOwner);
+        READWRITE(keyIDOperator);
+        READWRITE(keyIDVoting);
         READWRITE(*(CScriptBase*)(&scriptPayout));
         READWRITE(inputsHash);
         if (!(s.GetType() & SER_GETHASH)) {

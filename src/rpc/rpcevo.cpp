@@ -533,9 +533,12 @@ void protx_register_help()
             "                         The private key belonging to this address be known in your wallet. The address must\n"
             "                         be unused and must differ from the collateralAddress\n"
             "6. \"operatorKeyAddr\"     (string, required) The operator key address. The private key does not have to be known by your wallet.\n"
-            "                         It hat to match the private key which is later used when operating the masternode.\n"
+            "                         It has to match the private key which is later used when operating the masternode.\n"
             "                         If set to \"0\" or an empty string, ownerAddr will be used.\n"
-            "7. \"payoutAddress\"       (string, required) The dash address to use for masternode reward payments\n"
+            "7. \"votingKeyAddr\"       (string, required) The voting key address. The private key does not have to be known by your wallet.\n"
+            "                         It has to match the private key which is later used when voting on proposals.\n"
+            "                         If set to \"0\" or an empty string, ownerAddr will be used.\n"
+            "8. \"payoutAddress\"       (string, required) The dash address to use for masternode reward payments\n"
             "                         Must match \"collateralAddress\"."
             "\nExamples:\n"
             + HelpExampleCli("protx", "register \"XwnLY9Tf7Zsef8gMGL2fhWA9ZmMjt4KPwG\" 1000 \"1.2.3.4:1234\" 0 \"93Fd7XY2zF4q9YKTZUSFxLgp4Xs7MuaMnvY9kpvH7V8oXWqsCC1\" XwnLY9Tf7Zsef8gMGL2fhWA9ZmMjt4KPwG")
@@ -544,7 +547,7 @@ void protx_register_help()
 
 UniValue protx_register(const JSONRPCRequest& request)
 {
-    if (request.fHelp || request.params.size() != 8)
+    if (request.fHelp || request.params.size() != 9)
         protx_register_help();
 
     CBitcoinAddress collateralAddress(request.params[1].get_str());
@@ -579,18 +582,25 @@ UniValue protx_register(const JSONRPCRequest& request)
 
     CKey keyOwner = ParsePrivKey(request.params[5].get_str(), true);
     CKeyID keyIDOperator = keyOwner.GetPubKey().GetID();
+    CKeyID keyIDVoting = keyOwner.GetPubKey().GetID();
     if (request.params[6].get_str() != "0" && request.params[6].get_str() != "") {
         CBitcoinAddress address(request.params[6].get_str());
         if (!address.IsValid() || !address.GetKeyID(keyIDOperator))
             throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, strprintf("invalid operator address: %s", request.params[7].get_str()));
     }
+    if (request.params[7].get_str() != "0" && request.params[7].get_str() != "") {
+        CBitcoinAddress address(request.params[7].get_str());
+        if (!address.IsValid() || !address.GetKeyID(keyIDVoting))
+            throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, strprintf("invalid voting address: %s", request.params[7].get_str()));
+    }
 
-    CBitcoinAddress payoutAddress(request.params[7].get_str());
+    CBitcoinAddress payoutAddress(request.params[8].get_str());
     if (!payoutAddress.IsValid())
-        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, strprintf("invalid payout address: %s", request.params[7].get_str()));
+        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, strprintf("invalid payout address: %s", request.params[8].get_str()));
 
-    ptx.keyIDOperator = keyIDOperator;
     ptx.keyIDOwner = keyOwner.GetPubKey().GetID();
+    ptx.keyIDOperator = keyIDOperator;
+    ptx.keyIDVoting = keyIDVoting;
     ptx.scriptPayout = GetScriptForDestination(payoutAddress.Get());
     ptx.vchSig.resize(65); // reserve so that fee calculation is correct
 

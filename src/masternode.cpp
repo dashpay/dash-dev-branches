@@ -56,7 +56,7 @@ CMasternode::CMasternode(const CMasternodeBroadcast& mnb) :
 
 CMasternode::CMasternode(const uint256 &proTxHash, const CDeterministicMNCPtr& dmn) :
     masternode_info_t{ MASTERNODE_ENABLED, dmn->state->nProtocolVersion, GetAdjustedTime(),
-                       COutPoint(proTxHash, dmn->nCollateralIndex), dmn->state->addr, CKeyID(), dmn->state->keyIDOperator, dmn->state->keyIDOwner},
+                       COutPoint(proTxHash, dmn->nCollateralIndex), dmn->state->addr, CKeyID(), dmn->state->keyIDOwner, dmn->state->keyIDOperator, dmn->state->keyIDVoting},
     fAllowMixingTx(true)
 {
     CTxDestination dest;
@@ -73,8 +73,9 @@ bool CMasternode::UpdateFromNewBroadcast(CMasternodeBroadcast& mnb, CConnman& co
     if(mnb.sigTime <= sigTime && !mnb.fRecovery) return false;
 
     pubKeyMasternode = mnb.pubKeyMasternode;
-    keyIDOperator = mnb.pubKeyMasternode.GetID();
     keyIDOwner = mnb.pubKeyMasternode.GetID();
+    keyIDOperator = mnb.pubKeyMasternode.GetID();
+    keyIDVoting = mnb.pubKeyMasternode.GetID();
     sigTime = mnb.sigTime;
     vchSig = mnb.vchSig;
     nProtocolVersion = mnb.nProtocolVersion;

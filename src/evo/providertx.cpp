@@ -70,10 +70,8 @@ bool CheckProRegTx(const CTransaction& tx, const CBlockIndex* pindex, CValidatio
         return state.DoS(10, false, REJECT_INVALID, "bad-protx-collateral-index");
     if (tx.vout[ptx.nCollateralIndex].nValue != 1000 * COIN)
         return state.DoS(10, false, REJECT_INVALID, "bad-protx-collateral");
-    if (ptx.keyIDOperator.IsNull())
-        return state.DoS(10, false, REJECT_INVALID, "bad-protx-key-operator");
-    if (ptx.keyIDOwner.IsNull())
-        return state.DoS(10, false, REJECT_INVALID, "bad-protx-key-owner");
+    if (ptx.keyIDOwner.IsNull() || ptx.keyIDOperator.IsNull() || ptx.keyIDVoting.IsNull())
+        return state.DoS(10, false, REJECT_INVALID, "bad-protx-key-null");
     // we may support P2SH later, but restrict it for now (while in transitioning phase from old MN list to deterministic list)
     if (!ptx.scriptPayout.IsPayToPublicKeyHash())
         return state.DoS(10, false, REJECT_INVALID, "bad-protx-payee");
@@ -84,7 +82,7 @@ bool CheckProRegTx(const CTransaction& tx, const CBlockIndex* pindex, CValidatio
         return state.DoS(10, false, REJECT_INVALID, "bad-protx-payee");
     }
     // don't allow reuse of keys for different purposes
-    if (payoutDest == CTxDestination(ptx.keyIDOperator) || payoutDest == CTxDestination(ptx.keyIDOwner)) {
+    if (payoutDest == CTxDestination(ptx.keyIDOwner) || payoutDest == CTxDestination(ptx.keyIDOperator) || payoutDest == CTxDestination(ptx.keyIDVoting)) {
         return state.DoS(10, false, REJECT_INVALID, "bad-protx-payee");
     }
 
@@ -97,15 +95,18 @@ bool CheckProRegTx(const CTransaction& tx, const CBlockIndex* pindex, CValidatio
         auto mnList = deterministicMNManager->GetListAtHeight(pindex->nHeight);
         std::set<CKeyID> keyIDs;
         for (const auto& dmn : mnList.all_range()) {
-            keyIDs.emplace(dmn->state->keyIDOperator);
             keyIDs.emplace(dmn->state->keyIDOwner);
+            keyIDs.emplace(dmn->state->keyIDOperator);
+            keyIDs.emplace(dmn->state->keyIDVoting);
         }
-        if (keyIDs.count(ptx.keyIDOperator) || keyIDs.count(ptx.keyIDOwner)) {
+        if (keyIDs.count(ptx.keyIDOwner) || keyIDs.count(ptx.keyIDOperator) || keyIDs.count(ptx.keyIDVoting)) {
             return state.DoS(10, false, REJECT_DUPLICATE, "bad-protx-dup-key");
         }
 
-        if (ptx.keyIDOperator != ptx.keyIDOwner && !deterministicMNManager->IsDeterministicMNsSporkActive(pindex->nHeight)) {
-            return state.DoS(10, false, REJECT_INVALID, "bad-protx-owner-key-not-same");
+        if (!deterministicMNManager->IsDeterministicMNsSporkActive(pindex->nHeight)) {
+            if (ptx.keyIDOwner != ptx.keyIDOperator || ptx.keyIDOwner != ptx.keyIDVoting) {
+                return state.DoS(10, false, REJECT_INVALID, "bad-protx-key-not-same");
+            }
         }
     }
 
@@ -149,8 +150,8 @@ std::string CProRegTX::ToString() const
         payee = CBitcoinAddress(dest).ToString();
     }
 
-    return strprintf("CProRegTX(nVersion=%d, nProtocolVersion=%d, nCollateralIndex=%d, addr=%s, keyIDOperator=%s, keyIDOwner=%s, scriptPayout=%s)",
-        nVersion, nProtocolVersion, nCollateralIndex, addr.ToString(), keyIDOperator.ToString(), keyIDOwner.ToString(), payee);
+    return strprintf("CProRegTX(nVersion=%d, nProtocolVersion=%d, nCollateralIndex=%d, addr=%s, keyIDOwner=%s, keyIDOperator=%s, keyIDVoting=%s, scriptPayout=%s)",
+        nVersion, nProtocolVersion, nCollateralIndex, addr.ToString(), keyIDOwner.ToString(), keyIDOperator.ToString(), keyIDVoting.ToString(), payee);
 }
 
 void CProRegTX::ToJson(UniValue& obj) const
@@ -161,8 +162,9 @@ void CProRegTX::ToJson(UniValue& obj) const
     obj.push_back(Pair("protocolVersion", nProtocolVersion));
     obj.push_back(Pair("collateralIndex", (int)nCollateralIndex));
     obj.push_back(Pair("service", addr.ToString(false)));
-    obj.push_back(Pair("keyIDOperator", keyIDOperator.ToString()));
     obj.push_back(Pair("keyIDOwner", keyIDOwner.ToString()));
+    obj.push_back(Pair("keyIDOperator", keyIDOperator.ToString()));
+    obj.push_back(Pair("keyIDVoting", keyIDVoting.ToString()));
 
     UniValue payoutObj(UniValue::VOBJ);
     payoutObj.push_back(Pair("scriptHex", HexStr(scriptPayout)));

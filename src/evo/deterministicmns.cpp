@@ -30,9 +30,9 @@ std::string CDeterministicMNState::ToString() const
     }
 
     return strprintf("CDeterministicMNState(registeredHeight=%d, lastPaidHeight=%d, maturityHeight=%d, PoSePenality=%d, PoSeRevivedHeight=%d, PoSeBanHeight=%d, "
-                     "keyIDOperator=%s, keyIDOwner=%s, addr=%s, nProtocolVersion=%d, payee=%s)",
+                     "keyIDOwner=%s, keyIDOperator=%s, keyIDVoting=%s, addr=%s, nProtocolVersion=%d, payee=%s)",
                      registeredHeight, lastPaidHeight, maturityHeight, PoSePenality, PoSeRevivedHeight, PoSeBanHeight,
-                     keyIDOperator.ToString(), keyIDOwner.ToString(), addr.ToStringIPPort(false), nProtocolVersion, payee);
+                     keyIDOwner.ToString(), keyIDOperator.ToString(), keyIDVoting.ToString(), addr.ToStringIPPort(false), nProtocolVersion, payee);
 }
 
 void CDeterministicMNState::ToJson(UniValue& obj) const
@@ -45,8 +45,9 @@ void CDeterministicMNState::ToJson(UniValue& obj) const
     obj.push_back(Pair("PoSePenality", PoSePenality));
     obj.push_back(Pair("PoSeRevivedHeight", PoSeRevivedHeight));
     obj.push_back(Pair("PoSeBanHeight", PoSeBanHeight));
-    obj.push_back(Pair("keyIDOperator", keyIDOperator.ToString()));
     obj.push_back(Pair("keyIDOwner", keyIDOwner.ToString()));
+    obj.push_back(Pair("keyIDOperator", keyIDOperator.ToString()));
+    obj.push_back(Pair("keyIDVoting", keyIDVoting.ToString()));
     obj.push_back(Pair("addr", addr.ToStringIPPort(false)));
     obj.push_back(Pair("nProtocolVersion", nProtocolVersion));
 
@@ -290,8 +291,9 @@ bool CDeterministicMNManager::ProcessBlock(const CBlock& block, const CBlockInde
     std::set<CKeyID> pubKeyIDs;
     for (const auto& dmn : newList.all_range()) {
         addrs.emplace(dmn->state->addr);
-        pubKeyIDs.emplace(dmn->state->keyIDOperator);
         pubKeyIDs.emplace(dmn->state->keyIDOwner);
+        pubKeyIDs.emplace(dmn->state->keyIDOperator);
+        pubKeyIDs.emplace(dmn->state->keyIDVoting);
     }
 
     for (int i = 1; i < (int)block.vtx.size(); i++) {
@@ -317,9 +319,10 @@ bool CDeterministicMNManager::ProcessBlock(const CBlock& block, const CBlockInde
 
             if (addrs.count(proTx.addr))
                 return _state.DoS(100, false, REJECT_CONFLICT, "bad-protx-dup-addr");
-            if (pubKeyIDs.count(proTx.keyIDOperator) || pubKeyIDs.count(proTx.keyIDOwner))
+            if (pubKeyIDs.count(proTx.keyIDOwner) || pubKeyIDs.count(proTx.keyIDOperator) || pubKeyIDs.count(proTx.keyIDVoting))
                 return _state.DoS(100, false, REJECT_CONFLICT, "bad-protx-dup-key");
             addrs.emplace(proTx.addr);
+            pubKeyIDs.emplace(proTx.keyIDVoting);
             pubKeyIDs.emplace(proTx.keyIDOperator);
             pubKeyIDs.emplace(proTx.keyIDOwner);
 

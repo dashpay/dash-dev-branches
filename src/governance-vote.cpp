@@ -332,7 +332,7 @@ bool CGovernanceVote::CheckSignature(const CKeyID& pubKeyID) const
     return true;
 }
 
-bool CGovernanceVote::IsValid(bool useOwnerKey) const
+bool CGovernanceVote::IsValid(bool useVotingKey) const
 {
     if(nTime > GetAdjustedTime() + (60*60)) {
         LogPrint("gobject", "CGovernanceVote::IsValid -- vote is too far ahead of current time - %s - nTime %lli - Max Time %lli\n", GetHash().ToString(), nTime, GetAdjustedTime() + (60*60));
@@ -359,7 +359,7 @@ bool CGovernanceVote::IsValid(bool useOwnerKey) const
         return false;
     }
 
-    return CheckSignature(useOwnerKey ? infoMn.keyIDOwner : infoMn.keyIDOperator);
+    return CheckSignature(useVotingKey ? infoMn.keyIDVoting : infoMn.keyIDOperator);
 }
 
 bool operator==(const CGovernanceVote& vote1, const CGovernanceVote& vote2)

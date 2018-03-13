@@ -125,7 +125,7 @@ public:
 
     bool Sign(const CKey& key, const CKeyID& pubKeyID);
     bool CheckSignature(const CKeyID& pubKeyID) const;
-    bool IsValid(bool useOwnerKey) const;
+    bool IsValid(bool useVotingKey) const;
     void Relay(CConnman& connman) const;
 
     std::string GetVoteString() const {

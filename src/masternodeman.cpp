@@ -388,6 +388,7 @@ void CMasternodeMan::AddDeterministicMasternodes()
             // make sure we use the splitted keys from now on
             mn->keyIDOwner = dmn->state->keyIDOwner;
             mn->keyIDOperator = dmn->state->keyIDOperator;
+            mn->keyIDVoting = dmn->state->keyIDVoting;
             mn->addr = dmn->state->addr;
             mn->nProtocolVersion = dmn->state->nProtocolVersion;
 
