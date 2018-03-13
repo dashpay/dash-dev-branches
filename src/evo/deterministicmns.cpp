@@ -287,10 +287,10 @@ bool CDeterministicMNManager::ProcessBlock(const CBlock& block, const CBlockInde
 
     auto payee = oldList.GetMNPayee();
 
-    std::set<CService> addrs;
+    std::map<CService, uint256> addrs;
     std::set<CKeyID> pubKeyIDs;
     for (const auto& dmn : newList.all_range()) {
-        addrs.emplace(dmn->state->addr);
+        addrs.emplace(dmn->state->addr, dmn->proTxHash);
         pubKeyIDs.emplace(dmn->state->keyIDOwner);
         pubKeyIDs.emplace(dmn->state->keyIDOperator);
         pubKeyIDs.emplace(dmn->state->keyIDVoting);
@@ -321,7 +321,7 @@ bool CDeterministicMNManager::ProcessBlock(const CBlock& block, const CBlockInde
                 return _state.DoS(100, false, REJECT_CONFLICT, "bad-protx-dup-addr");
             if (pubKeyIDs.count(proTx.keyIDOwner) || pubKeyIDs.count(proTx.keyIDOperator) || pubKeyIDs.count(proTx.keyIDVoting))
                 return _state.DoS(100, false, REJECT_CONFLICT, "bad-protx-dup-key");
-            addrs.emplace(proTx.addr);
+            addrs.emplace(proTx.addr, tx.GetHash());
             pubKeyIDs.emplace(proTx.keyIDVoting);
             pubKeyIDs.emplace(proTx.keyIDOperator);
             pubKeyIDs.emplace(proTx.keyIDOwner);
@@ -346,6 +346,28 @@ bool CDeterministicMNManager::ProcessBlock(const CBlock& block, const CBlockInde
 
             LogPrintf("CDeterministicMNManager::%s -- MN %s added to MN list. height=%d, mapCurMNs.size=%d\n",
                       __func__, tx.GetHash().ToString(), height, newList.size());
+        } else if (tx.nType == TRANSACTION_PROVIDER_UPDATE_SERVICE) {
+            CProUpServTX proTx;
+            if (!GetTxPayload(tx, proTx)) {
+                assert(false); // this should have been handled already
+            }
+
+            if (addrs.count(proTx.addr) && addrs[proTx.addr] != proTx.proTxHash)
+                return _state.DoS(100, false, REJECT_CONFLICT, "bad-protx-dup-addr");
+            addrs.emplace(proTx.addr, proTx.proTxHash);
+
+            CDeterministicMNCPtr dmn = newList.GetMN(proTx.proTxHash);
+            if (!dmn) {
+                return _state.DoS(100, false, REJECT_INVALID, "bad-protx-hash");
+            }
+            auto newState = std::make_shared<CDeterministicMNState>(*dmn->state);
+            newState->addr = proTx.addr;
+            newState->nProtocolVersion = proTx.nProtocolVersion;
+
+            newList.UpdateMN(proTx.proTxHash, newState);
+
+            LogPrintf("CDeterministicMNManager::%s -- MN %s updated with addr=%s, nProtocolVersion=%d. height=%d\n",
+                      __func__, proTx.proTxHash.ToString(), proTx.addr.ToString(false), proTx.nProtocolVersion, height);
         }
     }
 

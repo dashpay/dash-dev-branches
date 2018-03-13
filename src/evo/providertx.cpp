@@ -18,7 +18,7 @@
 #include "base58.h"
 
 template <typename ProTx>
-static bool CheckService(const ProTx& proTx, const CBlockIndex* pindex, CValidationState& state)
+static bool CheckService(const uint256& proTxHash, const ProTx& proTx, const CBlockIndex* pindex, CValidationState& state)
 {
     if (proTx.nProtocolVersion < MIN_EVO_PROTO_VERSION || proTx.nProtocolVersion > MAX_PROTX_PROTO_VERSION)
         return state.DoS(10, false, REJECT_INVALID, "bad-protx-proto-version");
@@ -29,9 +29,9 @@ static bool CheckService(const ProTx& proTx, const CBlockIndex* pindex, CValidat
         return state.DoS(10, false, REJECT_INVALID, "bad-protx-addr");
 
     if (pindex) {
-        auto mnList = deterministicMNManager->GetListAtHeight(pindex->nHeight);
+        auto mnList = deterministicMNManager->GetListAtHeight(pindex->nHeight - 1);
         for (const auto& dmn : mnList.all_range()) {
-            if (dmn->state->addr == proTx.addr)
+            if (dmn->state->addr == proTx.addr && dmn->proTxHash != proTxHash)
                 return state.DoS(10, false, REJECT_DUPLICATE, "bad-protx-dup-addr");
         }
     }
@@ -63,7 +63,7 @@ bool CheckProRegTx(const CTransaction& tx, const CBlockIndex* pindex, CValidatio
     if (ptx.nVersion != CProRegTX::CURRENT_VERSION)
         return state.DoS(100, false, REJECT_INVALID, "bad-protx-version");
 
-    if (!CheckService(ptx, pindex, state))
+    if (!CheckService(tx.GetHash(), ptx, pindex, state))
         return false;
 
     if (ptx.nCollateralIndex >= tx.vout.size())
@@ -127,7 +127,7 @@ bool CheckProUpServTx(const CTransaction& tx, const CBlockIndex* pindex, CValida
     if (ptx.nVersion != CProRegTX::CURRENT_VERSION)
         return state.DoS(100, false, REJECT_INVALID, "bad-protx-version");
 
-    if (!CheckService(ptx, pindex, state))
+    if (!CheckService(ptx.proTxHash, ptx, pindex, state))
         return false;
 
     if (pindex) {
