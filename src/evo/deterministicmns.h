@@ -101,11 +101,11 @@ class CDeterministicMN
 {
 public:
     CDeterministicMN() {}
-    CDeterministicMN(const uint256& _proTxHash, const CProRegTXCPtr& _proTx)
+    CDeterministicMN(const uint256& _proTxHash, const CProRegTX& _proTx)
     {
         proTxHash = _proTxHash;
-        nCollateralIndex = _proTx->nCollateralIndex;
-        state = std::make_shared<CDeterministicMNState>(*_proTx);
+        nCollateralIndex = _proTx.nCollateralIndex;
+        state = std::make_shared<CDeterministicMNState>(_proTx);
     }
     template<typename Stream>
     CDeterministicMN(deserialize_type, Stream& s) { s >> *this;}
@@ -356,8 +356,6 @@ public:
 
     bool ProcessBlock(const CBlock& block, const CBlockIndex* pindex, CValidationState& state);
     bool UndoBlock(const CBlock& block, const CBlockIndex* pindex);
-
-    CProRegTXCPtr GetProTx(const uint256& proTxHash);
 
     CDeterministicMNList GetListAtHeight(int height);
     CDeterministicMNList GetListAtChainTip();

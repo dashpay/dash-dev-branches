@@ -54,8 +54,6 @@ public:
     std::string ToString() const;
     void ToJson(UniValue& obj) const;
 };
-typedef std::shared_ptr<CProRegTX> CProRegTXPtr;
-typedef std::shared_ptr<const CProRegTX> CProRegTXCPtr;
 
 class CProUpServTX
 {

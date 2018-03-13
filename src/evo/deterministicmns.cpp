@@ -14,7 +14,6 @@
 
 #include <univalue.h>
 
-static const char DB_MN = 'M';
 static const char DB_MANAGER_STATE = 's';
 static const char DB_LIST_SNAPSHOT = 'S';
 static const char DB_LIST_DIFF = 'D';
@@ -326,11 +325,7 @@ bool CDeterministicMNManager::ProcessBlock(const CBlock& block, const CBlockInde
             pubKeyIDs.emplace(proTx.keyIDOperator);
             pubKeyIDs.emplace(proTx.keyIDOwner);
 
-            dbTransaction.Write(std::make_pair(DB_MN, tx.GetHash()), proTx);
-
-            // Use the result from GetProTx instead of making a new shared_ptr from proTx so that we actually use the cached version
-            auto _proTx = GetProTx(tx.GetHash());
-            auto dmn = std::make_shared<CDeterministicMN>(tx.GetHash(), _proTx);
+            auto dmn = std::make_shared<CDeterministicMN>(tx.GetHash(), proTx);
 
             CDeterministicMNState dmnState = *dmn->state;
             dmnState.registeredHeight = height;
@@ -484,30 +479,6 @@ void CDeterministicMNManager::UpdateSpork15Value()
         state.spork15Value = newSpork15Value;
         LogPrintf("CDeterministicMNManager::%s -- Updated spork15 value to %d\n", __func__, state.spork15Value);
     }
-}
-
-CProRegTXCPtr CDeterministicMNManager::GetProTx(const uint256& proTxHash)
-{
-    LOCK(cs);
-
-    CProRegTXCPtr proTx;
-
-    auto it = proTxCache.find(proTxHash);
-    if (it != proTxCache.end()) {
-        proTx = it->second.lock();
-        if (!proTx) {
-            proTxCache.erase(it);
-        }
-    }
-    if (!proTx) {
-        CProRegTX tmpProTx;
-        if (dbTransaction.Read(std::make_pair(DB_MN, proTxHash), tmpProTx)) {
-            proTx = std::make_shared<CProRegTX>(tmpProTx);
-            proTxCache.emplace(proTxHash, proTx);
-        }
-    }
-
-    return proTx;
 }
 
 CDeterministicMNList CDeterministicMNManager::GetListAtHeight(int height)

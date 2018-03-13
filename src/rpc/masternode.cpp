@@ -508,7 +508,7 @@ UniValue masternode(const JSONRPCRequest& request)
                 CProRegTX tmpProTx;
                 if (!GetTxPayload(*tx, tmpProTx))
                     throw JSONRPCError(RPC_INVALID_PARAMETER, "TX is not a valid ProTx");
-                dmn = std::make_shared<CDeterministicMN>(tx->GetHash(), std::make_shared<CProRegTX>(tmpProTx));
+                dmn = std::make_shared<CDeterministicMN>(tx->GetHash(), tmpProTx);
             } else {
                 throw JSONRPCError(RPC_INVALID_PARAMETER, "ProTx not found");
             }
