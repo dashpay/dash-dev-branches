@@ -538,7 +538,7 @@ public:
             commitHandler();
         return result;
     }
-    bool Rollback() {
+    void Rollback() {
         assert(!didCommitOrRollback);
         didCommitOrRollback = true;
         dbTransaction.Clear();
