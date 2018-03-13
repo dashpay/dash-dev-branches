@@ -1119,7 +1119,7 @@ bool CWallet::AddToWallet(const CWalletTx& wtxIn, bool fFlushOnClose)
         }
         AddToSpends(hash);
 
-        int proTxCollateralIdx = GetProTxCollateralIndex(*wtx.tx);
+        uint32_t proTxCollateralIdx = GetProTxCollateralIndex(*wtx.tx);
         for(unsigned int i = 0; i < wtx.tx->vout.size(); ++i) {
             if (IsMine(wtx.tx->vout[i]) && !IsSpent(hash, i)) {
                 setWalletUTXO.insert(COutPoint(hash, i));
@@ -3960,7 +3960,7 @@ DBErrors CWallet::LoadWallet(bool& fFirstRunRet)
     {
         LOCK2(cs_main, cs_wallet);
         for (auto& pair : mapWallet) {
-            int proTxCollateralIdx = GetProTxCollateralIndex(*pair.second.tx);
+            uint32_t proTxCollateralIdx = GetProTxCollateralIndex(*pair.second.tx);
             for(unsigned int i = 0; i < pair.second.tx->vout.size(); ++i) {
                 if (IsMine(pair.second.tx->vout[i]) && !IsSpent(pair.first, i)) {
                     setWalletUTXO.insert(COutPoint(pair.first, i));

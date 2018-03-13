@@ -29,7 +29,7 @@ bool CheckProviderTxRegister(const CTransaction& tx, const CBlockIndex* pindex, 
     if (ptx.nProtocolVersion < MIN_EVO_PROTO_VERSION || ptx.nProtocolVersion > MAX_PROTX_PROTO_VERSION)
         return state.DoS(10, false, REJECT_INVALID, "bad-provider-proto-version");
 
-    if (ptx.nCollateralIndex < 0 || ptx.nCollateralIndex >= tx.vout.size())
+    if (ptx.nCollateralIndex >= tx.vout.size())
         return state.DoS(10, false, REJECT_INVALID, "bad-provider-collateral-index");
     if (tx.vout[ptx.nCollateralIndex].nValue != 1000 * COIN)
         return state.DoS(10, false, REJECT_INVALID, "bad-provider-collateral");
@@ -108,7 +108,7 @@ void CProviderTXRegisterMN::ToJson(UniValue& obj) const {
     obj.setObject();
     obj.push_back(Pair("version", nVersion));
     obj.push_back(Pair("protocolVersion", nProtocolVersion));
-    obj.push_back(Pair("collateralIndex", nCollateralIndex));
+    obj.push_back(Pair("collateralIndex", (int)nCollateralIndex));
     obj.push_back(Pair("service", addr.ToString(false)));
     obj.push_back(Pair("keyIDOperator", keyIDOperator.ToString()));
     obj.push_back(Pair("keyIDOwner", keyIDOwner.ToString()));
@@ -128,13 +128,13 @@ void CProviderTXRegisterMN::ToJson(UniValue& obj) const {
     obj.push_back(Pair("inputsHash", inputsHash.ToString()));
 }
 
-bool IsProTxCollateral(const CTransaction& tx, int n) {
+bool IsProTxCollateral(const CTransaction& tx, uint32_t n) {
     return GetProTxCollateralIndex(tx) == n;
 }
 
-int GetProTxCollateralIndex(const CTransaction& tx) {
+uint32_t GetProTxCollateralIndex(const CTransaction& tx) {
     if (tx.nVersion < 3 || tx.nType != TRANSACTION_PROVIDER_REGISTER)
-        return -1;
+        return (uint32_t) - 1;
     CProviderTXRegisterMN proTx;
     if (!GetTxPayload(tx, proTx))
         assert(false);

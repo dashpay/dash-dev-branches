@@ -226,7 +226,7 @@ static CKey ParsePrivKey(const std::string &strKeyOrAddress, bool allowAddresses
     return secret.GetKey();
 }
 
-static CKey GetKeyFromParamsOrWallet(const UniValue &params, int paramPos, const uint256 &regTxId) {
+static CKey GetKeyFromParamsOrWallet(const UniValue &params, uint32_t paramPos, const uint256 &regTxId) {
     if (params.size() > paramPos)
         return ParsePrivKey(params[paramPos].get_str());
 
@@ -247,7 +247,7 @@ static CKey GetKeyFromParamsOrWallet(const UniValue &params, int paramPos, const
 #endif//ENABLE_WALLET
 }
 
-static uint256 GetLastTransitionFromParams(const UniValue& params, int paramPos, const uint256 &regTxId) {
+static uint256 GetLastTransitionFromParams(const UniValue& params, uint32_t paramPos, const uint256 &regTxId) {
     if (params.size() > paramPos)
         return ParseHashStr(params[paramPos].get_str(), "hashLastTransition");
 
@@ -604,14 +604,14 @@ UniValue protx_register(const JSONRPCRequest& request) {
     if (!pwalletMain->FundTransaction(tx, nFee, false, feeRate, nChangePos, strFailReason, false, false, setSubtractFeeFromOutputs, true, CNoDestination()))
         throw JSONRPCError(RPC_INTERNAL_ERROR, strFailReason);
 
-    int collateralIndex = -1;
-    for (int i = 0; i < (int)tx.vout.size(); i++) {
+    uint32_t collateralIndex = (uint32_t) - 1;
+    for (uint32_t i = 0; i < tx.vout.size(); i++) {
         if (tx.vout[i] == collateralTxOut) {
             collateralIndex = i;
             break;
         }
     }
-    assert(collateralIndex != -1);
+    assert(collateralIndex != (uint32_t) - 1);
 
     ptx.nCollateralIndex = collateralIndex;
     ptx.inputsHash = CalcTxInputsHash(tx);

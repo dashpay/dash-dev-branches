@@ -475,7 +475,7 @@ UniValue gobject(const JSONRPCRequest& request)
                         continue;
                     }
 
-                    if (nTxHash == dmn->proTxHash && nOutputIndex == dmn->proTx->nCollateralIndex) {
+                    if (nTxHash == dmn->proTxHash && (uint32_t)nOutputIndex == dmn->proTx->nCollateralIndex) {
                         found = true;
                         break;
                     }
