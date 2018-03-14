@@ -41,6 +41,14 @@ inline bool GetTxPayload(const CTransaction& tx, T& obj)
     return GetTxPayload(tx.extraPayload, obj);
 }
 
+template <typename T>
+void SetTxPayload(CMutableTransaction& tx, const T& payload)
+{
+    CDataStream ds(SER_NETWORK, CLIENT_VERSION);
+    ds << payload;
+    tx.extraPayload.assign(ds.begin(), ds.end());
+}
+
 uint256 CalcTxInputsHash(const CTransaction& tx);
 
 #endif//DASH_SPECIALTX_H

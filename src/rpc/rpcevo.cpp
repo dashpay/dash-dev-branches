@@ -511,6 +511,60 @@ UniValue gettransition(const JSONRPCRequest &request) {
 }
 
 #ifdef ENABLE_WALLET
+
+template<typename SpecialTxPayload>
+static void FundSpecialTx(CMutableTransaction& tx, SpecialTxPayload payload)
+{
+    // resize so that fee calculation is correct
+    payload.vchSig.resize(65);
+
+    CDataStream ds(SER_NETWORK, CLIENT_VERSION);
+    ds << payload;
+    tx.extraPayload.assign(ds.begin(), ds.end());
+
+    CAmount nFee;
+    CFeeRate feeRate = CFeeRate(0);
+    int nChangePos = -1;
+    std::string strFailReason;
+    std::set<int> setSubtractFeeFromOutputs;
+    if (!pwalletMain->FundTransaction(tx, nFee, false, feeRate, nChangePos, strFailReason, false, false, setSubtractFeeFromOutputs, true, CNoDestination()))
+        throw JSONRPCError(RPC_INTERNAL_ERROR, strFailReason);
+
+}
+
+template<typename SpecialTxPayload>
+static void SignSpecialTxPayload(const CMutableTransaction& tx, SpecialTxPayload& payload, const CKey& key)
+{
+    payload.inputsHash = CalcTxInputsHash(tx);
+    payload.vchSig.clear();
+
+    uint256 hash = ::SerializeHash(payload);
+    if (!CHashSigner::SignHash(hash, key, payload.vchSig)) {
+        throw JSONRPCError(RPC_INTERNAL_ERROR, "failed to sign special tx");
+    }
+}
+
+static std::string SignAndSendSpecialTx(const CMutableTransaction& tx)
+{
+    LOCK(cs_main);
+    CValidationState state;
+    if (!CheckSpecialTx(tx, NULL, state))
+        throw std::runtime_error(FormatStateMessage(state));
+
+    CDataStream ds(SER_NETWORK, CLIENT_VERSION);
+    ds << tx;
+
+    JSONRPCRequest signReqeust;
+    signReqeust.params.setArray();
+    signReqeust.params.push_back(HexStr(ds.begin(), ds.end()));
+    UniValue signResult = signrawtransaction(signReqeust);
+
+    JSONRPCRequest sendRequest;
+    sendRequest.params.setArray();
+    sendRequest.params.push_back(signResult["hex"].get_str());
+    return sendrawtransaction(sendRequest).get_str();
+}
+
 void protx_register_help()
 {
     throw std::runtime_error(
@@ -527,9 +581,9 @@ void protx_register_help()
             "                         Must be exactly 1000 Dash.\n"
             "3. \"ipAndPort\"           (string, required) IP and port in the form \"IP:PORT\".\n"
             "                         Must be unique on the network.\n"
-            "4. \"protocolVersion\"     (string, required) The protocol version of your masternode.\n"
+            "4. \"protocolVersion\"     (numeric, required) The protocol version of your masternode.\n"
             "                         Can be 0 to default to the clients protocol version\n"
-            "5. \"ownerAddr\"           (string, required) The owner key used for payee updates and proposal voting.\n"
+            "5. \"ownerKeyAddr\"        (string, required) The owner key used for payee updates and proposal voting.\n"
             "                         The private key belonging to this address be known in your wallet. The address must\n"
             "                         be unused and must differ from the collateralAddress\n"
             "6. \"operatorKeyAddr\"     (string, required) The operator key address. The private key does not have to be known by your wallet.\n"
@@ -602,19 +656,8 @@ UniValue protx_register(const JSONRPCRequest& request)
     ptx.keyIDOperator = keyIDOperator;
     ptx.keyIDVoting = keyIDVoting;
     ptx.scriptPayout = GetScriptForDestination(payoutAddress.Get());
-    ptx.vchSig.resize(65); // reserve so that fee calculation is correct
 
-    CDataStream ds(SER_NETWORK, CLIENT_VERSION);
-    ds << ptx;
-    tx.extraPayload.assign(ds.begin(), ds.end());
-
-    CAmount nFee;
-    CFeeRate feeRate = CFeeRate(0);
-    int nChangePos = -1;
-    std::string strFailReason;
-    std::set<int> setSubtractFeeFromOutputs;
-    if (!pwalletMain->FundTransaction(tx, nFee, false, feeRate, nChangePos, strFailReason, false, false, setSubtractFeeFromOutputs, true, CNoDestination()))
-        throw JSONRPCError(RPC_INTERNAL_ERROR, strFailReason);
+    FundSpecialTx(tx, ptx);
 
     uint32_t collateralIndex = (uint32_t) - 1;
     for (uint32_t i = 0; i < tx.vout.size(); i++) {
@@ -624,39 +667,15 @@ UniValue protx_register(const JSONRPCRequest& request)
         }
     }
     assert(collateralIndex != (uint32_t) - 1);
-
     ptx.nCollateralIndex = collateralIndex;
-    ptx.inputsHash = CalcTxInputsHash(tx);
-    ptx.vchSig.clear();
 
-    uint256 hash = ::SerializeHash(ptx);
-    if (!CHashSigner::SignHash(hash, keyOwner, ptx.vchSig)) {
-        throw std::runtime_error(strprintf("failed to sign provider tx"));
-    }
+    SignSpecialTxPayload(tx, ptx, keyOwner);
+    SetTxPayload(tx, ptx);
 
-    // re-serialize the payload (we only now have correct hashes and signatures)
-    ds.clear();
-    ds << ptx;
-    tx.extraPayload.assign(ds.begin(), ds.end());
-
-    LOCK(cs_main);
-    CValidationState state;
-    if (!CheckSpecialTx(tx, NULL, state))
-        throw std::runtime_error(FormatStateMessage(state));
-
-    ds.clear();
-    ds << tx;
-
-    JSONRPCRequest signReqeust;
-    signReqeust.params.setArray();
-    signReqeust.params.push_back(HexStr(ds.begin(), ds.end()));
-    UniValue signResult = signrawtransaction(signReqeust);
-
-    JSONRPCRequest sendRequest;
-    sendRequest.params.setArray();
-    sendRequest.params.push_back(signResult["hex"].get_str());
-    return sendrawtransaction(sendRequest);
+    return SignAndSendSpecialTx(tx);
 }
+
+
 
 void protx_list_help()
 {
