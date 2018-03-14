@@ -92,7 +92,7 @@ bool CheckProRegTx(const CTransaction& tx, const CBlockIndex* pindex, CValidatio
         return state.DoS(10, false, REJECT_INVALID, "bad-protx-payee-collateral");
 
     if (pindex) {
-        auto mnList = deterministicMNManager->GetListAtHeight(pindex->nHeight);
+        auto mnList = deterministicMNManager->GetListAtHeight(pindex->nHeight - 1);
         std::set<CKeyID> keyIDs;
         for (const auto& dmn : mnList.all_range()) {
             keyIDs.emplace(dmn->state->keyIDOwner);
@@ -131,7 +131,7 @@ bool CheckProUpServTx(const CTransaction& tx, const CBlockIndex* pindex, CValida
         return false;
 
     if (pindex) {
-        auto mn = deterministicMNManager->GetMN(pindex->nHeight, ptx.proTxHash);
+        auto mn = deterministicMNManager->GetMN(pindex->nHeight - 1, ptx.proTxHash);
         if (!mn)
             return state.DoS(100, false, REJECT_INVALID, "bad-protx-hash");
         // we can only check the signature if pindex != NULL and the MN is known
