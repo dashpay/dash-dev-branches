@@ -480,7 +480,7 @@ UniValue gobject(const JSONRPCRequest& request)
                         break;
                     }
                 }
-                if (!found) {
+                if (found) {
                     continue;
                 }
 
