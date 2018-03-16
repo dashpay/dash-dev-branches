@@ -35,6 +35,7 @@ public:
     CService addr;
     int32_t nProtocolVersion;
     CScript scriptPayout;
+    CScript scriptOperatorPayout;
 
 public:
     CDeterministicMNState() {}
@@ -67,6 +68,7 @@ public:
         READWRITE(addr);
         READWRITE(nProtocolVersion);
         READWRITE(*(CScriptBase*)(&scriptPayout));
+        READWRITE(*(CScriptBase*)(&scriptOperatorPayout));
     }
 
     bool operator==(const CDeterministicMNState& rhs) const
@@ -82,7 +84,8 @@ public:
                keyIDVoting == rhs.keyIDVoting &&
                addr == rhs.addr &&
                nProtocolVersion == rhs.nProtocolVersion &&
-               scriptPayout == rhs.scriptPayout;
+               scriptPayout == rhs.scriptPayout &&
+               scriptOperatorPayout == rhs.scriptOperatorPayout;
     }
 
     bool operator!=(const CDeterministicMNState& rhs) const
@@ -105,6 +108,7 @@ public:
     {
         proTxHash = _proTxHash;
         nCollateralIndex = _proTx.nCollateralIndex;
+        operatorReward = _proTx.operatorReward;
         state = std::make_shared<CDeterministicMNState>(_proTx);
     }
     template<typename Stream>
@@ -112,15 +116,18 @@ public:
 
     uint256 proTxHash;
     uint32_t nCollateralIndex;
+    uint8_t operatorReward;
     CDeterministicMNStateCPtr state;
 
 public:
     ADD_SERIALIZE_METHODS;
 
     template <typename Stream, typename Operation>
-    inline void SerializationOp(Stream& s, Operation ser_action) {
+    inline void SerializationOp(Stream& s, Operation ser_action)
+    {
         READWRITE(proTxHash);
         READWRITE(nCollateralIndex);
+        READWRITE(operatorReward);
         READWRITE(state);
     }
 

@@ -23,15 +23,19 @@ CDeterministicMNManager* deterministicMNManager;
 std::string CDeterministicMNState::ToString() const
 {
     CTxDestination dest;
-    std::string payee = "unknown";
+    std::string payoutAddress = "unknown";
+    std::string operatorRewardAddress = "none";
     if (ExtractDestination(scriptPayout, dest)) {
-        payee = CBitcoinAddress(dest).ToString();
+        payoutAddress = CBitcoinAddress(dest).ToString();
+    }
+    if (ExtractDestination(scriptOperatorPayout, dest)) {
+        operatorRewardAddress = CBitcoinAddress(dest).ToString();
     }
 
     return strprintf("CDeterministicMNState(registeredHeight=%d, lastPaidHeight=%d, maturityHeight=%d, PoSePenality=%d, PoSeRevivedHeight=%d, PoSeBanHeight=%d, "
-                     "keyIDOwner=%s, keyIDOperator=%s, keyIDVoting=%s, addr=%s, nProtocolVersion=%d, payee=%s)",
+                     "keyIDOwner=%s, keyIDOperator=%s, keyIDVoting=%s, addr=%s, nProtocolVersion=%d, payoutAddress=%s, operatorRewardAddress=%s)",
                      registeredHeight, lastPaidHeight, maturityHeight, PoSePenality, PoSeRevivedHeight, PoSeBanHeight,
-                     keyIDOwner.ToString(), keyIDOperator.ToString(), keyIDVoting.ToString(), addr.ToStringIPPort(false), nProtocolVersion, payee);
+                     keyIDOwner.ToString(), keyIDOperator.ToString(), keyIDVoting.ToString(), addr.ToStringIPPort(false), nProtocolVersion, payoutAddress, operatorRewardAddress);
 }
 
 void CDeterministicMNState::ToJson(UniValue& obj) const
@@ -50,22 +54,20 @@ void CDeterministicMNState::ToJson(UniValue& obj) const
     obj.push_back(Pair("addr", addr.ToStringIPPort(false)));
     obj.push_back(Pair("nProtocolVersion", nProtocolVersion));
 
-    UniValue payoutObj(UniValue::VOBJ);
-    payoutObj.push_back(Pair("scriptHex", HexStr(scriptPayout)));
-    payoutObj.push_back(Pair("scriptAsm", ScriptToAsmStr(scriptPayout)));
-
     CTxDestination dest;
     if (ExtractDestination(scriptPayout, dest)) {
         CBitcoinAddress bitcoinAddress(dest);
-        payoutObj.push_back(Pair("address", bitcoinAddress.ToString()));
+        obj.push_back(Pair("payoutAddress", bitcoinAddress.ToString()));
     }
-
-    obj.push_back(Pair("payout", payoutObj));
+    if (ExtractDestination(scriptOperatorPayout, dest)) {
+        CBitcoinAddress bitcoinAddress(dest);
+        obj.push_back(Pair("operatorRewardAddress", bitcoinAddress.ToString()));
+    }
 }
 
 std::string CDeterministicMN::ToString() const
 {
-    return strprintf("CDeterministicMN(proTxHash=%s, nCollateralIndex=%d, state=%s", proTxHash.ToString(), nCollateralIndex, state->ToString());
+    return strprintf("CDeterministicMN(proTxHash=%s, nCollateralIndex=%d, operatorReward=%f, state=%s", proTxHash.ToString(), nCollateralIndex, (double)operatorReward / 1000, state->ToString());
 }
 
 void CDeterministicMN::ToJson(UniValue& obj) const
@@ -78,6 +80,7 @@ void CDeterministicMN::ToJson(UniValue& obj) const
 
     obj.push_back(Pair("proTxHash", proTxHash.ToString()));
     obj.push_back(Pair("collateralIndex", (int)nCollateralIndex));
+    obj.push_back(Pair("operatorReward", (double)operatorReward / 1000));
     obj.push_back(Pair("state", stateObj));
 }
 
@@ -358,6 +361,7 @@ bool CDeterministicMNManager::ProcessBlock(const CBlock& block, const CBlockInde
             auto newState = std::make_shared<CDeterministicMNState>(*dmn->state);
             newState->addr = proTx.addr;
             newState->nProtocolVersion = proTx.nProtocolVersion;
+            newState->scriptOperatorPayout = proTx.scriptOperatorPayout;
 
             newList.UpdateMN(proTx.proTxHash, newState);
 

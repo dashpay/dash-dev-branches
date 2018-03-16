@@ -27,6 +27,7 @@ public:
     CKeyID keyIDOwner;
     CKeyID keyIDOperator;
     CKeyID keyIDVoting;
+    uint8_t operatorReward{0};
     CScript scriptPayout;
     uint256 inputsHash; // replay protection
     std::vector<unsigned char> vchSig;
@@ -45,6 +46,7 @@ public:
         READWRITE(keyIDOperator);
         READWRITE(keyIDVoting);
         READWRITE(*(CScriptBase*)(&scriptPayout));
+        READWRITE(operatorReward);
         READWRITE(inputsHash);
         if (!(s.GetType() & SER_GETHASH)) {
             READWRITE(vchSig);
@@ -65,6 +67,7 @@ public:
     uint256 proTxHash;
     int32_t nProtocolVersion{0};
     CService addr;
+    CScript scriptOperatorPayout;
     uint256 inputsHash; // replay protection
     std::vector<unsigned char> vchSig;
 
@@ -78,6 +81,7 @@ public:
         READWRITE(proTxHash);
         READWRITE(nProtocolVersion);
         READWRITE(addr);
+        READWRITE(*(CScriptBase*)(&scriptOperatorPayout));
         READWRITE(inputsHash);
         if (!(s.GetType() & SER_GETHASH)) {
             READWRITE(vchSig);

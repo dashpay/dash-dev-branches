@@ -39,6 +39,19 @@ static bool CheckService(const uint256& proTxHash, const ProTx& proTx, const CBl
 }
 
 template <typename ProTx>
+static bool CheckServiceZero(const uint256& proTxHash, const ProTx& proTx, const CBlockIndex* pindex, CValidationState& state)
+{
+    // addr/protoVersion must be zero in case operatorReward was specified
+    if (proTx.addr != CService()) {
+        return state.DoS(10, false, REJECT_INVALID, "bad-protx-addr");
+    }
+    if (proTx.nProtocolVersion != 0) {
+        return state.DoS(10, false, REJECT_INVALID, "bad-protx-proto-version");
+    }
+    return true;
+}
+
+template <typename ProTx>
 static bool CheckInputsHashAndSig(const CTransaction &tx, const ProTx& proTx, const CKeyID &keyID, CValidationState& state)
 {
     uint256 inputsHash = CalcTxInputsHash(tx);
@@ -62,9 +75,6 @@ bool CheckProRegTx(const CTransaction& tx, const CBlockIndex* pindex, CValidatio
 
     if (ptx.nVersion != CProRegTX::CURRENT_VERSION)
         return state.DoS(100, false, REJECT_INVALID, "bad-protx-version");
-
-    if (!CheckService(tx.GetHash(), ptx, pindex, state))
-        return false;
 
     if (ptx.nCollateralIndex >= tx.vout.size())
         return state.DoS(10, false, REJECT_INVALID, "bad-protx-collateral-index");
@@ -90,6 +100,14 @@ bool CheckProRegTx(const CTransaction& tx, const CBlockIndex* pindex, CValidatio
     // It is required while we are transitioning from the old MN list to the deterministic list
     if (tx.vout[ptx.nCollateralIndex].scriptPubKey != ptx.scriptPayout)
         return state.DoS(10, false, REJECT_INVALID, "bad-protx-payee-collateral");
+
+    if (ptx.operatorReward == 0) {
+        if (!CheckService(tx.GetHash(), ptx, pindex, state))
+            return false;
+    } else {
+        if (!CheckServiceZero(tx.GetHash(), ptx, pindex, state))
+            return false;
+    }
 
     if (pindex) {
         auto mnList = deterministicMNManager->GetListAtHeight(pindex->nHeight - 1);
@@ -134,6 +152,17 @@ bool CheckProUpServTx(const CTransaction& tx, const CBlockIndex* pindex, CValida
         auto mn = deterministicMNManager->GetMN(pindex->nHeight - 1, ptx.proTxHash);
         if (!mn)
             return state.DoS(100, false, REJECT_INVALID, "bad-protx-hash");
+
+        if (mn->operatorReward != 0) {
+            // we may support P2SH later, but restrict it for now (while in transitioning phase from old MN list to deterministic list)
+            if (!ptx.scriptOperatorPayout.IsPayToPublicKeyHash())
+                return state.DoS(10, false, REJECT_INVALID, "bad-protx-operator-payee");
+        } else {
+            // don't allow to set operator reward payee in case no operatorReward was set
+            if (ptx.scriptOperatorPayout != CScript())
+                return state.DoS(10, false, REJECT_INVALID, "bad-protx-operator-payee");
+        }
+
         // we can only check the signature if pindex != NULL and the MN is known
         if (!CheckInputsHashAndSig(tx, ptx, mn->state->keyIDOperator, state))
             return false;
@@ -150,8 +179,8 @@ std::string CProRegTX::ToString() const
         payee = CBitcoinAddress(dest).ToString();
     }
 
-    return strprintf("CProRegTX(nVersion=%d, nProtocolVersion=%d, nCollateralIndex=%d, addr=%s, keyIDOwner=%s, keyIDOperator=%s, keyIDVoting=%s, scriptPayout=%s)",
-        nVersion, nProtocolVersion, nCollateralIndex, addr.ToString(), keyIDOwner.ToString(), keyIDOperator.ToString(), keyIDVoting.ToString(), payee);
+    return strprintf("CProRegTX(nVersion=%d, nProtocolVersion=%d, nCollateralIndex=%d, addr=%s, operatorReward=%f, keyIDOwner=%s, keyIDOperator=%s, keyIDVoting=%s, scriptPayout=%s)",
+        nVersion, nProtocolVersion, nCollateralIndex, addr.ToString(), (double)operatorReward / 1000, keyIDOwner.ToString(), keyIDOperator.ToString(), keyIDVoting.ToString(), payee);
 }
 
 void CProRegTX::ToJson(UniValue& obj) const
@@ -166,18 +195,13 @@ void CProRegTX::ToJson(UniValue& obj) const
     obj.push_back(Pair("keyIDOperator", keyIDOperator.ToString()));
     obj.push_back(Pair("keyIDVoting", keyIDVoting.ToString()));
 
-    UniValue payoutObj(UniValue::VOBJ);
-    payoutObj.push_back(Pair("scriptHex", HexStr(scriptPayout)));
-    payoutObj.push_back(Pair("scriptAsm", ScriptToAsmStr(scriptPayout)));
-
-
     CTxDestination dest;
     if (ExtractDestination(scriptPayout, dest)) {
         CBitcoinAddress bitcoinAddress(dest);
-        payoutObj.push_back(Pair("address", bitcoinAddress.ToString()));
+        obj.push_back(Pair("payoutAddress", bitcoinAddress.ToString()));
     }
+    obj.push_back(Pair("operatorReward", (double)operatorReward / 1000));
 
-    obj.push_back(Pair("payout", payoutObj));
     obj.push_back(Pair("inputsHash", inputsHash.ToString()));
 }
 
@@ -195,6 +219,12 @@ void CProUpServTX::ToJson(UniValue& obj) const
     obj.push_back(Pair("proTxHash", proTxHash.ToString()));
     obj.push_back(Pair("protocolVersion", nProtocolVersion));
     obj.push_back(Pair("service", addr.ToString(false)));
+    CTxDestination dest;
+    if (ExtractDestination(scriptOperatorPayout, dest)) {
+        CBitcoinAddress bitcoinAddress(dest);
+        obj.push_back(Pair("operatorPayoutAddress", bitcoinAddress.ToString()));
+    }
+    obj.push_back(Pair("inputsHash", inputsHash.ToString()));
 }
 
 bool IsProTxCollateral(const CTransaction& tx, uint32_t n)
