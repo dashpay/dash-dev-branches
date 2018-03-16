@@ -634,7 +634,10 @@ class DIP3Test(BitcoinTestFramework):
         if miner_address is None:
             miner_address = node.getnewaddress()
         if mn_payee is None:
-            mn_payee = bt['masternode']['payee']
+            if isinstance(bt['masternode'], list):
+                mn_payee = bt['masternode'][0]['payee']
+            else:
+                mn_payee = bt['masternode']['payee']
         # we can't take the masternode payee amount from the template here as we might have additional fees in vtx
 
         # calculate fees that the block template included (we'll have to remove it from the coinbase as we won't

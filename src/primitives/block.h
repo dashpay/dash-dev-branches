@@ -94,7 +94,7 @@ public:
     std::vector<CTransition> vts;
 
     // memory only
-    mutable CTxOut txoutMasternode; // masternode payment
+    mutable std::vector<CTxOut> txoutsMasternode; // masternode payment
     mutable std::vector<CTxOut> voutSuperblock; // superblock payment
     mutable bool fChecked;
 
@@ -127,7 +127,7 @@ public:
     {
         CBlockHeader::SetNull();
         vtx.clear();
-        txoutMasternode = CTxOut();
+        txoutsMasternode.clear();
         voutSuperblock.clear();
         fChecked = false;
     }

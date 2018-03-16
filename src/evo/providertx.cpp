@@ -105,6 +105,8 @@ bool CheckProRegTx(const CTransaction& tx, const CBlockIndex* pindex, CValidatio
         if (!CheckService(tx.GetHash(), ptx, pindex, state))
             return false;
     } else {
+        if (ptx.operatorReward > 250)
+            return state.DoS(10, false, REJECT_INVALID, "bad-protx-operator-reward");
         if (!CheckServiceZero(tx.GetHash(), ptx, pindex, state))
             return false;
     }

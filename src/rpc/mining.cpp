@@ -493,10 +493,10 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
     }
 
     // when enforcement is on we need information about a masternode payee or otherwise our block is going to be orphaned by the network
-    CScript payee;
+    std::vector<CTxOut> payees;
     if (sporkManager.IsSporkActive(SPORK_8_MASTERNODE_PAYMENT_ENFORCEMENT)
         && !masternodeSync.IsWinnersListSynced()
-        && !mnpayments.GetBlockPayee(chainActive.Height() + 1, payee))
+        && !mnpayments.GetBlockTxOuts(chainActive.Height() + 1, 0, payees))
             throw JSONRPCError(RPC_CLIENT_IN_INITIAL_DOWNLOAD, "Dash Core is downloading masternode winners...");
 
     // next bock is a superblock and we need governance info to correctly construct it
@@ -718,15 +718,35 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
     result.push_back(Pair("bits", strprintf("%08x", pblock->nBits)));
     result.push_back(Pair("height", (int64_t)(pindexPrev->nHeight+1)));
 
-    UniValue masternodeObj(UniValue::VOBJ);
-    if(pblock->txoutMasternode != CTxOut()) {
+    UniValue masternodeObj;
+    if (deterministicMNManager->IsDeterministicMNsSporkActive()) {
+        masternodeObj.setArray();
+        for (const auto& txout : pblock->txoutsMasternode) {
+            CTxDestination address1;
+            ExtractDestination(txout.scriptPubKey, address1);
+            CBitcoinAddress address2(address1);
+
+            UniValue obj(UniValue::VOBJ);
+            obj.push_back(Pair("payee", address2.ToString().c_str()));
+            obj.push_back(Pair("script", HexStr(txout.scriptPubKey)));
+            obj.push_back(Pair("amount", txout.nValue));
+            masternodeObj.push_back(obj);
+        }
+    } else if (!pblock->txoutsMasternode.empty()) {
+        // This version of "masternode" is deprecated and only for compatibility for non-upgraded miners/pools
+        // After spork15 activation, all miners must have upgraded to support the array version. After that we can remove this
+        assert(pblock->txoutsMasternode.size() == 1);
+        masternodeObj.setObject();
+
         CTxDestination address1;
-        ExtractDestination(pblock->txoutMasternode.scriptPubKey, address1);
+        ExtractDestination(pblock->txoutsMasternode[0].scriptPubKey, address1);
         CBitcoinAddress address2(address1);
+
         masternodeObj.push_back(Pair("payee", address2.ToString().c_str()));
-        masternodeObj.push_back(Pair("script", HexStr(pblock->txoutMasternode.scriptPubKey)));
-        masternodeObj.push_back(Pair("amount", pblock->txoutMasternode.nValue));
+        masternodeObj.push_back(Pair("script", HexStr(pblock->txoutsMasternode[0].scriptPubKey)));
+        masternodeObj.push_back(Pair("amount", pblock->txoutsMasternode[0].nValue));
     }
+
     result.push_back(Pair("masternode", masternodeObj));
     result.push_back(Pair("masternode_payments_started", pindexPrev->nHeight + 1 > consensusParams.nMasternodePaymentsStartBlock));
     result.push_back(Pair("masternode_payments_enforced", deterministicMNManager->IsDeterministicMNsSporkActive() || sporkManager.IsSporkActive(SPORK_8_MASTERNODE_PAYMENT_ENFORCEMENT)));
