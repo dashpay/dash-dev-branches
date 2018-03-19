@@ -840,22 +840,52 @@ void protx_list_help()
     );
 }
 
-UniValue BuildDMNListEntry(const uint256& hash, const CDeterministicMNCPtr& dmn, bool detailed)
+static bool CheckWalletOwnsScript(const CScript& script) {
+    CTxDestination dest;
+    if (ExtractDestination(script, dest)) {
+        if ((boost::get<CKeyID>(&dest) && pwalletMain->HaveKey(*boost::get<CKeyID>(&dest))) || (boost::get<CScriptID>(&dest) && pwalletMain->HaveCScript(*boost::get<CScriptID>(&dest)))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+UniValue BuildDMNListEntry(const CDeterministicMNCPtr& dmn, bool detailed)
 {
     if (!detailed)
-        return hash.ToString();
+        return dmn->proTxHash.ToString();
 
     UniValue o(UniValue::VOBJ);
 
-    o.push_back(Pair("proTxHash", hash.GetHex()));
+    o.push_back(Pair("proTxHash", dmn->proTxHash.ToString()));
     o.push_back(Pair("collateralIndex", (int)dmn->nCollateralIndex));
 
     UniValue stateObj;
     dmn->state->ToJson(stateObj);
     o.push_back(Pair("state", stateObj));
 
-    int confirmations = GetUTXOConfirmations(COutPoint(hash, dmn->nCollateralIndex));
+    int confirmations = GetUTXOConfirmations(COutPoint(dmn->proTxHash, dmn->nCollateralIndex));
     o.push_back(Pair("confirmations", confirmations));
+
+    bool hasOwnerKey = pwalletMain->HaveKey(dmn->state->keyIDOwner);
+    bool hasOperatorKey = pwalletMain->HaveKey(dmn->state->keyIDOperator);
+    bool hasVotingKey = pwalletMain->HaveKey(dmn->state->keyIDVoting);
+
+    bool ownsCollateral = false;
+    CTransactionRef collateralTx;
+    uint256 tmpHashBlock;
+    if (GetTransaction(dmn->proTxHash, collateralTx, Params().GetConsensus(), tmpHashBlock)) {
+        ownsCollateral = CheckWalletOwnsScript(collateralTx->vout[dmn->nCollateralIndex].scriptPubKey);
+    }
+
+    UniValue walletObj(UniValue::VOBJ);
+    walletObj.push_back(Pair("hasOwnerKey", hasOwnerKey));
+    walletObj.push_back(Pair("hasOperatorKey", hasOperatorKey));
+    walletObj.push_back(Pair("hasVotingKey", hasVotingKey));
+    walletObj.push_back(Pair("ownsCollateral", ownsCollateral));
+    walletObj.push_back(Pair("ownsPayeeScript", CheckWalletOwnsScript(dmn->state->scriptPayout)));
+    walletObj.push_back(Pair("ownsOperatorRewardScript", CheckWalletOwnsScript(dmn->state->scriptOperatorPayout)));
+    o.push_back(Pair("wallet", walletObj));
 
     return o;
 }
@@ -871,31 +901,35 @@ UniValue protx_list(const JSONRPCRequest& request)
 
     UniValue ret(UniValue::VARR);
 
+    LOCK2(cs_main, pwalletMain->cs_wallet);
+
     if (type == "wallet") {
         if (request.params.size() > 3)
             protx_list_help();
 
         bool detailed = request.params.size() > 2 ? ParseBoolV(request.params[2], "detailed") : false;
 
-        LOCK2(cs_main, pwalletMain->cs_wallet);
         std::vector<COutPoint> vOutpts;
         pwalletMain->ListProTxCoins(vOutpts);
+        std::set<uint256> setOutpts;
+        for (const auto& outpt : vOutpts) {
+            setOutpts.emplace(outpt.hash);
+        }
 
-        for (const COutPoint& outpt : vOutpts) {
-            const CWalletTx *wtx = pwalletMain->GetWalletTx(outpt.hash);
-            assert(wtx);
-
-            auto dmn = deterministicMNManager->GetListAtChainTip().GetMN(outpt.hash);
-            if (!dmn)
-                continue;
-
-            ret.push_back(BuildDMNListEntry(wtx->GetHash(), dmn, detailed));
+        for (const auto& dmn : deterministicMNManager->GetListAtChainTip().all_range()) {
+            if (setOutpts.count(dmn->proTxHash) ||
+                    pwalletMain->HaveKey(dmn->state->keyIDOwner) ||
+                    pwalletMain->HaveKey(dmn->state->keyIDOperator) ||
+                    pwalletMain->HaveKey(dmn->state->keyIDVoting) ||
+                    CheckWalletOwnsScript(dmn->state->scriptPayout) ||
+                    CheckWalletOwnsScript(dmn->state->scriptOperatorPayout)) {
+                ret.push_back(BuildDMNListEntry(dmn, detailed));
+            }
         }
     } else if (type == "valid" || type == "registered") {
         if (request.params.size() > 4)
             protx_list_help();
 
-        LOCK(cs_main);
         int height = request.params.size() > 2 ? ParseInt32V(request.params[2], "height") : chainActive.Height();
         if (height < 1 || height > chainActive.Height())
             throw JSONRPCError(RPC_INVALID_PARAMETER, "invalid height specified");
@@ -911,7 +945,7 @@ UniValue protx_list(const JSONRPCRequest& request)
             range = mnList.all_range();
         }
         for (const auto& dmn : range) {
-            ret.push_back(BuildDMNListEntry(dmn->proTxHash, dmn, detailed));
+            ret.push_back(BuildDMNListEntry(dmn, detailed));
         }
     } else {
         throw JSONRPCError(RPC_INVALID_PARAMETER, "invalid type specified");
