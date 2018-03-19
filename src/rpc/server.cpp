@@ -178,7 +178,7 @@ int32_t ParseInt32V(const UniValue& v, const std::string &strName)
     std::string strNum = v.getValStr();
     int32_t num;
     if (!ParseInt32(strNum, &num))
-        throw JSONRPCError(RPC_INVALID_PARAMETER, strName+" must a 32bit integer (not '"+strNum+"')");
+        throw JSONRPCError(RPC_INVALID_PARAMETER, strName+" must be a 32bit integer (not '"+strNum+"')");
     return num;
 }
 
@@ -187,7 +187,7 @@ int64_t ParseInt64V(const UniValue& v, const std::string &strName)
     std::string strNum = v.getValStr();
     int64_t num;
     if (!ParseInt64(strNum, &num))
-        throw JSONRPCError(RPC_INVALID_PARAMETER, strName+" must a 64bit integer (not '"+strNum+"')");
+        throw JSONRPCError(RPC_INVALID_PARAMETER, strName+" must be a 64bit integer (not '"+strNum+"')");
     return num;
 }
 
