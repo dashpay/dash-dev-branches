@@ -903,12 +903,7 @@ UniValue BuildDMNListEntry(const CDeterministicMNCPtr& dmn, bool detailed)
 
     UniValue o(UniValue::VOBJ);
 
-    o.push_back(Pair("proTxHash", dmn->proTxHash.ToString()));
-    o.push_back(Pair("collateralIndex", (int)dmn->nCollateralIndex));
-
-    UniValue stateObj;
-    dmn->state->ToJson(stateObj);
-    o.push_back(Pair("state", stateObj));
+    dmn->ToJson(o);
 
     int confirmations = GetUTXOConfirmations(COutPoint(dmn->proTxHash, dmn->nCollateralIndex));
     o.push_back(Pair("confirmations", confirmations));
