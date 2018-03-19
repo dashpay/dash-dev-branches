@@ -247,6 +247,15 @@ static CKey GetKeyFromParamsOrWallet(const UniValue &params, uint32_t paramPos, 
 #endif//ENABLE_WALLET
 }
 
+static CKeyID ParsePubKeyIDFromAddress(const std::string& strAddress, const std::string& paramName)
+{
+    CBitcoinAddress address(strAddress);
+    CKeyID keyID;
+    if (!address.IsValid() || !address.GetKeyID(keyID))
+        throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("%s must be a valid P2PKH address, not %s", paramName, strAddress));
+    return keyID;
+}
+
 static uint256 GetLastTransitionFromParams(const UniValue& params, uint32_t paramPos, const uint256 &regTxId) {
     if (params.size() > paramPos)
         return ParseHashStr(params[paramPos].get_str(), "hashLastTransition");
@@ -568,7 +577,7 @@ static std::string SignAndSendSpecialTx(const CMutableTransaction& tx)
 void protx_register_help()
 {
     throw std::runtime_error(
-            "protx register \"collateralAddress\" collateralAmount \"ipAndPort\" protocolVersion \"masternodeKey\" \"payoutAddress\"\n"
+            "protx register \"collateralAddress\" collateralAmount \"ipAndPort\" protocolVersion \"ownerKeyAddr\" \"operatorKeyAddr\" \"votingKeyAddr\" operatorReward \"payoutAddress\"\n"
             "\nCreates and sends a ProTx to the network. The resulting transaction will move the specified amount\n"
             "to the address specified by collateralAddress and will then function as the collateral of your\n"
             "masternode.\n"
@@ -640,14 +649,10 @@ UniValue protx_register(const JSONRPCRequest& request)
     CKeyID keyIDOperator = keyOwner.GetPubKey().GetID();
     CKeyID keyIDVoting = keyOwner.GetPubKey().GetID();
     if (request.params[6].get_str() != "0" && request.params[6].get_str() != "") {
-        CBitcoinAddress address(request.params[6].get_str());
-        if (!address.IsValid() || !address.GetKeyID(keyIDOperator))
-            throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, strprintf("invalid operator address: %s", request.params[7].get_str()));
+        keyIDOperator = ParsePubKeyIDFromAddress(request.params[6].get_str(), "operator address");
     }
     if (request.params[7].get_str() != "0" && request.params[7].get_str() != "") {
-        CBitcoinAddress address(request.params[7].get_str());
-        if (!address.IsValid() || !address.GetKeyID(keyIDVoting))
-            throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, strprintf("invalid voting address: %s", request.params[7].get_str()));
+        keyIDVoting = ParsePubKeyIDFromAddress(request.params[7].get_str(), "voting address");
     }
 
     double operatorReward = ParseDoubleV(request.params[8], "operatorReward");
@@ -685,13 +690,12 @@ UniValue protx_register(const JSONRPCRequest& request)
 void protx_update_service_help()
 {
     throw std::runtime_error(
-            "protx update_service \"proTxHash\" \"ipAndPort\" protocolVersion\n"
+            "protx update_service \"proTxHash\" \"ipAndPort\" protocolVersion (\"operatorPayoutAddress\")\n"
             "\nCreates and sends a ProUpServTx to the network. This will update the address and protocol version\n"
             "of a masternode. The operator key of the masternode must be known to your wallet.\n"
             "If this is done for a masternode that got PoSe-banned, the ProUpServTx will also revive this masternode.\n"
             "\nArguments:\n"
-            "1. \"proTxHash\"                (string, required) The dash address to send the collateral to.\n"
-            "                              Must be a P2PKH address.\n"
+            "1. \"proTxHash\"                (string, required) The hash of the initial ProRegTx.\n"
             "2. \"ipAndPort\"                (string, required) IP and port in the form \"IP:PORT\".\n"
             "                              Must be unique on the network.\n"
             "3. \"protocolVersion\"          (numeric, required) The protocol version of your masternode.\n"
@@ -716,10 +720,7 @@ UniValue protx_update_service(const JSONRPCRequest& request)
         throw std::runtime_error(strprintf("invalid network address %s", request.params[3].get_str()));
     }
 
-    if (!ParseInt32(request.params[3].get_str(), &ptx.nProtocolVersion)) {
-        throw std::runtime_error(strprintf("invalid protocol version %s", request.params[4].get_str()));
-    }
-
+    ptx.nProtocolVersion = ParseInt32V(request.params[3], "protocolVersion");
     if (ptx.nProtocolVersion == 0) {
         ptx.nProtocolVersion = PROTOCOL_VERSION;
     }
