@@ -32,9 +32,9 @@ std::string CDeterministicMNState::ToString() const
         operatorRewardAddress = CBitcoinAddress(dest).ToString();
     }
 
-    return strprintf("CDeterministicMNState(registeredHeight=%d, lastPaidHeight=%d, maturityHeight=%d, PoSePenality=%d, PoSeRevivedHeight=%d, PoSeBanHeight=%d, "
+    return strprintf("CDeterministicMNState(registeredHeight=%d, lastPaidHeight=%d, PoSePenality=%d, PoSeRevivedHeight=%d, PoSeBanHeight=%d, "
                      "keyIDOwner=%s, keyIDOperator=%s, keyIDVoting=%s, addr=%s, nProtocolVersion=%d, payoutAddress=%s, operatorRewardAddress=%s)",
-                     registeredHeight, lastPaidHeight, maturityHeight, PoSePenality, PoSeRevivedHeight, PoSeBanHeight,
+                     registeredHeight, lastPaidHeight, PoSePenality, PoSeRevivedHeight, PoSeBanHeight,
                      keyIDOwner.ToString(), keyIDOperator.ToString(), keyIDVoting.ToString(), addr.ToStringIPPort(false), nProtocolVersion, payoutAddress, operatorRewardAddress);
 }
 
@@ -44,7 +44,6 @@ void CDeterministicMNState::ToJson(UniValue& obj) const
     obj.setObject();
     obj.push_back(Pair("registeredHeight", registeredHeight));
     obj.push_back(Pair("lastPaidHeight", lastPaidHeight));
-    obj.push_back(Pair("maturityHeight", maturityHeight));
     obj.push_back(Pair("PoSePenality", PoSePenality));
     obj.push_back(Pair("PoSeRevivedHeight", PoSeRevivedHeight));
     obj.push_back(Pair("PoSeBanHeight", PoSeBanHeight));
@@ -93,15 +92,6 @@ bool CDeterministicMNList::IsMNValid(const uint256& proTxHash) const
     return IsMNValid(it->second);
 }
 
-bool CDeterministicMNList::IsMNMature(const uint256& proTxHash) const
-{
-    auto it = mnMap->find(proTxHash);
-    if (it == mnMap->end()) {
-        return false;
-    }
-    return IsMNMature(it->second);
-}
-
 bool CDeterministicMNList::IsMNPoSeBanned(const uint256& proTxHash) const
 {
     auto it = mnMap->find(proTxHash);
@@ -113,14 +103,7 @@ bool CDeterministicMNList::IsMNPoSeBanned(const uint256& proTxHash) const
 
 bool CDeterministicMNList::IsMNValid(const CDeterministicMNCPtr& dmn) const
 {
-    return IsMNMature(dmn) && !IsMNPoSeBanned(dmn);
-}
-
-bool CDeterministicMNList::IsMNMature(const CDeterministicMNCPtr& dmn) const
-{
-    assert(dmn);
-    const CDeterministicMNState& state = *dmn->state;
-    return height >= state.maturityHeight;
+    return !IsMNPoSeBanned(dmn);
 }
 
 bool CDeterministicMNList::IsMNPoSeBanned(const CDeterministicMNCPtr& dmn) const
@@ -158,17 +141,25 @@ CDeterministicMNCPtr CDeterministicMNList::GetMNByOperatorKey(const CKeyID& keyI
     return nullptr;
 }
 
+static int CompareByLastPaid_GetHeight(const CDeterministicMN &dmn)
+{
+    int h = dmn.state->lastPaidHeight;
+    if (dmn.state->PoSeRevivedHeight != -1 && dmn.state->PoSeRevivedHeight > h) {
+        h = dmn.state->PoSeRevivedHeight;
+    } else if (h == 0) {
+        h = dmn.state->registeredHeight;
+    }
+    return h;
+}
+
 static bool CompareByLastPaid(const CDeterministicMN &_a, const CDeterministicMN &_b)
 {
-    const CDeterministicMNState& as = *_a.state;
-    const CDeterministicMNState& bs = *_b.state;
-    if (as.lastPaidHeight == bs.lastPaidHeight) {
-        if (as.registeredHeight == bs.registeredHeight)
-            return _a.proTxHash < _b.proTxHash;
-        else
-            return as.registeredHeight < bs.registeredHeight;
+    int ah = CompareByLastPaid_GetHeight(_a);
+    int bh = CompareByLastPaid_GetHeight(_b);
+    if (ah == bh) {
+        return _a.proTxHash < _b.proTxHash;
     } else {
-        return as.lastPaidHeight < bs.lastPaidHeight;
+        return ah < bh;
     }
 }
 static bool CompareByLastPaid(const CDeterministicMNCPtr &_a, const CDeterministicMNCPtr &_b)
@@ -332,8 +323,6 @@ bool CDeterministicMNManager::ProcessBlock(const CBlock& block, const CBlockInde
 
             CDeterministicMNState dmnState = *dmn->state;
             dmnState.registeredHeight = height;
-            // MN becomes mature after at least one full payment cycle
-            dmnState.maturityHeight = (int)(height + Params().GetConsensus().nMasternodeMinimumConfirmations + oldList.valid_count());
 
             if (proTx.addr == CService() || proTx.nProtocolVersion == 0) {
                 // start in banned state as we need to wait for a ProUpServTx
@@ -372,11 +361,9 @@ bool CDeterministicMNManager::ProcessBlock(const CBlock& block, const CBlockInde
             if (newState->PoSeBanHeight != -1) {
                 newState->PoSeBanHeight = -1;
                 newState->PoSeRevivedHeight = height;
-                // MN becomes mature after at least one full payment cycle
-                newState->maturityHeight = (int)(height + Params().GetConsensus().nMasternodeMinimumConfirmations + oldList.valid_count());
 
-                LogPrintf("CDeterministicMNManager::%s -- MN %s revived at height %d. maturityHeight=%d\n",
-                          __func__, proTx.proTxHash.ToString(), height, newState->maturityHeight);
+                LogPrintf("CDeterministicMNManager::%s -- MN %s revived at height %d\n",
+                          __func__, proTx.proTxHash.ToString(), height);
             }
 
             newList.UpdateMN(proTx.proTxHash, newState);

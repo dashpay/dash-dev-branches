@@ -44,7 +44,6 @@ class CActiveDeterministicMasternodeManager : public CValidationInterface {
 public:
     enum masternode_state_t {
         MASTERNODE_WAITING_FOR_PROTX,
-        MASTERNODE_NOT_MATURE,
         MASTERNODE_POSE_BANNED,
         MASTERNODE_REMOVED,
         MASTERNODE_READY,

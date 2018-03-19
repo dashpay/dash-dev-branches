@@ -258,15 +258,9 @@ class DIP3Test(BitcoinTestFramework):
             self.start_mn(mn)
             self.sync_all()
             self.force_finish_mnsync(mn.node)
-            self.assert_mnlists(mns, False, True, check_maturity=True)
+            self.assert_mnlists(mns, False, True)
 
-        # mature all MNs
-        for i in range(len(mns)):
-            self.nodes[0].generate(1)
-            self.sync_all()
-            self.assert_mnlists(mns, False, True, check_maturity=True)
-        # all should be mature now
-        self.assert_mnlists(mns, False, True, check_maturity=False)
+        self.assert_mnlists(mns, False, True)
 
         print("test mn payment enforcement with deterministic MNs")
         for i in range(20):
@@ -311,7 +305,6 @@ class DIP3Test(BitcoinTestFramework):
         mn.alias = alias
         mn.is_protx = True
         mn.p2p_port = p2p_port(mn.idx)
-        mn.maturity_height = node.getblockchaininfo()['blocks'] + 2 + len(self.nodes[0].masternode('list', 'status'))
 
         mn.ownerAddr = node.getnewaddress()
         mn.operatorAddr = mn.ownerAddr
@@ -530,12 +523,12 @@ class DIP3Test(BitcoinTestFramework):
             time.sleep(0.5)
         raise AssertionError("wait_for_mnlist timed out")
 
-    def assert_mnlists(self, mns, include_legacy, include_protx, check_maturity=False):
+    def assert_mnlists(self, mns, include_legacy, include_protx):
         for node in self.nodes:
-            self.assert_mnlist(node, mns, include_legacy, include_protx, check_maturity)
+            self.assert_mnlist(node, mns, include_legacy, include_protx)
 
-    def assert_mnlist(self, node, mns, include_legacy, include_protx, check_maturity=False):
-        if not self.compare_mnlist(node, mns, include_legacy, include_protx, check_maturity):
+    def assert_mnlist(self, node, mns, include_legacy, include_protx):
+        if not self.compare_mnlist(node, mns, include_legacy, include_protx):
             expected = []
             for mn in mns:
                 if (mn.is_protx and include_protx) or (not mn.is_protx and include_legacy):
@@ -559,26 +552,19 @@ class DIP3Test(BitcoinTestFramework):
                 return False
         return True
 
-    def compare_mnlist(self, node, mns, include_legacy, include_protx, check_maturity=False):
+    def compare_mnlist(self, node, mns, include_legacy, include_protx):
         mnlist = node.masternode('list', 'status')
         for mn in mns:
             s = '%s-%d' % (mn.collateral_txid, mn.collateral_vout)
             in_list = s in mnlist
 
             if mn.is_protx:
-                if check_maturity and include_protx:
-                    height = node.getblockchaininfo()['blocks']
-                    if height >= mn.maturity_height and not in_list:
-                        return False
-                    elif height < mn.maturity_height and in_list:
+                if include_protx:
+                    if not in_list:
                         return False
                 else:
-                    if include_protx:
-                        if not in_list:
-                            return False
-                    else:
-                        if in_list:
-                            return False
+                    if in_list:
+                        return False
             else:
                 if include_legacy:
                     if not in_list:

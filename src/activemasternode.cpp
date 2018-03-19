@@ -22,7 +22,6 @@ std::string CActiveDeterministicMasternodeManager::GetStateString() const
 {
     switch (state) {
         case MASTERNODE_WAITING_FOR_PROTX:  return "WAITING_FOR_PROTX";
-        case MASTERNODE_NOT_MATURE:         return "NOT_MATURE";
         case MASTERNODE_POSE_BANNED:        return "POSE_BANNED";
         case MASTERNODE_REMOVED:            return "REMOVED";
         case MASTERNODE_READY:              return "READY";
@@ -35,7 +34,6 @@ std::string CActiveDeterministicMasternodeManager::GetStatus() const
 {
     switch (state) {
         case MASTERNODE_WAITING_FOR_PROTX:  return "Waiting for ProTx to appear on-chain";
-        case MASTERNODE_NOT_MATURE:         return "Waiting for ProTx to mature";
         case MASTERNODE_POSE_BANNED:        return "Masternode was PoSe banned";
         case MASTERNODE_REMOVED:            return "Masternode removed from list";
         case MASTERNODE_READY:              return "Ready";
@@ -69,8 +67,6 @@ void CActiveDeterministicMasternodeManager::Init() {
     if (!mnList.IsMNValid(dmn->proTxHash)) {
         if (mnList.IsMNPoSeBanned(dmn->proTxHash)) {
             state = MASTERNODE_POSE_BANNED;
-        } else if (!mnList.IsMNMature(dmn->proTxHash)) {
-            state = MASTERNODE_NOT_MATURE;
         } else {
             state = MASTERNODE_REMOVED;
         }
@@ -109,7 +105,7 @@ void CActiveDeterministicMasternodeManager::UpdatedBlockTip(const CBlockIndex* p
         return;
     }
 
-    if (state == MASTERNODE_WAITING_FOR_PROTX || state == MASTERNODE_NOT_MATURE) {
+    if (state == MASTERNODE_WAITING_FOR_PROTX) {
         Init();
     } else if (state == MASTERNODE_READY) {
         if (!deterministicMNManager->HasValidMNAtHeight(pindexNew->nHeight, mnListEntry->proTxHash)) {

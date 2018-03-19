@@ -24,7 +24,6 @@ class CDeterministicMNState
 public:
     int registeredHeight{-1};
     int lastPaidHeight{0};
-    int maturityHeight{-1};
     int PoSePenality{0};
     int PoSeRevivedHeight{-1};
     int PoSeBanHeight{-1};
@@ -58,7 +57,6 @@ public:
     {
         READWRITE(registeredHeight);
         READWRITE(lastPaidHeight);
-        READWRITE(maturityHeight);
         READWRITE(PoSePenality);
         READWRITE(PoSeRevivedHeight);
         READWRITE(PoSeBanHeight);
@@ -75,7 +73,6 @@ public:
     {
         return registeredHeight == rhs.registeredHeight &&
                lastPaidHeight == rhs.lastPaidHeight &&
-               maturityHeight == rhs.maturityHeight &&
                PoSePenality == rhs.PoSePenality &&
                PoSeRevivedHeight == rhs.PoSeRevivedHeight &&
                PoSeBanHeight == rhs.PoSeBanHeight &&
@@ -226,7 +223,6 @@ public:
     }
 
     bool IsMNValid(const uint256& proTxHash) const;
-    bool IsMNMature(const uint256& proTxHash) const;
     bool IsMNPoSeBanned(const uint256& proTxHash) const;
 
     bool HasMN(const uint256& proTxHash) const {
@@ -267,7 +263,6 @@ public:
 
 private:
     bool IsMNValid(const CDeterministicMNCPtr& dmn) const;
-    bool IsMNMature(const CDeterministicMNCPtr& dmn) const;
     bool IsMNPoSeBanned(const CDeterministicMNCPtr& dmn) const;
 };
 
