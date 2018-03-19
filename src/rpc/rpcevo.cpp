@@ -656,9 +656,9 @@ UniValue protx_register(const JSONRPCRequest& request)
     }
 
     double operatorReward = ParseDoubleV(request.params[8], "operatorReward");
-    if (operatorReward < 0 || operatorReward > 25)
-        throw JSONRPCError(RPC_INVALID_PARAMETER, "operatorReward must be between 0 and 25");
-    ptx.operatorReward = (uint8_t)(operatorReward * 10);
+    if (operatorReward < 0 || operatorReward > 100)
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "operatorReward must be between 0 and 100");
+    ptx.operatorReward = (uint16_t)(operatorReward * 100);
 
     CBitcoinAddress payoutAddress(request.params[9].get_str());
     if (!payoutAddress.IsValid())

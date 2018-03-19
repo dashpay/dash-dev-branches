@@ -573,7 +573,7 @@ bool CMasternodePayments::GetBlockTxOuts(int nBlockHeight, CAmount blockReward, 
         if (dmnPayee->operatorReward == 0 || dmnPayee->state->scriptOperatorPayout == CScript()) {
             vecTxOutsRet.emplace_back(masternodeReward, dmnPayee->state->scriptPayout);
         } else {
-            CAmount operatorReward = (masternodeReward * dmnPayee->operatorReward) / 1000;
+            CAmount operatorReward = (masternodeReward * dmnPayee->operatorReward) / 10000;
             masternodeReward -= operatorReward;
             vecTxOutsRet.emplace_back(masternodeReward, dmnPayee->state->scriptPayout);
             vecTxOutsRet.emplace_back(operatorReward, dmnPayee->state->scriptOperatorPayout);

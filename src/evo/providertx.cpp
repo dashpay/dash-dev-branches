@@ -101,14 +101,14 @@ bool CheckProRegTx(const CTransaction& tx, const CBlockIndex* pindex, CValidatio
     if (tx.vout[ptx.nCollateralIndex].scriptPubKey != ptx.scriptPayout)
         return state.DoS(10, false, REJECT_INVALID, "bad-protx-payee-collateral");
 
-    if (ptx.operatorReward == 0) {
-        if (!CheckService(tx.GetHash(), ptx, pindex, state))
-            return false;
-    } else {
-        if (ptx.operatorReward > 250)
+    // It's allowed to set addr/protocolVersion to 0, which will put the MN into PoSe-banned state and require a ProUpServTx to be issues later
+    // If any of both is set, it must be valid however
+    if ((ptx.addr != CService() || ptx.nProtocolVersion != 0) && !CheckService(tx.GetHash(), ptx, pindex, state))
+        return false;
+
+    if (ptx.operatorReward != 0) {
+        if (ptx.operatorReward > 10000)
             return state.DoS(10, false, REJECT_INVALID, "bad-protx-operator-reward");
-        if (!CheckServiceZero(tx.GetHash(), ptx, pindex, state))
-            return false;
     }
 
     if (pindex) {
@@ -275,7 +275,7 @@ std::string CProRegTX::ToString() const
     }
 
     return strprintf("CProRegTX(nVersion=%d, nProtocolVersion=%d, nCollateralIndex=%d, addr=%s, operatorReward=%f, keyIDOwner=%s, keyIDOperator=%s, keyIDVoting=%s, scriptPayout=%s)",
-        nVersion, nProtocolVersion, nCollateralIndex, addr.ToString(), (double)operatorReward / 1000, keyIDOwner.ToString(), keyIDOperator.ToString(), keyIDVoting.ToString(), payee);
+        nVersion, nProtocolVersion, nCollateralIndex, addr.ToString(), (double)operatorReward / 100, keyIDOwner.ToString(), keyIDOperator.ToString(), keyIDVoting.ToString(), payee);
 }
 
 void CProRegTX::ToJson(UniValue& obj) const
@@ -295,7 +295,7 @@ void CProRegTX::ToJson(UniValue& obj) const
         CBitcoinAddress bitcoinAddress(dest);
         obj.push_back(Pair("payoutAddress", bitcoinAddress.ToString()));
     }
-    obj.push_back(Pair("operatorReward", (double)operatorReward / 1000));
+    obj.push_back(Pair("operatorReward", (double)operatorReward / 100));
 
     obj.push_back(Pair("inputsHash", inputsHash.ToString()));
 }

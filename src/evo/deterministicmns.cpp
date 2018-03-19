@@ -66,7 +66,7 @@ void CDeterministicMNState::ToJson(UniValue& obj) const
 
 std::string CDeterministicMN::ToString() const
 {
-    return strprintf("CDeterministicMN(proTxHash=%s, nCollateralIndex=%d, operatorReward=%f, state=%s", proTxHash.ToString(), nCollateralIndex, (double)operatorReward / 1000, state->ToString());
+    return strprintf("CDeterministicMN(proTxHash=%s, nCollateralIndex=%d, operatorReward=%f, state=%s", proTxHash.ToString(), nCollateralIndex, (double)operatorReward / 100, state->ToString());
 }
 
 void CDeterministicMN::ToJson(UniValue& obj) const
@@ -79,7 +79,7 @@ void CDeterministicMN::ToJson(UniValue& obj) const
 
     obj.push_back(Pair("proTxHash", proTxHash.ToString()));
     obj.push_back(Pair("collateralIndex", (int)nCollateralIndex));
-    obj.push_back(Pair("operatorReward", (double)operatorReward / 1000));
+    obj.push_back(Pair("operatorReward", (double)operatorReward / 100));
     obj.push_back(Pair("state", stateObj));
 }
 

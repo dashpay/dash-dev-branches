@@ -113,7 +113,7 @@ public:
 
     uint256 proTxHash;
     uint32_t nCollateralIndex;
-    uint8_t operatorReward;
+    uint16_t operatorReward;
     CDeterministicMNStateCPtr state;
 
 public:

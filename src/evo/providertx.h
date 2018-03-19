@@ -27,7 +27,7 @@ public:
     CKeyID keyIDOwner;
     CKeyID keyIDOperator;
     CKeyID keyIDVoting;
-    uint8_t operatorReward{0};
+    uint16_t operatorReward{0};
     CScript scriptPayout;
     uint256 inputsHash; // replay protection
     std::vector<unsigned char> vchSig;
