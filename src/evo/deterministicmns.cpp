@@ -389,6 +389,28 @@ bool CDeterministicMNManager::ProcessBlock(const CBlock& block, const CBlockInde
 
             LogPrintf("CDeterministicMNManager::%s -- MN %s updated at height %d: %s\n",
                       __func__, proTx.proTxHash.ToString(), height, proTx.ToString());
+        } else if (tx.nType == TRANSACTION_PROVIDER_UPDATE_REVOKE) {
+            CProUpRevTX proTx;
+            if (!GetTxPayload(tx, proTx)) {
+                assert(false); // this should have been handled already
+            }
+
+            CDeterministicMNCPtr dmn = newList.GetMN(proTx.proTxHash);
+            if (!dmn) {
+                return _state.DoS(100, false, REJECT_INVALID, "bad-protx-hash");
+            }
+            auto newState = std::make_shared<CDeterministicMNState>(*dmn->state);
+            newState->keyIDOperator.SetNull();
+            newState->addr = CService();
+            newState->nProtocolVersion = 0;
+            if (newState->PoSeBanHeight == -1) {
+                newState->PoSeBanHeight = height;
+            }
+
+            newList.UpdateMN(proTx.proTxHash, newState);
+
+            LogPrintf("CDeterministicMNManager::%s -- MN %s revoked operator key at height %d: %s\n",
+                      __func__, proTx.proTxHash.ToString(), height, proTx.ToString());
         }
     }
 

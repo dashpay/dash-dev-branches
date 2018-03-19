@@ -242,6 +242,30 @@ bool CheckProUpRegTx(const CTransaction& tx, const CBlockIndex* pindex, CValidat
     return true;
 }
 
+bool CheckProUpRevTx(const CTransaction& tx, const CBlockIndex* pindex, CValidationState& state)
+{
+    AssertLockHeld(cs_main);
+
+    CProUpRevTX ptx;
+    if (!GetTxPayload(tx, ptx))
+        return state.DoS(100, false, REJECT_INVALID, "bad-tx-payload");
+
+    if (ptx.nVersion != CProRegTX::CURRENT_VERSION)
+        return state.DoS(100, false, REJECT_INVALID, "bad-protx-version");
+
+    if (pindex) {
+        auto mnList = deterministicMNManager->GetListAtHeight(pindex->nHeight - 1);
+        auto dmn = mnList.GetMN(ptx.proTxHash);
+        if (!dmn)
+            return state.DoS(100, false, REJECT_INVALID, "bad-protx-hash");
+
+        if (!CheckInputsHashAndSig(tx, ptx, dmn->state->keyIDOperator, state))
+            return false;
+    }
+
+    return true;
+}
+
 std::string CProRegTX::ToString() const
 {
     CTxDestination dest;
@@ -329,6 +353,21 @@ void CProUpRegTX::ToJson(UniValue& obj) const
         CBitcoinAddress bitcoinAddress(dest);
         obj.push_back(Pair("payoutAddress", bitcoinAddress.ToString()));
     }
+    obj.push_back(Pair("inputsHash", inputsHash.ToString()));
+}
+
+std::string CProUpRevTX::ToString() const
+{
+    return strprintf("CProUpRevTX(nVersion=%d, proTxHash=%s)",
+                     nVersion, proTxHash.ToString());
+}
+
+void CProUpRevTX::ToJson(UniValue& obj) const
+{
+    obj.clear();
+    obj.setObject();
+    obj.push_back(Pair("version", nVersion));
+    obj.push_back(Pair("proTxHash", proTxHash.ToString()));
     obj.push_back(Pair("inputsHash", inputsHash.ToString()));
 }
 
