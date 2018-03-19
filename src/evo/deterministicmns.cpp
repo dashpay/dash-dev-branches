@@ -334,6 +334,12 @@ bool CDeterministicMNManager::ProcessBlock(const CBlock& block, const CBlockInde
             dmnState.registeredHeight = height;
             // MN becomes mature after at least one full payment cycle
             dmnState.maturityHeight = (int)(height + Params().GetConsensus().nMasternodeMinimumConfirmations + oldList.valid_count());
+
+            if (proTx.addr == CService() || proTx.nProtocolVersion == 0) {
+                // start in banned state as we need to wait for a ProUpServTx
+                dmnState.PoSeBanHeight = height;
+            }
+
             dmn->state = std::make_shared<CDeterministicMNState>(dmnState);
 
             newList.AddMN(dmn);
