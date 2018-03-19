@@ -369,6 +369,15 @@ bool CDeterministicMNManager::ProcessBlock(const CBlock& block, const CBlockInde
             newState->nProtocolVersion = proTx.nProtocolVersion;
             newState->scriptOperatorPayout = proTx.scriptOperatorPayout;
 
+            if (newState->PoSeBanHeight != -1) {
+                newState->PoSeBanHeight = -1;
+                newState->PoSeRevivedHeight = height;
+                // MN becomes mature after at least one full payment cycle
+                newState->maturityHeight = (int)(height + Params().GetConsensus().nMasternodeMinimumConfirmations + oldList.valid_count());
+
+                LogPrintf("CDeterministicMNManager::%s -- MN %s revived. maturityHeight=%d, height=%d\n", __func__, proTx.proTxHash.ToString(), newState->maturityHeight, height);
+            }
+
             newList.UpdateMN(proTx.proTxHash, newState);
 
             LogPrintf("CDeterministicMNManager::%s -- MN %s updated with addr=%s, nProtocolVersion=%d. height=%d\n",
