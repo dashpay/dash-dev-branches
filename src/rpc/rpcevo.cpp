@@ -580,9 +580,9 @@ void protx_register_help()
             "2. \"collateralAmount\"    (numeric or string, required) The collateral amount.\n"
             "                         Must be exactly 1000 Dash.\n"
             "3. \"ipAndPort\"           (string, required) IP and port in the form \"IP:PORT\".\n"
-            "                         Must be unique on the network.\n"
+            "                         Must be unique on the network. Can be set zu 0, which will require a ProUpServTx afterwards.\n"
             "4. \"protocolVersion\"     (numeric, required) The protocol version of your masternode.\n"
-            "                         Can be 0 to default to the clients protocol version\n"
+            "                         Can be 0 to default to the clients protocol version.\n"
             "5. \"ownerKeyAddr\"        (string, required) The owner key used for payee updates and proposal voting.\n"
             "                         The private key belonging to this address be known in your wallet. The address must\n"
             "                         be unused and must differ from the collateralAddress\n"
@@ -592,7 +592,9 @@ void protx_register_help()
             "7. \"votingKeyAddr\"       (string, required) The voting key address. The private key does not have to be known by your wallet.\n"
             "                         It has to match the private key which is later used when voting on proposals.\n"
             "                         If set to \"0\" or an empty string, ownerAddr will be used.\n"
-            "8. \"payoutAddress\"       (string, required) The dash address to use for masternode reward payments\n"
+            "8. \"operatorReward\"      (numeric, required) The fraction in %% to share with the operator. If non-zero,\n"
+            "                         \"ipAndPort\" and \"protocolVersion\" must be zero as well. The value must be between 0 and 25.\n"
+            "9. \"payoutAddress\"       (string, required) The dash address to use for masternode reward payments\n"
             "                         Must match \"collateralAddress\"."
             "\nExamples:\n"
             + HelpExampleCli("protx", "register \"XwnLY9Tf7Zsef8gMGL2fhWA9ZmMjt4KPwG\" 1000 \"1.2.3.4:1234\" 0 \"93Fd7XY2zF4q9YKTZUSFxLgp4Xs7MuaMnvY9kpvH7V8oXWqsCC1\" XwnLY9Tf7Zsef8gMGL2fhWA9ZmMjt4KPwG")
@@ -601,7 +603,7 @@ void protx_register_help()
 
 UniValue protx_register(const JSONRPCRequest& request)
 {
-    if (request.fHelp || request.params.size() != 9)
+    if (request.fHelp || request.params.size() != 10)
         protx_register_help();
 
     CBitcoinAddress collateralAddress(request.params[1].get_str());
@@ -625,13 +627,13 @@ UniValue protx_register(const JSONRPCRequest& request)
     CProRegTX ptx;
     ptx.nVersion = CProRegTX::CURRENT_VERSION;
 
-    if (!Lookup(request.params[3].get_str().c_str(), ptx.addr, Params().GetDefaultPort(), false))
-        throw std::runtime_error(strprintf("invalid network address %s", request.params[3].get_str()));
+    if (request.params[3].get_str() != "0" && request.params[3].get_str() != "") {
+        if (!Lookup(request.params[3].get_str().c_str(), ptx.addr, Params().GetDefaultPort(), false))
+            throw std::runtime_error(strprintf("invalid network address %s", request.params[3].get_str()));
+    }
 
-    if (!ParseInt32(request.params[4].get_str(), &ptx.nProtocolVersion))
-        throw std::runtime_error(strprintf("invalid protocol version %s", request.params[4].get_str()));
-
-    if (ptx.nProtocolVersion == 0)
+    ptx.nProtocolVersion = ParseInt32V(request.params[4], "protocolVersion");
+    if (ptx.nProtocolVersion == 0 && ptx.addr != CService())
         ptx.nProtocolVersion = PROTOCOL_VERSION;
 
     CKey keyOwner = ParsePrivKey(request.params[5].get_str(), true);
@@ -648,9 +650,14 @@ UniValue protx_register(const JSONRPCRequest& request)
             throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, strprintf("invalid voting address: %s", request.params[7].get_str()));
     }
 
-    CBitcoinAddress payoutAddress(request.params[8].get_str());
+    double operatorReward = ParseDoubleV(request.params[8], "operatorReward");
+    if (operatorReward < 0 || operatorReward > 25)
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "operatorReward must be between 0 and 25");
+    ptx.operatorReward = (uint8_t)(operatorReward * 10);
+
+    CBitcoinAddress payoutAddress(request.params[9].get_str());
     if (!payoutAddress.IsValid())
-        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, strprintf("invalid payout address: %s", request.params[8].get_str()));
+        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, strprintf("invalid payout address: %s", request.params[9].get_str()));
 
     ptx.keyIDOwner = keyOwner.GetPubKey().GetID();
     ptx.keyIDOperator = keyIDOperator;
@@ -683,12 +690,14 @@ void protx_update_service_help()
             "of a masternode. The operator key of the masternode must be known to your wallet.\n"
             "If this is done for a masternode that got PoSe-banned, the ProUpServTx will also revive this masternode.\n"
             "\nArguments:\n"
-            "1. \"proTxHash\"           (string, required) The dash address to send the collateral to.\n"
-            "                         Must be a P2PKH address.\n"
-            "2. \"ipAndPort\"           (string, required) IP and port in the form \"IP:PORT\".\n"
-            "                         Must be unique on the network.\n"
-            "3. \"protocolVersion\"     (numeric, required) The protocol version of your masternode.\n"
-            "                         Can be 0 to default to the clients protocol version\n"
+            "1. \"proTxHash\"                (string, required) The dash address to send the collateral to.\n"
+            "                              Must be a P2PKH address.\n"
+            "2. \"ipAndPort\"                (string, required) IP and port in the form \"IP:PORT\".\n"
+            "                              Must be unique on the network.\n"
+            "3. \"protocolVersion\"          (numeric, required) The protocol version of your masternode.\n"
+            "                              Can be 0 to default to the clients protocol version\n"
+            "4. \"operatorPayoutAddress\"    (string, optional) The address used for operator reward payments.\n"
+            "                              Only allowed when the ProRegTx had a non-zero operatorReward value.\n"
             "\nExamples:\n"
             + HelpExampleCli("protx", "update_service \"0123456701234567012345670123456701234567012345670123456701234567\" \"1.2.3.4:1234\" 0")
     );
@@ -696,7 +705,7 @@ void protx_update_service_help()
 
 UniValue protx_update_service(const JSONRPCRequest& request)
 {
-    if (request.fHelp || request.params.size() != 4)
+    if (request.fHelp || (request.params.size() != 4 && request.params.size() != 5))
         protx_update_service_help();
 
     CProUpServTX ptx;
@@ -713,6 +722,13 @@ UniValue protx_update_service(const JSONRPCRequest& request)
 
     if (ptx.nProtocolVersion == 0) {
         ptx.nProtocolVersion = PROTOCOL_VERSION;
+    }
+
+    if (request.params.size() > 4) {
+        CBitcoinAddress payoutAddress(request.params[4].get_str());
+        if (!payoutAddress.IsValid())
+            throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, strprintf("invalid operator payout address: %s", request.params[4].get_str()));
+        ptx.scriptOperatorPayout = GetScriptForDestination(payoutAddress.Get());
     }
 
     auto dmn = deterministicMNManager->GetListAtChainTip().GetMN(ptx.proTxHash);

@@ -155,13 +155,13 @@ bool CheckProUpServTx(const CTransaction& tx, const CBlockIndex* pindex, CValida
         if (!mn)
             return state.DoS(100, false, REJECT_INVALID, "bad-protx-hash");
 
-        if (mn->operatorReward != 0) {
+        if (ptx.scriptOperatorPayout != CScript()) {
+            if (mn->operatorReward == 0) {
+                // don't allow to set operator reward payee in case no operatorReward was set
+                return state.DoS(10, false, REJECT_INVALID, "bad-protx-operator-payee");
+            }
             // we may support P2SH later, but restrict it for now (while in transitioning phase from old MN list to deterministic list)
             if (!ptx.scriptOperatorPayout.IsPayToPublicKeyHash())
-                return state.DoS(10, false, REJECT_INVALID, "bad-protx-operator-payee");
-        } else {
-            // don't allow to set operator reward payee in case no operatorReward was set
-            if (ptx.scriptOperatorPayout != CScript())
                 return state.DoS(10, false, REJECT_INVALID, "bad-protx-operator-payee");
         }
 

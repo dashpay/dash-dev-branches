@@ -189,6 +189,7 @@ extern std::vector<unsigned char> ParseHexO(const UniValue& o, std::string strKe
 
 extern int32_t ParseInt32V(const UniValue& v, const std::string &strName);
 extern int64_t ParseInt64V(const UniValue& v, const std::string &strName);
+extern double ParseDoubleV(const UniValue& v, const std::string &strName);
 extern bool ParseBoolV(const UniValue& v, const std::string &strName);
 
 extern int64_t nWalletUnlockTime;
