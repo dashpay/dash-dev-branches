@@ -533,7 +533,7 @@ private:
     mapSpentIndexInserted mapSpentInserted;
 
     std::map<CService, uint256> mapProTxAddresses;
-    std::map<CKeyID, uint256> mapProTxRegisterPubKeyIDs;
+    std::map<CKeyID, uint256> mapProTxPubKeyIDs;
 
     std::map<std::string, uint256> mapSubTxRegisterUserNames;
     std::map<uint256, std::set<uint256>> mapSubTxTopups;
@@ -580,6 +580,7 @@ public:
     void removeRecursive(const CTransaction &tx, MemPoolRemovalReason reason = MemPoolRemovalReason::UNKNOWN);
     void removeForReorg(const CCoinsViewCache *pcoins, unsigned int nMemPoolHeight, int flags);
     void removeConflicts(const CTransaction &tx);
+    void removeProTxPubKeyConflicts(const CTransaction &tx, const CKeyID &keyId);
     void removeProTxConflicts(const CTransaction &tx);
     void removeSubTxTopups(const uint256 &regTxId);
     void removeSubTxConflicts(const CTransaction &tx);

@@ -148,6 +148,13 @@ void TxToJSON(const CTransaction& tx, const uint256 hashBlock, UniValue& entry)
             proTx.ToJson(proTxObj);
             entry.push_back(Pair("proUpServTx", proTxObj));
         }
+    } else if (tx.nType == TRANSACTION_PROVIDER_UPDATE_REGISTRAR) {
+        CProUpRegTX proTx;
+        if (GetTxPayload(tx, proTx)) {
+            UniValue proTxObj;
+            proTx.ToJson(proTxObj);
+            entry.push_back(Pair("proUpRegTx", proTxObj));
+        }
     }
 
     if (IsSubTx(tx)) {
