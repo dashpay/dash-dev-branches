@@ -33,6 +33,8 @@ file(GLOB SOURCE_FILES
         src/leveldb/db/*.cc
         src/leveldb/db/*.h
         src/leveldb/include/*.h
+        src/netbackend/*.h
+        src/netbackend/*.cpp
         src/policy/*.cpp
         src/policy/*.h
         src/primitives/*.cpp
