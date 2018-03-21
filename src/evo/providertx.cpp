@@ -39,19 +39,6 @@ static bool CheckService(const uint256& proTxHash, const ProTx& proTx, const CBl
 }
 
 template <typename ProTx>
-static bool CheckServiceZero(const uint256& proTxHash, const ProTx& proTx, const CBlockIndex* pindex, CValidationState& state)
-{
-    // addr/protoVersion must be zero in case operatorReward was specified
-    if (proTx.addr != CService()) {
-        return state.DoS(10, false, REJECT_INVALID, "bad-protx-addr");
-    }
-    if (proTx.nProtocolVersion != 0) {
-        return state.DoS(10, false, REJECT_INVALID, "bad-protx-proto-version");
-    }
-    return true;
-}
-
-template <typename ProTx>
 static bool CheckInputsHashAndSig(const CTransaction &tx, const ProTx& proTx, const CKeyID &keyID, CValidationState& state)
 {
     uint256 inputsHash = CalcTxInputsHash(tx);
