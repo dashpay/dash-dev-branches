@@ -253,6 +253,9 @@ bool CheckProUpRevTx(const CTransaction& tx, const CBlockIndex* pindex, CValidat
     if (ptx.nVersion != CProRegTX::CURRENT_VERSION)
         return state.DoS(100, false, REJECT_INVALID, "bad-protx-version");
 
+    if (ptx.reason < CProUpRevTX::REASON_NOT_SPECIFIED || ptx.reason > CProUpRevTX::REASON_LAST)
+        return state.DoS(100, false, REJECT_INVALID, "bad-protx-reason");
+
     if (pindex) {
         auto mnList = deterministicMNManager->GetListAtHeight(pindex->nHeight - 1);
         auto dmn = mnList.GetMN(ptx.proTxHash);
@@ -358,8 +361,8 @@ void CProUpRegTX::ToJson(UniValue& obj) const
 
 std::string CProUpRevTX::ToString() const
 {
-    return strprintf("CProUpRevTX(nVersion=%d, proTxHash=%s)",
-                     nVersion, proTxHash.ToString());
+    return strprintf("CProUpRevTX(nVersion=%d, proTxHash=%s, reason=%d)",
+                     nVersion, proTxHash.ToString(), reason);
 }
 
 void CProUpRevTX::ToJson(UniValue& obj) const
@@ -368,6 +371,7 @@ void CProUpRevTX::ToJson(UniValue& obj) const
     obj.setObject();
     obj.push_back(Pair("version", nVersion));
     obj.push_back(Pair("proTxHash", proTxHash.ToString()));
+    obj.push_back(Pair("reason", (int)reason));
     obj.push_back(Pair("inputsHash", inputsHash.ToString()));
 }
 

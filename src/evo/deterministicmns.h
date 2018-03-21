@@ -27,6 +27,7 @@ public:
     int PoSePenality{0};
     int PoSeRevivedHeight{-1};
     int PoSeBanHeight{-1};
+    uint16_t revocationReason{CProUpRevTX::REASON_NOT_SPECIFIED};
 
     CKeyID keyIDOwner;
     CKeyID keyIDOperator;
@@ -60,6 +61,7 @@ public:
         READWRITE(PoSePenality);
         READWRITE(PoSeRevivedHeight);
         READWRITE(PoSeBanHeight);
+        READWRITE(revocationReason);
         READWRITE(keyIDOwner);
         READWRITE(keyIDOperator);
         READWRITE(keyIDVoting);

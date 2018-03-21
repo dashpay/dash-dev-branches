@@ -32,9 +32,9 @@ std::string CDeterministicMNState::ToString() const
         operatorRewardAddress = CBitcoinAddress(dest).ToString();
     }
 
-    return strprintf("CDeterministicMNState(registeredHeight=%d, lastPaidHeight=%d, PoSePenality=%d, PoSeRevivedHeight=%d, PoSeBanHeight=%d, "
+    return strprintf("CDeterministicMNState(registeredHeight=%d, lastPaidHeight=%d, PoSePenality=%d, PoSeRevivedHeight=%d, PoSeBanHeight=%d, revocationReason=%d, "
                      "keyIDOwner=%s, keyIDOperator=%s, keyIDVoting=%s, addr=%s, nProtocolVersion=%d, payoutAddress=%s, operatorRewardAddress=%s)",
-                     registeredHeight, lastPaidHeight, PoSePenality, PoSeRevivedHeight, PoSeBanHeight,
+                     registeredHeight, lastPaidHeight, PoSePenality, PoSeRevivedHeight, PoSeBanHeight, revocationReason,
                      keyIDOwner.ToString(), keyIDOperator.ToString(), keyIDVoting.ToString(), addr.ToStringIPPort(false), nProtocolVersion, payoutAddress, operatorRewardAddress);
 }
 
@@ -47,6 +47,7 @@ void CDeterministicMNState::ToJson(UniValue& obj) const
     obj.push_back(Pair("PoSePenality", PoSePenality));
     obj.push_back(Pair("PoSeRevivedHeight", PoSeRevivedHeight));
     obj.push_back(Pair("PoSeBanHeight", PoSeBanHeight));
+    obj.push_back(Pair("revocationReason", revocationReason));
     obj.push_back(Pair("keyIDOwner", keyIDOwner.ToString()));
     obj.push_back(Pair("keyIDOperator", keyIDOperator.ToString()));
     obj.push_back(Pair("keyIDVoting", keyIDVoting.ToString()));
@@ -389,6 +390,7 @@ bool CDeterministicMNManager::ProcessBlock(const CBlock& block, const CBlockInde
             newState->keyIDOperator = proTx.keyIDOperator;
             newState->keyIDVoting = proTx.keyIDVoting;
             newState->scriptPayout = proTx.scriptPayout;
+            newState->revocationReason = CProUpRevTX::REASON_NOT_SPECIFIED;
 
             newList.UpdateMN(proTx.proTxHash, newState);
 
@@ -407,6 +409,7 @@ bool CDeterministicMNManager::ProcessBlock(const CBlock& block, const CBlockInde
             auto newState = std::make_shared<CDeterministicMNState>(*dmn->state);
             newState->ResetOperatorFields();
             newState->BanIfNotBanned(height);
+            newState->revocationReason = proTx.reason;
 
             newList.UpdateMN(proTx.proTxHash, newState);
 

@@ -832,6 +832,7 @@ void protx_revoke_help()
             "The operator key of the masternode must be known to your wallet.\n"
             "\nArguments:\n"
             "1. \"proTxHash\"           (string, required) The hash of the initial ProRegTx.\n"
+            "2. reason                  (numeric, optional) The reason for revocation.\n"
             "\nExamples:\n"
             + HelpExampleCli("protx", "revoke \"0123456701234567012345670123456701234567012345670123456701234567\" \"<operatorKeyAddr>\"")
     );
@@ -839,12 +840,19 @@ void protx_revoke_help()
 
 UniValue protx_revoke(const JSONRPCRequest& request)
 {
-    if (request.fHelp || request.params.size() != 2)
+    if (request.fHelp || (request.params.size() != 2 && request.params.size() != 3))
         protx_revoke_help();
 
     CProUpRevTX ptx;
     ptx.nVersion = CProRegTX::CURRENT_VERSION;
     ptx.proTxHash = ParseHashV(request.params[1], "proTxHash");
+
+    if (request.params.size() > 2) {
+        int32_t reason = ParseInt32V(request.params[2], "reason");
+        if (reason < 0 || reason >= CProUpRevTX::REASON_LAST)
+            throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("invalid reason %d, must be between 0 and %d", reason, CProUpRevTX::REASON_LAST));
+        ptx.reason = (uint16_t)reason;
+    }
 
     auto dmn = deterministicMNManager->GetListAtChainTip().GetMN(ptx.proTxHash);
     if (!dmn) {

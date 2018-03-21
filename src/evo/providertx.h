@@ -134,9 +134,19 @@ class CProUpRevTX
 public:
     static const int CURRENT_VERSION = 1;
 
+    // these are just informational and do not have any effect on the revocation
+    enum {
+        REASON_NOT_SPECIFIED = 0,
+        REASON_TERMINATION_OF_SERVICE = 1,
+        REASON_COMPROMISED_KEYS = 2,
+        REASON_CHANGE_OF_KEYS = 3,
+        REASON_LAST = REASON_CHANGE_OF_KEYS
+    };
+
 public:
     uint16_t nVersion{CURRENT_VERSION}; // message version
     uint256 proTxHash;
+    uint16_t reason{REASON_NOT_SPECIFIED};
     uint256 inputsHash; // replay protection
     std::vector<unsigned char> vchSig;
 
@@ -148,6 +158,7 @@ public:
     {
         READWRITE(nVersion);
         READWRITE(proTxHash);
+        READWRITE(reason);
         READWRITE(inputsHash);
         if (!(s.GetType() & SER_GETHASH)) {
             READWRITE(vchSig);
