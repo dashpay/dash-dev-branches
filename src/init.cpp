@@ -65,6 +65,7 @@
 #include "privatesend-server.h"
 #include "spork.h"
 #include "warnings.h"
+#include "evo/deterministicmns.h"
 #include "evo/users.h"
 
 #include <stdint.h>
@@ -278,6 +279,10 @@ void PrepareShutdown()
         pcoinsdbview = NULL;
         delete pblocktree;
         pblocktree = NULL;
+        delete deterministicMNManager;
+        deterministicMNManager = NULL;
+        delete evoUserDB;
+        evoUserDB = NULL;
     }
 #ifdef ENABLE_WALLET
     if (pwalletMain)
@@ -296,6 +301,9 @@ void PrepareShutdown()
         UnregisterValidationInterface(pdsNotificationInterface);
         delete pdsNotificationInterface;
         pdsNotificationInterface = NULL;
+    }
+    if (fMasternodeMode) {
+        UnregisterValidationInterface(activeMasternodeManager);
     }
 
 #ifndef WIN32
@@ -549,6 +557,7 @@ std::string HelpMessage(HelpMessageMode mode)
     strUsage += HelpMessageOpt("-mnconf=<file>", strprintf(_("Specify masternode configuration file (default: %s)"), "masternode.conf"));
     strUsage += HelpMessageOpt("-mnconflock=<n>", strprintf(_("Lock masternodes from masternode configuration file (default: %u)"), 1));
     strUsage += HelpMessageOpt("-masternodeprivkey=<n>", _("Set the masternode private key"));
+    strUsage += HelpMessageOpt("-masternodeprotx=<n>", _("Set the masternode proTx hash"));
 
 #ifdef ENABLE_WALLET
     strUsage += HelpMessageGroup(_("PrivateSend options:"));
@@ -1264,6 +1273,31 @@ bool AppInitParameterInteraction()
         }
     }
 
+    if (IsArgSet("-budgetparams")) {
+        // Allow overriding budget parameters for testing
+        if (!chainparams.MineBlocksOnDemand()) {
+            return InitError("Budget parameters may only be overridden on regtest.");
+        }
+
+        std::string strBudgetParams = GetArg("-budgetparams", "");
+        std::vector<std::string> vBudgetParams;
+        boost::split(vBudgetParams, strBudgetParams, boost::is_any_of(":"));
+        if (vBudgetParams.size() != 3) {
+            return InitError("Budget parameters malformed, expecting masternodePaymentsStartBlock:budgetPaymentsStartBlock:superblockStartBlock");
+        }
+        int nMasternodePaymentsStartBlock, nBudgetPaymentsStartBlock, nSuperblockStartBlock;
+        if (!ParseInt32(vBudgetParams[0], &nMasternodePaymentsStartBlock)) {
+            return InitError(strprintf("Invalid nMasternodePaymentsStartBlock (%s)", vBudgetParams[0]));
+        }
+        if (!ParseInt32(vBudgetParams[1], &nBudgetPaymentsStartBlock)) {
+            return InitError(strprintf("Invalid nBudgetPaymentsStartBlock (%s)", vBudgetParams[1]));
+        }
+        if (!ParseInt32(vBudgetParams[2], &nSuperblockStartBlock)) {
+            return InitError(strprintf("Invalid nSuperblockStartBlock (%s)", vBudgetParams[2]));
+        }
+        UpdateRegtestBudgetParameters(nMasternodePaymentsStartBlock, nBudgetPaymentsStartBlock, nSuperblockStartBlock);
+    }
+
     return true;
 }
 
@@ -1592,6 +1626,7 @@ bool AppInitMain(boost::thread_group& threadGroup, CScheduler& scheduler)
     nTotalCache -= nCoinDBCache;
     nCoinCacheUsage = nTotalCache; // the rest goes to in-memory cache
     int64_t nMempoolSizeMax = GetArg("-maxmempool", DEFAULT_MAX_MEMPOOL_SIZE) * 1000000;
+    int64_t nDeterministicMNsCache = 1024 * 1024 * 16; // TODO
     int64_t nUsersDBCache = 1024 * 1024 * 16; // TODO
     LogPrintf("Cache configuration:\n");
     LogPrintf("* Using %.1fMiB for block index database\n", nBlockTreeDBCache * (1.0 / 1024 / 1024));
@@ -1613,12 +1648,14 @@ bool AppInitMain(boost::thread_group& threadGroup, CScheduler& scheduler)
                 delete pcoinsdbview;
                 delete pcoinscatcher;
                 delete pblocktree;
+                delete deterministicMNManager;
                 delete evoUserDB;
 
                 pblocktree = new CBlockTreeDB(nBlockTreeDBCache, false, fReindex);
                 pcoinsdbview = new CCoinsViewDB(nCoinDBCache, false, fReindex || fReindexChainState);
                 pcoinscatcher = new CCoinsViewErrorCatcher(pcoinsdbview);
                 pcoinsTip = new CCoinsViewCache(pcoinscatcher);
+                deterministicMNManager = new CDeterministicMNManager(nDeterministicMNsCache, false, fReindex || fReindexChainState);
                 evoUserDB = new CEvoUserDB(nUsersDBCache, false, fReindex || fReindexChainState);
 
                 if (fReindex) {
@@ -1666,6 +1703,11 @@ bool AppInitMain(boost::thread_group& threadGroup, CScheduler& scheduler)
                     strLoadError = _("You need to rebuild the database using -reindex to go back to unpruned mode.  This will redownload the entire blockchain");
                     break;
                 }
+
+                // Needs to be called after chain is initialized
+                if (chainActive.Tip() && chainActive.Tip()->pprev)
+                    fDIP0003ActiveAtTip = VersionBitsState(chainActive.Tip()->pprev, Params().GetConsensus(), Consensus::DEPLOYMENT_DIP0003, versionbitscache) == THRESHOLD_ACTIVE;
+                deterministicMNManager->Init();
 
                 uiInterface.InitMessage(_("Verifying blocks..."));
                 if (fHavePruned && GetArg("-checkblocks", DEFAULT_CHECKBLOCKS) > MIN_BLOCKS_TO_KEEP) {
@@ -1806,13 +1848,20 @@ bool AppInitMain(boost::thread_group& threadGroup, CScheduler& scheduler)
 
         std::string strMasterNodePrivKey = GetArg("-masternodeprivkey", "");
         if(!strMasterNodePrivKey.empty()) {
-            if(!CMessageSigner::GetKeysFromSecret(strMasterNodePrivKey, activeMasternode.keyMasternode, activeMasternode.pubKeyMasternode))
+            CPubKey pubKeyMasternode;
+            if(!CMessageSigner::GetKeysFromSecret(strMasterNodePrivKey, activeMasternode.keyOperator, pubKeyMasternode))
                 return InitError(_("Invalid masternodeprivkey. Please see documenation."));
 
-            LogPrintf("  pubKeyMasternode: %s\n", CBitcoinAddress(activeMasternode.pubKeyMasternode.GetID()).ToString());
+            activeMasternode.keyIDOperator = pubKeyMasternode.GetID();
+
+            LogPrintf("  keyIDOperator: %s\n", CBitcoinAddress(activeMasternode.keyIDOperator).ToString());
         } else {
             return InitError(_("You must specify a masternodeprivkey in the configuration. Please see documentation for help."));
         }
+
+        // init and register activeMasternodeManager
+        activeMasternodeManager = new CActiveDeterministicMasternodeManager();
+        RegisterValidationInterface(activeMasternodeManager);
     }
 
 #ifdef ENABLE_WALLET
@@ -1917,6 +1966,9 @@ bool AppInitMain(boost::thread_group& threadGroup, CScheduler& scheduler)
     // but don't call it directly to prevent triggering of other listeners like zmq etc.
     // GetMainSignals().UpdatedBlockTip(chainActive.Tip());
     pdsNotificationInterface->InitializeCurrentBlockTip();
+
+    if (activeMasternodeManager && fDIP0003ActiveAtTip)
+        activeMasternodeManager->Init();
 
     // ********************************************************* Step 11d: start dash-ps-<smth> threads
 

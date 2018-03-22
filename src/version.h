@@ -46,4 +46,7 @@ static const int DIP0001_PROTOCOL_VERSION = 70208;
 //! evo commands starts with this version
 static const int MIN_EVO_PROTO_VERSION = 70209;
 
+//! allow ProTx protocol versions to diverge a little bit, but not too much
+static const int MAX_PROTX_PROTO_VERSION = PROTOCOL_VERSION + 2;
+
 #endif // BITCOIN_VERSION_H

@@ -43,6 +43,9 @@
 #include "masternodeman.h"
 #include "masternode-payments.h"
 
+#include "evo/specialtx.h"
+#include "evo/providertx.h"
+#include "evo/deterministicmns.h"
 #include "evo/subtx.h"
 #include "evo/tsmempool.h"
 #include "evo/tsvalidation.h"
@@ -94,6 +97,7 @@ int64_t nMaxTipAge = DEFAULT_MAX_TIP_AGE;
 bool fEnableReplacement = DEFAULT_ENABLE_REPLACEMENT;
 
 std::atomic<bool> fDIP0001ActiveAtTip{false};
+std::atomic<bool> fDIP0003ActiveAtTip{false};
 
 uint256 hashAssumeValid;
 
@@ -515,6 +519,21 @@ int GetUTXOConfirmations(const COutPoint& outpoint)
 
 bool CheckTransaction(const CTransaction& tx, CValidationState &state, bool fCheckDuplicateInputs)
 {
+    // check version 3 transaction types
+    if (tx.nVersion >= 3) {
+        if (tx.nType != TRANSACTION_NORMAL &&
+                tx.nType != TRANSACTION_PROVIDER_REGISTER &&
+                tx.nType != TRANSACTION_PROVIDER_UPDATE_SERVICE &&
+                tx.nType != TRANSACTION_PROVIDER_UPDATE_REGISTRAR &&
+                tx.nType != TRANSACTION_PROVIDER_UPDATE_REVOKE) {
+            return state.DoS(100, false, REJECT_INVALID, "bad-txns-type");
+        }
+        if (tx.IsCoinBase() && tx.nType != TRANSACTION_NORMAL)
+            return state.DoS(100, false, REJECT_INVALID, "bad-txns-cb-type");
+    } else if (tx.nType != TRANSACTION_NORMAL) {
+        return state.DoS(100, false, REJECT_INVALID, "bad-txns-type");
+    }
+
     // Basic checks that don't depend on any context
     if (tx.vin.empty())
         return state.DoS(10, false, REJECT_INVALID, "bad-txns-vin-empty");
@@ -523,6 +542,8 @@ bool CheckTransaction(const CTransaction& tx, CValidationState &state, bool fChe
     // Size limits
     if (::GetSerializeSize(tx, SER_NETWORK, PROTOCOL_VERSION) > MAX_LEGACY_BLOCK_SIZE)
         return state.DoS(100, false, REJECT_INVALID, "bad-txns-oversize");
+    if (tx.extraPayload.size() > MAX_TX_EXTRA_PAYLOAD)
+        return state.DoS(100, false, REJECT_INVALID, "bad-txns-payload-oversize");
 
     // Check for negative or overflow output values
     CAmount nValueOut = 0;
@@ -622,6 +643,9 @@ bool AcceptToMemoryPoolWorker(CTxMemPool& pool, CValidationState& state, const C
     if (!ContextualCheckTransaction(tx, state, chainActive.Tip()))
         return error("%s: ContextualCheckTransaction: %s, %s", __func__, hash.ToString(), FormatStateMessage(state));
 
+    if (!CheckSpecialTx(tx, chainActive.Tip(), state))
+        return false;
+
     // Coinbase is only valid in a block, not as a loose transaction
     if (tx.IsCoinBase())
         return state.DoS(100, false, REJECT_INVALID, "coinbase");
@@ -630,6 +654,11 @@ bool AcceptToMemoryPoolWorker(CTxMemPool& pool, CValidationState& state, const C
     std::string reason;
     if (fRequireStandard && !IsStandardTx(tx, reason))
         return state.DoS(0, false, REJECT_NONSTANDARD, reason);
+
+    if (pool.existsProviderTxConflict(tx)) {
+        return state.DoS(0, false, REJECT_DUPLICATE, "protx-dup");
+    }
+
     if (IsSubTx(tx)) {
         if (!CheckSubTx(tx, state))
             return false;
@@ -1788,6 +1817,10 @@ static DisconnectResult DisconnectBlock(const CBlock& block, CValidationState& s
     std::vector<std::pair<CAddressUnspentKey, CAddressUnspentValue> > addressUnspentIndex;
     std::vector<std::pair<CSpentIndexKey, CSpentIndexValue> > spentIndex;
 
+    if (!UndoSpecialTxsInBlock(block, pindex)) {
+        return DISCONNECT_FAILED;
+    }
+
     // Evo transitions
     if (!UndoTransitionsInBlock(block, state)) {
         return DISCONNECT_FAILED;
@@ -1908,6 +1941,10 @@ static DisconnectResult DisconnectBlock(const CBlock& block, CValidationState& s
         }
     }
 
+    if (pindex->pprev && pindex->pprev->pprev && VersionBitsState(pindex->pprev->pprev, Params().GetConsensus(), Consensus::DEPLOYMENT_DIP0003, versionbitscache) != THRESHOLD_ACTIVE) {
+        fDIP0003ActiveAtTip = false;
+    }
+
     // move best block pointer to prevout block
     view.SetBestBlock(pindex->pprev->GetBlockHash());
 
@@ -1970,13 +2007,13 @@ int32_t ComputeBlockVersion(const CBlockIndex* pindexPrev, const Consensus::Para
         ThresholdState state = VersionBitsState(pindexPrev, params, pos, versionbitscache);
         const struct BIP9DeploymentInfo& vbinfo = VersionBitsDeploymentInfo[pos];
         if (vbinfo.check_mn_protocol && state == THRESHOLD_STARTED && !fAssumeMasternodeIsUpgraded) {
-            CScript payee;
+            std::vector<CTxOut> blockTxOuts;;
             masternode_info_t mnInfo;
-            if (!mnpayments.GetBlockPayee(pindexPrev->nHeight + 1, payee)) {
+            if (!mnpayments.GetBlockTxOuts(pindexPrev->nHeight + 1, 0, blockTxOuts)) {
                 // no votes for this block
                 continue;
             }
-            if (!mnodeman.GetMasternodeInfo(payee, mnInfo)) {
+            if (!mnodeman.GetMasternodeInfo(blockTxOuts[0].scriptPubKey, mnInfo)) {
                 // unknown masternode
                 continue;
             }
@@ -2168,6 +2205,12 @@ static bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockInd
         flags |= SCRIPT_VERIFY_NULLDUMMY;
     }
 
+    if (!fJustCheck && VersionBitsState(pindex->pprev, chainparams.GetConsensus(), Consensus::DEPLOYMENT_DIP0003, versionbitscache) == THRESHOLD_ACTIVE) {
+        if (!fDIP0003ActiveAtTip)
+            LogPrintf("ConnectBlock -- DIP0003 got activated at height %d\n", pindex->nHeight);
+        fDIP0003ActiveAtTip = true;
+    }
+
     int64_t nTime2 = GetTimeMicros(); nTimeForks += nTime2 - nTime1;
     LogPrint("bench", "    - Fork checks: %.2fms [%.2fs]\n", 0.001 * (nTime2 - nTime1), nTimeForks * 0.000001);
 
@@ -2324,6 +2367,9 @@ static bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockInd
     }
     int64_t nTime3 = GetTimeMicros(); nTimeConnect += nTime3 - nTime2;
     LogPrint("bench", "      - Connect %u transactions: %.2fms (%.3fms/tx, %.3fms/txin) [%.2fs]\n", (unsigned)block.vtx.size(), 0.001 * (nTime3 - nTime2), 0.001 * (nTime3 - nTime2) / block.vtx.size(), nInputs <= 1 ? 0 : 0.001 * (nTime3 - nTime2) / (nInputs-1), nTimeConnect * 0.000001);
+
+    if (!ProcessSpecialTxsInBlock(block, pindex, state))
+        return false;
 
     // Evo SubTXs
     if (!ProcessSubTxsInBlock(block, state))
@@ -2620,13 +2666,14 @@ bool static DisconnectTip(CValidationState& state, const CChainParams& chainpara
     int64_t nStart = GetTimeMicros();
     {
         auto evoDbTx = evoUserDB->BeginTransaction();
+        auto dmnlDbTx = deterministicMNManager->BeginTransaction();
 
         CCoinsViewCache view(pcoinsTip);
         if (DisconnectBlock(block, state, pindexDelete, view) != DISCONNECT_OK)
             return error("DisconnectTip(): DisconnectBlock %s failed", pindexDelete->GetBlockHash().ToString());
         bool flushed = view.Flush();
         assert(flushed);
-		bool committed = evoUserDB->Commit();
+		bool committed = evoDbTx->Commit() && dmnlDbTx->Commit();
         assert(committed);
     }
     LogPrint("bench", "- Disconnect block: %.2fms\n", (GetTimeMicros() - nStart) * 0.001);
@@ -2707,6 +2754,7 @@ bool static ConnectTip(CValidationState& state, const CChainParams& chainparams,
     LogPrint("bench", "  - Load block from disk: %.2fms [%.2fs]\n", (nTime2 - nTime1) * 0.001, nTimeReadFromDisk * 0.000001);
     {
         auto evoDbTx = evoUserDB->BeginTransaction();
+        auto dmnlDbTx = deterministicMNManager->BeginTransaction();
 
         CCoinsViewCache view(pcoinsTip);
         bool rv = ConnectBlock(blockConnecting, state, pindexNew, view, chainparams);
@@ -2720,7 +2768,7 @@ bool static ConnectTip(CValidationState& state, const CChainParams& chainparams,
         LogPrint("bench", "  - Connect total: %.2fms [%.2fs]\n", (nTime3 - nTime2) * 0.001, nTimeConnectTotal * 0.000001);
         bool flushed = view.Flush();
         assert(flushed);
-		bool committed = evoUserDB->Commit();
+		bool committed = evoDbTx->Commit() && dmnlDbTx->Commit();
         assert(committed);
     }
     int64_t nTime4 = GetTimeMicros(); nTimeFlush += nTime4 - nTime3;
@@ -3119,6 +3167,7 @@ bool InvalidateBlock(CValidationState& state, const CChainParams& chainparams, C
 
     InvalidChainFound(pindex);
     mempool.removeForReorg(pcoinsTip, chainActive.Tip()->nHeight + 1, STANDARD_LOCKTIME_VERIFY_FLAGS);
+    GetMainSignals().UpdatedBlockTip(chainActive.Tip(), NULL, IsInitialBlockDownload());
     uiInterface.NotifyBlockTip(IsInitialBlockDownload(), pindex->pprev);
     return true;
 }
@@ -3745,6 +3794,7 @@ bool TestBlockValidity(CValidationState& state, const CChainParams& chainparams,
 
     // begin tx and let it rollback
     auto evoDbTx = evoUserDB->BeginTransaction();
+    auto dmnlDbTx = deterministicMNManager->BeginTransaction();
 
     // NOTE: CheckBlockHeader is called by CheckBlock
     if (!ContextualCheckBlockHeader(block, state, chainparams.GetConsensus(), pindexPrev, GetAdjustedTime()))
@@ -4101,6 +4151,7 @@ bool CVerifyDB::VerifyDB(const CChainParams& chainparams, CCoinsView *coinsview,
 
     // begin tx and let it rollback
     auto evoDbTx = evoUserDB->BeginTransaction();
+    auto dmnlDbTx = deterministicMNManager->BeginTransaction();
 
     // Verify blocks in the best chain
     if (nCheckDepth <= 0)

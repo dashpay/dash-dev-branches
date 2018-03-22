@@ -101,8 +101,9 @@ bool CGovernanceObject::ProcessVote(CNode* pfrom,
                                     CGovernanceException& exception,
                                     CConnman& connman)
 {
+    LOCK(cs);
+
     if(!mnodeman.Has(vote.GetMasternodeOutpoint())) {
-        LOCK(cs);
         std::ostringstream ostr;
         ostr << "CGovernanceObject::ProcessVote -- Masternode " << vote.GetMasternodeOutpoint().ToStringShort() << " not found";
         exception = CGovernanceException(ostr.str(), GOVERNANCE_EXCEPTION_WARNING);
@@ -118,9 +119,6 @@ bool CGovernanceObject::ProcessVote(CNode* pfrom,
         return false;
     }
 
-    vote_instance_t voteInstance;
-    {
-    LOCK(cs);
     vote_m_it it = mapCurrentMNVotes.find(vote.GetMasternodeOutpoint());
     if(it == mapCurrentMNVotes.end()) {
         it = mapCurrentMNVotes.insert(vote_m_t::value_type(vote.GetMasternodeOutpoint(), vote_rec_t())).first;
@@ -145,7 +143,7 @@ bool CGovernanceObject::ProcessVote(CNode* pfrom,
     if(it2 == recVote.mapInstances.end()) {
         it2 = recVote.mapInstances.insert(vote_instance_m_t::value_type(int(eSignal), vote_instance_t())).first;
     }
-    voteInstance = it2->second;
+    vote_instance_t& voteInstance = it2->second;
 
     // Reject obsolete votes
     if(vote.GetTimestamp() < voteInstance.nCreationTime) {
@@ -155,7 +153,6 @@ bool CGovernanceObject::ProcessVote(CNode* pfrom,
         exception = CGovernanceException(ostr.str(), GOVERNANCE_EXCEPTION_NONE);
         return false;
     }
-    } // LOCK(cs)
 
     int64_t nNow = GetAdjustedTime();
     int64_t nVoteTimeUpdate = voteInstance.nTime;
@@ -173,8 +170,11 @@ bool CGovernanceObject::ProcessVote(CNode* pfrom,
             return false;
         }
     }
+
+    bool onlyOwnerAllowed = nObjectType == GOVERNANCE_OBJECT_PROPOSAL;
+
     // Finally check that the vote is actually valid (done last because of cost of signature verification)
-    if(!vote.IsValid(true)) {
+    if(!vote.IsValid(onlyOwnerAllowed)) {
         std::ostringstream ostr;
         ostr << "CGovernanceObject::ProcessVote -- Invalid vote"
                 << ", MN outpoint = " << vote.GetMasternodeOutpoint().ToStringShort()
@@ -194,7 +194,7 @@ bool CGovernanceObject::ProcessVote(CNode* pfrom,
         exception = CGovernanceException(ostr.str(), GOVERNANCE_EXCEPTION_PERMANENT_ERROR);
         return false;
     }
-    LOCK(cs);
+
     voteInstance = vote_instance_t(vote.GetOutcome(), nVoteTimeUpdate, vote.GetTimestamp());
     if(!fileVotes.HasVote(vote.GetHash())) {
         fileVotes.AddVote(vote);
@@ -262,53 +262,53 @@ void CGovernanceObject::SetMasternodeOutpoint(const COutPoint& outpoint)
     masternodeOutpoint = outpoint;
 }
 
-bool CGovernanceObject::Sign(const CKey& keyMasternode, const CPubKey& pubKeyMasternode)
+bool CGovernanceObject::Sign(const CKey& key, const CKeyID& keyID)
 {
     std::string strError;
 
     if (sporkManager.IsSporkActive(SPORK_6_NEW_SIGS)) {
         uint256 hash = GetSignatureHash();
 
-        if (!CHashSigner::SignHash(hash, keyMasternode, vchSig)) {
+        if (!CHashSigner::SignHash(hash, key, vchSig)) {
             LogPrintf("CGovernanceObject::Sign -- SignHash() failed\n");
             return false;
         }
 
-        if (!CHashSigner::VerifyHash(hash, pubKeyMasternode, vchSig, strError)) {
+        if (!CHashSigner::VerifyHash(hash, keyID, vchSig, strError)) {
             LogPrintf("CGovernanceObject::Sign -- VerifyHash() failed, error: %s\n", strError);
             return false;
         }
     } else {
         std::string strMessage = GetSignatureMessage();
-        if (!CMessageSigner::SignMessage(strMessage, vchSig, keyMasternode)) {
+        if (!CMessageSigner::SignMessage(strMessage, vchSig, key)) {
             LogPrintf("CGovernanceObject::Sign -- SignMessage() failed\n");
             return false;
         }
 
-        if (!CMessageSigner::VerifyMessage(pubKeyMasternode, vchSig, strMessage, strError)) {
+        if(!CMessageSigner::VerifyMessage(keyID, vchSig, strMessage, strError)) {
             LogPrintf("CGovernanceObject::Sign -- VerifyMessage() failed, error: %s\n", strError);
             return false;
         }
     }
 
     LogPrint("gobject", "CGovernanceObject::Sign -- pubkey id = %s, masternode = %s\n",
-             pubKeyMasternode.GetID().ToString(), masternodeOutpoint.ToStringShort());
+             keyID.ToString(), masternodeOutpoint.ToStringShort());
 
     return true;
 }
 
-bool CGovernanceObject::CheckSignature(const CPubKey& pubKeyMasternode)
+bool CGovernanceObject::CheckSignature(const CKeyID& keyID)
 {
     std::string strError;
 
     if (sporkManager.IsSporkActive(SPORK_6_NEW_SIGS)) {
         uint256 hash = GetSignatureHash();
 
-        if (!CHashSigner::VerifyHash(hash, pubKeyMasternode, vchSig, strError)) {
+        if (!CHashSigner::VerifyHash(hash, keyID, vchSig, strError)) {
             // could be an old object
             std::string strMessage = GetSignatureMessage();
 
-            if (!CMessageSigner::VerifyMessage(pubKeyMasternode, vchSig, strMessage, strError)) {
+            if(!CMessageSigner::VerifyMessage(keyID, vchSig, strMessage, strError)) {
                 // nope, not in old format either
                 LogPrintf("CGovernance::CheckSignature -- VerifyMessage() failed, error: %s\n", strError);
                 return false;
@@ -317,7 +317,7 @@ bool CGovernanceObject::CheckSignature(const CPubKey& pubKeyMasternode)
     } else {
         std::string strMessage = GetSignatureMessage();
 
-        if (!CMessageSigner::VerifyMessage(pubKeyMasternode, vchSig, strMessage, strError)) {
+        if (!CMessageSigner::VerifyMessage(keyID, vchSig, strMessage, strError)) {
             LogPrintf("CGovernance::CheckSignature -- VerifyMessage() failed, error: %s\n", strError);
             return false;
         }
@@ -484,9 +484,11 @@ bool CGovernanceObject::IsValidLocally(std::string& strError, bool& fMissingMast
             masternode_info_t infoMn;
             if(!mnodeman.GetMasternodeInfo(masternodeOutpoint, infoMn)) {
 
-                CMasternode::CollateralStatus err = CMasternode::CheckCollateral(masternodeOutpoint, CPubKey());
+                CMasternode::CollateralStatus err = CMasternode::CheckCollateral(masternodeOutpoint, CKeyID());
                 if (err == CMasternode::COLLATERAL_UTXO_NOT_FOUND) {
                     strError = "Failed to find Masternode UTXO, missing masternode=" + strOutpoint + "\n";
+                } else if (err == CMasternode::COLLATERAL_UTXO_NOT_PROTX) {
+                    strError = "Masternode UTXO is not a ProTx, missing masternode=" + strOutpoint + "\n";
                 } else if (err == CMasternode::COLLATERAL_INVALID_AMOUNT) {
                     strError = "Masternode UTXO should have 1000 DASH, missing masternode=" + strOutpoint + "\n";
                 } else if (err == CMasternode::COLLATERAL_INVALID_PUBKEY) {
@@ -501,8 +503,8 @@ bool CGovernanceObject::IsValidLocally(std::string& strError, bool& fMissingMast
             }
 
             // Check that we have a valid MN signature
-            if(!CheckSignature(infoMn.pubKeyMasternode)) {
-                strError = "Invalid masternode signature for: " + strOutpoint + ", pubkey id = " + infoMn.pubKeyMasternode.GetID().ToString();
+            if(!CheckSignature(infoMn.keyIDOperator)) {
+                strError = "Invalid masternode signature for: " + strOutpoint + ", pubkey id = " + infoMn.keyIDOperator.ToString();
                 return false;
             }
 

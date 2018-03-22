@@ -35,32 +35,39 @@ void CSporkManager::ProcessSpork(CNode* pfrom, const std::string& strCommand, CD
             if(!chainActive.Tip()) return;
             strLogMsg = strprintf("SPORK -- hash: %s id: %d value: %10d bestHeight: %d peer=%d", hash.ToString(), spork.nSporkID, spork.nValue, chainActive.Height(), pfrom->id);
         }
-
-        if(mapSporksActive.count(spork.nSporkID)) {
-            if (mapSporksActive[spork.nSporkID].nTimeSigned >= spork.nTimeSigned) {
-                LogPrint("spork", "%s seen\n", strLogMsg);
-                return;
+        {
+            LOCK(cs); // make sure to not lock this together with cs_main
+            if (mapSporksActive.count(spork.nSporkID)) {
+                if (mapSporksActive[spork.nSporkID].nTimeSigned >= spork.nTimeSigned) {
+                    LogPrint("spork", "%s seen\n", strLogMsg);
+                    return;
+                } else {
+                    LogPrintf("%s updated\n", strLogMsg);
+                }
             } else {
-                LogPrintf("%s updated\n", strLogMsg);
+                LogPrintf("%s new\n", strLogMsg);
             }
-        } else {
-            LogPrintf("%s new\n", strLogMsg);
         }
 
         if(!spork.CheckSignature(sporkPubKeyID)) {
+            LOCK(cs_main);
             LogPrintf("CSporkManager::ProcessSpork -- ERROR: invalid signature\n");
             Misbehaving(pfrom->GetId(), 100);
             return;
         }
 
-        mapSporks[hash] = spork;
-        mapSporksActive[spork.nSporkID] = spork;
+        {
+            LOCK(cs); // make sure to not lock this together with cs_main
+            mapSporks[hash] = spork;
+            mapSporksActive[spork.nSporkID] = spork;
+        }
         spork.Relay(connman);
 
         //does a task if needed
         ExecuteSpork(spork.nSporkID, spork.nValue);
 
     } else if (strCommand == NetMsgType::GETSPORKS) {
+        LOCK(cs); // make sure to not lock this together with cs_main
 
         std::map<int, CSporkMessage>::iterator it = mapSporksActive.begin();
 
@@ -103,11 +110,11 @@ void CSporkManager::ExecuteSpork(int nSporkID, int nValue)
 
 bool CSporkManager::UpdateSpork(int nSporkID, int64_t nValue, CConnman& connman)
 {
-
     CSporkMessage spork = CSporkMessage(nSporkID, nValue, GetAdjustedTime());
 
     if(spork.Sign(sporkPrivKey)) {
         spork.Relay(connman);
+        LOCK(cs);
         mapSporks[spork.GetHash()] = spork;
         mapSporksActive[nSporkID] = spork;
         return true;
@@ -119,6 +126,7 @@ bool CSporkManager::UpdateSpork(int nSporkID, int64_t nValue, CConnman& connman)
 // grab the spork, otherwise say it's off
 bool CSporkManager::IsSporkActive(int nSporkID)
 {
+    LOCK(cs);
     int64_t r = -1;
 
     if(mapSporksActive.count(nSporkID)){
@@ -134,6 +142,7 @@ bool CSporkManager::IsSporkActive(int nSporkID)
             case SPORK_10_MASTERNODE_PAY_UPDATED_NODES:     r = SPORK_10_MASTERNODE_PAY_UPDATED_NODES_DEFAULT; break;
             case SPORK_12_RECONSIDER_BLOCKS:                r = SPORK_12_RECONSIDER_BLOCKS_DEFAULT; break;
             case SPORK_14_REQUIRE_SENTINEL_FLAG:            r = SPORK_14_REQUIRE_SENTINEL_FLAG_DEFAULT; break;
+            case SPORK_15_DETERMINISTIC_MNS_ENABLED:        r = SPORK_15_DETERMINISTIC_MNS_DEFAULT; break;
             default:
                 LogPrint("spork", "CSporkManager::IsSporkActive -- Unknown Spork ID %d\n", nSporkID);
                 r = 4070908800ULL; // 2099-1-1 i.e. off by default
@@ -147,6 +156,7 @@ bool CSporkManager::IsSporkActive(int nSporkID)
 // grab the value of the spork on the network, or the default
 int64_t CSporkManager::GetSporkValue(int nSporkID)
 {
+    LOCK(cs);
     if (mapSporksActive.count(nSporkID))
         return mapSporksActive[nSporkID].nValue;
 
@@ -160,6 +170,7 @@ int64_t CSporkManager::GetSporkValue(int nSporkID)
         case SPORK_10_MASTERNODE_PAY_UPDATED_NODES:     return SPORK_10_MASTERNODE_PAY_UPDATED_NODES_DEFAULT;
         case SPORK_12_RECONSIDER_BLOCKS:                return SPORK_12_RECONSIDER_BLOCKS_DEFAULT;
         case SPORK_14_REQUIRE_SENTINEL_FLAG:            return SPORK_14_REQUIRE_SENTINEL_FLAG_DEFAULT;
+        case SPORK_15_DETERMINISTIC_MNS_ENABLED:        return SPORK_15_DETERMINISTIC_MNS_DEFAULT;
         default:
             LogPrint("spork", "CSporkManager::GetSporkValue -- Unknown Spork ID %d\n", nSporkID);
             return -1;
@@ -178,6 +189,7 @@ int CSporkManager::GetSporkIDByName(const std::string& strName)
     if (strName == "SPORK_10_MASTERNODE_PAY_UPDATED_NODES")     return SPORK_10_MASTERNODE_PAY_UPDATED_NODES;
     if (strName == "SPORK_12_RECONSIDER_BLOCKS")                return SPORK_12_RECONSIDER_BLOCKS;
     if (strName == "SPORK_14_REQUIRE_SENTINEL_FLAG")            return SPORK_14_REQUIRE_SENTINEL_FLAG;
+    if (strName == "SPORK_15_DETERMINISTIC_MNS_ENABLED")        return SPORK_15_DETERMINISTIC_MNS_ENABLED;
 
     LogPrint("spork", "CSporkManager::GetSporkIDByName -- Unknown Spork name '%s'\n", strName);
     return -1;
@@ -195,6 +207,7 @@ std::string CSporkManager::GetSporkNameByID(int nSporkID)
         case SPORK_10_MASTERNODE_PAY_UPDATED_NODES:     return "SPORK_10_MASTERNODE_PAY_UPDATED_NODES";
         case SPORK_12_RECONSIDER_BLOCKS:                return "SPORK_12_RECONSIDER_BLOCKS";
         case SPORK_14_REQUIRE_SENTINEL_FLAG:            return "SPORK_14_REQUIRE_SENTINEL_FLAG";
+        case SPORK_15_DETERMINISTIC_MNS_ENABLED:        return "SPORK_15_DETERMINISTIC_MNS_ENABLED";
         default:
             LogPrint("spork", "CSporkManager::GetSporkNameByID -- Unknown Spork ID %d\n", nSporkID);
             return "Unknown";
@@ -202,6 +215,7 @@ std::string CSporkManager::GetSporkNameByID(int nSporkID)
 }
 
 bool CSporkManager::SetSporkAddress(const std::string& strAddress) {
+    LOCK(cs);
     CBitcoinAddress address(strAddress);
     if (!address.IsValid() || !address.GetKeyID(sporkPubKeyID)) {
         LogPrintf("CSporkManager::SetSporkAddress -- Failed to parse spork address\n");
@@ -226,6 +240,7 @@ bool CSporkManager::SetPrivKey(const std::string& strPrivKey)
 
     CSporkMessage spork;
     if (spork.Sign(key)) {
+	    LOCK(cs);
         // Test signing successful, proceed
         LogPrintf("CSporkManager::SetPrivKey -- Successfully initialized as spork signer\n");
 

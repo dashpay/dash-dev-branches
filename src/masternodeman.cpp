@@ -17,6 +17,9 @@
 #include "script/standard.h"
 #include "util.h"
 
+#include "evo/deterministicmns.h"
+#include "evo/providertx.h"
+
 /** Masternode manager */
 CMasternodeMan mnodeman;
 
@@ -73,6 +76,9 @@ bool CMasternodeMan::Add(CMasternode &mn)
 {
     LOCK(cs);
 
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return false;
+
     if (Has(mn.outpoint)) return false;
 
     LogPrint("masternode", "CMasternodeMan::Add -- Adding new Masternode: addr=%s, %i now\n", mn.addr.ToString(), size() + 1);
@@ -87,6 +93,9 @@ void CMasternodeMan::AskForMN(CNode* pnode, const COutPoint& outpoint, CConnman&
 
     CNetMsgMaker msgMaker(pnode->GetSendVersion());
     LOCK(cs);
+
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return;
 
     CService addrSquashed = Params().AllowMultiplePorts() ? (CService)pnode->addr : CService(pnode->addr, 0);
     auto it1 = mWeAskedForMasternodeListEntry.find(outpoint);
@@ -145,6 +154,10 @@ bool CMasternodeMan::DisallowMixing(const COutPoint &outpoint)
 bool CMasternodeMan::PoSeBan(const COutPoint &outpoint)
 {
     LOCK(cs);
+
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return true;
+
     CMasternode* pmn = Find(outpoint);
     if (!pmn) {
         return false;
@@ -158,6 +171,9 @@ void CMasternodeMan::Check()
 {
     LOCK2(cs_main, cs);
 
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return;
+
     LogPrint("masternode", "CMasternodeMan::Check -- nLastSentinelPingTime=%d, IsSentinelPingActive()=%d\n", nLastSentinelPingTime, IsSentinelPingActive());
 
     for (auto& mnpair : mapMasternodes) {
@@ -169,6 +185,9 @@ void CMasternodeMan::Check()
 
 void CMasternodeMan::CheckAndRemove(CConnman& connman)
 {
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return;
+
     if(!masternodeSync.IsMasternodeListSynced()) return;
 
     LogPrintf("CMasternodeMan::CheckAndRemove\n");
@@ -350,6 +369,69 @@ void CMasternodeMan::CheckAndRemove(CConnman& connman)
     }
 }
 
+void CMasternodeMan::AddDeterministicMasternodes()
+{
+    if (!deterministicMNManager->IsDeterministicMNsSporkActive())
+        return;
+
+    bool added = false;
+    {
+        LOCK(cs);
+        unsigned int oldMnCount = mapMasternodes.size();
+
+        auto mnList = deterministicMNManager->GetListAtChainTip();
+        for (const auto& dmn : mnList.valid_range()) {
+            // call Find() on each deterministic MN to force creation of CMasternode object
+            auto mn = Find(COutPoint(dmn->proTxHash, dmn->nCollateralIndex));
+            assert(mn);
+
+            // make sure we use the splitted keys from now on
+            mn->keyIDOwner = dmn->state->keyIDOwner;
+            mn->keyIDOperator = dmn->state->keyIDOperator;
+            mn->keyIDVoting = dmn->state->keyIDVoting;
+            mn->addr = dmn->state->addr;
+            mn->nProtocolVersion = dmn->state->nProtocolVersion;
+
+            // If it appeared in the valid list, it is enabled no matter what
+            mn->nActiveState = CMasternode::MASTERNODE_ENABLED;
+        }
+
+        added = oldMnCount != mapMasternodes.size();
+    }
+
+    if (added) {
+        NotifyMasternodeUpdates(*g_connman, true, false);
+    }
+}
+
+void CMasternodeMan::RemoveNonDeterministicMasternodes()
+{
+    if (!deterministicMNManager->IsDeterministicMNsSporkActive())
+        return;
+
+    bool erased = false;
+    {
+        LOCK(cs);
+        std::set<COutPoint> mnSet;
+        auto mnList = deterministicMNManager->GetListAtChainTip();
+        for (const auto& dmn : mnList.valid_range()) {
+            mnSet.insert(COutPoint(dmn->proTxHash, dmn->nCollateralIndex));
+        }
+        auto it = mapMasternodes.begin();
+        while (it != mapMasternodes.end()) {
+            if (!mnSet.count(it->second.outpoint)) {
+                mapMasternodes.erase(it++);
+                erased = true;
+            } else {
+                ++it;
+            }
+        }
+    }
+    if (erased) {
+        NotifyMasternodeUpdates(*g_connman, false, true);
+    }
+}
+
 void CMasternodeMan::Clear()
 {
     LOCK(cs);
@@ -366,20 +448,32 @@ void CMasternodeMan::Clear()
 int CMasternodeMan::CountMasternodes(int nProtocolVersion)
 {
     LOCK(cs);
+
     int nCount = 0;
     nProtocolVersion = nProtocolVersion == -1 ? mnpayments.GetMinMasternodePaymentsProto() : nProtocolVersion;
 
-    for (const auto& mnpair : mapMasternodes) {
-        if(mnpair.second.nProtocolVersion < nProtocolVersion) continue;
-        nCount++;
+    if (deterministicMNManager->IsDeterministicMNsSporkActive()) {
+        auto mnList = deterministicMNManager->GetListAtChainTip();
+        for (const auto& dmn : mnList.valid_range()) {
+            if (dmn->state->nProtocolVersion < nProtocolVersion) continue;
+            nCount++;
+        }
+    } else {
+        for (const auto& mnpair : mapMasternodes) {
+            if(mnpair.second.nProtocolVersion < nProtocolVersion) continue;
+            nCount++;
+        }
     }
-
     return nCount;
 }
 
 int CMasternodeMan::CountEnabled(int nProtocolVersion)
 {
     LOCK(cs);
+
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return CountMasternodes(nProtocolVersion);
+
     int nCount = 0;
     nProtocolVersion = nProtocolVersion == -1 ? mnpayments.GetMinMasternodePaymentsProto() : nProtocolVersion;
 
@@ -413,6 +507,9 @@ void CMasternodeMan::DsegUpdate(CNode* pnode, CConnman& connman)
     CNetMsgMaker msgMaker(pnode->GetSendVersion());
     LOCK(cs);
 
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return;
+
     CService addrSquashed = Params().AllowMultiplePorts() ? (CService)pnode->addr : CService(pnode->addr, 0);
     if(Params().NetworkIDString() == CBaseChainParams::MAIN) {
         if(!(pnode->addr.IsRFC1918() || pnode->addr.IsLocal())) {
@@ -438,63 +535,109 @@ void CMasternodeMan::DsegUpdate(CNode* pnode, CConnman& connman)
 CMasternode* CMasternodeMan::Find(const COutPoint &outpoint)
 {
     LOCK(cs);
-    auto it = mapMasternodes.find(outpoint);
-    return it == mapMasternodes.end() ? NULL : &(it->second);
+
+    if (deterministicMNManager->IsDeterministicMNsSporkActive()) {
+        // This code keeps compatibility to old code depending on the non-deterministic MN lists
+        // When deterministic MN lists get activated, we stop relying on the MNs we encountered due to MNBs and start
+        // using the MNs found in the deterministic MN manager. To keep compatibility, we create CMasternode entries
+        // for these and return them here. This is needed because we also need to track some data per MN that is not
+        // on-chain, like vote counts
+
+        auto mnList = deterministicMNManager->GetListAtChainTip();
+        if (!mnList.IsMNValid(outpoint.hash)) {
+            return NULL;
+        }
+        auto dmn = mnList.GetMN(outpoint.hash);
+        if (!dmn) {
+            return NULL;
+        }
+
+        auto it = mapMasternodes.find(outpoint);
+        if (it != mapMasternodes.end()) {
+            return &(it->second);
+        } else {
+            // MN is not in mapMasternodes but in the deterministic list. Create an entry in mapMasternodes for compatibility with legacy code
+            CMasternode mn(outpoint.hash, dmn);
+            it = mapMasternodes.emplace(outpoint, mn).first;
+            return &(it->second);
+        }
+    } else {
+        auto it = mapMasternodes.find(outpoint);
+        return it == mapMasternodes.end() ? NULL : &(it->second);
+    }
 }
 
 bool CMasternodeMan::Get(const COutPoint& outpoint, CMasternode& masternodeRet)
 {
     // Theses mutexes are recursive so double locking by the same thread is safe.
     LOCK(cs);
-    auto it = mapMasternodes.find(outpoint);
-    if (it == mapMasternodes.end()) {
+    CMasternode* mn = Find(outpoint);
+    if (!mn)
         return false;
-    }
-
-    masternodeRet = it->second;
+    masternodeRet = *mn;
     return true;
+}
+
+bool CMasternodeMan::GetMasternodeInfo(const uint256& proTxHash, masternode_info_t& mnInfoRet)
+{
+    auto dmn = deterministicMNManager->GetListAtChainTip().GetValidMN(proTxHash);
+    if (!dmn)
+        return false;
+    return GetMasternodeInfo(COutPoint(proTxHash, dmn->nCollateralIndex), mnInfoRet);
 }
 
 bool CMasternodeMan::GetMasternodeInfo(const COutPoint& outpoint, masternode_info_t& mnInfoRet)
 {
     LOCK(cs);
-    auto it = mapMasternodes.find(outpoint);
-    if (it == mapMasternodes.end()) {
+    CMasternode* mn = Find(outpoint);
+    if (!mn)
         return false;
-    }
-    mnInfoRet = it->second.GetInfo();
+    mnInfoRet = mn->GetInfo();
     return true;
 }
 
-bool CMasternodeMan::GetMasternodeInfo(const CPubKey& pubKeyMasternode, masternode_info_t& mnInfoRet)
-{
+bool CMasternodeMan::GetMasternodeInfo(const CKeyID& keyIDOperator, masternode_info_t& mnInfoRet) {
     LOCK(cs);
-    for (const auto& mnpair : mapMasternodes) {
-        if (mnpair.second.pubKeyMasternode == pubKeyMasternode) {
-            mnInfoRet = mnpair.second.GetInfo();
-            return true;
+    if (deterministicMNManager->IsDeterministicMNsSporkActive()) {
+        auto mnList = deterministicMNManager->GetListAtChainTip();
+        auto dmn = mnList.GetMNByOperatorKey(keyIDOperator);
+        if (dmn) {
+            return GetMasternodeInfo(COutPoint(dmn->proTxHash, dmn->nCollateralIndex), mnInfoRet);
         }
+        return false;
+    } else {
+        for (const auto& mnpair : mapMasternodes) {
+            if (mnpair.second.keyIDOperator == keyIDOperator) {
+                mnInfoRet = mnpair.second.GetInfo();
+                return true;
+            }
+        }
+        return false;
     }
-    return false;
+}
+
+bool CMasternodeMan::GetMasternodeInfo(const CPubKey& pubKeyOperator, masternode_info_t& mnInfoRet)
+{
+    return GetMasternodeInfo(pubKeyOperator.GetID(), mnInfoRet);
 }
 
 bool CMasternodeMan::GetMasternodeInfo(const CScript& payee, masternode_info_t& mnInfoRet)
 {
-    LOCK(cs);
-    for (const auto& mnpair : mapMasternodes) {
-        CScript scriptCollateralAddress = GetScriptForDestination(mnpair.second.pubKeyCollateralAddress.GetID());
-        if (scriptCollateralAddress == payee) {
-            mnInfoRet = mnpair.second.GetInfo();
-            return true;
-        }
-    }
-    return false;
+    CTxDestination dest;
+    if (!ExtractDestination(payee, dest) || !boost::get<CKeyID>(&dest))
+        return false;
+    CKeyID keyId = *boost::get<CKeyID>(&dest);
+    return GetMasternodeInfo(keyId, mnInfoRet);
 }
 
 bool CMasternodeMan::Has(const COutPoint& outpoint)
 {
     LOCK(cs);
-    return mapMasternodes.find(outpoint) != mapMasternodes.end();
+    if (deterministicMNManager->IsDeterministicMNsSporkActive()) {
+        return deterministicMNManager->HasValidMNAtChainTip(outpoint.hash);
+    } else {
+        return mapMasternodes.find(outpoint) != mapMasternodes.end();
+    }
 }
 
 //
@@ -507,6 +650,10 @@ bool CMasternodeMan::GetNextMasternodeInQueueForPayment(bool fFilterSigTime, int
 
 bool CMasternodeMan::GetNextMasternodeInQueueForPayment(int nBlockHeight, bool fFilterSigTime, int& nCountRet, masternode_info_t& mnInfoRet)
 {
+    if (deterministicMNManager->IsDeterministicMNsSporkActive(nBlockHeight)) {
+        return false;
+    }
+
     mnInfoRet = masternode_info_t();
     nCountRet = 0;
 
@@ -615,6 +762,8 @@ masternode_info_t CMasternodeMan::FindRandomNotInVec(const std::vector<COutPoint
             }
         }
         if(fExclude) continue;
+        if (deterministicMNManager->IsDeterministicMNsSporkActive() && !deterministicMNManager->HasValidMNAtChainTip(pmn->outpoint.hash))
+            continue;
         // found the one not in vecToExclude
         LogPrint("masternode", "CMasternodeMan::FindRandomNotInVec -- found, masternode=%s\n", pmn->outpoint.ToStringShort());
         return pmn->GetInfo();
@@ -622,6 +771,22 @@ masternode_info_t CMasternodeMan::FindRandomNotInVec(const std::vector<COutPoint
 
     LogPrint("masternode", "CMasternodeMan::FindRandomNotInVec -- failed\n");
     return masternode_info_t();
+}
+
+std::map<COutPoint, CMasternode> CMasternodeMan::GetFullMasternodeMap() {
+    LOCK(cs);
+
+    if (deterministicMNManager->IsDeterministicMNsSporkActive()) {
+        std::map<COutPoint, CMasternode> result;
+        for (const auto &p : mapMasternodes) {
+            if (deterministicMNManager->HasValidMNAtChainTip(p.first.hash)) {
+                result.emplace(p.first, p.second);
+            }
+        }
+        return result;
+    } else {
+        return mapMasternodes;
+    }
 }
 
 bool CMasternodeMan::GetMasternodeScores(const uint256& nBlockHash, CMasternodeMan::score_pair_vec_t& vecMasternodeScoresRet, int nMinProtocol)
@@ -638,6 +803,9 @@ bool CMasternodeMan::GetMasternodeScores(const uint256& nBlockHash, CMasternodeM
 
     // calculate scores
     for (const auto& mnpair : mapMasternodes) {
+        if (deterministicMNManager->IsDeterministicMNsSporkActive() && !deterministicMNManager->HasValidMNAtChainTip(mnpair.second.outpoint.hash))
+            continue;
+
         if (mnpair.second.nProtocolVersion >= nMinProtocol) {
             vecMasternodeScoresRet.push_back(std::make_pair(mnpair.second.CalculateScore(nBlockHash), &mnpair.second));
         }
@@ -728,6 +896,9 @@ void CMasternodeMan::ProcessMasternodeConnections(CConnman& connman)
 std::pair<CService, std::set<uint256> > CMasternodeMan::PopScheduledMnbRequestConnection()
 {
     LOCK(cs);
+    if (deterministicMNManager->IsDeterministicMNsSporkActive()) {
+        return std::make_pair(CService(), std::set<uint256>());
+    }
     if(listScheduledMnbRequestConnections.empty()) {
         return std::make_pair(CService(), std::set<uint256>());
     }
@@ -754,6 +925,9 @@ std::pair<CService, std::set<uint256> > CMasternodeMan::PopScheduledMnbRequestCo
 
 void CMasternodeMan::ProcessPendingMnbRequests(CConnman& connman)
 {
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return;
+
     std::pair<CService, std::set<uint256> > p = PopScheduledMnbRequestConnection();
     if (!(p.first == CService() || p.second.empty())) {
         if (connman.IsMasternodeOrDisconnectRequested(p.first)) return;
@@ -797,6 +971,9 @@ void CMasternodeMan::ProcessPendingMnbRequests(CConnman& connman)
 
 void CMasternodeMan::ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStream& vRecv, CConnman& connman)
 {
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return;
+
     if(fLiteMode) return; // disable all Dash specific functionality
 
     CNetMsgMaker msgMaker(pfrom->GetSendVersion());
@@ -964,7 +1141,7 @@ void CMasternodeMan::SyncAll(CNode* pnode, CConnman& connman)
     int nInvCount = 0;
 
     for (const auto& mnpair : mapMasternodes) {
-        if (mnpair.second.addr.IsRFC1918() || mnpair.second.addr.IsLocal()) continue; // do not send local network masternode
+        if (Params().NetworkIDString() != CBaseChainParams::REGTEST && (mnpair.second.addr.IsRFC1918() || mnpair.second.addr.IsLocal())) continue; // do not send local network masternode
         // NOTE: send masternode regardless of its current state, the other node will need it to verify old votes.
         LogPrint("masternode", "CMasternodeMan::%s -- Sending Masternode entry: masternode=%s  addr=%s\n", __func__, mnpair.first.ToStringShort(), mnpair.second.addr.ToString());
         PushDsegInvs(pnode, mnpair.second);
@@ -993,6 +1170,9 @@ void CMasternodeMan::PushDsegInvs(CNode* pnode, const CMasternode& mn)
 
 void CMasternodeMan::DoFullVerificationStep(CConnman& connman)
 {
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return;
+
     if(activeMasternode.outpoint.IsNull()) return;
     if(!masternodeSync.IsSynced()) return;
 
@@ -1072,6 +1252,9 @@ void CMasternodeMan::DoFullVerificationStep(CConnman& connman)
 
 void CMasternodeMan::CheckSameAddr()
 {
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return;
+
     if(!masternodeSync.IsSynced() || mapMasternodes.empty()) return;
 
     std::vector<CMasternode*> vBan;
@@ -1125,6 +1308,9 @@ void CMasternodeMan::CheckSameAddr()
 
 bool CMasternodeMan::SendVerifyRequest(const CAddress& addr, const std::vector<const CMasternode*>& vSortedByAddr, CConnman& connman)
 {
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return false;
+
     if(netfulfilledman.HasFulfilledRequest(addr, strprintf("%s", NetMsgType::MNVERIFY)+"-request")) {
         // we already asked for verification, not a good idea to do this too often, skip it
         LogPrint("masternode", "CMasternodeMan::SendVerifyRequest -- too many requests, skipping... addr=%s\n", addr.ToString());
@@ -1145,6 +1331,9 @@ bool CMasternodeMan::SendVerifyRequest(const CAddress& addr, const std::vector<c
 void CMasternodeMan::ProcessPendingMnvRequests(CConnman& connman)
 {
     LOCK(cs_mapPendingMNV);
+
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return;
 
     std::map<CService, std::pair<int64_t, CMasternodeVerification> >::iterator itPendingMNV = mapPendingMNV.begin();
 
@@ -1174,6 +1363,9 @@ void CMasternodeMan::ProcessPendingMnvRequests(CConnman& connman)
 
 void CMasternodeMan::SendVerifyReply(CNode* pnode, CMasternodeVerification& mnv, CConnman& connman)
 {
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return;
+
     // only masternodes can sign this, why would someone ask regular node?
     if(!fMasternodeMode) {
         // do not ban, malicious node might be using my IP
@@ -1199,24 +1391,24 @@ void CMasternodeMan::SendVerifyReply(CNode* pnode, CMasternodeVerification& mnv,
     if (sporkManager.IsSporkActive(SPORK_6_NEW_SIGS)) {
         uint256 hash = mnv.GetSignatureHash1(blockHash);
 
-        if(!CHashSigner::SignHash(hash, activeMasternode.keyMasternode, mnv.vchSig1)) {
+        if(!CHashSigner::SignHash(hash, activeMasternode.keyOperator, mnv.vchSig1)) {
             LogPrintf("CMasternodeMan::SendVerifyReply -- SignHash() failed\n");
             return;
         }
 
-        if (!CHashSigner::VerifyHash(hash, activeMasternode.pubKeyMasternode, mnv.vchSig1, strError)) {
+        if (!CHashSigner::VerifyHash(hash, activeMasternode.keyIDOperator, mnv.vchSig1, strError)) {
             LogPrintf("CMasternodeMan::SendVerifyReply -- VerifyHash() failed, error: %s\n", strError);
             return;
         }
     } else {
         std::string strMessage = strprintf("%s%d%s", activeMasternode.service.ToString(false), mnv.nonce, blockHash.ToString());
 
-        if(!CMessageSigner::SignMessage(strMessage, mnv.vchSig1, activeMasternode.keyMasternode)) {
+        if(!CMessageSigner::SignMessage(strMessage, mnv.vchSig1, activeMasternode.keyOperator)) {
             LogPrintf("MasternodeMan::SendVerifyReply -- SignMessage() failed\n");
             return;
         }
 
-        if(!CMessageSigner::VerifyMessage(activeMasternode.pubKeyMasternode, mnv.vchSig1, strMessage, strError)) {
+        if(!CMessageSigner::VerifyMessage(activeMasternode.keyIDOperator, mnv.vchSig1, strMessage, strError)) {
             LogPrintf("MasternodeMan::SendVerifyReply -- VerifyMessage() failed, error: %s\n", strError);
             return;
         }
@@ -1229,6 +1421,9 @@ void CMasternodeMan::SendVerifyReply(CNode* pnode, CMasternodeVerification& mnv,
 
 void CMasternodeMan::ProcessVerifyReply(CNode* pnode, CMasternodeVerification& mnv)
 {
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return;
+
     std::string strError;
 
     // did we even ask for it? if that's the case we should have matching fulfilled request
@@ -1281,10 +1476,10 @@ void CMasternodeMan::ProcessVerifyReply(CNode* pnode, CMasternodeVerification& m
             if(CAddress(mnpair.second.addr, NODE_NETWORK) == pnode->addr) {
                 bool fFound = false;
                 if (sporkManager.IsSporkActive(SPORK_6_NEW_SIGS)) {
-                    fFound = CHashSigner::VerifyHash(hash1, mnpair.second.pubKeyMasternode, mnv.vchSig1, strError);
+                    fFound = CHashSigner::VerifyHash(hash1, mnpair.second.keyIDOperator, mnv.vchSig1, strError);
                     // we don't care about mnv with signature in old format
                 } else {
-                    fFound = CMessageSigner::VerifyMessage(mnpair.second.pubKeyMasternode, mnv.vchSig1, strMessage1, strError);
+                    fFound = CMessageSigner::VerifyMessage(mnpair.second.keyIDOperator, mnv.vchSig1, strMessage1, strError);
                 }
                 if (fFound) {
                     // found it!
@@ -1306,12 +1501,12 @@ void CMasternodeMan::ProcessVerifyReply(CNode* pnode, CMasternodeVerification& m
                     if (sporkManager.IsSporkActive(SPORK_6_NEW_SIGS)) {
                         uint256 hash2 = mnv.GetSignatureHash2(blockHash);
 
-                        if(!CHashSigner::SignHash(hash2, activeMasternode.keyMasternode, mnv.vchSig2)) {
+                        if(!CHashSigner::SignHash(hash2, activeMasternode.keyOperator, mnv.vchSig2)) {
                             LogPrintf("MasternodeMan::ProcessVerifyReply -- SignHash() failed\n");
                             return;
                         }
 
-                        if(!CHashSigner::VerifyHash(hash2, activeMasternode.pubKeyMasternode, mnv.vchSig2, strError)) {
+                        if(!CHashSigner::VerifyHash(hash2, activeMasternode.keyIDOperator, mnv.vchSig2, strError)) {
                             LogPrintf("MasternodeMan::ProcessVerifyReply -- VerifyHash() failed, error: %s\n", strError);
                             return;
                         }
@@ -1319,12 +1514,12 @@ void CMasternodeMan::ProcessVerifyReply(CNode* pnode, CMasternodeVerification& m
                         std::string strMessage2 = strprintf("%s%d%s%s%s", mnv.addr.ToString(false), mnv.nonce, blockHash.ToString(),
                                                 mnv.masternodeOutpoint1.ToStringShort(), mnv.masternodeOutpoint2.ToStringShort());
 
-                        if(!CMessageSigner::SignMessage(strMessage2, mnv.vchSig2, activeMasternode.keyMasternode)) {
+                        if(!CMessageSigner::SignMessage(strMessage2, mnv.vchSig2, activeMasternode.keyOperator)) {
                             LogPrintf("MasternodeMan::ProcessVerifyReply -- SignMessage() failed\n");
                             return;
                         }
 
-                        if(!CMessageSigner::VerifyMessage(activeMasternode.pubKeyMasternode, mnv.vchSig2, strMessage2, strError)) {
+                        if(!CMessageSigner::VerifyMessage(activeMasternode.keyIDOperator, mnv.vchSig2, strMessage2, strError)) {
                             LogPrintf("MasternodeMan::ProcessVerifyReply -- VerifyMessage() failed, error: %s\n", strError);
                             return;
                         }
@@ -1363,6 +1558,9 @@ void CMasternodeMan::ProcessVerifyReply(CNode* pnode, CMasternodeVerification& m
 
 void CMasternodeMan::ProcessVerifyBroadcast(CNode* pnode, const CMasternodeVerification& mnv)
 {
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return;
+
     std::string strError;
 
     if(mapSeenMasternodeVerification.find(mnv.GetHash()) != mapSeenMasternodeVerification.end()) {
@@ -1432,12 +1630,12 @@ void CMasternodeMan::ProcessVerifyBroadcast(CNode* pnode, const CMasternodeVerif
             uint256 hash1 = mnv.GetSignatureHash1(blockHash);
             uint256 hash2 = mnv.GetSignatureHash2(blockHash);
 
-            if(!CHashSigner::VerifyHash(hash1, pmn1->pubKeyMasternode, mnv.vchSig1, strError)) {
+            if(!CHashSigner::VerifyHash(hash1, pmn1->keyIDOperator, mnv.vchSig1, strError)) {
                 LogPrintf("MasternodeMan::ProcessVerifyBroadcast -- VerifyHash() failed, error: %s\n", strError);
                 return;
             }
 
-            if(!CHashSigner::VerifyHash(hash2, pmn2->pubKeyMasternode, mnv.vchSig2, strError)) {
+            if(!CHashSigner::VerifyHash(hash2, pmn2->keyIDOperator, mnv.vchSig2, strError)) {
                 LogPrintf("MasternodeMan::ProcessVerifyBroadcast -- VerifyHash() failed, error: %s\n", strError);
                 return;
             }
@@ -1446,12 +1644,12 @@ void CMasternodeMan::ProcessVerifyBroadcast(CNode* pnode, const CMasternodeVerif
             std::string strMessage2 = strprintf("%s%d%s%s%s", mnv.addr.ToString(false), mnv.nonce, blockHash.ToString(),
                                     mnv.masternodeOutpoint1.ToStringShort(), mnv.masternodeOutpoint2.ToStringShort());
 
-            if(!CMessageSigner::VerifyMessage(pmn1->pubKeyMasternode, mnv.vchSig1, strMessage1, strError)) {
+            if(!CMessageSigner::VerifyMessage(pmn1->keyIDOperator, mnv.vchSig1, strMessage1, strError)) {
                 LogPrintf("CMasternodeMan::ProcessVerifyBroadcast -- VerifyMessage() for masternode1 failed, error: %s\n", strError);
                 return;
             }
 
-            if(!CMessageSigner::VerifyMessage(pmn2->pubKeyMasternode, mnv.vchSig2, strMessage2, strError)) {
+            if(!CMessageSigner::VerifyMessage(pmn2->keyIDOperator, mnv.vchSig2, strMessage2, strError)) {
                 LogPrintf("CMasternodeMan::ProcessVerifyBroadcast -- VerifyMessage() for masternode2 failed, error: %s\n", strError);
                 return;
             }
@@ -1484,12 +1682,17 @@ std::string CMasternodeMan::ToString() const
 {
     std::ostringstream info;
 
-    info << "Masternodes: " << (int)mapMasternodes.size() <<
-            ", peers who asked us for Masternode list: " << (int)mAskedUsForMasternodeList.size() <<
-            ", peers we asked for Masternode list: " << (int)mWeAskedForMasternodeList.size() <<
-            ", entries in Masternode list we asked for: " << (int)mWeAskedForMasternodeListEntry.size() <<
-            ", nDsqCount: " << (int)nDsqCount;
-
+    if (deterministicMNManager->IsDeterministicMNsSporkActive()) {
+        info << "Masternodes: masternode object count: " << (int)mapMasternodes.size() <<
+                ", deterministic masternode count: " << deterministicMNManager->GetListAtChainTip().size() <<
+                ", nDsqCount: " << (int)nDsqCount;
+    } else {
+        info << "Masternodes: " << (int)mapMasternodes.size() <<
+                ", peers who asked us for Masternode list: " << (int)mAskedUsForMasternodeList.size() <<
+                ", peers we asked for Masternode list: " << (int)mWeAskedForMasternodeList.size() <<
+                ", entries in Masternode list we asked for: " << (int)mWeAskedForMasternodeListEntry.size() <<
+                ", nDsqCount: " << (int)nDsqCount;
+    }
     return info.str();
 }
 
@@ -1497,6 +1700,9 @@ bool CMasternodeMan::CheckMnbAndUpdateMasternodeList(CNode* pfrom, CMasternodeBr
 {
     // Need to lock cs_main here to ensure consistent locking order because the SimpleCheck call below locks cs_main
     LOCK(cs_main);
+
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return false;
 
     {
         LOCK(cs);
@@ -1563,13 +1769,13 @@ bool CMasternodeMan::CheckMnbAndUpdateMasternodeList(CNode* pfrom, CMasternodeBr
         Add(mnb);
         masternodeSync.BumpAssetLastTime("CMasternodeMan::CheckMnbAndUpdateMasternodeList - new");
         // if it matches our Masternode privkey...
-        if(fMasternodeMode && mnb.pubKeyMasternode == activeMasternode.pubKeyMasternode) {
+        if(fMasternodeMode && mnb.keyIDOperator == activeMasternode.keyIDOperator) {
             mnb.nPoSeBanScore = -MASTERNODE_POSE_BAN_MAX_SCORE;
             if(mnb.nProtocolVersion == PROTOCOL_VERSION) {
                 // ... and PROTOCOL_VERSION, then we've been remotely activated ...
                 LogPrintf("CMasternodeMan::CheckMnbAndUpdateMasternodeList -- Got NEW Masternode entry: masternode=%s  sigTime=%lld  addr=%s\n",
                             mnb.outpoint.ToStringShort(), mnb.sigTime, mnb.addr.ToString());
-                activeMasternode.ManageState(connman);
+                legacyActiveMasternodeManager.ManageState(connman);
             } else {
                 // ... otherwise we need to reactivate our node, do not add it to the list and do not relay
                 // but also do not ban the node we get this message from
@@ -1588,7 +1794,7 @@ bool CMasternodeMan::CheckMnbAndUpdateMasternodeList(CNode* pfrom, CMasternodeBr
 
 void CMasternodeMan::UpdateLastPaid(const CBlockIndex* pindex)
 {
-    LOCK(cs);
+    LOCK2(cs_main, cs);
 
     if(fLiteMode || !masternodeSync.IsWinnersListSynced() || mapMasternodes.empty()) return;
 
@@ -1610,6 +1816,8 @@ void CMasternodeMan::UpdateLastPaid(const CBlockIndex* pindex)
 void CMasternodeMan::UpdateLastSentinelPingTime()
 {
     LOCK(cs);
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return;
     nLastSentinelPingTime = GetTime();
 }
 
@@ -1639,11 +1847,13 @@ void CMasternodeMan::RemoveGovernanceObject(uint256 nGovernanceObjectHash)
     }
 }
 
-void CMasternodeMan::CheckMasternode(const CPubKey& pubKeyMasternode, bool fForce)
+void CMasternodeMan::CheckMasternode(const CKeyID& keyIDOperator, bool fForce)
 {
     LOCK2(cs_main, cs);
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return;
     for (auto& mnpair : mapMasternodes) {
-        if (mnpair.second.pubKeyMasternode == pubKeyMasternode) {
+        if (mnpair.second.keyIDOperator == keyIDOperator) {
             mnpair.second.Check(fForce);
             return;
         }
@@ -1660,6 +1870,8 @@ bool CMasternodeMan::IsMasternodePingedWithin(const COutPoint& outpoint, int nSe
 void CMasternodeMan::SetMasternodeLastPing(const COutPoint& outpoint, const CMasternodePing& mnp)
 {
     LOCK(cs);
+    if (deterministicMNManager->IsDeterministicMNsSporkActive())
+        return;
     CMasternode* pmn = Find(outpoint);
     if(!pmn) {
         return;
@@ -1682,6 +1894,9 @@ void CMasternodeMan::UpdatedBlockTip(const CBlockIndex *pindex)
     nCachedBlockHeight = pindex->nHeight;
     LogPrint("masternode", "CMasternodeMan::UpdatedBlockTip -- nCachedBlockHeight=%d\n", nCachedBlockHeight);
 
+    AddDeterministicMasternodes();
+    RemoveNonDeterministicMasternodes();
+
     CheckSameAddr();
 
     if(fMasternodeMode) {
@@ -1690,7 +1905,7 @@ void CMasternodeMan::UpdatedBlockTip(const CBlockIndex *pindex)
     }
 }
 
-void CMasternodeMan::NotifyMasternodeUpdates(CConnman& connman)
+void CMasternodeMan::NotifyMasternodeUpdates(CConnman& connman, bool forceAddedChecks, bool forceRemovedChecks)
 {
     // Avoid double locking
     bool fMasternodesAddedLocal = false;
@@ -1701,11 +1916,11 @@ void CMasternodeMan::NotifyMasternodeUpdates(CConnman& connman)
         fMasternodesRemovedLocal = fMasternodesRemoved;
     }
 
-    if(fMasternodesAddedLocal) {
+    if(fMasternodesAddedLocal || forceAddedChecks) {
         governance.CheckMasternodeOrphanObjects(connman);
         governance.CheckMasternodeOrphanVotes(connman);
     }
-    if(fMasternodesRemovedLocal) {
+    if(fMasternodesRemovedLocal || forceRemovedChecks) {
         governance.UpdateCachesAndClean();
     }
 
