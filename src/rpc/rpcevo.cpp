@@ -531,6 +531,14 @@ static void FundSpecialTx(CMutableTransaction& tx, SpecialTxPayload payload)
     ds << payload;
     tx.extraPayload.assign(ds.begin(), ds.end());
 
+    static CTxOut dummyTxOut(0, CScript() << OP_RETURN);
+    bool dummyTxOutAdded = false;
+    if (tx.vout.empty()) {
+        // add dummy txout as FundTransaction requires at least one output
+        tx.vout.emplace_back(dummyTxOut);
+        dummyTxOutAdded = true;
+    }
+
     CAmount nFee;
     CFeeRate feeRate = CFeeRate(0);
     int nChangePos = -1;
@@ -539,6 +547,13 @@ static void FundSpecialTx(CMutableTransaction& tx, SpecialTxPayload payload)
     if (!pwalletMain->FundTransaction(tx, nFee, false, feeRate, nChangePos, strFailReason, false, false, setSubtractFeeFromOutputs, true, CNoDestination()))
         throw JSONRPCError(RPC_INTERNAL_ERROR, strFailReason);
 
+    if (dummyTxOutAdded && tx.vout.size() > 1) {
+        // FundTransaction added a change output, so we don't need the dummy txout anymore
+        // Removing it results in slight overpayment of fees, but we ignore this for now (as it's a very low amount)
+        auto it = std::find(tx.vout.begin(), tx.vout.end(), dummyTxOut);
+        assert(it != tx.vout.end());
+        tx.vout.erase(it);
+    }
 }
 
 template<typename SpecialTxPayload>
