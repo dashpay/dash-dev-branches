@@ -389,10 +389,12 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
             "  \"curtime\" : ttt,                  (numeric) current timestamp in seconds since epoch (Jan 1 1970 GMT)\n"
             "  \"bits\" : \"xxxxxxxx\",              (string) compressed target of next block\n"
             "  \"height\" : n                      (numeric) The height of the next block\n"
-            "  \"masternode\" : {                  (json object) required masternode payee that must be included in the next block\n"
-            "      \"payee\" : \"xxxx\",             (string) payee address\n"
-            "      \"script\" : \"xxxx\",            (string) payee scriptPubKey\n"
-            "      \"amount\": n                   (numeric) required amount to pay\n"
+            "  \"masternode\" : [                  (array) required masternode payments that must be included in the next block\n"
+            "      {\n"
+            "         \"payee\" : \"xxxx\",          (string) payee address\n"
+            "         \"script\" : \"xxxx\",         (string) payee scriptPubKey\n"
+            "         \"amount\": n                (numeric) required amount to pay\n"
+            "      }\n"
             "  },\n"
             "  \"masternode_payments_started\" :  true|false, (boolean) true, if masternode payments started\n"
             "  \"masternode_payments_enforced\" : true|false, (boolean) true, if masternode payments are enforced\n"
@@ -718,33 +720,17 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
     result.push_back(Pair("bits", strprintf("%08x", pblock->nBits)));
     result.push_back(Pair("height", (int64_t)(pindexPrev->nHeight+1)));
 
-    UniValue masternodeObj;
-    if (deterministicMNManager->IsDeterministicMNsSporkActive()) {
-        masternodeObj.setArray();
-        for (const auto& txout : pblock->txoutsMasternode) {
-            CTxDestination address1;
-            ExtractDestination(txout.scriptPubKey, address1);
-            CBitcoinAddress address2(address1);
-
-            UniValue obj(UniValue::VOBJ);
-            obj.push_back(Pair("payee", address2.ToString().c_str()));
-            obj.push_back(Pair("script", HexStr(txout.scriptPubKey)));
-            obj.push_back(Pair("amount", txout.nValue));
-            masternodeObj.push_back(obj);
-        }
-    } else if (!pblock->txoutsMasternode.empty()) {
-        // This version of "masternode" is deprecated and only for compatibility for non-upgraded miners/pools
-        // After spork15 activation, all miners must have upgraded to support the array version. After that we can remove this
-        assert(pblock->txoutsMasternode.size() == 1);
-        masternodeObj.setObject();
-
+    UniValue masternodeObj(UniValue::VARR);
+    for (const auto& txout : pblock->txoutsMasternode) {
         CTxDestination address1;
-        ExtractDestination(pblock->txoutsMasternode[0].scriptPubKey, address1);
+        ExtractDestination(txout.scriptPubKey, address1);
         CBitcoinAddress address2(address1);
 
-        masternodeObj.push_back(Pair("payee", address2.ToString().c_str()));
-        masternodeObj.push_back(Pair("script", HexStr(pblock->txoutsMasternode[0].scriptPubKey)));
-        masternodeObj.push_back(Pair("amount", pblock->txoutsMasternode[0].nValue));
+        UniValue obj(UniValue::VOBJ);
+        obj.push_back(Pair("payee", address2.ToString().c_str()));
+        obj.push_back(Pair("script", HexStr(txout.scriptPubKey)));
+        obj.push_back(Pair("amount", txout.nValue));
+        masternodeObj.push_back(obj);
     }
 
     result.push_back(Pair("masternode", masternodeObj));
