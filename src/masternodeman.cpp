@@ -470,10 +470,10 @@ bool CMasternodeMan::GetMasternodeInfo(const COutPoint& outpoint, masternode_inf
     return true;
 }
 
-bool CMasternodeMan::GetMasternodeInfo(const CKeyID& pubKeyIDMasternode, masternode_info_t& mnInfoRet) {
+bool CMasternodeMan::GetMasternodeInfo(const CKeyID& keyIDOperator, masternode_info_t& mnInfoRet) {
     LOCK(cs);
     for (const auto& mnpair : mapMasternodes) {
-        if (mnpair.second.pubKeyIDMasternode == pubKeyIDMasternode) {
+        if (mnpair.second.keyIDOperator == keyIDOperator) {
             mnInfoRet = mnpair.second.GetInfo();
             return true;
         }
@@ -481,9 +481,9 @@ bool CMasternodeMan::GetMasternodeInfo(const CKeyID& pubKeyIDMasternode, mastern
     return false;
 }
 
-bool CMasternodeMan::GetMasternodeInfo(const CPubKey& pubKeyMasternode, masternode_info_t& mnInfoRet)
+bool CMasternodeMan::GetMasternodeInfo(const CPubKey& pubKeyOperator, masternode_info_t& mnInfoRet)
 {
-    return GetMasternodeInfo(pubKeyMasternode.GetID(), mnInfoRet);
+    return GetMasternodeInfo(pubKeyOperator.GetID(), mnInfoRet);
 }
 
 bool CMasternodeMan::GetMasternodeInfo(const CScript& payee, masternode_info_t& mnInfoRet)
@@ -1198,24 +1198,24 @@ void CMasternodeMan::SendVerifyReply(CNode* pnode, CMasternodeVerification& mnv,
     if (sporkManager.IsSporkActive(SPORK_6_NEW_SIGS)) {
         uint256 hash = mnv.GetSignatureHash1(blockHash);
 
-        if(!CHashSigner::SignHash(hash, activeMasternode.keyMasternode, mnv.vchSig1)) {
+        if(!CHashSigner::SignHash(hash, activeMasternode.keyOperator, mnv.vchSig1)) {
             LogPrintf("CMasternodeMan::SendVerifyReply -- SignHash() failed\n");
             return;
         }
 
-        if (!CHashSigner::VerifyHash(hash, activeMasternode.pubKeyIDMasternode, mnv.vchSig1, strError)) {
+        if (!CHashSigner::VerifyHash(hash, activeMasternode.keyIDOperator, mnv.vchSig1, strError)) {
             LogPrintf("CMasternodeMan::SendVerifyReply -- VerifyHash() failed, error: %s\n", strError);
             return;
         }
     } else {
         std::string strMessage = strprintf("%s%d%s", activeMasternode.service.ToString(false), mnv.nonce, blockHash.ToString());
 
-        if(!CMessageSigner::SignMessage(strMessage, mnv.vchSig1, activeMasternode.keyMasternode)) {
+        if(!CMessageSigner::SignMessage(strMessage, mnv.vchSig1, activeMasternode.keyOperator)) {
             LogPrintf("MasternodeMan::SendVerifyReply -- SignMessage() failed\n");
             return;
         }
 
-        if(!CMessageSigner::VerifyMessage(activeMasternode.pubKeyIDMasternode, mnv.vchSig1, strMessage, strError)) {
+        if(!CMessageSigner::VerifyMessage(activeMasternode.keyIDOperator, mnv.vchSig1, strMessage, strError)) {
             LogPrintf("MasternodeMan::SendVerifyReply -- VerifyMessage() failed, error: %s\n", strError);
             return;
         }
@@ -1282,10 +1282,10 @@ void CMasternodeMan::ProcessVerifyReply(CNode* pnode, CMasternodeVerification& m
             if(CAddress(mnpair.second.addr, NODE_NETWORK) == pnode->addr) {
                 bool fFound = false;
                 if (sporkManager.IsSporkActive(SPORK_6_NEW_SIGS)) {
-                    fFound = CHashSigner::VerifyHash(hash1, mnpair.second.pubKeyIDMasternode, mnv.vchSig1, strError);
+                    fFound = CHashSigner::VerifyHash(hash1, mnpair.second.keyIDOperator, mnv.vchSig1, strError);
                     // we don't care about mnv with signature in old format
                 } else {
-                    fFound = CMessageSigner::VerifyMessage(mnpair.second.pubKeyIDMasternode, mnv.vchSig1, strMessage1, strError);
+                    fFound = CMessageSigner::VerifyMessage(mnpair.second.keyIDOperator, mnv.vchSig1, strMessage1, strError);
                 }
                 if (fFound) {
                     // found it!
@@ -1307,12 +1307,12 @@ void CMasternodeMan::ProcessVerifyReply(CNode* pnode, CMasternodeVerification& m
                     if (sporkManager.IsSporkActive(SPORK_6_NEW_SIGS)) {
                         uint256 hash2 = mnv.GetSignatureHash2(blockHash);
 
-                        if(!CHashSigner::SignHash(hash2, activeMasternode.keyMasternode, mnv.vchSig2)) {
+                        if(!CHashSigner::SignHash(hash2, activeMasternode.keyOperator, mnv.vchSig2)) {
                             LogPrintf("MasternodeMan::ProcessVerifyReply -- SignHash() failed\n");
                             return;
                         }
 
-                        if(!CHashSigner::VerifyHash(hash2, activeMasternode.pubKeyIDMasternode, mnv.vchSig2, strError)) {
+                        if(!CHashSigner::VerifyHash(hash2, activeMasternode.keyIDOperator, mnv.vchSig2, strError)) {
                             LogPrintf("MasternodeMan::ProcessVerifyReply -- VerifyHash() failed, error: %s\n", strError);
                             return;
                         }
@@ -1320,12 +1320,12 @@ void CMasternodeMan::ProcessVerifyReply(CNode* pnode, CMasternodeVerification& m
                         std::string strMessage2 = strprintf("%s%d%s%s%s", mnv.addr.ToString(false), mnv.nonce, blockHash.ToString(),
                                                 mnv.masternodeOutpoint1.ToStringShort(), mnv.masternodeOutpoint2.ToStringShort());
 
-                        if(!CMessageSigner::SignMessage(strMessage2, mnv.vchSig2, activeMasternode.keyMasternode)) {
+                        if(!CMessageSigner::SignMessage(strMessage2, mnv.vchSig2, activeMasternode.keyOperator)) {
                             LogPrintf("MasternodeMan::ProcessVerifyReply -- SignMessage() failed\n");
                             return;
                         }
 
-                        if(!CMessageSigner::VerifyMessage(activeMasternode.pubKeyIDMasternode, mnv.vchSig2, strMessage2, strError)) {
+                        if(!CMessageSigner::VerifyMessage(activeMasternode.keyIDOperator, mnv.vchSig2, strMessage2, strError)) {
                             LogPrintf("MasternodeMan::ProcessVerifyReply -- VerifyMessage() failed, error: %s\n", strError);
                             return;
                         }
@@ -1435,12 +1435,12 @@ void CMasternodeMan::ProcessVerifyBroadcast(CNode* pnode, const CMasternodeVerif
             uint256 hash1 = mnv.GetSignatureHash1(blockHash);
             uint256 hash2 = mnv.GetSignatureHash2(blockHash);
 
-            if(!CHashSigner::VerifyHash(hash1, pmn1->pubKeyIDMasternode, mnv.vchSig1, strError)) {
+            if(!CHashSigner::VerifyHash(hash1, pmn1->keyIDOperator, mnv.vchSig1, strError)) {
                 LogPrintf("MasternodeMan::ProcessVerifyBroadcast -- VerifyHash() failed, error: %s\n", strError);
                 return;
             }
 
-            if(!CHashSigner::VerifyHash(hash2, pmn2->pubKeyIDMasternode, mnv.vchSig2, strError)) {
+            if(!CHashSigner::VerifyHash(hash2, pmn2->keyIDOperator, mnv.vchSig2, strError)) {
                 LogPrintf("MasternodeMan::ProcessVerifyBroadcast -- VerifyHash() failed, error: %s\n", strError);
                 return;
             }
@@ -1449,12 +1449,12 @@ void CMasternodeMan::ProcessVerifyBroadcast(CNode* pnode, const CMasternodeVerif
             std::string strMessage2 = strprintf("%s%d%s%s%s", mnv.addr.ToString(false), mnv.nonce, blockHash.ToString(),
                                     mnv.masternodeOutpoint1.ToStringShort(), mnv.masternodeOutpoint2.ToStringShort());
 
-            if(!CMessageSigner::VerifyMessage(pmn1->pubKeyIDMasternode, mnv.vchSig1, strMessage1, strError)) {
+            if(!CMessageSigner::VerifyMessage(pmn1->keyIDOperator, mnv.vchSig1, strMessage1, strError)) {
                 LogPrintf("CMasternodeMan::ProcessVerifyBroadcast -- VerifyMessage() for masternode1 failed, error: %s\n", strError);
                 return;
             }
 
-            if(!CMessageSigner::VerifyMessage(pmn2->pubKeyIDMasternode, mnv.vchSig2, strMessage2, strError)) {
+            if(!CMessageSigner::VerifyMessage(pmn2->keyIDOperator, mnv.vchSig2, strMessage2, strError)) {
                 LogPrintf("CMasternodeMan::ProcessVerifyBroadcast -- VerifyMessage() for masternode2 failed, error: %s\n", strError);
                 return;
             }
@@ -1566,7 +1566,7 @@ bool CMasternodeMan::CheckMnbAndUpdateMasternodeList(CNode* pfrom, CMasternodeBr
         Add(mnb);
         masternodeSync.BumpAssetLastTime("CMasternodeMan::CheckMnbAndUpdateMasternodeList - new");
         // if it matches our Masternode privkey...
-        if(fMasternodeMode && mnb.pubKeyIDMasternode == activeMasternode.pubKeyIDMasternode) {
+        if(fMasternodeMode && mnb.keyIDOperator == activeMasternode.keyIDOperator) {
             mnb.nPoSeBanScore = -MASTERNODE_POSE_BAN_MAX_SCORE;
             if(mnb.nProtocolVersion == PROTOCOL_VERSION) {
                 // ... and PROTOCOL_VERSION, then we've been remotely activated ...
@@ -1642,11 +1642,11 @@ void CMasternodeMan::RemoveGovernanceObject(uint256 nGovernanceObjectHash)
     }
 }
 
-void CMasternodeMan::CheckMasternode(const CKeyID& pubKeyIDMasternode, bool fForce)
+void CMasternodeMan::CheckMasternode(const CKeyID& keyIDOperator, bool fForce)
 {
     LOCK2(cs_main, cs);
     for (auto& mnpair : mapMasternodes) {
-        if (mnpair.second.pubKeyIDMasternode == pubKeyIDMasternode) {
+        if (mnpair.second.keyIDOperator == keyIDOperator) {
             mnpair.second.Check(fForce);
             return;
         }

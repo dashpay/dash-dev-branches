@@ -152,19 +152,19 @@ uint256 CGovernanceVote::GetSignatureHash() const
     return SerializeHash(*this);
 }
 
-bool CGovernanceVote::Sign(const CKey& keyMasternode, const CKeyID& pubKeyIDMasternode)
+bool CGovernanceVote::Sign(const CKey& key, const CKeyID& pubKeyID)
 {
     std::string strError;
 
     if (sporkManager.IsSporkActive(SPORK_6_NEW_SIGS)) {
         uint256 hash = GetSignatureHash();
 
-        if(!CHashSigner::SignHash(hash, keyMasternode, vchSig)) {
+        if(!CHashSigner::SignHash(hash, key, vchSig)) {
             LogPrintf("CGovernanceVote::Sign -- SignHash() failed\n");
             return false;
         }
 
-        if (!CHashSigner::VerifyHash(hash, pubKeyIDMasternode, vchSig, strError)) {
+        if (!CHashSigner::VerifyHash(hash, pubKeyID, vchSig, strError)) {
             LogPrintf("CGovernanceVote::Sign -- VerifyHash() failed, error: %s\n", strError);
             return false;
         }
@@ -173,12 +173,12 @@ bool CGovernanceVote::Sign(const CKey& keyMasternode, const CKeyID& pubKeyIDMast
         std::string strMessage = masternodeOutpoint.ToStringShort() + "|" + nParentHash.ToString() + "|" +
             std::to_string(nVoteSignal) + "|" + std::to_string(nVoteOutcome) + "|" + std::to_string(nTime);
 
-        if(!CMessageSigner::SignMessage(strMessage, vchSig, keyMasternode)) {
+        if(!CMessageSigner::SignMessage(strMessage, vchSig, key)) {
             LogPrintf("CGovernanceVote::Sign -- SignMessage() failed\n");
             return false;
         }
 
-        if(!CMessageSigner::VerifyMessage(pubKeyIDMasternode, vchSig, strMessage, strError)) {
+        if(!CMessageSigner::VerifyMessage(pubKeyID, vchSig, strMessage, strError)) {
             LogPrintf("CGovernanceVote::Sign -- VerifyMessage() failed, error: %s\n", strError);
             return false;
         }
@@ -187,21 +187,21 @@ bool CGovernanceVote::Sign(const CKey& keyMasternode, const CKeyID& pubKeyIDMast
     return true;
 }
 
-bool CGovernanceVote::CheckSignature(const CKeyID& pubKeyIDMasternode) const
+bool CGovernanceVote::CheckSignature(const CKeyID& pubKeyID) const
 {
     std::string strError;
 
     if (sporkManager.IsSporkActive(SPORK_6_NEW_SIGS)) {
         uint256 hash = GetSignatureHash();
 
-        if (!CHashSigner::VerifyHash(hash, pubKeyIDMasternode, vchSig, strError)) {
+        if (!CHashSigner::VerifyHash(hash, pubKeyID, vchSig, strError)) {
             // could be a signature in old format
             std::string strMessage = masternodeOutpoint.ToStringShort() + "|" + nParentHash.ToString() + "|" +
                 std::to_string(nVoteSignal) + "|" +
                 std::to_string(nVoteOutcome) + "|" +
                 std::to_string(nTime);
 
-            if(!CMessageSigner::VerifyMessage(pubKeyIDMasternode, vchSig, strMessage, strError)) {
+            if(!CMessageSigner::VerifyMessage(pubKeyID, vchSig, strMessage, strError)) {
                 // nope, not in old format either
                 LogPrint("gobject", "CGovernanceVote::IsValid -- VerifyMessage() failed, error: %s\n", strError);
                 return false;
@@ -213,7 +213,7 @@ bool CGovernanceVote::CheckSignature(const CKeyID& pubKeyIDMasternode) const
             std::to_string(nVoteOutcome) + "|" +
             std::to_string(nTime);
 
-        if(!CMessageSigner::VerifyMessage(pubKeyIDMasternode, vchSig, strMessage, strError)) {
+        if(!CMessageSigner::VerifyMessage(pubKeyID, vchSig, strMessage, strError)) {
             LogPrint("gobject", "CGovernanceVote::IsValid -- VerifyMessage() failed, error: %s\n", strError);
             return false;
         }
@@ -222,7 +222,7 @@ bool CGovernanceVote::CheckSignature(const CKeyID& pubKeyIDMasternode) const
     return true;
 }
 
-bool CGovernanceVote::IsValid(bool fSignatureCheck) const
+bool CGovernanceVote::IsValid(bool useVotingKey) const
 {
     if(nTime > GetAdjustedTime() + (60*60)) {
         LogPrint("gobject", "CGovernanceVote::IsValid -- vote is too far ahead of current time - %s - nTime %lli - Max Time %lli\n", GetHash().ToString(), nTime, GetAdjustedTime() + (60*60));
@@ -249,9 +249,7 @@ bool CGovernanceVote::IsValid(bool fSignatureCheck) const
         return false;
     }
 
-    if(!fSignatureCheck) return true;
-
-    return CheckSignature(infoMn.pubKeyIDMasternode);
+    return CheckSignature(useVotingKey ? infoMn.keyIDVoting : infoMn.keyIDOperator);
 }
 
 bool operator==(const CGovernanceVote& vote1, const CGovernanceVote& vote2)

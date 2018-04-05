@@ -95,8 +95,8 @@ public:
 
     bool IsExpired() const { return GetAdjustedTime() - sigTime > MASTERNODE_NEW_START_REQUIRED_SECONDS; }
 
-    bool Sign(const CKey& keyMasternode, const CKeyID& pubKeyIDMasternode);
-    bool CheckSignature(CKeyID& pubKeyIDMasternode, int &nDos) const;
+    bool Sign(const CKey& keyMasternode, const CKeyID& keyIDOperator);
+    bool CheckSignature(CKeyID& keyIDOperator, int &nDos) const;
     bool SimpleCheck(int& nDos);
     bool CheckAndUpdate(CMasternode* pmn, bool fFromNewBroadcast, int& nDos, CConnman& connman);
     void Relay(CConnman& connman);
@@ -133,15 +133,15 @@ struct masternode_info_t
                       CPubKey const& pkCollAddr, CPubKey const& pkMN) :
         nActiveState{activeState}, nProtocolVersion{protoVer}, sigTime{sTime},
         outpoint{outpnt}, addr{addr},
-        pubKeyCollateralAddress{pkCollAddr}, pubKeyMasternode{pkMN}, pubKeyIDCollateralAddress{pkCollAddr.GetID()}, pubKeyIDMasternode{pkMN.GetID()} {}
+        pubKeyCollateralAddress{pkCollAddr}, pubKeyMasternode{pkMN}, pubKeyIDCollateralAddress{pkCollAddr.GetID()}, keyIDOperator{pkMN.GetID()}, keyIDOwner{pkMN.GetID()} {}
 
     // only called when the network is in deterministic MN list mode
     masternode_info_t(int activeState, int protoVer, int64_t sTime,
                       COutPoint const& outpnt, CService const& addr,
-                      CKeyID const& pkCollAddr, CKeyID const& pkMN) :
+                      CKeyID const& pkCollAddr, CKeyID const& pkOperator, CKeyID const& pkOwner) :
         nActiveState{activeState}, nProtocolVersion{protoVer}, sigTime{sTime},
         outpoint{outpnt}, addr{addr},
-        pubKeyCollateralAddress{}, pubKeyMasternode{}, pubKeyIDCollateralAddress{pkCollAddr}, pubKeyIDMasternode{pkMN} {}
+        pubKeyCollateralAddress{}, pubKeyMasternode{}, pubKeyIDCollateralAddress{pkCollAddr}, keyIDOperator{pkOperator}, keyIDOwner{pkOwner} {}
 
     int nActiveState = 0;
     int nProtocolVersion = 0;
@@ -152,7 +152,8 @@ struct masternode_info_t
     CPubKey pubKeyCollateralAddress{}; // this will be invalid/unset when the network switches to deterministic MNs (luckely it's only important for the broadcast hash)
     CPubKey pubKeyMasternode{}; // this will be invalid/unset when the network switches to deterministic MNs (luckely it's only important for the broadcast hash)
     CKeyID pubKeyIDCollateralAddress{};
-    CKeyID pubKeyIDMasternode{};
+    CKeyID keyIDOperator{};
+    CKeyID keyIDOwner{};
 
     int64_t nLastDsq = 0; //the dsq count from the last dsq broadcast of this node
     int64_t nTimeLastChecked = 0;
@@ -234,7 +235,8 @@ public:
         READWRITE(pubKeyCollateralAddress);
         READWRITE(pubKeyMasternode);
         READWRITE(pubKeyIDCollateralAddress);
-        READWRITE(pubKeyIDMasternode);
+        READWRITE(keyIDOperator);
+        READWRITE(keyIDOwner);
         READWRITE(lastPing);
         READWRITE(vchSig);
         READWRITE(sigTime);
@@ -403,7 +405,8 @@ public:
 
         if (ser_action.ForRead()) {
             pubKeyIDCollateralAddress = pubKeyCollateralAddress.GetID();
-            pubKeyIDMasternode = pubKeyMasternode.GetID();
+            keyIDOperator = pubKeyMasternode.GetID();
+            keyIDOwner = pubKeyMasternode.GetID();
         }
     }
 
