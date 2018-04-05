@@ -1492,7 +1492,7 @@ bool AppInitMain(boost::thread_group& threadGroup, CScheduler& scheduler)
         bool fBound = false;
         if (mapMultiArgs.count("-bind")) {
             BOOST_FOREACH(const std::string& strBind, mapMultiArgs.at("-bind")) {
-                CService addrBind;
+                CService addrBind{CService::DefaultBackend};
                 if (!Lookup(strBind.c_str(), addrBind, GetListenPort(), false))
                     return InitError(ResolveErrMsg("bind", strBind));
                 fBound |= Bind(connman, addrBind, (BF_EXPLICIT | BF_REPORT_ERROR));
@@ -1500,7 +1500,7 @@ bool AppInitMain(boost::thread_group& threadGroup, CScheduler& scheduler)
         }
         if (mapMultiArgs.count("-whitebind")) {
             BOOST_FOREACH(const std::string& strBind, mapMultiArgs.at("-whitebind")) {
-                CService addrBind;
+                CService addrBind{CService::DefaultBackend};
                 if (!Lookup(strBind.c_str(), addrBind, 0, false))
                     return InitError(ResolveErrMsg("whitebind", strBind));
                 if (addrBind.GetPort() == 0)
@@ -1525,7 +1525,7 @@ bool AppInitMain(boost::thread_group& threadGroup, CScheduler& scheduler)
 
     if (mapMultiArgs.count("-externalip")) {
         BOOST_FOREACH(const std::string& strAddr, mapMultiArgs.at("-externalip")) {
-            CService addrLocal;
+            CService addrLocal{CService::DefaultBackend};
             if (Lookup(strAddr.c_str(), addrLocal, GetListenPort(), fNameLookup) && addrLocal.IsValid())
                 AddLocal(addrLocal, LOCAL_MANUAL);
             else

@@ -214,7 +214,7 @@ UniValue addnode(const JSONRPCRequest& request)
 
     if (strCommand == "onetry")
     {
-        CAddress addr;
+        CAddress addr{CAddress::DefaultBackend};
         g_connman->OpenNetworkConnection(addr, false, NULL, strNode.c_str());
         return NullUniValue;
     }
@@ -490,14 +490,14 @@ UniValue setban(const JSONRPCRequest& request)
         throw JSONRPCError(RPC_CLIENT_P2P_DISABLED, "Error: Peer-to-peer functionality missing or disabled");
 
     CSubNet subNet;
-    CNetAddr netAddr;
+    CNetAddr netAddr{CNetAddr::DefaultBackend};
     bool isSubnet = false;
 
     if (request.params[0].get_str().find("/") != std::string::npos)
         isSubnet = true;
 
     if (!isSubnet) {
-        CNetAddr resolved;
+        CNetAddr resolved{CNetAddr::DefaultBackend};
         LookupHost(request.params[0].get_str().c_str(), resolved, false);
         netAddr = resolved;
     }

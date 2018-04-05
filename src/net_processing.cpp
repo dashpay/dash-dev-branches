@@ -255,8 +255,8 @@ void PushNodeVersion(CNode *pnode, CConnman& connman, int64_t nTime)
     NodeId nodeid = pnode->GetId();
     CAddress addr = pnode->addr;
 
-    CAddress addrYou = (addr.IsRoutable() && !IsProxy(addr) ? addr : CAddress(CService(), addr.nServices));
-    CAddress addrMe = CAddress(CService(), nLocalNodeServices);
+    CAddress addrYou = (addr.IsRoutable() && !IsProxy(addr) ? addr : CAddress(CService(CService::DefaultBackend), addr.nServices));
+    CAddress addrMe = CAddress(CService(CService::DefaultBackend), nLocalNodeServices);
 
     connman.PushMessage(pnode, CNetMsgMaker(INIT_PROTO_VERSION).Make(NetMsgType::VERSION, PROTOCOL_VERSION, (uint64_t)nLocalNodeServices, nTime, addrYou, addrMe,
             nonce, strSubVersion, nNodeStartingHeight, ::fRelayTxes));
@@ -1362,8 +1362,8 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         }
 
         int64_t nTime;
-        CAddress addrMe;
-        CAddress addrFrom;
+        CAddress addrMe{CAddress::DefaultBackend};
+        CAddress addrFrom{CAddress::DefaultBackend};
         uint64_t nNonce = 1;
         uint64_t nServiceInt;
         ServiceFlags nServices;

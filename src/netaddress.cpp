@@ -32,7 +32,7 @@ void CNetAddr::SetIP(const CNetAddr& ipIn)
     ip = ipIn.ip;
 }
 
-CNetAddr::CNetAddr()
+CNetAddr::CNetAddr(CDefaultBackend)
 : backend{&CNetBackendTcp::instance}, ip{}, scopeId{0}
 {
 }
@@ -167,7 +167,7 @@ void CService::Init()
     port = 0;
 }
 
-CService::CService()
+CService::CService(CDefaultBackend) : CNetAddr{DefaultBackend}
 {
     Init();
 }
@@ -236,12 +236,14 @@ void CService::SetPort(unsigned short portIn)
 }
 
 CSubNet::CSubNet():
+    network(CNetAddr::DefaultBackend),
     valid(false)
 {
     memset(netmask, 0, sizeof(netmask));
 }
 
-CSubNet::CSubNet(const CNetAddr &addr, int32_t mask)
+CSubNet::CSubNet(const CNetAddr &addr, int32_t mask):
+    network(CNetAddr::DefaultBackend)
 {
     valid = true;
     network = addr;
@@ -266,7 +268,8 @@ CSubNet::CSubNet(const CNetAddr &addr, int32_t mask)
         network.ip[x] &= netmask[x];
 }
 
-CSubNet::CSubNet(const CNetAddr &addr, const CNetAddr &mask)
+CSubNet::CSubNet(const CNetAddr &addr, const CNetAddr &mask):
+    network(CNetAddr::DefaultBackend)
 {
     valid = true;
     network = addr;
@@ -285,6 +288,7 @@ CSubNet::CSubNet(const CNetAddr &addr, const CNetAddr &mask)
 }
 
 CSubNet::CSubNet(const CNetAddr &addr):
+    network(CNetAddr::DefaultBackend),
     valid(addr.IsValid())
 {
     memset(netmask, 255, sizeof(netmask));

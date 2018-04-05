@@ -16,7 +16,7 @@ BOOST_FIXTURE_TEST_SUITE(netbase_tests, BasicTestingSetup)
 
 static CNetAddr ResolveIP(const char* ip)
 {
-    CNetAddr addr;
+    CNetAddr addr{CNetAddr::DefaultBackend};
     LookupHost(ip, addr, false);
     return addr;
 }

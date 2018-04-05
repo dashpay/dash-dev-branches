@@ -156,8 +156,8 @@ static std::vector<CAddress> convertSeed6(const std::vector<SeedSpec6> &vSeedsIn
 // one by discovery.
 CAddress GetLocalAddress(const CNetAddr *paddrPeer, ServiceFlags nLocalServices)
 {
-    CAddress ret(CService(CNetAddr(),GetListenPort()), nLocalServices);
-    CService addr;
+    CAddress ret(CService(CNetAddr(paddrPeer->GetBackend()),GetListenPort()), nLocalServices);
+    CService addr{CService::DefaultBackend};
     if (GetLocal(addr, paddrPeer))
     {
         ret = CAddress(addr, nLocalServices);
@@ -1449,7 +1449,7 @@ void ThreadMapPort()
             {
                 if(externalIPAddress[0])
                 {
-                    CNetAddr resolved;
+                    CNetAddr resolved{CNetAddr::DefaultBackend};
                     if(LookupHost(externalIPAddress, resolved, false)) {
                         LogPrintf("UPnP: ExternalIPAddress = %s\n", resolved.ToString().c_str());
                         AddLocal(resolved, LOCAL_UPNP);
@@ -1600,7 +1600,7 @@ void CConnman::ThreadDNSAddressSeed()
             // This should switch to a hard-coded stable dummy IP for each seed name, so that the
             // resolve is not required at all.
             if (!vIPs.empty()) {
-                CService seedSource;
+                CService seedSource{CService::DefaultBackend};
                 Lookup(seed.name.c_str(), seedSource, 0, true);
                 addrman.Add(vAdd, seedSource);
             }
@@ -1648,7 +1648,7 @@ void CConnman::ProcessOneShot()
         strDest = vOneShots.front();
         vOneShots.pop_front();
     }
-    CAddress addr;
+    CAddress addr{CAddress::DefaultBackend};
     CSemaphoreGrant grant(*semOutbound, true);
     if (grant) {
         if (!OpenNetworkConnection(addr, false, &grant, strDest.c_str(), true))
@@ -1666,7 +1666,7 @@ void CConnman::ThreadOpenConnections()
             ProcessOneShot();
             BOOST_FOREACH(const std::string& strAddr, mapMultiArgs.at("-connect"))
             {
-                CAddress addr(CService(), NODE_NONE);
+                CAddress addr(CService(CService::DefaultBackend), NODE_NONE);
                 OpenNetworkConnection(addr, false, NULL, strAddr.c_str());
                 for (int i = 0; i < 10 && i < nLoop; i++)
                 {
@@ -1700,7 +1700,7 @@ void CConnman::ThreadOpenConnections()
             static bool done = false;
             if (!done) {
                 LogPrintf("Adding fixed seed nodes as DNS doesn't seem to be available.\n");
-                CNetAddr local;
+                CNetAddr local{CNetAddr::DefaultBackend};
                 LookupHost("127.0.0.1", local, false);
                 addrman.Add(convertSeed6(Params().FixedSeeds()), local);
                 done = true;
@@ -1710,7 +1710,7 @@ void CConnman::ThreadOpenConnections()
         //
         // Choose an address to connect to based on most recently seen
         //
-        CAddress addrConnect;
+        CAddress addrConnect{CAddress::DefaultBackend};
 
         // Only connect out to one peer per network group (/16 for IPv4).
         // Do this here so we don't have to critsect vNodes inside mapAddresses critsect.
@@ -1765,10 +1765,10 @@ void CConnman::ThreadOpenConnections()
         int nTries = 0;
         while (!interruptNet)
         {
-            CAddrInfo addr = addrman.Select(fFeeler);
+            boost::optional<const CAddrInfo&> addr = addrman.Select(fFeeler);
 
             // if we selected an invalid address, restart
-            if (!addr.IsValid() || setConnected.count(addr.GetGroup()) || IsLocal(addr))
+            if (addr == boost::none || !addr->IsValid() || setConnected.count(addr->GetGroup()) || IsLocal(*addr))
                 break;
 
             // If we didn't find an appropriate destination after trying 100 addresses fetched from addrman,
@@ -1778,15 +1778,15 @@ void CConnman::ThreadOpenConnections()
             if (nTries > 100)
                 break;
 
-            if (IsLimited(addr))
+            if (IsLimited(*addr))
                 continue;
 
             // only connect to full nodes
-            if ((addr.nServices & REQUIRED_SERVICES) != REQUIRED_SERVICES)
+            if ((addr->nServices & REQUIRED_SERVICES) != REQUIRED_SERVICES)
                 continue;
 
             // only consider very recently tried nodes after 30 failed attempts
-            if (nANow - addr.nLastTry < 600 && nTries < 30)
+            if (nANow - addr->nLastTry < 600 && nTries < 30)
                 continue;
 
             // only consider nodes missing relevant services after 40 failed attempts and only if less than half the outbound are up.
@@ -1795,15 +1795,15 @@ void CConnman::ThreadOpenConnections()
                 nRequiredServices = REQUIRED_SERVICES;
             }
 
-            if ((addr.nServices & nRequiredServices) != nRequiredServices) {
+            if ((addr->nServices & nRequiredServices) != nRequiredServices) {
                 continue;
             }
 
             // do not allow non-default ports, unless after 50 invalid addresses selected already
-            if (addr.GetPort() != Params().GetDefaultPort() && nTries < 50)
+            if (addr->GetPort() != Params().GetDefaultPort() && nTries < 50)
                 continue;
 
-            addrConnect = addr;
+            addrConnect = *addr;
 
             // regardless of the services assumed to be available, only require the minimum if half or more outbound have relevant services
             if (nOutboundRelevant >= (nMaxOutbound >> 1)) {
@@ -1853,7 +1853,10 @@ std::vector<AddedNodeInfo> CConnman::GetAddedNodeInfo()
             }
             std::string addrName = pnode->GetAddrName();
             if (!addrName.empty()) {
-                mapConnectedByName[std::move(addrName)] = std::make_pair(pnode->fInbound, static_cast<const CService&>(pnode->addr));
+                auto v = std::make_pair(pnode->fInbound, static_cast<const CService&>(pnode->addr));
+                auto res = mapConnectedByName.insert(std::make_pair(std::move(addrName), v));
+                if (!res.second)
+                    res.first->second = v;
             }
         }
     }
@@ -1866,7 +1869,7 @@ std::vector<AddedNodeInfo> CConnman::GetAddedNodeInfo()
             if (it != mapConnected.end()) {
                 ret.push_back(AddedNodeInfo{strAddNode, service, true, it->second});
             } else {
-                ret.push_back(AddedNodeInfo{strAddNode, CService(), false, false});
+                ret.push_back(AddedNodeInfo{strAddNode, CService(CService::DefaultBackend), false, false});
             }
         } else {
             // strAddNode is a name
@@ -1874,7 +1877,7 @@ std::vector<AddedNodeInfo> CConnman::GetAddedNodeInfo()
             if (it != mapConnectedByName.end()) {
                 ret.push_back(AddedNodeInfo{strAddNode, it->second.second, true, it->second.first});
             } else {
-                ret.push_back(AddedNodeInfo{strAddNode, CService(), false, false});
+                ret.push_back(AddedNodeInfo{strAddNode, CService(CService::DefaultBackend), false, false});
             }
         }
     }

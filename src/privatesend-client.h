@@ -47,7 +47,7 @@ private:
 
 public:
     CPendingDsaRequest():
-        addr(CService()),
+        addr(CService(CService::DefaultBackend)),
         dsa(CDarksendAccept()),
         nTimeCreated(0)
     {};

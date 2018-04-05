@@ -129,9 +129,11 @@ bool Lookup(const char *pszName, std::vector<CService>& vAddr, int portDefault, 
     bool fRet = LookupIntern(hostname.c_str(), vIP, nMaxSolutions, fAllowLookup);
     if (!fRet)
         return false;
-    vAddr.resize(vIP.size());
-    for (unsigned int i = 0; i < vIP.size(); i++)
-        vAddr[i] = CService(vIP[i], port);
+    vAddr.clear();
+    vAddr.reserve(vIP.size());
+    for (auto& p: vIP)
+        vAddr.emplace_back(p, port);
+    vAddr.shrink_to_fit();
     return true;
 }
 
@@ -147,11 +149,11 @@ bool Lookup(const char *pszName, CService& addr, int portDefault, bool fAllowLoo
 
 CService LookupNumeric(const char *pszName, int portDefault)
 {
-    CService addr;
+    CService addr{CService::DefaultBackend};
     // "1.2:345" will fail to resolve the ip, but will still set the port.
     // If the ip fails to resolve, re-init the result.
     if(!Lookup(pszName, addr, portDefault, false))
-        addr = CService();
+        addr = CService(CService::DefaultBackend);
     return addr;
 }
 
@@ -474,7 +476,7 @@ bool ConnectSocketByName(CService &addr, SOCKET& hSocketRet, const char *pszDest
         }
     }
 
-    addr = CService();
+    addr = CService(CService::DefaultBackend);
 
     if (!HaveNameProxy())
         return false;

@@ -210,7 +210,7 @@ bool CMessageHeader::IsValid(const MessageStartChars& pchMessageStartIn) const
 
 
 
-CAddress::CAddress() : CService()
+CAddress::CAddress(CDefaultBackend) : CService(DefaultBackend)
 {
     Init();
 }

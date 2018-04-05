@@ -139,7 +139,7 @@ struct masternode_info_t
     int64_t sigTime = 0; //mnb message time
 
     COutPoint outpoint{};
-    CService addr{};
+    CService addr{CService::DefaultBackend};
     CPubKey pubKeyCollateralAddress{};
     CPubKey pubKeyMasternode{};
 
@@ -409,7 +409,7 @@ class CMasternodeVerification
 public:
     COutPoint masternodeOutpoint1{};
     COutPoint masternodeOutpoint2{};
-    CService addr{};
+    CService addr{CService::DefaultBackend};
     int nonce{};
     int nBlockHeight{};
     std::vector<unsigned char> vchSig1{};

@@ -198,8 +198,8 @@ static bool ClientAllowed(const CNetAddr& netaddr)
 static bool InitHTTPAllowList()
 {
     rpc_allow_subnets.clear();
-    CNetAddr localv4;
-    CNetAddr localv6;
+    CNetAddr localv4{CNetAddr::DefaultBackend};
+    CNetAddr localv6{CNetAddr::DefaultBackend};
     LookupHost("127.0.0.1", localv4, false);
     LookupHost("::1", localv6, false);
     rpc_allow_subnets.push_back(CSubNet(localv4, 8));      // always allow IPv4 local subnet
@@ -619,7 +619,7 @@ void HTTPRequest::WriteReply(int nStatus, const std::string& strReply)
 CService HTTPRequest::GetPeer()
 {
     evhttp_connection* con = evhttp_request_get_connection(req);
-    CService peer;
+    CService peer{CService::DefaultBackend};
     if (con) {
         // evhttp retains ownership over returned address string
         const char* address = "";

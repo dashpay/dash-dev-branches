@@ -51,10 +51,10 @@ public:
         int nUBuckets = ADDRMAN_NEW_BUCKET_COUNT ^ (1 << 30);
         s << nUBuckets;
 
-        CService serv;
+        CService serv{CService::DefaultBackend};
         Lookup("252.1.1.1", serv, 7777, false);
         CAddress addr = CAddress(serv, NODE_NONE);
-        CNetAddr resolved;
+        CNetAddr resolved{CNetAddr::DefaultBackend};
         LookupHost("252.2.2.2", resolved, false);
         CAddrInfo info = CAddrInfo(addr, resolved);
         s << info;
@@ -78,13 +78,15 @@ BOOST_AUTO_TEST_CASE(caddrdb_read)
     CAddrManUncorrupted addrmanUncorrupted;
     addrmanUncorrupted.MakeDeterministic();
 
-    CService addr1, addr2, addr3;
+    CService addr1{CService::DefaultBackend};
+    CService addr2{CService::DefaultBackend};
+    CService addr3{CService::DefaultBackend};
     Lookup("250.8.1.1", addr1, 8333, false);
     Lookup("250.8.2.2", addr2, 9999, false);
     Lookup("250.8.3.3", addr3, 9999, false);
 
     // Add three addresses to new table.
-    CService source;
+    CService source{CService::DefaultBackend};
     Lookup("252.5.1.1", source, 8333, false);
     addrmanUncorrupted.Add(CAddress(addr1, NODE_NONE), source);
     addrmanUncorrupted.Add(CAddress(addr2, NODE_NONE), source);

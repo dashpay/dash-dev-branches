@@ -371,7 +371,7 @@ private:
     bool reconnect;
     struct event *reconnect_ev;
     float reconnect_timeout;
-    CService service;
+    CService service{CService::DefaultBackend};
     /** Cookie for SAFECOOKIE auth */
     std::vector<uint8_t> cookie;
     /** ClientNonce for SAFECOOKIE auth */
@@ -626,7 +626,7 @@ void TorController::disconnected_cb(TorControlConnection& _conn)
     // Stop advertising service when disconnected
     if (service.IsValid())
         RemoveLocal(service);
-    service = CService();
+    service = CService(CService::DefaultBackend);
     if (!reconnect)
         return;
 

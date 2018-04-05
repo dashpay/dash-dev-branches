@@ -186,7 +186,8 @@ public:
     bool GetMasternodeRank(const COutPoint &outpoint, int& nRankRet, int nBlockHeight = -1, int nMinProtocol = 0);
 
     void ProcessMasternodeConnections(CConnman& connman);
-    std::pair<CService, std::set<uint256> > PopScheduledMnbRequestConnection();
+    boost::optional<std::pair<CService, std::set<uint256> > >
+    PopScheduledMnbRequestConnection();
     void ProcessPendingMnbRequests(CConnman& connman);
 
     void ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStream& vRecv, CConnman& connman);

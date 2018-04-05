@@ -63,7 +63,7 @@ public:
           pubKeyMasternode(),
           keyMasternode(),
           outpoint(),
-          service(),
+          service(CService::DefaultBackend),
           nState(ACTIVE_MASTERNODE_INITIAL)
     {}
 

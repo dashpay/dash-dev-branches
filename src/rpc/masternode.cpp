@@ -174,7 +174,7 @@ UniValue masternode(const JSONRPCRequest& request)
 
         std::string strAddress = request.params[1].get_str();
 
-        CService addr;
+        CService addr{CService::DefaultBackend};
         if (!Lookup(strAddress.c_str(), addr, 0, false))
             throw JSONRPCError(RPC_INTERNAL_ERROR, strprintf("Incorrect masternode address %s", strAddress));
 

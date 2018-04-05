@@ -75,7 +75,8 @@ class CNetAddr
         uint32_t scopeId; // for scoped/link-local ipv6 addresses
 
     public:
-        CNetAddr();
+        constexpr static const struct CDefaultBackend {} DefaultBackend {};
+        CNetAddr(CDefaultBackend);
         CNetAddr(const CNetBackend& netbackend);
         void SetIP(const CNetAddr& ip);
 
@@ -163,7 +164,7 @@ class CService : public CNetAddr
         unsigned short port; // host order
 
     public:
-        CService();
+        CService(CDefaultBackend);
         CService(const CNetBackend& netbackend);
         CService(const CNetAddr& ip, unsigned short port);
         void Init();
@@ -188,5 +189,55 @@ class CService : public CNetAddr
                  port = ntohs(portN);
         }
 };
+
+// XXX: Find also a way to (un)serialise netbackend
+// XXX: Do it less ugly way
+// Comment out this to find out all places where
+// map<CService> and set<CService> is unserialised
+
+template<typename Stream, typename T, typename Pred, typename A>
+void Unserialize(Stream& is, std::map<CService, T, Pred, A>& m)
+{
+    m.clear();
+    unsigned int nSize = ReadCompactSize(is);
+    typename std::map<CService, T, Pred, A>::iterator mi = m.begin();
+    for (unsigned int i = 0; i < nSize; i++)
+    {
+        // XXX: Find a way to unserialise netbackend
+        std::pair<CService, T> item(std::piecewise_construct,
+                                    std::forward_as_tuple(CService::DefaultBackend),
+                                    std::forward_as_tuple());
+        Unserialize(is, item);
+        mi = m.insert(mi, item);
+    }
+}
+
+template<typename Stream, typename T, typename Pred, typename A>
+inline void SerReadWrite(Stream& s, std::map<CService, T, Pred, A>& obj,
+                         CSerActionUnserialize ser_action)
+{
+    ::Unserialize(s, obj);
+}
+
+template<typename Stream, typename Pred, typename A>
+void Unserialize(Stream& is, std::set<CService, Pred, A>& m)
+{
+    m.clear();
+    unsigned int nSize = ReadCompactSize(is);
+    typename std::set<CService, Pred, A>::iterator it = m.begin();
+    for (unsigned int i = 0; i < nSize; i++)
+    {
+        CService key{CService::DefaultBackend};
+        Unserialize(is, key);
+        it = m.insert(it, key);
+    }
+}
+
+template<typename Stream, typename Pred, typename A>
+inline void SerReadWrite(Stream& s, std::set<CService, Pred, A>& obj,
+                         CSerActionUnserialize ser_action)
+{
+    ::Unserialize(s, obj);
+}
 
 #endif // BITCOIN_NETADDRESS_H

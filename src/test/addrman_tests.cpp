@@ -51,7 +51,7 @@ public:
 
 static CNetAddr ResolveIP(const char* ip)
 {
-    CNetAddr addr;
+    CNetAddr addr{CNetAddr::DefaultBackend};
     BOOST_CHECK_MESSAGE(LookupHost(ip, addr, false), strprintf("failed to resolve: %s", ip));
     return addr;
 }
@@ -63,7 +63,7 @@ static CNetAddr ResolveIP(std::string ip)
 
 static CService ResolveService(const char* ip, int port = 0)
 {
-    CService serv;
+    CService serv{CService::DefaultBackend};
     BOOST_CHECK_MESSAGE(Lookup(ip, serv, port, false), strprintf("failed to resolve: %s:%i", ip, port));
     return serv;
 }
@@ -86,14 +86,13 @@ BOOST_AUTO_TEST_CASE(addrman_simple)
 
     // Test 1: Does Addrman respond correctly when empty.
     BOOST_CHECK(addrman.size() == 0);
-    CAddrInfo addr_null = addrman.Select();
-    BOOST_CHECK(addr_null.ToString() == "[::]:0");
+    BOOST_CHECK(addrman.Select() == boost::none);
 
     // Test 2: Does Addrman::Add work as expected.
     CService addr1 = ResolveService("250.1.1.1", 8333);
     addrman.Add(CAddress(addr1, NODE_NONE), source);
     BOOST_CHECK(addrman.size() == 1);
-    CAddrInfo addr_ret1 = addrman.Select();
+    const CAddrInfo& addr_ret1 = addrman.Select().value();
     BOOST_CHECK(addr_ret1.ToString() == "250.1.1.1:8333");
 
     // Test 3: Does IP address deduplication work correctly.
@@ -112,8 +111,7 @@ BOOST_AUTO_TEST_CASE(addrman_simple)
     // Test 6: AddrMan::Clear() should empty the new table.
     addrman.Clear();
     BOOST_CHECK(addrman.size() == 0);
-    CAddrInfo addr_null2 = addrman.Select();
-    BOOST_CHECK(addr_null2.ToString() == "[::]:0");
+    BOOST_CHECK(addrman.Select() == boost::none);
 }
 
 BOOST_AUTO_TEST_CASE(addrman_ports)
@@ -135,7 +133,7 @@ BOOST_AUTO_TEST_CASE(addrman_ports)
     CService addr1_port = ResolveService("250.1.1.1", 8334);
     addrman.Add(CAddress(addr1_port, NODE_NONE), source);
     BOOST_CHECK(addrman.size() == 1);
-    CAddrInfo addr_ret2 = addrman.Select();
+    const CAddrInfo& addr_ret2 = addrman.Select().value();
     BOOST_CHECK(addr_ret2.ToString() == "250.1.1.1:8333");
 
     // Test 8: Add same IP but diff port to tried table, it doesn't get added.
@@ -143,7 +141,7 @@ BOOST_AUTO_TEST_CASE(addrman_ports)
     addrman.Good(CAddress(addr1_port, NODE_NONE));
     BOOST_CHECK(addrman.size() == 1);
     bool newOnly = true;
-    CAddrInfo addr_ret3 = addrman.Select(newOnly);
+    const CAddrInfo& addr_ret3 = addrman.Select(newOnly).value();
     BOOST_CHECK(addr_ret3.ToString() == "250.1.1.1:8333");
 }
 
@@ -163,16 +161,15 @@ BOOST_AUTO_TEST_CASE(addrman_select)
     BOOST_CHECK(addrman.size() == 1);
 
     bool newOnly = true;
-    CAddrInfo addr_ret1 = addrman.Select(newOnly);
+    const CAddrInfo& addr_ret1 = addrman.Select(newOnly).value();
     BOOST_CHECK(addr_ret1.ToString() == "250.1.1.1:8333");
 
     // Test 10: move addr to tried, select from new expected nothing returned.
     addrman.Good(CAddress(addr1, NODE_NONE));
     BOOST_CHECK(addrman.size() == 1);
-    CAddrInfo addr_ret2 = addrman.Select(newOnly);
-    BOOST_CHECK(addr_ret2.ToString() == "[::]:0");
+    BOOST_CHECK(addrman.Select(newOnly) == boost::none);
 
-    CAddrInfo addr_ret3 = addrman.Select();
+    const CAddrInfo& addr_ret3 = addrman.Select().value();
     BOOST_CHECK(addr_ret3.ToString() == "250.1.1.1:8333");
 
     BOOST_CHECK(addrman.size() == 1);
@@ -203,10 +200,10 @@ BOOST_AUTO_TEST_CASE(addrman_select)
     BOOST_CHECK(addrman.size() == 7);
 
     // Test 12: Select pulls from new and tried regardless of port number.
-    BOOST_CHECK(addrman.Select().ToString() == "250.4.4.4:8333");
-    BOOST_CHECK(addrman.Select().ToString() == "250.3.1.1:8333");
-    BOOST_CHECK(addrman.Select().ToString() == "250.3.2.2:9999");
-    BOOST_CHECK(addrman.Select().ToString() == "250.4.6.6:8333");
+    BOOST_CHECK(addrman.Select().value().ToString() == "250.4.4.4:8333");
+    BOOST_CHECK(addrman.Select().value().ToString() == "250.3.1.1:8333");
+    BOOST_CHECK(addrman.Select().value().ToString() == "250.3.2.2:9999");
+    BOOST_CHECK(addrman.Select().value().ToString() == "250.4.6.6:8333");
 }
 
 BOOST_AUTO_TEST_CASE(addrman_new_collisions)

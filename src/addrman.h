@@ -13,10 +13,14 @@
 #include "timedata.h"
 #include "util.h"
 
+#include "netbackend/tcp.h"
+
 #include <map>
 #include <set>
 #include <stdint.h>
 #include <vector>
+
+#include <boost/optional.hpp>
 
 /**
  * Extended statistics about a CAddress
@@ -77,11 +81,6 @@ public:
     }
 
     CAddrInfo(const CAddress &addrIn, const CNetAddr &addrSource) : CAddress(addrIn), source(addrSource)
-    {
-        Init();
-    }
-
-    CAddrInfo() : CAddress(), source()
     {
         Init();
     }
@@ -248,7 +247,7 @@ protected:
     void Attempt_(const CService &addr, bool fCountFailure, int64_t nTime);
 
     //! Select an address to connect to, if newOnly is set to true, only the new table is selected from.
-    CAddrInfo Select_(bool newOnly);
+    boost::optional<const CAddrInfo&> Select_(bool newOnly);
 
     //! Wraps GetRandInt to allow tests to override RandomInt and make it determinismistic.
     virtual int RandomInt(int nMax);
@@ -378,8 +377,12 @@ public:
 
         // Deserialize entries from the new table.
         for (int n = 0; n < nNew; n++) {
-            CAddrInfo &info = mapInfo[n];
+            // XXX: allow serialization of non-TCP addresses
+            CAddrInfo info{CNetBackendTcp::instance};
             s >> info;
+            auto res = mapInfo.insert(std::make_pair(n, info));
+            if (!res.second)
+                res.first->second = info;
             mapAddr[info] = n;
             info.nRandomPos = vRandom.size();
             vRandom.push_back(n);
@@ -399,7 +402,8 @@ public:
         // Deserialize entries from the tried table.
         int nLost = 0;
         for (int n = 0; n < nTried; n++) {
-            CAddrInfo info;
+            // XXX: allow serialization of non-TCP addresses
+            CAddrInfo info{CNetBackendTcp::instance};
             s >> info;
             int nKBucket = info.GetTriedBucket(nKey);
             int nKBucketPos = info.GetBucketPosition(nKey, false, nKBucket);
@@ -407,7 +411,9 @@ public:
                 info.nRandomPos = vRandom.size();
                 info.fInTried = true;
                 vRandom.push_back(nIdCount);
-                mapInfo[nIdCount] = info;
+                auto res = mapInfo.insert(std::make_pair(nIdCount, info));
+                if (!res.second)
+                    res.first->second = info;
                 mapAddr[info] = nIdCount;
                 vvTried[nKBucket][nKBucketPos] = nIdCount;
                 nIdCount++;
@@ -425,7 +431,8 @@ public:
                 int nIndex = 0;
                 s >> nIndex;
                 if (nIndex >= 0 && nIndex < nNew) {
-                    CAddrInfo &info = mapInfo[nIndex];
+                    auto p = mapInfo.find(nIndex);
+                    CAddrInfo &info = p->second;
                     int nUBucketPos = info.GetBucketPosition(nKey, true, bucket);
                     if (nVersion == 1 && nUBuckets == ADDRMAN_NEW_BUCKET_COUNT && vvNew[bucket][nUBucketPos] == -1 && info.nRefCount < ADDRMAN_NEW_BUCKETS_PER_ADDRESS) {
                         info.nRefCount++;
@@ -552,9 +559,9 @@ public:
     /**
      * Choose an address to connect to.
      */
-    CAddrInfo Select(bool newOnly = false)
+    boost::optional<const CAddrInfo&> Select(bool newOnly = false)
     {
-        CAddrInfo addrRet;
+        boost::optional<const CAddrInfo&> addrRet;
         {
             LOCK(cs);
             Check();

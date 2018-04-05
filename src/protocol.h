@@ -306,7 +306,7 @@ enum ServiceFlags : uint64_t {
 class CAddress : public CService
 {
 public:
-    CAddress();
+    CAddress(CDefaultBackend);
     CAddress(const CNetBackend& netbackend);
     explicit CAddress(CService ipIn, ServiceFlags nServicesIn);
 
@@ -338,6 +338,35 @@ public:
     // disk and network only
     unsigned int nTime;
 };
+
+// XXX: Find also a way to (un)serialise netbackend
+// XXX: Do it less ugly way
+// Comment out this to find out all places where vector<CAddress> is unserialised
+
+template<typename Stream, typename A>
+void Unserialize(Stream& is, std::vector<CAddress, A>& v)
+{
+    v.clear();
+    unsigned int nSize = ReadCompactSize(is);
+    unsigned int i = 0;
+    unsigned int nMid = 0;
+    while (nMid < nSize)
+    {
+        nMid += 5000000 / sizeof(CAddress);
+        if (nMid > nSize)
+            nMid = nSize;
+        v.resize(nMid, CAddress{CAddress::DefaultBackend});
+        for (; i < nMid; i++)
+            Unserialize(is, v[i]);
+    }
+}
+
+template<typename Stream, typename A>
+inline void SerReadWrite(Stream& s, std::vector<CAddress, A>& obj,
+                         CSerActionUnserialize ser_action)
+{
+    ::Unserialize(s, obj);
+}
 
 /** getdata / inv message types.
  * These numbers are defined by the protocol. When adding a new value, be sure

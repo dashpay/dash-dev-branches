@@ -34,7 +34,7 @@ public:
 
     bool IsValid() const { return proxy.IsValid(); }
 
-    CService proxy;
+    CService proxy{CService::DefaultBackend};
     bool randomize_credentials;
 };
 
