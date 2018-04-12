@@ -13,6 +13,8 @@
 #include "utilstrencodings.h"
 #include "tinyformat.h"
 
+#include "netbackend/tcp.h"
+
 static const unsigned char pchIPv4[12] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff };
 static const unsigned char pchOnionCat[] = {0xFD,0x87,0xD8,0x7E,0xEB,0x43};
 
@@ -34,10 +36,12 @@ void CNetAddr::SetRaw(Network network, const uint8_t *ip_in)
     switch(network)
     {
         case NET_IPV4:
+            assert(backend == &CNetBackendTcp::instance);
             memcpy(ip, pchIPv4, 12);
             memcpy(ip+12, ip_in, 4);
             break;
         case NET_IPV6:
+            assert(backend == &CNetBackendTcp::instance);
             memcpy(ip, ip_in, 16);
             break;
         default:
@@ -60,16 +64,25 @@ bool CNetAddr::SetSpecial(const std::string &strName)
 }
 
 CNetAddr::CNetAddr()
+: backend{&CNetBackendTcp::instance}
+{
+    Init();
+}
+
+CNetAddr::CNetAddr(const CNetBackend& netbackend)
+: backend{&netbackend}
 {
     Init();
 }
 
 CNetAddr::CNetAddr(const struct in_addr& ipv4Addr)
+: backend{&CNetBackendTcp::instance}
 {
     SetRaw(NET_IPV4, (const uint8_t*)&ipv4Addr);
 }
 
 CNetAddr::CNetAddr(const struct in6_addr& ipv6Addr, const uint32_t scope)
+: backend{&CNetBackendTcp::instance}
 {
     SetRaw(NET_IPV6, (const uint8_t*)&ipv6Addr);
     scopeId = scope;
@@ -235,6 +248,9 @@ bool CNetAddr::IsRoutable() const
 
 enum Network CNetAddr::GetNetwork() const
 {
+    if (&GetBackend() != &CNetBackendTcp::instance)
+        return NET_OTHER;
+
     if (!IsRoutable())
         return NET_UNROUTABLE;
 
@@ -461,6 +477,11 @@ void CService::Init()
 }
 
 CService::CService()
+{
+    Init();
+}
+
+CService::CService(const CNetBackend& netbackend) : CNetAddr{netbackend}
 {
     Init();
 }

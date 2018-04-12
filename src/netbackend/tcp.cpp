@@ -31,7 +31,7 @@ bool CNetBackendTcp::lookup(const char *pszName,
                             bool fAllowLookup) const
 {
     {
-        CNetAddr addr;
+        CNetAddr addr{instance};
         if (addr.SetSpecial(std::string(pszName))) {
             vIP.push_back(addr);
             return true;

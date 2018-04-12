@@ -18,12 +18,15 @@
 
 extern bool fAllowPrivateNet;
 
+class CNetBackend;
+
 enum Network
 {
     NET_UNROUTABLE = 0,
     NET_IPV4,
     NET_IPV6,
     NET_TOR,
+    NET_OTHER,
 
     NET_MAX,
 };
@@ -32,11 +35,13 @@ enum Network
 class CNetAddr
 {
     protected:
+        const CNetBackend *backend;
         unsigned char ip[16]; // in network byte order
         uint32_t scopeId; // for scoped/link-local ipv6 addresses
 
     public:
         CNetAddr();
+        CNetAddr(const CNetBackend& netbackend);
         CNetAddr(const struct in_addr& ipv4Addr);
         void Init();
         void SetIP(const CNetAddr& ip);
@@ -68,6 +73,7 @@ class CNetAddr
         bool IsRoutable() const;
         bool IsValid() const;
         bool IsMulticast() const;
+        const CNetBackend& GetBackend() const {return *backend;}
         enum Network GetNetwork() const;
         std::string ToString() const;
         std::string ToStringIP(bool fUseGetnameinfo = true) const;
@@ -139,6 +145,7 @@ class CService : public CNetAddr
 
     public:
         CService();
+        CService(const CNetBackend& netbackend);
         CService(const CNetAddr& ip, unsigned short port);
         CService(const struct in_addr& ipv4Addr, unsigned short port);
         CService(const struct sockaddr_in& addr);

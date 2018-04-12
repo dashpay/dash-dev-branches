@@ -86,6 +86,11 @@ public:
         Init();
     }
 
+    CAddrInfo(const CNetBackend& netbackend) : CAddress(netbackend), source(netbackend)
+    {
+        Init();
+    }
+
     //! Calculate in which "tried" bucket this entry belongs
     int GetTriedBucket(const uint256 &nKey) const;
 

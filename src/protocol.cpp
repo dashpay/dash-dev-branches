@@ -215,6 +215,11 @@ CAddress::CAddress() : CService()
     Init();
 }
 
+CAddress::CAddress(const CNetBackend& netbackend) : CService(netbackend)
+{
+    Init();
+}
+
 CAddress::CAddress(CService ipIn, ServiceFlags nServicesIn) : CService(ipIn)
 {
     Init();
