@@ -8,6 +8,7 @@
 #endif
 
 #include "netbase.h"
+#include "netbackend.h"
 
 #include "hash.h"
 #include "sync.h"
@@ -79,54 +80,18 @@ void SplitHostPort(std::string in, int &portOut, std::string &hostOut) {
 
 bool static LookupIntern(const char *pszName, std::vector<CNetAddr>& vIP, unsigned int nMaxSolutions, bool fAllowLookup)
 {
+    bool fFound = false;
     vIP.clear();
 
-    {
-        CNetAddr addr;
-        if (addr.SetSpecial(std::string(pszName))) {
-            vIP.push_back(addr);
-            return true;
-        }
+    for (const CNetBackend& b: CNetBackend::all()) {
+        if (nMaxSolutions > 0 && vIP.size() >= nMaxSolutions)
+            break;
+        fFound |= b.lookup(pszName, vIP,
+                           nMaxSolutions > 0 ? nMaxSolutions - vIP.size() : 0,
+                           fAllowLookup);
     }
 
-    struct addrinfo aiHint;
-    memset(&aiHint, 0, sizeof(struct addrinfo));
-
-    aiHint.ai_socktype = SOCK_STREAM;
-    aiHint.ai_protocol = IPPROTO_TCP;
-    aiHint.ai_family = AF_UNSPEC;
-#ifdef WIN32
-    aiHint.ai_flags = fAllowLookup ? 0 : AI_NUMERICHOST;
-#else
-    aiHint.ai_flags = fAllowLookup ? AI_ADDRCONFIG : AI_NUMERICHOST;
-#endif
-    struct addrinfo *aiRes = NULL;
-    int nErr = getaddrinfo(pszName, NULL, &aiHint, &aiRes);
-    if (nErr)
-        return false;
-
-    struct addrinfo *aiTrav = aiRes;
-    while (aiTrav != NULL && (nMaxSolutions == 0 || vIP.size() < nMaxSolutions))
-    {
-        if (aiTrav->ai_family == AF_INET)
-        {
-            assert(aiTrav->ai_addrlen >= sizeof(sockaddr_in));
-            vIP.push_back(CNetAddr(((struct sockaddr_in*)(aiTrav->ai_addr))->sin_addr));
-        }
-
-        if (aiTrav->ai_family == AF_INET6)
-        {
-            assert(aiTrav->ai_addrlen >= sizeof(sockaddr_in6));
-            struct sockaddr_in6* s6 = (struct sockaddr_in6*) aiTrav->ai_addr;
-            vIP.push_back(CNetAddr(s6->sin6_addr, s6->sin6_scope_id));
-        }
-
-        aiTrav = aiTrav->ai_next;
-    }
-
-    freeaddrinfo(aiRes);
-
-    return (vIP.size() > 0);
+    return fFound;
 }
 
 bool LookupHost(const char *pszName, std::vector<CNetAddr>& vIP, unsigned int nMaxSolutions, bool fAllowLookup)
