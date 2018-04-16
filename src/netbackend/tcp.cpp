@@ -84,6 +84,8 @@ bool CNetBackendTcp::lookup(const char *pszName,
 // Create listener for specified endpoint address.
 CNetBackendTcp::listener_type CNetBackendTcp::listen(const CService& addrBind) const
 {
+    assert(&addrBind.GetBackend() == this);
+
     std::string strError;
     int nOne = 1;
 
@@ -173,6 +175,8 @@ CNetBackendTcp::listener_type CNetBackendTcp::listen(const CService& addrBind) c
 CNetBackendTcp::connection_type CNetBackendTcp::accept(listener_type socketListen,
                                                        CService& addrAccept) const
 {
+    assert(&addrAccept.GetBackend() == this);
+
     struct sockaddr_storage sockaddr;
     socklen_t len = sizeof(sockaddr);
     SOCKET hSocket = ::accept(socketListen,
@@ -213,6 +217,8 @@ CNetBackendTcp::connection_type CNetBackendTcp::accept(listener_type socketListe
 CNetBackendTcp::connection_type CNetBackendTcp::connect(const CService& addrConnect,
                                                         int nTimeout) const
 {
+    assert(&addrConnect.GetBackend() == this);
+
     struct sockaddr_storage sockaddr;
     socklen_t len = sizeof(sockaddr);
     if (!addrConnect.GetSockAddr((struct sockaddr*)&sockaddr, &len)) {
