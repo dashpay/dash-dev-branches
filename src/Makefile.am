@@ -394,6 +394,7 @@ libdash_common_a_SOURCES = \
   key.cpp \
   keystore.cpp \
   netaddress.cpp \
+  netbackend.cpp \
   netbackend/tcp.cpp \
   netbase.cpp \
   protocol.cpp \

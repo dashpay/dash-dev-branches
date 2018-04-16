@@ -14,6 +14,9 @@ class CService;
 
 //! Abstract network backend.
 class CNetBackend {
+protected:
+    CNetBackend();
+
 public:
     //! Type of file descriptor representing network connnection.
     using connection_type = SOCKET;
@@ -24,8 +27,15 @@ public:
     //! Maximum size of address data in bytes.
     constexpr static const unsigned int MAX_ADDRESS_SIZE = 16;
 
+    //! Type of container where all available backends are registered.
+    using all_t = std::vector<std::reference_wrapper<const CNetBackend>>;
+
     //! Destructor
     virtual ~CNetBackend() {}
+
+    //! All available network backends.
+    //! @return reference to container where all available backends are registered
+    static const all_t& all();
 
     //! Lookup service endpoints by name.
     //! @param[in] pszName string representation of endpoint name
