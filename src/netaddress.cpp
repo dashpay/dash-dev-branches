@@ -111,33 +111,6 @@ bool CNetAddr::IsRFC1918() const
         (GetByte(3) == 172 && (GetByte(2) >= 16 && GetByte(2) <= 31)));
 }
 
-bool CNetAddr::IsRFC2544() const
-{
-    return IsIPv4() && GetByte(3) == 198 && (GetByte(2) == 18 || GetByte(2) == 19);
-}
-
-bool CNetAddr::IsRFC3927() const
-{
-    return IsIPv4() && (GetByte(3) == 169 && GetByte(2) == 254);
-}
-
-bool CNetAddr::IsRFC6598() const
-{
-    return IsIPv4() && GetByte(3) == 100 && GetByte(2) >= 64 && GetByte(2) <= 127;
-}
-
-bool CNetAddr::IsRFC5737() const
-{
-    return IsIPv4() && ((GetByte(3) == 192 && GetByte(2) == 0 && GetByte(1) == 2) ||
-        (GetByte(3) == 198 && GetByte(2) == 51 && GetByte(1) == 100) ||
-        (GetByte(3) == 203 && GetByte(2) == 0 && GetByte(1) == 113));
-}
-
-bool CNetAddr::IsRFC3849() const
-{
-    return GetByte(15) == 0x20 && GetByte(14) == 0x01 && GetByte(13) == 0x0D && GetByte(12) == 0xB8;
-}
-
 bool CNetAddr::IsRFC3964() const
 {
     return (GetByte(15) == 0x20 && GetByte(14) == 0x02);
@@ -152,17 +125,6 @@ bool CNetAddr::IsRFC6052() const
 bool CNetAddr::IsRFC4380() const
 {
     return (GetByte(15) == 0x20 && GetByte(14) == 0x01 && GetByte(13) == 0 && GetByte(12) == 0);
-}
-
-bool CNetAddr::IsRFC4862() const
-{
-    static const unsigned char pchRFC4862[] = {0xFE,0x80,0,0,0,0,0,0};
-    return (memcmp(ip, pchRFC4862, sizeof(pchRFC4862)) == 0);
-}
-
-bool CNetAddr::IsRFC4193() const
-{
-    return ((GetByte(15) & 0xFE) == 0xFC);
 }
 
 bool CNetAddr::IsRFC6145() const
