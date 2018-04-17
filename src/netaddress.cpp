@@ -201,6 +201,8 @@ bool CNetAddr::GetInAddr(struct in_addr* pipv4Addr) const
 
 bool CNetAddr::GetIn6Addr(struct in6_addr* pipv6Addr) const
 {
+    if (&GetBackend() != &CNetBackendTcp::instance)
+        return false;
     memcpy(pipv6Addr, ip, 16);
     return true;
 }
