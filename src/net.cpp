@@ -849,7 +849,11 @@ size_t CConnman::SocketSendData(CNode *pnode) const
             LOCK(pnode->cs_hSocket);
             if (pnode->hSocket == INVALID_SOCKET)
                 break;
-            nBytes = send(pnode->hSocket, reinterpret_cast<const char*>(data.data()) + pnode->nSendOffset, data.size() - pnode->nSendOffset, MSG_NOSIGNAL | MSG_DONTWAIT);
+            const CNetBackend& backend = pnode->addr.GetBackend();
+            nBytes = backend.send(pnode->hSocket,
+                                  reinterpret_cast<const char*>(data.data()) +
+                                  pnode->nSendOffset,
+                                  data.size() - pnode->nSendOffset);
         }
         if (nBytes > 0) {
             pnode->nLastSend = GetSystemTimeInSeconds();
@@ -1293,7 +1297,9 @@ void CConnman::ThreadSocketHandler()
                             LOCK(pnode->cs_hSocket);
                             if (pnode->hSocket == INVALID_SOCKET)
                                 continue;
-                            nBytes = recv(pnode->hSocket, pchBuf, sizeof(pchBuf), MSG_DONTWAIT);
+                            const CNetBackend& backend = pnode->addr.GetBackend();
+                            nBytes = backend.recv(pnode->hSocket,
+                                                  pchBuf, sizeof(pchBuf));
                         }
                         if (nBytes > 0)
                         {
