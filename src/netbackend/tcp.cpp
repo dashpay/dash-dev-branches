@@ -83,6 +83,7 @@ bool CNetBackendTcp::lookup(const char *pszName,
 }
 
 static bool IsTor(const CNetAddr& addr);
+static bool IsIPv6(const CNetAddr& addr);
 
 boost::optional<std::string> CNetBackendTcp::lookup(const CService& addr) const
 {
@@ -152,7 +153,7 @@ CNetBackendTcp::listener_type CNetBackendTcp::listen(const CService& addrBind) c
 
     // some systems don't have IPV6_V6ONLY but are always v6only; others do have the option
     // and enable it by default or not. Try to enable it, if possible.
-    if (addrBind.IsIPv6()) {
+    if (IsIPv6(addrBind)) {
 #ifdef IPV6_V6ONLY
 #ifdef WIN32
         setsockopt(hListenSocket, IPPROTO_IPV6, IPV6_V6ONLY, (const char*)&nOne, sizeof(int));
