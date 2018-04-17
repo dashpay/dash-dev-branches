@@ -23,6 +23,99 @@
 #include "netbase.h"
 #include "netbackend/tcp.h"
 
+static const unsigned char pchIPv4[12] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff };
+static const unsigned char pchOnionCat[] = {0xFD,0x87,0xD8,0x7E,0xEB,0x43};
+
+static bool IsTor(const CNetAddr& addr)
+{
+    return (memcmp(addr.GetRaw(), pchOnionCat, sizeof(pchOnionCat)) == 0);
+}
+
+// IPv4 mapped address (::FFFF:0:0/96, 0.0.0.0/0)
+static bool IsIPv4(const CNetAddr& addr)
+{
+    return (memcmp(addr.GetRaw(), pchIPv4, sizeof(pchIPv4)) == 0);
+}
+
+// IPv6 address (not mapped IPv4, not Tor)
+static bool IsIPv6(const CNetAddr& addr)
+{
+    return (!IsIPv4(addr) && !IsTor(addr));
+}
+
+// IPv4 private networks (10.0.0.0/8, 192.168.0.0/16, 172.16.0.0/12)
+static bool IsRFC1918(const CNetAddr& addr)
+{
+    return IsIPv4(addr) && (
+        addr.GetByte(3) == 10 ||
+        (addr.GetByte(3) == 192 && addr.GetByte(2) == 168) ||
+        (addr.GetByte(3) == 172 && (addr.GetByte(2) >= 16 && addr.GetByte(2) <= 31)));
+}
+
+// IPv4 inter-network communications (192.18.0.0/15)
+static bool IsRFC2544(const CNetAddr& addr)
+{
+    return IsIPv4(addr) && addr.GetByte(3) == 198 &&
+           (addr.GetByte(2) == 18 || addr.GetByte(2) == 19);
+}
+
+// IPv4 autoconfig (169.254.0.0/16)
+static bool IsRFC3927(const CNetAddr& addr)
+{
+    return IsIPv4(addr) && (addr.GetByte(3) == 169 && addr.GetByte(2) == 254);
+}
+
+// IPv4 ISP-level NAT (100.64.0.0/10)
+static bool IsRFC6598(const CNetAddr& addr)
+{
+    return IsIPv4(addr) && addr.GetByte(3) == 100 &&
+           addr.GetByte(2) >= 64 && addr.GetByte(2) <= 127;
+}
+
+// IPv4 documentation addresses (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24)
+static bool IsRFC5737(const CNetAddr& addr)
+{
+    return IsIPv4(addr) &&
+           ((addr.GetByte(3) == 192 &&
+             addr.GetByte(2) == 0 &&
+             addr.GetByte(1) == 2) ||
+            (addr.GetByte(3) == 198 &&
+             addr.GetByte(2) == 51 &&
+             addr.GetByte(1) == 100) ||
+            (addr.GetByte(3) == 203 &&
+             addr.GetByte(2) == 0 &&
+             addr.GetByte(1) == 113));
+}
+
+// IPv6 documentation address (2001:0DB8::/32)
+static bool IsRFC3849(const CNetAddr& addr)
+{
+    return addr.GetByte(15) == 0x20 && addr.GetByte(14) == 0x01 &&
+           addr.GetByte(13) == 0x0D && addr.GetByte(12) == 0xB8;
+}
+
+// IPv6 autoconfig (FE80::/64)
+static bool IsRFC4862(const CNetAddr& addr)
+{
+    static const unsigned char pchRFC4862[] = {0xFE,0x80,0,0,0,0,0,0};
+    return (memcmp(addr.GetRaw(), pchRFC4862, sizeof(pchRFC4862)) == 0);
+}
+
+// IPv6 unique local (FC00::/7)
+static bool IsRFC4193(const CNetAddr& addr)
+{
+    return ((addr.GetByte(15) & 0xFE) == 0xFC);
+}
+
+// IPv6 ORCHID (2001:10::/28)
+static bool IsRFC4843(const CNetAddr& addr)
+{
+    return (addr.GetByte(15) == 0x20 && addr.GetByte(14) == 0x01 &&
+            addr.GetByte(13) == 0x00 && (addr.GetByte(12) & 0xF0) == 0x10);
+}
+
+// ----------------
+
 const CNetBackendTcp CNetBackendTcp::instance{};
 
 // Lookup service endpoints by name.
@@ -81,9 +174,6 @@ bool CNetBackendTcp::lookup(const char *pszName,
 
     return fAdded;
 }
-
-static bool IsTor(const CNetAddr& addr);
-static bool IsIPv6(const CNetAddr& addr);
 
 boost::optional<std::string> CNetBackendTcp::lookup(const CService& addr) const
 {
@@ -364,97 +454,6 @@ bool CNetBackendTcp::close_connection(connection_type socket) const
     int ret = close(socket);
 #endif
     return ret != SOCKET_ERROR;
-}
-
-static const unsigned char pchIPv4[12] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff };
-static const unsigned char pchOnionCat[] = {0xFD,0x87,0xD8,0x7E,0xEB,0x43};
-
-static bool IsTor(const CNetAddr& addr)
-{
-    return (memcmp(addr.GetRaw(), pchOnionCat, sizeof(pchOnionCat)) == 0);
-}
-
-// IPv4 mapped address (::FFFF:0:0/96, 0.0.0.0/0)
-static bool IsIPv4(const CNetAddr& addr)
-{
-    return (memcmp(addr.GetRaw(), pchIPv4, sizeof(pchIPv4)) == 0);
-}
-
-// IPv6 address (not mapped IPv4, not Tor)
-static bool IsIPv6(const CNetAddr& addr)
-{
-    return (!IsIPv4(addr) && !IsTor(addr));
-}
-
-// IPv4 private networks (10.0.0.0/8, 192.168.0.0/16, 172.16.0.0/12)
-static bool IsRFC1918(const CNetAddr& addr)
-{
-    return IsIPv4(addr) && (
-        addr.GetByte(3) == 10 ||
-        (addr.GetByte(3) == 192 && addr.GetByte(2) == 168) ||
-        (addr.GetByte(3) == 172 && (addr.GetByte(2) >= 16 && addr.GetByte(2) <= 31)));
-}
-
-// IPv4 inter-network communications (192.18.0.0/15)
-static bool IsRFC2544(const CNetAddr& addr)
-{
-    return IsIPv4(addr) && addr.GetByte(3) == 198 &&
-           (addr.GetByte(2) == 18 || addr.GetByte(2) == 19);
-}
-
-// IPv4 autoconfig (169.254.0.0/16)
-static bool IsRFC3927(const CNetAddr& addr)
-{
-    return IsIPv4(addr) && (addr.GetByte(3) == 169 && addr.GetByte(2) == 254);
-}
-
-// IPv4 ISP-level NAT (100.64.0.0/10)
-static bool IsRFC6598(const CNetAddr& addr)
-{
-    return IsIPv4(addr) && addr.GetByte(3) == 100 &&
-           addr.GetByte(2) >= 64 && addr.GetByte(2) <= 127;
-}
-
-// IPv4 documentation addresses (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24)
-static bool IsRFC5737(const CNetAddr& addr)
-{
-    return IsIPv4(addr) &&
-           ((addr.GetByte(3) == 192 &&
-             addr.GetByte(2) == 0 &&
-             addr.GetByte(1) == 2) ||
-            (addr.GetByte(3) == 198 &&
-             addr.GetByte(2) == 51 &&
-             addr.GetByte(1) == 100) ||
-            (addr.GetByte(3) == 203 &&
-             addr.GetByte(2) == 0 &&
-             addr.GetByte(1) == 113));
-}
-
-// IPv6 documentation address (2001:0DB8::/32)
-static bool IsRFC3849(const CNetAddr& addr)
-{
-    return addr.GetByte(15) == 0x20 && addr.GetByte(14) == 0x01 &&
-           addr.GetByte(13) == 0x0D && addr.GetByte(12) == 0xB8;
-}
-
-// IPv6 autoconfig (FE80::/64)
-static bool IsRFC4862(const CNetAddr& addr)
-{
-    static const unsigned char pchRFC4862[] = {0xFE,0x80,0,0,0,0,0,0};
-    return (memcmp(addr.GetRaw(), pchRFC4862, sizeof(pchRFC4862)) == 0);
-}
-
-// IPv6 unique local (FC00::/7)
-static bool IsRFC4193(const CNetAddr& addr)
-{
-    return ((addr.GetByte(15) & 0xFE) == 0xFC);
-}
-
-// IPv6 ORCHID (2001:10::/28)
-static bool IsRFC4843(const CNetAddr& addr)
-{
-    return (addr.GetByte(15) == 0x20 && addr.GetByte(14) == 0x01 &&
-            addr.GetByte(13) == 0x00 && (addr.GetByte(12) & 0xF0) == 0x10);
 }
 
 bool CNetBackendTcp::addr_is_local(const CNetAddr& addr) const
