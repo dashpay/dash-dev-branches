@@ -183,67 +183,22 @@ bool CNetAddr::IsTor() const
 
 bool CNetAddr::IsLocal() const
 {
-    // IPv4 loopback
-   if (IsIPv4() && (GetByte(3) == 127 || GetByte(3) == 0))
-       return true;
-
-   // IPv6 loopback (::1/128)
-   static const unsigned char pchLocal[16] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1};
-   if (memcmp(ip, pchLocal, 16) == 0)
-       return true;
-
-   return false;
+    return GetBackend().addr_is_local(*this);
 }
 
 bool CNetAddr::IsMulticast() const
 {
-    return    (IsIPv4() && (GetByte(3) & 0xF0) == 0xE0)
-           || (GetByte(15) == 0xFF);
+    return GetBackend().addr_is_multicast(*this);
 }
 
 bool CNetAddr::IsValid() const
 {
-    // Cleanup 3-byte shifted addresses caused by garbage in size field
-    // of addr messages from versions before 0.2.9 checksum.
-    // Two consecutive addr messages look like this:
-    // header20 vectorlen3 addr26 addr26 addr26 header20 vectorlen3 addr26 addr26 addr26...
-    // so if the first length field is garbled, it reads the second batch
-    // of addr misaligned by 3 bytes.
-    if (memcmp(ip, pchIPv4+3, sizeof(pchIPv4)-3) == 0)
-        return false;
-
-    // unspecified IPv6 address (::/128)
-    unsigned char ipNone6[16] = {};
-    if (memcmp(ip, ipNone6, 16) == 0)
-        return false;
-
-    // documentation IPv6 address
-    if (IsRFC3849())
-        return false;
-
-    if (IsIPv4())
-    {
-        // INADDR_NONE
-        uint32_t ipNone = INADDR_NONE;
-        if (memcmp(ip+12, &ipNone, 4) == 0)
-            return false;
-
-        // 0
-        ipNone = 0;
-        if (memcmp(ip+12, &ipNone, 4) == 0)
-            return false;
-    }
-
-    return true;
+    return GetBackend().addr_is_valid(*this);
 }
 
 bool CNetAddr::IsRoutable() const
 {
-    if (!IsValid())
-        return false;
-    if (!fAllowPrivateNet && IsRFC1918())
-        return false;
-    return !(IsRFC2544() || IsRFC3927() || IsRFC4862() || IsRFC6598() || IsRFC5737() || (IsRFC4193() && !IsTor()) || IsRFC4843() || IsLocal());
+    return GetBackend().addr_is_routable(*this);
 }
 
 enum Network CNetAddr::GetNetwork() const

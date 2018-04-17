@@ -50,6 +50,18 @@ public:
 
     // Close connection.
     bool close_connection(connection_type socket) const override;
+
+    // Check whether address is local.
+    bool addr_is_local(const CNetAddr& addr) const override;
+
+    // Check whether address is multicast.
+    bool addr_is_multicast(const CNetAddr& addr) const override;
+
+    // Check whether address is valid.
+    bool addr_is_valid(const CNetAddr& addr) const override;
+
+    // Check whether address is routable.
+    bool addr_is_routable(const CNetAddr& addr) const override;
 };
 
 #endif

@@ -94,6 +94,26 @@ public:
     //! @param[in] socket descriptor of connection to close
     //! @return whether closing was successful
     virtual bool close_connection(connection_type socket) const = 0;
+
+    //! Check whether address is local.
+    //! @param[in] addr address to check
+    //! @return true if address is local
+    virtual bool addr_is_local(const CNetAddr& addr) const = 0;
+
+    //! Check whether address is multicast.
+    //! @param[in] addr address to check
+    //! @return true if address is multicast
+    virtual bool addr_is_multicast(const CNetAddr& addr) const = 0;
+
+    //! Check whether address is valid.
+    //! @param[in] addr address to check
+    //! @return true if address is valid
+    virtual bool addr_is_valid(const CNetAddr& addr) const = 0;
+
+    //! Check whether address is routable.
+    //! @param[in] addr address to check
+    //! @return true if address is routable
+    virtual bool addr_is_routable(const CNetAddr& addr) const = 0;
 };
 
 #endif
