@@ -49,20 +49,6 @@ void CNetAddr::SetRaw(Network network, const uint8_t *ip_in)
     }
 }
 
-bool CNetAddr::SetSpecial(const std::string &strName)
-{
-    if (strName.size()>6 && strName.substr(strName.size() - 6, 6) == ".onion") {
-        std::vector<unsigned char> vchAddr = DecodeBase32(strName.substr(0, strName.size() - 6).c_str());
-        if (vchAddr.size() != 16-sizeof(pchOnionCat))
-            return false;
-        memcpy(ip, pchOnionCat, sizeof(pchOnionCat));
-        for (unsigned int i=0; i<16-sizeof(pchOnionCat); i++)
-            ip[i + sizeof(pchOnionCat)] = vchAddr[i];
-        return true;
-    }
-    return false;
-}
-
 CNetAddr::CNetAddr()
 : backend{&CNetBackendTcp::instance}
 {

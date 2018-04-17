@@ -124,12 +124,19 @@ bool CNetBackendTcp::lookup(const char *pszName,
                             unsigned int nMaxSolutions,
                             bool fAllowLookup) const
 {
-    {
-        CNetAddr addr{instance};
-        if (addr.SetSpecial(std::string(pszName))) {
-            vIP.push_back(addr);
-            return true;
-        }
+    const std::string strName{pszName};
+    // Special case: Tor address.
+    if (strName.size()>6 && strName.substr(strName.size() - 6, 6) == ".onion") {
+        const std::vector<unsigned char> vchAddr =
+            DecodeBase32(strName.substr(0, strName.size() - 6).c_str());
+        if (vchAddr.size() != 16-sizeof(pchOnionCat))
+            return false;
+        CNetAddr addr{*this};
+        memcpy(addr.GetRaw(), pchOnionCat, sizeof(pchOnionCat));
+        for (unsigned int i=0; i<16-sizeof(pchOnionCat); i++)
+            addr.GetRaw()[i + sizeof(pchOnionCat)] = vchAddr[i];
+        vIP.push_back(addr);
+        return true;
     }
 
     struct addrinfo aiHint;
