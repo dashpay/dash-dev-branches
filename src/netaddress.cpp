@@ -502,7 +502,7 @@ std::string CService::ToStringPort() const
 
 std::string CService::ToStringIPPort(bool fUseGetnameinfo) const
 {
-    if (IsIPv4() || IsTor()) {
+    if (!IsIPv6()) {
         return ToStringIP(fUseGetnameinfo) + ":" + ToStringPort();
     } else {
         return "[" + ToStringIP(fUseGetnameinfo) + "]:" + ToStringPort();
