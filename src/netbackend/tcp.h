@@ -24,6 +24,9 @@ public:
                 unsigned int nMaxSolutions,
                 bool fAllowLookup) const override;
 
+    // Lookup service name by endpoint address.
+    boost::optional<std::string> lookup(const CService& addr) const override;
+
     // Create listener for specified endpoint address.
     listener_type listen(const CService& addrBind) const override;
 
@@ -62,6 +65,9 @@ public:
 
     // Check whether address is routable.
     bool addr_is_routable(const CNetAddr& addr) const override;
+
+    // String representation of address.
+    std::string addr_str(const CNetAddr& addr) const override;
 };
 
 #endif

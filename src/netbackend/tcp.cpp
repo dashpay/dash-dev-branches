@@ -19,6 +19,7 @@
 
 #include "util.h"
 #include "chainparams.h"
+#include "utilstrencodings.h"
 #include "netbase.h"
 #include "netbackend/tcp.h"
 
@@ -79,6 +80,23 @@ bool CNetBackendTcp::lookup(const char *pszName,
     freeaddrinfo(aiRes);
 
     return fAdded;
+}
+
+static bool IsTor(const CNetAddr& addr);
+
+boost::optional<std::string> CNetBackendTcp::lookup(const CService& addr) const
+{
+    if (IsTor(addr))
+        return boost::none;
+    struct sockaddr_storage sockaddr;
+    socklen_t socklen = sizeof(sockaddr);
+    if (addr.GetSockAddr((struct sockaddr*)&sockaddr, &socklen)) {
+        char name[1025] = "";
+        if (!getnameinfo((const struct sockaddr*)&sockaddr,
+            socklen, name, sizeof(name), NULL, 0, NI_NUMERICHOST))
+            return std::string(name);
+    }
+    return boost::none;
 }
 
 // Create listener for specified endpoint address.
@@ -510,4 +528,24 @@ bool CNetBackendTcp::addr_is_routable(const CNetAddr& addr) const
              IsRFC6598(addr) || IsRFC5737(addr) ||
              (IsRFC4193(addr) && !IsTor(addr)) || IsRFC4843(addr) ||
              addr_is_local(addr));
+}
+
+std::string CNetBackendTcp::addr_str(const CNetAddr& addr) const
+{
+    if (IsTor(addr))
+        return EncodeBase32(addr.GetRaw() + 6, 10) + ".onion";
+    if (IsIPv4(addr))
+        return strprintf("%u.%u.%u.%u",
+                         addr.GetByte(3), addr.GetByte(2),
+                         addr.GetByte(1), addr.GetByte(0));
+    else
+        return strprintf("%x:%x:%x:%x:%x:%x:%x:%x",
+                         addr.GetByte(15) << 8 | addr.GetByte(14),
+                         addr.GetByte(13) << 8 | addr.GetByte(12),
+                         addr.GetByte(11) << 8 | addr.GetByte(10),
+                         addr.GetByte(9) << 8 | addr.GetByte(8),
+                         addr.GetByte(7) << 8 | addr.GetByte(6),
+                         addr.GetByte(5) << 8 | addr.GetByte(4),
+                         addr.GetByte(3) << 8 | addr.GetByte(2),
+                         addr.GetByte(1) << 8 | addr.GetByte(0));
 }

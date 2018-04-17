@@ -6,6 +6,8 @@
 #define NETBACKEND_H
 
 #include <vector>
+#include <string>
+#include <boost/optional.hpp>
 
 #include "netaddress.h"
 #include "compat.h"
@@ -47,6 +49,11 @@ public:
                         std::vector<CNetAddr>& vIP,
                         unsigned int nMaxSolutions,
                         bool fAllowLookup) const = 0;
+
+    //! Lookup service name by endpoint address.
+    //! @param[in] addr address of endpoint to lookup
+    //! @return name corresponding to address or boost::none if not found
+    virtual boost::optional<std::string> lookup(const CService& addr) const = 0;
 
     //! Create listener for specified endpoint address.
     //! @param[in] addrBind endpoint address to listen on
@@ -114,6 +121,11 @@ public:
     //! @param[in] addr address to check
     //! @return true if address is routable
     virtual bool addr_is_routable(const CNetAddr& addr) const = 0;
+
+    //! String representation of address.
+    //! @param[in] addr address to convert to string
+    //! @return readable string representation of the address
+    virtual std::string addr_str(const CNetAddr& addr) const = 0;
 };
 
 #endif

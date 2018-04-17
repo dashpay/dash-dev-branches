@@ -182,27 +182,13 @@ enum Network CNetAddr::GetNetwork() const
 
 std::string CNetAddr::ToStringIP(bool fUseGetnameinfo) const
 {
-    if (IsTor())
-        return EncodeBase32(&ip[6], 10) + ".onion";
-    if (fUseGetnameinfo)
-    {
+    if (fUseGetnameinfo) {
         CService serv(*this, 0);
-        struct sockaddr_storage sockaddr;
-        socklen_t socklen = sizeof(sockaddr);
-        if (serv.GetSockAddr((struct sockaddr*)&sockaddr, &socklen)) {
-            char name[1025] = "";
-            if (!getnameinfo((const struct sockaddr*)&sockaddr, socklen, name, sizeof(name), NULL, 0, NI_NUMERICHOST))
-                return std::string(name);
-        }
+        auto res = GetBackend().lookup(serv);
+        if (res != boost::none)
+            return *res;
     }
-    if (IsIPv4())
-        return strprintf("%u.%u.%u.%u", GetByte(3), GetByte(2), GetByte(1), GetByte(0));
-    else
-        return strprintf("%x:%x:%x:%x:%x:%x:%x:%x",
-                         GetByte(15) << 8 | GetByte(14), GetByte(13) << 8 | GetByte(12),
-                         GetByte(11) << 8 | GetByte(10), GetByte(9) << 8 | GetByte(8),
-                         GetByte(7) << 8 | GetByte(6), GetByte(5) << 8 | GetByte(4),
-                         GetByte(3) << 8 | GetByte(2), GetByte(1) << 8 | GetByte(0));
+    return GetBackend().addr_str(*this);
 }
 
 std::string CNetAddr::ToString() const
