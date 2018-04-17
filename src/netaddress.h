@@ -46,11 +46,6 @@ class CNetAddr
         void Init();
         void SetIP(const CNetAddr& ip);
 
-        /**
-         * Set raw IPv4 or IPv6 address (in network byte order)
-         * @note Only NET_IPV4 and NET_IPV6 are allowed for network.
-         */
-        void SetRaw(Network network, const uint8_t *data);
         const unsigned char *GetRaw() const {return ip;}
         unsigned char *GetRaw() {return ip;}
 
