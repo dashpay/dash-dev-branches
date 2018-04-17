@@ -2656,7 +2656,8 @@ CNode::CNode(NodeId idIn, ServiceFlags nLocalServicesIn, int nMyStartingHeightIn
     nLocalHostNonce(nLocalHostNonceIn),
     nLocalServices(nLocalServicesIn),
     nMyStartingHeight(nMyStartingHeightIn),
-    nSendVersion(0)
+    nSendVersion(0),
+    addrLocal(addrIn.GetBackend())
 {
     nServices = NODE_NONE;
     nServicesExpected = NODE_NONE;
