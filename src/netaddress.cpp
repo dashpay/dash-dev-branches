@@ -191,22 +191,6 @@ bool operator<(const CNetAddr& a, const CNetAddr& b)
             (&a.GetBackend() == &b.GetBackend() && memcmp(a.ip, b.ip, 16) < 0));
 }
 
-bool CNetAddr::GetInAddr(struct in_addr* pipv4Addr) const
-{
-    if (!IsIPv4())
-        return false;
-    memcpy(pipv4Addr, ip+12, 4);
-    return true;
-}
-
-bool CNetAddr::GetIn6Addr(struct in6_addr* pipv6Addr) const
-{
-    if (&GetBackend() != &CNetBackendTcp::instance)
-        return false;
-    memcpy(pipv6Addr, ip, 16);
-    return true;
-}
-
 // get canonical identifier of an address' group
 // no two connections will be attempted to addresses with the same group
 std::vector<unsigned char> CNetAddr::GetGroup() const
@@ -393,20 +377,6 @@ CService::CService(const struct sockaddr_in6 &addr) : CNetAddr(addr.sin6_addr, a
    assert(addr.sin6_family == AF_INET6);
 }
 
-bool CService::SetSockAddr(const struct sockaddr *paddr)
-{
-    switch (paddr->sa_family) {
-    case AF_INET:
-        *this = CService(*(const struct sockaddr_in*)paddr);
-        return true;
-    case AF_INET6:
-        *this = CService(*(const struct sockaddr_in6*)paddr);
-        return true;
-    default:
-        return false;
-    }
-}
-
 unsigned short CService::GetPort() const
 {
     return port;
@@ -425,36 +395,6 @@ bool operator!=(const CService& a, const CService& b)
 bool operator<(const CService& a, const CService& b)
 {
     return (CNetAddr)a < (CNetAddr)b || ((CNetAddr)a == (CNetAddr)b && a.port < b.port);
-}
-
-bool CService::GetSockAddr(struct sockaddr* paddr, socklen_t *addrlen) const
-{
-    if (IsIPv4()) {
-        if (*addrlen < (socklen_t)sizeof(struct sockaddr_in))
-            return false;
-        *addrlen = sizeof(struct sockaddr_in);
-        struct sockaddr_in *paddrin = (struct sockaddr_in*)paddr;
-        memset(paddrin, 0, *addrlen);
-        if (!GetInAddr(&paddrin->sin_addr))
-            return false;
-        paddrin->sin_family = AF_INET;
-        paddrin->sin_port = htons(port);
-        return true;
-    }
-    if (IsIPv6()) {
-        if (*addrlen < (socklen_t)sizeof(struct sockaddr_in6))
-            return false;
-        *addrlen = sizeof(struct sockaddr_in6);
-        struct sockaddr_in6 *paddrin6 = (struct sockaddr_in6*)paddr;
-        memset(paddrin6, 0, *addrlen);
-        if (!GetIn6Addr(&paddrin6->sin6_addr))
-            return false;
-        paddrin6->sin6_scope_id = scopeId;
-        paddrin6->sin6_family = AF_INET6;
-        paddrin6->sin6_port = htons(port);
-        return true;
-    }
-    return false;
 }
 
 std::vector<unsigned char> CService::GetKey() const

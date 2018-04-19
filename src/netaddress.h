@@ -48,6 +48,8 @@ class CNetAddr
 
         const unsigned char *GetRaw() const {return ip;}
         unsigned char *GetRaw() {return ip;}
+        uint32_t GetScopeId() const {return scopeId;}
+        void SetScopeId(uint32_t scopeIdIn) {scopeId = scopeIdIn;}
 
         bool IsIPv4() const;    // IPv4 mapped address (::FFFF:0:0/96, 0.0.0.0/0)
         bool IsIPv6() const;    // IPv6 address (not mapped IPv4, not Tor)
@@ -68,12 +70,10 @@ class CNetAddr
         std::string ToStringIP(bool fUseGetnameinfo = true) const;
         unsigned int GetByte(int n) const;
         uint64_t GetHash() const;
-        bool GetInAddr(struct in_addr* pipv4Addr) const;
         std::vector<unsigned char> GetGroup() const;
         int GetReachabilityFrom(const CNetAddr *paddrPartner = NULL) const;
 
         CNetAddr(const struct in6_addr& pipv6Addr, const uint32_t scope = 0);
-        bool GetIn6Addr(struct in6_addr* pipv6Addr) const;
 
         friend bool operator==(const CNetAddr& a, const CNetAddr& b);
         friend bool operator!=(const CNetAddr& a, const CNetAddr& b);
@@ -141,8 +141,6 @@ class CService : public CNetAddr
         void Init();
         void SetPort(unsigned short portIn);
         unsigned short GetPort() const;
-        bool GetSockAddr(struct sockaddr* paddr, socklen_t *addrlen) const;
-        bool SetSockAddr(const struct sockaddr* paddr);
         friend bool operator==(const CService& a, const CService& b);
         friend bool operator!=(const CService& a, const CService& b);
         friend bool operator<(const CService& a, const CService& b);

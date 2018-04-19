@@ -114,6 +114,60 @@ static bool IsRFC4843(const CNetAddr& addr)
             addr.GetByte(13) == 0x00 && (addr.GetByte(12) & 0xF0) == 0x10);
 }
 
+static bool GetSockAddr(const CService& addr,
+                        struct sockaddr* paddr,
+                        socklen_t *addrlen)
+{
+    if (IsIPv4(addr)) {
+        if (*addrlen < (socklen_t)sizeof(struct sockaddr_in))
+            return false;
+        *addrlen = sizeof(struct sockaddr_in);
+        struct sockaddr_in *paddrin = (struct sockaddr_in*)paddr;
+        memset(paddrin, 0, *addrlen);
+        memcpy(&paddrin->sin_addr, addr.GetRaw()+12, 4);
+        paddrin->sin_family = AF_INET;
+        paddrin->sin_port = htons(addr.GetPort());
+        return true;
+    }
+    if (IsIPv6(addr)) {
+        if (*addrlen < (socklen_t)sizeof(struct sockaddr_in6))
+            return false;
+        *addrlen = sizeof(struct sockaddr_in6);
+        struct sockaddr_in6 *paddrin6 = (struct sockaddr_in6*)paddr;
+        memset(paddrin6, 0, *addrlen);
+        memcpy(&paddrin6->sin6_addr, addr.GetRaw(), 16);
+        paddrin6->sin6_scope_id = addr.GetScopeId();
+        paddrin6->sin6_family = AF_INET6;
+        paddrin6->sin6_port = htons(addr.GetPort());
+        return true;
+    }
+    return false;
+}
+
+static bool SetSockAddr(CService& addr, const struct sockaddr *paddr)
+{
+    switch (paddr->sa_family) {
+    case AF_INET: {
+        addr = CService(CNetBackendTcp::instance);
+        const auto paddr4 = reinterpret_cast<const struct sockaddr_in *>(paddr);
+        memcpy(addr.GetRaw(), pchIPv4, 12);
+        memcpy(addr.GetRaw()+12, (const uint8_t*)&paddr4->sin_addr, 4);
+        addr.SetPort(ntohs(paddr4->sin_port));
+        return true;
+    }
+    case AF_INET6: {
+        addr = CService(CNetBackendTcp::instance);
+        const auto paddr6 = reinterpret_cast<const struct sockaddr_in6 *>(paddr);
+        memcpy(addr.GetRaw(), (const uint8_t*)&paddr6->sin6_addr, 16);
+        addr.SetScopeId(paddr6->sin6_scope_id);
+        addr.SetPort(ntohs(paddr6->sin6_port));
+        return true;
+    }
+    default:
+        return false;
+    }
+}
+
 // ----------------
 
 const CNetBackendTcp CNetBackendTcp::instance{};
@@ -188,7 +242,7 @@ boost::optional<std::string> CNetBackendTcp::lookup(const CService& addr) const
         return boost::none;
     struct sockaddr_storage sockaddr;
     socklen_t socklen = sizeof(sockaddr);
-    if (addr.GetSockAddr((struct sockaddr*)&sockaddr, &socklen)) {
+    if (GetSockAddr(addr, (struct sockaddr*)&sockaddr, &socklen)) {
         char name[1025] = "";
         if (!getnameinfo((const struct sockaddr*)&sockaddr,
             socklen, name, sizeof(name), NULL, 0, NI_NUMERICHOST))
@@ -208,7 +262,7 @@ CNetBackendTcp::listener_type CNetBackendTcp::listen(const CService& addrBind) c
     // Create socket for listening for incoming connections
     struct sockaddr_storage sockaddr;
     socklen_t len = sizeof(sockaddr);
-    if (!addrBind.GetSockAddr((struct sockaddr*)&sockaddr, &len))
+    if (!GetSockAddr(addrBind, (struct sockaddr*)&sockaddr, &len))
     {
         strError = strprintf("Error: Bind address family for %s not supported", addrBind.ToString());
         throw std::runtime_error(strError);
@@ -299,7 +353,7 @@ CNetBackendTcp::connection_type CNetBackendTcp::accept(listener_type socketListe
                             reinterpret_cast<struct sockaddr*>(&sockaddr),
                             &len);
     if (hSocket != INVALID_SOCKET)
-        if (!addrAccept.SetSockAddr((const struct sockaddr*)&sockaddr))
+        if (!SetSockAddr(addrAccept, (const struct sockaddr*)&sockaddr))
             LogPrintf("Warning: Unknown socket family\n");
 
     if (hSocket == INVALID_SOCKET)
@@ -337,7 +391,7 @@ CNetBackendTcp::connection_type CNetBackendTcp::connect(const CService& addrConn
 
     struct sockaddr_storage sockaddr;
     socklen_t len = sizeof(sockaddr);
-    if (!addrConnect.GetSockAddr((struct sockaddr*)&sockaddr, &len)) {
+    if (!GetSockAddr(addrConnect, (struct sockaddr*)&sockaddr, &len)) {
         LogPrintf("Cannot connect to %s: unsupported network\n", addrConnect.ToString());
         return INVALID_SOCKET;
     }
