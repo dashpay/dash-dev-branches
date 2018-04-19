@@ -367,16 +367,6 @@ CService::CService(const struct in6_addr& ipv6Addr, unsigned short portIn) : CNe
 {
 }
 
-CService::CService(const struct sockaddr_in& addr) : CNetAddr(addr.sin_addr), port(ntohs(addr.sin_port))
-{
-    assert(addr.sin_family == AF_INET);
-}
-
-CService::CService(const struct sockaddr_in6 &addr) : CNetAddr(addr.sin6_addr, addr.sin6_scope_id), port(ntohs(addr.sin6_port))
-{
-   assert(addr.sin6_family == AF_INET6);
-}
-
 unsigned short CService::GetPort() const
 {
     return port;
