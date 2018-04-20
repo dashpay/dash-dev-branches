@@ -172,6 +172,25 @@ static bool SetSockAddr(CService& addr, const struct sockaddr *paddr)
 
 const CNetBackendTcp CNetBackendTcp::instance{};
 
+CService CNetBackendTcp::addr_create(const ::in_addr& ipv4Addr,
+                                     unsigned short portIn) const
+{
+    CService addr{*this};
+    memcpy(addr.GetRaw(), pchIPv4, 12);
+    memcpy(addr.GetRaw()+12, reinterpret_cast<const uint8_t*>(&ipv4Addr), 4);
+    addr.SetPort(portIn);
+    return addr;
+}
+
+CService CNetBackendTcp::addr_create(const ::in6_addr& ipv6Addr,
+                                     unsigned short portIn) const
+{
+    CService addr{*this};
+    memcpy(addr.GetRaw(), reinterpret_cast<const uint8_t*>(&ipv6Addr), 16);
+    addr.SetPort(portIn);
+    return addr;
+}
+
 // Lookup service endpoints by name.
 bool CNetBackendTcp::lookup(const char *pszName,
                             std::vector<CNetAddr>& vIP,

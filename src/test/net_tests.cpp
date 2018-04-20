@@ -10,6 +10,7 @@
 #include "streams.h"
 #include "net.h"
 #include "netbase.h"
+#include "netbackend/tcp.h"
 #include "chainparams.h"
 
 class CAddrManSerializationMock : public CAddrMan
@@ -157,7 +158,8 @@ BOOST_AUTO_TEST_CASE(cnode_simple_test)
     in_addr ipv4Addr;
     ipv4Addr.s_addr = 0xa0b0c001;
     
-    CAddress addr = CAddress(CService(ipv4Addr, 7777), NODE_NETWORK);
+    CService s = CNetBackendTcp::instance.addr_create(ipv4Addr, 7777);
+    CAddress addr = CAddress(s, NODE_NETWORK);
     std::string pszDest = "";
     bool fInboundIn = false;
 

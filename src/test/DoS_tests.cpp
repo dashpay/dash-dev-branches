@@ -8,6 +8,7 @@
 #include "keystore.h"
 #include "net.h"
 #include "net_processing.h"
+#include "netbackend/tcp.h"
 #include "pow.h"
 #include "script/sign.h"
 #include "serialize.h"
@@ -38,7 +39,7 @@ CService ip(uint32_t i)
 {
     struct in_addr s;
     s.s_addr = i;
-    return CService(CNetAddr(s), Params().GetDefaultPort());
+    return CNetBackendTcp::instance.addr_create(s, Params().GetDefaultPort());
 }
 
 static NodeId id = 0;

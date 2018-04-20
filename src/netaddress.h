@@ -136,7 +136,6 @@ class CService : public CNetAddr
         CService();
         CService(const CNetBackend& netbackend);
         CService(const CNetAddr& ip, unsigned short port);
-        CService(const struct in_addr& ipv4Addr, unsigned short port);
         void Init();
         void SetPort(unsigned short portIn);
         unsigned short GetPort() const;
@@ -147,8 +146,6 @@ class CService : public CNetAddr
         std::string ToString(bool fUseGetnameinfo = true) const;
         std::string ToStringPort() const;
         std::string ToStringIPPort(bool fUseGetnameinfo = true) const;
-
-        CService(const struct in6_addr& ipv6Addr, unsigned short port);
 
         ADD_SERIALIZE_METHODS;
 

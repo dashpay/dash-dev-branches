@@ -7,6 +7,9 @@
 
 #include "netbackend.h"
 
+struct in_addr;
+struct in6_addr;
+
 //! Network backend providing TCP connection.
 class CNetBackendTcp: public CNetBackend {
 
@@ -17,6 +20,20 @@ public:
 
     //! CNetBackendTcp singleton instance.
     static const CNetBackendTcp instance;
+
+    //! Create endpoint address from IPv4 address and port number.
+    //! @param[in] ipv4Addr IPv4 address
+    //! @param[in] portIn port number
+    //! @return endpoint address for given IPv4 address and port number
+    CService addr_create(const ::in_addr& ipv4Addr,
+                         unsigned short portIn) const;
+
+    //! Create endpoint address from IPv6 address and port number.
+    //! @param[in] ipv6Addr IPv6 address
+    //! @param[in] portIn port number
+    //! @return endpoint address for given IPv6 address and port number
+    CService addr_create(const ::in6_addr& ipv6Addr,
+                         unsigned short portIn) const;
 
     // Lookup service endpoints by name.
     bool lookup(const char *pszName,

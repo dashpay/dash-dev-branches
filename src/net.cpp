@@ -21,6 +21,7 @@
 #include "hash.h"
 #include "primitives/transaction.h"
 #include "netbase.h"
+#include "netbackend/tcp.h"
 #include "scheduler.h"
 #include "ui_interface.h"
 #include "utilstrencodings.h"
@@ -141,7 +142,8 @@ static std::vector<CAddress> convertSeed6(const std::vector<SeedSpec6> &vSeedsIn
     {
         struct in6_addr ip;
         memcpy(&ip, i->addr, sizeof(ip));
-        CAddress addr(CService(ip, i->port), NODE_NETWORK);
+        CAddress addr(CNetBackendTcp::instance.addr_create(ip, i->port),
+                      NODE_NETWORK);
         addr.nTime = GetTime() - GetRand(nOneWeek) - nOneWeek;
         vSeedsOut.push_back(addr);
     }

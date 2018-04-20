@@ -359,14 +359,6 @@ CService::CService(const CNetAddr& cip, unsigned short portIn) : CNetAddr(cip), 
 {
 }
 
-CService::CService(const struct in_addr& ipv4Addr, unsigned short portIn) : CNetAddr(ipv4Addr), port(portIn)
-{
-}
-
-CService::CService(const struct in6_addr& ipv6Addr, unsigned short portIn) : CNetAddr(ipv6Addr), port(portIn)
-{
-}
-
 unsigned short CService::GetPort() const
 {
     return port;
