@@ -25,6 +25,7 @@
 #include "miner.h"
 #include "netbase.h"
 #include "net.h"
+#include "netbackend.h"
 #include "netfulfilledman.h"
 #include "net_processing.h"
 #include "policy/policy.h"
@@ -1508,10 +1509,15 @@ bool AppInitMain(boost::thread_group& threadGroup, CScheduler& scheduler)
             }
         }
         if (!mapMultiArgs.count("-bind") && !mapMultiArgs.count("-whitebind")) {
-            struct in_addr inaddr_any;
-            inaddr_any.s_addr = INADDR_ANY;
-            fBound |= Bind(connman, CService(in6addr_any, GetListenPort()), BF_NONE);
-            fBound |= Bind(connman, CService(inaddr_any, GetListenPort()), !fBound ? BF_REPORT_ERROR : BF_NONE);
+            for (const CNetBackend& b: CNetBackend::all()) {
+                std::vector<CService> addrs{b.bind_any_addrs()};
+                for (auto paddr = addrs.begin(); paddr != addrs.end(); ++paddr) {
+                    paddr->SetPort(GetListenPort());
+                    fBound |= Bind(connman, *paddr,
+                                   !fBound && std::next(paddr) == addrs.end() ?
+                                   BF_REPORT_ERROR : BF_NONE);
+                }
+            }
         }
         if (!fBound)
             return InitError(_("Failed to listen on any port. Use -listen=0 if you want this."));

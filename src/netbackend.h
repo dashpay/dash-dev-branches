@@ -126,6 +126,10 @@ public:
     //! @param[in] addr address to convert to string
     //! @return readable string representation of the address
     virtual std::string addr_str(const CNetAddr& addr) const = 0;
+
+    //! Addresses for this backend to bind to any local interface.
+    //! @return vector with local addresses
+    virtual std::vector<CService> bind_any_addrs() const = 0;
 };
 
 #endif

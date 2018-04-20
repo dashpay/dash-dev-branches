@@ -610,3 +610,27 @@ std::string CNetBackendTcp::addr_str(const CNetAddr& addr) const
                          addr.GetByte(3) << 8 | addr.GetByte(2),
                          addr.GetByte(1) << 8 | addr.GetByte(0));
 }
+
+std::vector<CService> CNetBackendTcp::bind_any_addrs() const
+{
+    CService addr6{*this};
+    CService addr4{*this};
+    {
+        ::sockaddr_in6 sockaddr6;
+        memset(&sockaddr6, 0, sizeof sockaddr6);
+        sockaddr6.sin6_family = AF_INET;
+        sockaddr6.sin6_addr = in6addr_any;
+        sockaddr6.sin6_port = htons(0);
+        sockaddr6.sin6_scope_id = 0;
+        SetSockAddr(addr6, reinterpret_cast<const ::sockaddr *>(&sockaddr6));
+    }
+    {
+        ::sockaddr_in sockaddr4;
+        memset(&sockaddr4, 0, sizeof sockaddr4);
+        sockaddr4.sin_family = AF_INET;
+        sockaddr4.sin_addr.s_addr = INADDR_ANY;
+        sockaddr4.sin_port = htons(0);
+        SetSockAddr(addr4, reinterpret_cast<const ::sockaddr *>(&sockaddr4));
+    }
+    return {addr6, addr4};
+}
