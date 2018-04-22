@@ -236,15 +236,18 @@ bool CNetBackendTcp::lookup(const char *pszName,
         if (aiTrav->ai_family == AF_INET)
         {
             assert(aiTrav->ai_addrlen >= sizeof(sockaddr_in));
-            vIP.push_back(CNetAddr(((struct sockaddr_in*)(aiTrav->ai_addr))->sin_addr));
+            CService addr{*this};
+            SetSockAddr(addr, aiTrav->ai_addr);
+            vIP.push_back(addr);
             fAdded = true;
         }
 
         if (aiTrav->ai_family == AF_INET6)
         {
             assert(aiTrav->ai_addrlen >= sizeof(sockaddr_in6));
-            struct sockaddr_in6* s6 = (struct sockaddr_in6*) aiTrav->ai_addr;
-            vIP.push_back(CNetAddr(s6->sin6_addr, s6->sin6_scope_id));
+            CService addr{*this};
+            SetSockAddr(addr, aiTrav->ai_addr);
+            vIP.push_back(addr);
             fAdded = true;
         }
 

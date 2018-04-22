@@ -42,7 +42,6 @@ class CNetAddr
     public:
         CNetAddr();
         CNetAddr(const CNetBackend& netbackend);
-        CNetAddr(const struct in_addr& ipv4Addr);
         void Init();
         void SetIP(const CNetAddr& ip);
 
@@ -72,8 +71,6 @@ class CNetAddr
         uint64_t GetHash() const;
         std::vector<unsigned char> GetGroup() const;
         int GetReachabilityFrom(const CNetAddr *paddrPartner = NULL) const;
-
-        CNetAddr(const struct in6_addr& pipv6Addr, const uint32_t scope = 0);
 
         friend bool operator==(const CNetAddr& a, const CNetAddr& b);
         friend bool operator!=(const CNetAddr& a, const CNetAddr& b);

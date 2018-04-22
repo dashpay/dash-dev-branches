@@ -43,20 +43,6 @@ CNetAddr::CNetAddr(const CNetBackend& netbackend)
     Init();
 }
 
-CNetAddr::CNetAddr(const struct in_addr& ipv4Addr)
-: backend{&CNetBackendTcp::instance}
-{
-    memcpy(ip, pchIPv4, 12);
-    memcpy(ip+12, (const uint8_t*)&ipv4Addr, 4);
-}
-
-CNetAddr::CNetAddr(const struct in6_addr& ipv6Addr, const uint32_t scope)
-: backend{&CNetBackendTcp::instance}
-{
-    memcpy(ip, (const uint8_t*)&ipv6Addr, 16);
-    scopeId = scope;
-}
-
 unsigned int CNetAddr::GetByte(int n) const
 {
     return ip[15-n];
