@@ -8,6 +8,7 @@
 
 #include <string>
 #include <stdexcept>
+#include <algorithm>
 
 #ifndef WIN32
 #include <fcntl.h>
@@ -652,4 +653,46 @@ std::vector<CService> CNetBackendTcp::bind_any_addrs() const
         SetSockAddr(addr4, reinterpret_cast<const ::sockaddr *>(&sockaddr4));
     }
     return {addr6, addr4};
+}
+
+std::vector<CService> CNetBackendTcp::local_if_addrs() const
+{
+    std::vector<CService> addrs;
+#ifdef WIN32
+    // Get local host IP
+    char pszHostName[256] = "";
+    if (gethostname(pszHostName, sizeof(pszHostName)) != SOCKET_ERROR)
+    {
+        std::vector<CNetAddr> vaddr;
+        if (LookupHost(pszHostName, vaddr, 0, true))
+        {
+            std::transform(vaddr.begin(), vaddr.end(), addrs.end(),
+                           [](const CNetAddr& addr){return CService(addr, 0);});
+        }
+    }
+#else
+    // Get local host ip
+    struct ifaddrs* myaddrs;
+    if (getifaddrs(&myaddrs) == 0)
+    {
+        for (struct ifaddrs* ifa = myaddrs; ifa != NULL; ifa = ifa->ifa_next)
+        {
+            if (ifa->ifa_addr == NULL) continue;
+            if ((ifa->ifa_flags & IFF_UP) == 0) continue;
+            if (strcmp(ifa->ifa_name, "lo") == 0) continue;
+            if (strcmp(ifa->ifa_name, "lo0") == 0) continue;
+            if (ifa->ifa_addr->sa_family == AF_INET)
+            {
+                ::sockaddr_in* s4 = (::sockaddr_in*)(ifa->ifa_addr);
+                addrs.push_back(addr_create(s4->sin_addr, 0));
+            }
+            else if (ifa->ifa_addr->sa_family == AF_INET6)
+            {
+                ::sockaddr_in6* s6 = (::sockaddr_in6*)(ifa->ifa_addr);
+                addrs.push_back(addr_create(s6->sin6_addr, 0));
+            }
+        }
+        freeifaddrs(myaddrs);
+    }
+#endif
 }

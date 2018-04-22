@@ -130,6 +130,10 @@ public:
     //! Addresses for this backend to bind to any local interface.
     //! @return vector with local addresses
     virtual std::vector<CService> bind_any_addrs() const = 0;
+
+    //! All local addresses for this host.
+    //! @return vector with local addresses
+    virtual std::vector<CService> local_if_addrs() const = 0;
 };
 
 #endif

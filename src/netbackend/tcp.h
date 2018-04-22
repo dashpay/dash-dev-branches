@@ -88,6 +88,9 @@ public:
 
     // Addresses for this backend to bind to any local interface.
     std::vector<CService> bind_any_addrs() const override;
+
+    // All local addresses for this host.
+    std::vector<CService> local_if_addrs() const override;
 };
 
 #endif
