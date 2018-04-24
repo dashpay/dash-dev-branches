@@ -634,6 +634,67 @@ std::string CNetBackendTcp::addr_str(const CNetAddr& addr) const
                          addr.GetByte(1) << 8 | addr.GetByte(0));
 }
 
+std::vector<unsigned char> CNetBackendTcp::addr_group(const CNetAddr& addr) const
+{
+    std::vector<unsigned char> vchRet;
+    int nClass = NET_IPV6;
+    int nStartByte = 0;
+    int nBits = 16;
+
+    // all local addresses belong to the same group
+    if (addr_is_local(addr)) {
+        nClass = 255;
+        nBits = 0;
+    }
+
+    // all unroutable addresses belong to the same group
+    if (!addr_is_routable(addr)) {
+        nClass = NET_UNROUTABLE;
+        nBits = 0;
+    }
+    // for IPv4 addresses, '1' + the 16 higher-order bits of the IP
+    // includes mapped IPv4, SIIT translated IPv4, and the well-known prefix
+    else if (IsIPv4(addr) || addr.IsRFC6145() || addr.IsRFC6052()) {
+        nClass = NET_IPV4;
+        nStartByte = 12;
+    }
+    // for 6to4 tunnelled addresses, use the encapsulated IPv4 address
+    else if (addr.IsRFC3964()) {
+        nClass = NET_IPV4;
+        nStartByte = 2;
+    }
+    // for Teredo-tunnelled IPv6 addresses, use the encapsulated IPv4 address
+    else if (addr.IsRFC4380()) {
+        vchRet.push_back(NET_IPV4);
+        vchRet.push_back(addr.GetByte(3) ^ 0xFF);
+        vchRet.push_back(addr.GetByte(2) ^ 0xFF);
+        return vchRet;
+    }
+    else if (IsTor(addr)) {
+        nClass = NET_TOR;
+        nStartByte = 6;
+        nBits = 4;
+    }
+    // for he.net, use /36 groups
+    else if (addr.GetByte(15) == 0x20 && addr.GetByte(14) == 0x01 &&
+             addr.GetByte(13) == 0x04 && addr.GetByte(12) == 0x70)
+        nBits = 36;
+    // for the rest of the IPv6 network, use /32 groups
+    else
+        nBits = 32;
+
+    vchRet.push_back(nClass);
+    while (nBits >= 8) {
+        vchRet.push_back(addr.GetByte(15 - nStartByte));
+        nStartByte++;
+        nBits -= 8;
+    }
+    if (nBits > 0)
+        vchRet.push_back(addr.GetByte(15 - nStartByte) | ((1 << (8 - nBits)) - 1));
+
+    return vchRet;
+}
+
 std::vector<CService> CNetBackendTcp::bind_any_addrs() const
 {
     CService addr6{*this};

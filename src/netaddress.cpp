@@ -181,69 +181,7 @@ bool operator<(const CNetAddr& a, const CNetAddr& b)
 // no two connections will be attempted to addresses with the same group
 std::vector<unsigned char> CNetAddr::GetGroup() const
 {
-    std::vector<unsigned char> vchRet;
-    int nClass = NET_IPV6;
-    int nStartByte = 0;
-    int nBits = 16;
-
-    // all local addresses belong to the same group
-    if (IsLocal())
-    {
-        nClass = 255;
-        nBits = 0;
-    }
-
-    // all unroutable addresses belong to the same group
-    if (!IsRoutable())
-    {
-        nClass = NET_UNROUTABLE;
-        nBits = 0;
-    }
-    // for IPv4 addresses, '1' + the 16 higher-order bits of the IP
-    // includes mapped IPv4, SIIT translated IPv4, and the well-known prefix
-    else if (IsIPv4() || IsRFC6145() || IsRFC6052())
-    {
-        nClass = NET_IPV4;
-        nStartByte = 12;
-    }
-    // for 6to4 tunnelled addresses, use the encapsulated IPv4 address
-    else if (IsRFC3964())
-    {
-        nClass = NET_IPV4;
-        nStartByte = 2;
-    }
-    // for Teredo-tunnelled IPv6 addresses, use the encapsulated IPv4 address
-    else if (IsRFC4380())
-    {
-        vchRet.push_back(NET_IPV4);
-        vchRet.push_back(GetByte(3) ^ 0xFF);
-        vchRet.push_back(GetByte(2) ^ 0xFF);
-        return vchRet;
-    }
-    else if (IsTor())
-    {
-        nClass = NET_TOR;
-        nStartByte = 6;
-        nBits = 4;
-    }
-    // for he.net, use /36 groups
-    else if (GetByte(15) == 0x20 && GetByte(14) == 0x01 && GetByte(13) == 0x04 && GetByte(12) == 0x70)
-        nBits = 36;
-    // for the rest of the IPv6 network, use /32 groups
-    else
-        nBits = 32;
-
-    vchRet.push_back(nClass);
-    while (nBits >= 8)
-    {
-        vchRet.push_back(GetByte(15 - nStartByte));
-        nStartByte++;
-        nBits -= 8;
-    }
-    if (nBits > 0)
-        vchRet.push_back(GetByte(15 - nStartByte) | ((1 << (8 - nBits)) - 1));
-
-    return vchRet;
+    return GetBackend().addr_group(*this);
 }
 
 uint64_t CNetAddr::GetHash() const

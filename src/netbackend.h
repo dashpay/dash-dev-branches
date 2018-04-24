@@ -127,6 +127,11 @@ public:
     //! @return readable string representation of the address
     virtual std::string addr_str(const CNetAddr& addr) const = 0;
 
+    //! Address group.
+    //! @param[in] addr address to get group of
+    //! @return group corrresponding to the address
+    virtual std::vector<unsigned char> addr_group(const CNetAddr& addr) const = 0;
+
     //! Addresses for this backend to bind to any local interface.
     //! @return vector with local addresses
     virtual std::vector<CService> bind_any_addrs() const = 0;

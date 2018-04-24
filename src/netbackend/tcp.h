@@ -86,6 +86,9 @@ public:
     // String representation of address.
     std::string addr_str(const CNetAddr& addr) const override;
 
+    // Address group.
+    std::vector<unsigned char> addr_group(const CNetAddr& addr) const override;
+
     // Addresses for this backend to bind to any local interface.
     std::vector<CService> bind_any_addrs() const override;
 
