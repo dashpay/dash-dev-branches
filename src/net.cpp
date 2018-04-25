@@ -1717,7 +1717,7 @@ void CConnman::ThreadOpenConnections()
         // This is only done for mainnet and testnet
         int nOutbound = 0;
         int nOutboundRelevant = 0;
-        std::set<std::vector<unsigned char> > setConnected;
+        std::set<CNetAddrGroup> setConnected;
         if (!Params().AllowMultipleAddressesFromGroup()) {
             LOCK(cs_vNodes);
             BOOST_FOREACH(CNode* pnode, vNodes) {
@@ -2848,7 +2848,12 @@ CSipHasher CConnman::GetDeterministicRandomizer(uint64_t id) const
 
 uint64_t CConnman::CalculateKeyedNetGroup(const CAddress& ad) const
 {
-    std::vector<unsigned char> vchNetGroup(ad.GetGroup());
+    CNetAddrGroup netGroup(ad.GetGroup());
+    std::string strBackendName(netGroup.GetBackendName());
 
-    return GetDeterministicRandomizer(RANDOMIZER_ID_NETGROUP).Write(&vchNetGroup[0], vchNetGroup.size()).Finalize();
+    return GetDeterministicRandomizer(RANDOMIZER_ID_NETGROUP)
+           .Write(reinterpret_cast<const unsigned char *>(strBackendName.data()),
+                  strBackendName.size())
+           .Write(netGroup.GetData().data(), netGroup.GetData().size())
+           .Finalize();
 }

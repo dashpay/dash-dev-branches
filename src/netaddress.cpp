@@ -20,6 +20,11 @@ static const unsigned char pchOnionCat[] = {0xFD,0x87,0xD8,0x7E,0xEB,0x43};
 
 bool fAllowPrivateNet = DEFAULT_ALLOWPRIVATENET;
 
+const char *CNetAddrGroup::GetBackendName() const
+{
+    return GetBackend().name();
+}
+
 void CNetAddr::Init()
 {
     memset(ip, 0, sizeof(ip));
@@ -179,9 +184,9 @@ bool operator<(const CNetAddr& a, const CNetAddr& b)
 
 // get canonical identifier of an address' group
 // no two connections will be attempted to addresses with the same group
-std::vector<unsigned char> CNetAddr::GetGroup() const
+CNetAddrGroup CNetAddr::GetGroup() const
 {
-    return GetBackend().addr_group(*this);
+    return {GetBackend(), GetBackend().addr_group(*this)};
 }
 
 uint64_t CNetAddr::GetHash() const

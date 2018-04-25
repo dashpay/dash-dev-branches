@@ -203,10 +203,10 @@ BOOST_AUTO_TEST_CASE(addrman_select)
     BOOST_CHECK(addrman.size() == 7);
 
     // Test 12: Select pulls from new and tried regardless of port number.
-    BOOST_CHECK(addrman.Select().ToString() == "250.4.6.6:8333");
-    BOOST_CHECK(addrman.Select().ToString() == "250.3.2.2:9999");
-    BOOST_CHECK(addrman.Select().ToString() == "250.3.3.3:9999");
     BOOST_CHECK(addrman.Select().ToString() == "250.4.4.4:8333");
+    BOOST_CHECK(addrman.Select().ToString() == "250.3.1.1:8333");
+    BOOST_CHECK(addrman.Select().ToString() == "250.3.2.2:9999");
+    BOOST_CHECK(addrman.Select().ToString() == "250.4.6.6:8333");
 }
 
 BOOST_AUTO_TEST_CASE(addrman_new_collisions)
@@ -220,7 +220,7 @@ BOOST_AUTO_TEST_CASE(addrman_new_collisions)
 
     BOOST_CHECK(addrman.size() == 0);
 
-    for (unsigned int i = 1; i < 18; i++) {
+    for (unsigned int i = 1; i < 12; i++) {
         CService addr = ResolveService("250.1.1." + boost::to_string(i));
         addrman.Add(CAddress(addr, NODE_NONE), source);
 
@@ -229,13 +229,13 @@ BOOST_AUTO_TEST_CASE(addrman_new_collisions)
     }
 
     //Test 14: new table collision!
-    CService addr1 = ResolveService("250.1.1.18");
+    CService addr1 = ResolveService("250.1.1.12");
     addrman.Add(CAddress(addr1, NODE_NONE), source);
-    BOOST_CHECK(addrman.size() == 17);
+    BOOST_CHECK(addrman.size() == 11);
 
-    CService addr2 = ResolveService("250.1.1.19");
+    CService addr2 = ResolveService("250.1.1.13");
     addrman.Add(CAddress(addr2, NODE_NONE), source);
-    BOOST_CHECK(addrman.size() == 18);
+    BOOST_CHECK(addrman.size() == 12);
 }
 
 BOOST_AUTO_TEST_CASE(addrman_tried_collisions)
@@ -249,7 +249,7 @@ BOOST_AUTO_TEST_CASE(addrman_tried_collisions)
 
     BOOST_CHECK(addrman.size() == 0);
 
-    for (unsigned int i = 1; i < 80; i++) {
+    for (unsigned int i = 1; i < 51; i++) {
         CService addr = ResolveService("250.1.1." + boost::to_string(i));
         addrman.Add(CAddress(addr, NODE_NONE), source);
         addrman.Good(CAddress(addr, NODE_NONE));
@@ -259,13 +259,14 @@ BOOST_AUTO_TEST_CASE(addrman_tried_collisions)
     }
 
     //Test 16: tried table collision!
-    CService addr1 = ResolveService("250.1.1.80");
+    CService addr1 = ResolveService("250.1.1.51");
     addrman.Add(CAddress(addr1, NODE_NONE), source);
-    BOOST_CHECK(addrman.size() == 79);
+    addrman.Good(CAddress(addr1, NODE_NONE));
+    BOOST_CHECK(addrman.size() == 50);
 
-    CService addr2 = ResolveService("250.1.1.81");
+    CService addr2 = ResolveService("250.1.1.52");
     addrman.Add(CAddress(addr2, NODE_NONE), source);
-    BOOST_CHECK(addrman.size() == 80);
+    BOOST_CHECK(addrman.size() == 51);
 }
 
 BOOST_AUTO_TEST_CASE(addrman_find)
@@ -412,9 +413,9 @@ BOOST_AUTO_TEST_CASE(addrman_getaddr)
 
     size_t percent23 = (addrman.size() * 23) / 100;
     BOOST_CHECK(vAddr.size() == percent23);
-    BOOST_CHECK(vAddr.size() == 461);
+    BOOST_CHECK(vAddr.size() == 460);
     // (Addrman.size() < number of addresses added) due to address collisons.
-    BOOST_CHECK(addrman.size() == 2007);
+    BOOST_CHECK(addrman.size() == 2001);
 }
 
 
@@ -437,7 +438,7 @@ BOOST_AUTO_TEST_CASE(caddrinfo_get_tried_bucket)
     uint256 nKey2 = (uint256)(CHashWriter(SER_GETHASH, 0) << 2).GetHash();
 
 
-    BOOST_CHECK(info1.GetTriedBucket(nKey1) == 40);
+    BOOST_CHECK(info1.GetTriedBucket(nKey1) == 226);
 
     // Test 26: Make sure key actually randomizes bucket placement. A fail on
     //  this test could be a security issue.
@@ -472,7 +473,7 @@ BOOST_AUTO_TEST_CASE(caddrinfo_get_tried_bucket)
     }
     // Test 29: IP addresses in the different groups should map to more than
     //  8 buckets.
-    BOOST_CHECK(buckets.size() == 160);
+    BOOST_CHECK(buckets.size() == 162);
 }
 
 BOOST_AUTO_TEST_CASE(caddrinfo_get_new_bucket)
@@ -492,7 +493,7 @@ BOOST_AUTO_TEST_CASE(caddrinfo_get_new_bucket)
     uint256 nKey1 = (uint256)(CHashWriter(SER_GETHASH, 0) << 1).GetHash();
     uint256 nKey2 = (uint256)(CHashWriter(SER_GETHASH, 0) << 2).GetHash();
 
-    BOOST_CHECK(info1.GetNewBucket(nKey1) == 786);
+    BOOST_CHECK(info1.GetNewBucket(nKey1) == 656);
 
     // Test 30: Make sure key actually randomizes bucket placement. A fail on
     //  this test could be a security issue.

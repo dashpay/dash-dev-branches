@@ -31,6 +31,37 @@ enum Network
     NET_MAX,
 };
 
+/** Address group */
+class CNetAddrGroup
+{
+    const CNetBackend *backend;
+    const std::vector<unsigned char> data;
+public:
+    CNetAddrGroup(const CNetBackend& backendIn,
+                  const std::vector<unsigned char>& dataIn)
+    : backend(&backendIn), data(dataIn) {}
+    const CNetBackend& GetBackend() const {return *backend;}
+    const char *GetBackendName() const;
+    const std::vector<unsigned char>& GetData() const {return data;}
+
+    template <typename Stream> void Serialize(Stream& s) const {
+        std::string strName(GetBackendName());
+        ::Serialize(s, strName);
+        ::Serialize(s, data);
+    }
+};
+
+inline bool operator==(const CNetAddrGroup& l, const CNetAddrGroup& r)
+{
+    return &l.GetBackend() == &r.GetBackend() && l.GetData() == r.GetData();
+}
+
+inline bool operator<(const CNetAddrGroup& l, const CNetAddrGroup& r)
+{
+    return &l.GetBackend() < &r.GetBackend() ||
+           (&l.GetBackend() == &r.GetBackend() && l.GetData() < r.GetData());
+}
+
 /** IP address (IPv6, or IPv4 using mapped IPv6 range (::FFFF:0:0/96)) */
 class CNetAddr
 {
@@ -69,7 +100,7 @@ class CNetAddr
         std::string ToStringIP(bool fUseGetnameinfo = true) const;
         unsigned int GetByte(int n) const;
         uint64_t GetHash() const;
-        std::vector<unsigned char> GetGroup() const;
+        CNetAddrGroup GetGroup() const;
         int GetReachabilityFrom(const CNetAddr *paddrPartner = NULL) const;
 
         friend bool operator==(const CNetAddr& a, const CNetAddr& b);
