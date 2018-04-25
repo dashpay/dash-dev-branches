@@ -92,6 +92,10 @@ public:
     // Address group.
     std::vector<unsigned char> addr_group(const CNetAddr& addr) const override;
 
+    // Reachability score between two nodes specified by their addresses.
+    int addr_reachability(const CNetAddr& ouraddr,
+                          const CNetAddr& theiraddr) const override;
+
     // Addresses for this backend to bind to any local interface.
     std::vector<CService> bind_any_addrs() const override;
 

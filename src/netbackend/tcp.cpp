@@ -169,6 +169,17 @@ static bool SetSockAddr(CService& addr, const struct sockaddr *paddr)
     }
 }
 
+// private extensions to enum Network, only returned by GetExtNetwork,
+// and only used in GetReachabilityFrom
+static const int NET_UNKNOWN = NET_MAX + 0;
+static const int NET_TEREDO  = NET_MAX + 1;
+int static GetExtNetwork(const CNetAddr& addr)
+{
+    if (addr.IsRFC4380())
+        return NET_TEREDO;
+    return addr.GetNetwork();
+}
+
 // ----------------
 
 const CNetBackendTcp CNetBackendTcp::instance{};
@@ -693,6 +704,69 @@ std::vector<unsigned char> CNetBackendTcp::addr_group(const CNetAddr& addr) cons
         vchRet.push_back(addr.GetByte(15 - nStartByte) | ((1 << (8 - nBits)) - 1));
 
     return vchRet;
+}
+
+int CNetBackendTcp::addr_reachability(const CNetAddr& ouraddr,
+                                      const CNetAddr& theiraddr) const
+{
+    assert(&ouraddr.GetBackend() == this);
+    if (&theiraddr.GetBackend() != this)
+        return -1;
+
+    enum Reachability {
+        REACH_UNREACHABLE,
+        REACH_DEFAULT,
+        REACH_TEREDO,
+        REACH_IPV6_WEAK,
+        REACH_IPV4,
+        REACH_IPV6_STRONG,
+        REACH_PRIVATE
+    };
+
+    if (!addr_is_routable(ouraddr))
+        return REACH_UNREACHABLE;
+
+    int ourNet = GetExtNetwork(ouraddr);
+    int theirNet = GetExtNetwork(theiraddr);
+    bool fTunnel = ouraddr.IsRFC3964() || ouraddr.IsRFC6052() || ouraddr.IsRFC6145();
+
+    switch(theirNet) {
+    case NET_IPV4:
+        switch(ourNet) {
+        default:       return REACH_DEFAULT;
+        case NET_IPV4: return REACH_IPV4;
+        }
+    case NET_IPV6:
+        switch(ourNet) {
+        default:         return REACH_DEFAULT;
+        case NET_TEREDO: return REACH_TEREDO;
+        case NET_IPV4:   return REACH_IPV4;
+        case NET_IPV6:   return fTunnel ? REACH_IPV6_WEAK : REACH_IPV6_STRONG; // only prefer giving our IPv6 address if it's not tunnelled
+        }
+    case NET_TOR:
+        switch(ourNet) {
+        default:         return REACH_DEFAULT;
+        case NET_IPV4:   return REACH_IPV4; // Tor users can connect to IPv4 as well
+        case NET_TOR:    return REACH_PRIVATE;
+        }
+    case NET_TEREDO:
+        switch(ourNet) {
+        default:          return REACH_DEFAULT;
+        case NET_TEREDO:  return REACH_TEREDO;
+        case NET_IPV6:    return REACH_IPV6_WEAK;
+        case NET_IPV4:    return REACH_IPV4;
+        }
+    case NET_UNKNOWN:
+    case NET_UNROUTABLE:
+    default:
+        switch(ourNet) {
+        default:          return REACH_DEFAULT;
+        case NET_TEREDO:  return REACH_TEREDO;
+        case NET_IPV6:    return REACH_IPV6_WEAK;
+        case NET_IPV4:    return REACH_IPV4;
+        case NET_TOR:     return REACH_PRIVATE; // either from Tor, or don't care about our address
+        }
+    }
 }
 
 std::vector<CService> CNetBackendTcp::bind_any_addrs() const

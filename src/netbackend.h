@@ -136,6 +136,13 @@ public:
     //! @return group corrresponding to the address
     virtual std::vector<unsigned char> addr_group(const CNetAddr& addr) const = 0;
 
+    //! Reachability score between two nodes specified by their addresses.
+    //! @param[in] ouraddr address of our node
+    //! @param[in] theiraddr address of partner node
+    //! @return score of reachability between these nodes (greater is better)
+    virtual int addr_reachability(const CNetAddr& ouraddr,
+                                  const CNetAddr& theiraddr) const = 0;
+
     //! Addresses for this backend to bind to any local interface.
     //! @return vector with local addresses
     virtual std::vector<CService> bind_any_addrs() const = 0;
