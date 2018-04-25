@@ -39,6 +39,10 @@ public:
     //! @return reference to container where all available backends are registered
     static const all_t& all();
 
+    //! Name of the backend.
+    //! @return name of the backend
+    virtual const char *name() const = 0;
+
     //! Lookup service endpoints by name.
     //! @param[in] pszName string representation of endpoint name
     //! @param[in] nMaxSolitions maximum number of returned endpoints

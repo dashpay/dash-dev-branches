@@ -35,6 +35,9 @@ public:
     CService addr_create(const ::in6_addr& ipv6Addr,
                          unsigned short portIn) const;
 
+    // Name of the backend.
+    const char *name() const override {return "tcp";}
+
     // Lookup service endpoints by name.
     bool lookup(const char *pszName,
                 std::vector<CNetAddr>& vIP,
