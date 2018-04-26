@@ -95,6 +95,26 @@ static bool IsRFC3849(const CNetAddr& addr)
            addr.GetByte(13) == 0x0D && addr.GetByte(12) == 0xB8;
 }
 
+// IPv6 6to4 tunnelling (2002::/16)
+static bool IsRFC3964(const CNetAddr& addr)
+{
+    return (addr.GetByte(15) == 0x20 && addr.GetByte(14) == 0x02);
+}
+
+// IPv6 well-known prefix (64:FF9B::/96)
+static bool IsRFC6052(const CNetAddr& addr)
+{
+    static const unsigned char pchRFC6052[] = {0,0x64,0xFF,0x9B,0,0,0,0,0,0,0,0};
+    return (memcmp(addr.GetRaw(), pchRFC6052, sizeof(pchRFC6052)) == 0);
+}
+
+// IPv6 Teredo tunnelling (2001::/32)
+static bool IsRFC4380(const CNetAddr& addr)
+{
+    return (addr.GetByte(15) == 0x20 && addr.GetByte(14) == 0x01 &&
+            addr.GetByte(13) == 0 && addr.GetByte(12) == 0);
+}
+
 // IPv6 autoconfig (FE80::/64)
 static bool IsRFC4862(const CNetAddr& addr)
 {
@@ -106,6 +126,13 @@ static bool IsRFC4862(const CNetAddr& addr)
 static bool IsRFC4193(const CNetAddr& addr)
 {
     return ((addr.GetByte(15) & 0xFE) == 0xFC);
+}
+
+// IPv6 IPv4-translated address (::FFFF:0:0:0/96)
+static bool IsRFC6145(const CNetAddr& addr)
+{
+    static const unsigned char pchRFC6145[] = {0,0,0,0,0,0,0,0,0xFF,0xFF,0,0};
+    return (memcmp(addr.GetRaw(), pchRFC6145, sizeof(pchRFC6145)) == 0);
 }
 
 // IPv6 ORCHID (2001:10::/28)
@@ -175,7 +202,7 @@ static const int NET_UNKNOWN = NET_MAX + 0;
 static const int NET_TEREDO  = NET_MAX + 1;
 int static GetExtNetwork(const CNetAddr& addr)
 {
-    if (addr.IsRFC4380())
+    if (IsRFC4380(addr))
         return NET_TEREDO;
     return addr.GetNetwork();
 }
@@ -665,17 +692,17 @@ std::vector<unsigned char> CNetBackendTcp::addr_group(const CNetAddr& addr) cons
     }
     // for IPv4 addresses, '1' + the 16 higher-order bits of the IP
     // includes mapped IPv4, SIIT translated IPv4, and the well-known prefix
-    else if (IsIPv4(addr) || addr.IsRFC6145() || addr.IsRFC6052()) {
+    else if (IsIPv4(addr) || IsRFC6145(addr) || IsRFC6052(addr)) {
         nClass = NET_IPV4;
         nStartByte = 12;
     }
     // for 6to4 tunnelled addresses, use the encapsulated IPv4 address
-    else if (addr.IsRFC3964()) {
+    else if (IsRFC3964(addr)) {
         nClass = NET_IPV4;
         nStartByte = 2;
     }
     // for Teredo-tunnelled IPv6 addresses, use the encapsulated IPv4 address
-    else if (addr.IsRFC4380()) {
+    else if (IsRFC4380(addr)) {
         vchRet.push_back(NET_IPV4);
         vchRet.push_back(addr.GetByte(3) ^ 0xFF);
         vchRet.push_back(addr.GetByte(2) ^ 0xFF);
@@ -728,7 +755,7 @@ int CNetBackendTcp::addr_reachability(const CNetAddr& ouraddr,
 
     int ourNet = GetExtNetwork(ouraddr);
     int theirNet = GetExtNetwork(theiraddr);
-    bool fTunnel = ouraddr.IsRFC3964() || ouraddr.IsRFC6052() || ouraddr.IsRFC6145();
+    bool fTunnel = IsRFC3964(ouraddr) || IsRFC6052(ouraddr) || IsRFC6145(ouraddr);
 
     switch(theirNet) {
     case NET_IPV4:

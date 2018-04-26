@@ -84,11 +84,6 @@ class CNetAddr
         bool IsIPv4() const;    // IPv4 mapped address (::FFFF:0:0/96, 0.0.0.0/0)
         bool IsIPv6() const;    // IPv6 address (not mapped IPv4, not Tor)
         bool IsRFC1918() const; // IPv4 private networks (10.0.0.0/8, 192.168.0.0/16, 172.16.0.0/12)
-        bool IsRFC3964() const; // IPv6 6to4 tunnelling (2002::/16)
-        bool IsRFC4380() const; // IPv6 Teredo tunnelling (2001::/32)
-        bool IsRFC4843() const; // IPv6 ORCHID (2001:10::/28)
-        bool IsRFC6052() const; // IPv6 well-known prefix (64:FF9B::/96)
-        bool IsRFC6145() const; // IPv6 IPv4-translated address (::FFFF:0:0:0/96)
         bool IsTor() const;
         bool IsLocal() const;
         bool IsRoutable() const;
