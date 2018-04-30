@@ -77,6 +77,9 @@ public:
     // Check whether address is local.
     bool addr_is_local(const CNetAddr& addr) const override;
 
+    // Check whather address is from private network.
+    bool addr_is_private(const CNetAddr& addr) const override;
+
     // Check whether address is multicast.
     bool addr_is_multicast(const CNetAddr& addr) const override;
 

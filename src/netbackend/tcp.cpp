@@ -594,6 +594,11 @@ bool CNetBackendTcp::addr_is_local(const CNetAddr& addr) const
    return false;
 }
 
+bool CNetBackendTcp::addr_is_private(const CNetAddr& addr) const
+{
+    return IsRFC1918(addr) || IsRFC4193(addr);
+}
+
 bool CNetBackendTcp::addr_is_multicast(const CNetAddr& addr) const
 {
     assert(&addr.GetBackend() == this);

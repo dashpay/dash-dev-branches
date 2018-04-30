@@ -111,6 +111,11 @@ public:
     //! @return true if address is local
     virtual bool addr_is_local(const CNetAddr& addr) const = 0;
 
+    //! Check whather address is from private network.
+    //! @param[in] addr address to check
+    //! @return true if address is from private network
+    virtual bool addr_is_private(const CNetAddr& addr) const = 0;
+
     //! Check whether address is multicast.
     //! @param[in] addr address to check
     //! @return true if address is multicast
