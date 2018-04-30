@@ -27,6 +27,11 @@
 static const unsigned char pchIPv4[12] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff };
 static const unsigned char pchOnionCat[] = {0xFD,0x87,0xD8,0x7E,0xEB,0x43};
 
+static unsigned int GetByte(const CNetAddr& addr, unsigned int n)
+{
+    return addr.GetRaw()[15-n];
+}
+
 static bool IsTor(const CNetAddr& addr)
 {
     return (memcmp(addr.GetRaw(), pchOnionCat, sizeof(pchOnionCat)) == 0);
@@ -48,57 +53,58 @@ static bool IsIPv6(const CNetAddr& addr)
 static bool IsRFC1918(const CNetAddr& addr)
 {
     return IsIPv4(addr) && (
-        addr.GetByte(3) == 10 ||
-        (addr.GetByte(3) == 192 && addr.GetByte(2) == 168) ||
-        (addr.GetByte(3) == 172 && (addr.GetByte(2) >= 16 && addr.GetByte(2) <= 31)));
+        GetByte(addr, 3) == 10 ||
+        (GetByte(addr, 3) == 192 && GetByte(addr, 2) == 168) ||
+        (GetByte(addr, 3) == 172 &&
+         (GetByte(addr, 2) >= 16 && GetByte(addr, 2) <= 31)));
 }
 
 // IPv4 inter-network communications (192.18.0.0/15)
 static bool IsRFC2544(const CNetAddr& addr)
 {
-    return IsIPv4(addr) && addr.GetByte(3) == 198 &&
-           (addr.GetByte(2) == 18 || addr.GetByte(2) == 19);
+    return IsIPv4(addr) && GetByte(addr, 3) == 198 &&
+           (GetByte(addr, 2) == 18 || GetByte(addr, 2) == 19);
 }
 
 // IPv4 autoconfig (169.254.0.0/16)
 static bool IsRFC3927(const CNetAddr& addr)
 {
-    return IsIPv4(addr) && (addr.GetByte(3) == 169 && addr.GetByte(2) == 254);
+    return IsIPv4(addr) && (GetByte(addr, 3) == 169 && GetByte(addr, 2) == 254);
 }
 
 // IPv4 ISP-level NAT (100.64.0.0/10)
 static bool IsRFC6598(const CNetAddr& addr)
 {
-    return IsIPv4(addr) && addr.GetByte(3) == 100 &&
-           addr.GetByte(2) >= 64 && addr.GetByte(2) <= 127;
+    return IsIPv4(addr) && GetByte(addr, 3) == 100 &&
+           GetByte(addr, 2) >= 64 && GetByte(addr, 2) <= 127;
 }
 
 // IPv4 documentation addresses (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24)
 static bool IsRFC5737(const CNetAddr& addr)
 {
     return IsIPv4(addr) &&
-           ((addr.GetByte(3) == 192 &&
-             addr.GetByte(2) == 0 &&
-             addr.GetByte(1) == 2) ||
-            (addr.GetByte(3) == 198 &&
-             addr.GetByte(2) == 51 &&
-             addr.GetByte(1) == 100) ||
-            (addr.GetByte(3) == 203 &&
-             addr.GetByte(2) == 0 &&
-             addr.GetByte(1) == 113));
+           ((GetByte(addr, 3) == 192 &&
+             GetByte(addr, 2) == 0 &&
+             GetByte(addr, 1) == 2) ||
+            (GetByte(addr, 3) == 198 &&
+             GetByte(addr, 2) == 51 &&
+             GetByte(addr, 1) == 100) ||
+            (GetByte(addr, 3) == 203 &&
+             GetByte(addr, 2) == 0 &&
+             GetByte(addr, 1) == 113));
 }
 
 // IPv6 documentation address (2001:0DB8::/32)
 static bool IsRFC3849(const CNetAddr& addr)
 {
-    return addr.GetByte(15) == 0x20 && addr.GetByte(14) == 0x01 &&
-           addr.GetByte(13) == 0x0D && addr.GetByte(12) == 0xB8;
+    return GetByte(addr, 15) == 0x20 && GetByte(addr, 14) == 0x01 &&
+           GetByte(addr, 13) == 0x0D && GetByte(addr, 12) == 0xB8;
 }
 
 // IPv6 6to4 tunnelling (2002::/16)
 static bool IsRFC3964(const CNetAddr& addr)
 {
-    return (addr.GetByte(15) == 0x20 && addr.GetByte(14) == 0x02);
+    return (GetByte(addr, 15) == 0x20 && GetByte(addr, 14) == 0x02);
 }
 
 // IPv6 well-known prefix (64:FF9B::/96)
@@ -111,8 +117,8 @@ static bool IsRFC6052(const CNetAddr& addr)
 // IPv6 Teredo tunnelling (2001::/32)
 static bool IsRFC4380(const CNetAddr& addr)
 {
-    return (addr.GetByte(15) == 0x20 && addr.GetByte(14) == 0x01 &&
-            addr.GetByte(13) == 0 && addr.GetByte(12) == 0);
+    return (GetByte(addr, 15) == 0x20 && GetByte(addr, 14) == 0x01 &&
+            GetByte(addr, 13) == 0 && GetByte(addr, 12) == 0);
 }
 
 // IPv6 autoconfig (FE80::/64)
@@ -125,7 +131,7 @@ static bool IsRFC4862(const CNetAddr& addr)
 // IPv6 unique local (FC00::/7)
 static bool IsRFC4193(const CNetAddr& addr)
 {
-    return ((addr.GetByte(15) & 0xFE) == 0xFC);
+    return ((GetByte(addr, 15) & 0xFE) == 0xFC);
 }
 
 // IPv6 IPv4-translated address (::FFFF:0:0:0/96)
@@ -138,8 +144,8 @@ static bool IsRFC6145(const CNetAddr& addr)
 // IPv6 ORCHID (2001:10::/28)
 static bool IsRFC4843(const CNetAddr& addr)
 {
-    return (addr.GetByte(15) == 0x20 && addr.GetByte(14) == 0x01 &&
-            addr.GetByte(13) == 0x00 && (addr.GetByte(12) & 0xF0) == 0x10);
+    return (GetByte(addr, 15) == 0x20 && GetByte(addr, 14) == 0x01 &&
+            GetByte(addr, 13) == 0x00 && (GetByte(addr, 12) & 0xF0) == 0x10);
 }
 
 static bool GetSockAddr(const CService& addr,
@@ -583,7 +589,7 @@ bool CNetBackendTcp::addr_is_local(const CNetAddr& addr) const
     assert(&addr.GetBackend() == this);
 
     // IPv4 loopback
-   if (IsIPv4(addr) && (addr.GetByte(3) == 127 || addr.GetByte(3) == 0))
+   if (IsIPv4(addr) && (GetByte(addr, 3) == 127 || GetByte(addr, 3) == 0))
        return true;
 
    // IPv6 loopback (::1/128)
@@ -602,8 +608,8 @@ bool CNetBackendTcp::addr_is_private(const CNetAddr& addr) const
 bool CNetBackendTcp::addr_is_multicast(const CNetAddr& addr) const
 {
     assert(&addr.GetBackend() == this);
-    return    (IsIPv4(addr) && (addr.GetByte(3) & 0xF0) == 0xE0)
-           || (addr.GetByte(15) == 0xFF);
+    return    (IsIPv4(addr) && (GetByte(addr, 3) & 0xF0) == 0xE0)
+           || (GetByte(addr, 15) == 0xFF);
 }
 
 bool CNetBackendTcp::addr_is_valid(const CNetAddr& addr) const
@@ -663,18 +669,18 @@ std::string CNetBackendTcp::addr_str(const CNetAddr& addr) const
         return EncodeBase32(addr.GetRaw() + 6, 10) + ".onion";
     if (IsIPv4(addr))
         return strprintf("%u.%u.%u.%u",
-                         addr.GetByte(3), addr.GetByte(2),
-                         addr.GetByte(1), addr.GetByte(0));
+                         GetByte(addr, 3), GetByte(addr, 2),
+                         GetByte(addr, 1), GetByte(addr, 0));
     else
         return strprintf("%x:%x:%x:%x:%x:%x:%x:%x",
-                         addr.GetByte(15) << 8 | addr.GetByte(14),
-                         addr.GetByte(13) << 8 | addr.GetByte(12),
-                         addr.GetByte(11) << 8 | addr.GetByte(10),
-                         addr.GetByte(9) << 8 | addr.GetByte(8),
-                         addr.GetByte(7) << 8 | addr.GetByte(6),
-                         addr.GetByte(5) << 8 | addr.GetByte(4),
-                         addr.GetByte(3) << 8 | addr.GetByte(2),
-                         addr.GetByte(1) << 8 | addr.GetByte(0));
+                         GetByte(addr, 15) << 8 | GetByte(addr, 14),
+                         GetByte(addr, 13) << 8 | GetByte(addr, 12),
+                         GetByte(addr, 11) << 8 | GetByte(addr, 10),
+                         GetByte(addr, 9) << 8 | GetByte(addr, 8),
+                         GetByte(addr, 7) << 8 | GetByte(addr, 6),
+                         GetByte(addr, 5) << 8 | GetByte(addr, 4),
+                         GetByte(addr, 3) << 8 | GetByte(addr, 2),
+                         GetByte(addr, 1) << 8 | GetByte(addr, 0));
 }
 
 std::vector<unsigned char> CNetBackendTcp::addr_group(const CNetAddr& addr) const
@@ -709,8 +715,8 @@ std::vector<unsigned char> CNetBackendTcp::addr_group(const CNetAddr& addr) cons
     // for Teredo-tunnelled IPv6 addresses, use the encapsulated IPv4 address
     else if (IsRFC4380(addr)) {
         vchRet.push_back(NET_IPV4);
-        vchRet.push_back(addr.GetByte(3) ^ 0xFF);
-        vchRet.push_back(addr.GetByte(2) ^ 0xFF);
+        vchRet.push_back(GetByte(addr, 3) ^ 0xFF);
+        vchRet.push_back(GetByte(addr, 2) ^ 0xFF);
         return vchRet;
     }
     else if (IsTor(addr)) {
@@ -719,8 +725,8 @@ std::vector<unsigned char> CNetBackendTcp::addr_group(const CNetAddr& addr) cons
         nBits = 4;
     }
     // for he.net, use /36 groups
-    else if (addr.GetByte(15) == 0x20 && addr.GetByte(14) == 0x01 &&
-             addr.GetByte(13) == 0x04 && addr.GetByte(12) == 0x70)
+    else if (GetByte(addr, 15) == 0x20 && GetByte(addr, 14) == 0x01 &&
+             GetByte(addr, 13) == 0x04 && GetByte(addr, 12) == 0x70)
         nBits = 36;
     // for the rest of the IPv6 network, use /32 groups
     else
@@ -728,12 +734,12 @@ std::vector<unsigned char> CNetBackendTcp::addr_group(const CNetAddr& addr) cons
 
     vchRet.push_back(nClass);
     while (nBits >= 8) {
-        vchRet.push_back(addr.GetByte(15 - nStartByte));
+        vchRet.push_back(GetByte(addr, 15 - nStartByte));
         nStartByte++;
         nBits -= 8;
     }
     if (nBits > 0)
-        vchRet.push_back(addr.GetByte(15 - nStartByte) | ((1 << (8 - nBits)) - 1));
+        vchRet.push_back(GetByte(addr, 15 - nStartByte) | ((1 << (8 - nBits)) - 1));
 
     return vchRet;
 }

@@ -93,7 +93,6 @@ class CNetAddr
         enum Network GetNetwork() const;
         std::string ToString() const;
         std::string ToStringIP(bool fUseGetnameinfo = true) const;
-        unsigned int GetByte(int n) const;
         uint64_t GetHash() const;
         CNetAddrGroup GetGroup() const;
         int GetReachabilityFrom(const CNetAddr *paddrPartner = NULL) const;

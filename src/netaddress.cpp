@@ -48,11 +48,6 @@ CNetAddr::CNetAddr(const CNetBackend& netbackend)
     Init();
 }
 
-unsigned int CNetAddr::GetByte(int n) const
-{
-    return ip[15-n];
-}
-
 bool CNetAddr::IsIPv4() const
 {
     return (&GetBackend() == &CNetBackendTcp::instance &&
