@@ -65,12 +65,9 @@ bool CNetAddr::IsIPv6() const
             !IsIPv4() && !IsTor());
 }
 
-bool CNetAddr::IsRFC1918() const
+bool CNetAddr::IsPrivate() const
 {
-    return IsIPv4() && (
-        GetByte(3) == 10 ||
-        (GetByte(3) == 192 && GetByte(2) == 168) ||
-        (GetByte(3) == 172 && (GetByte(2) >= 16 && GetByte(2) <= 31)));
+    return GetBackend().addr_is_private(*this);
 }
 
 bool CNetAddr::IsTor() const

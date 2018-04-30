@@ -421,7 +421,7 @@ void CMasternodeMan::DsegUpdate(CNode* pnode, CConnman& connman)
 
     CService addrSquashed = Params().AllowMultiplePorts() ? (CService)pnode->addr : CService(pnode->addr, 0);
     if(Params().NetworkIDString() == CBaseChainParams::MAIN) {
-        if(!(pnode->addr.IsRFC1918() || pnode->addr.IsLocal())) {
+        if(!(pnode->addr.IsPrivate() || pnode->addr.IsLocal())) {
             auto it = mWeAskedForMasternodeList.find(addrSquashed);
             if(it != mWeAskedForMasternodeList.end() && GetTime() < (*it).second) {
                 LogPrintf("CMasternodeMan::DsegUpdate -- we already asked %s for the list; skipping...\n", addrSquashed.ToString());
@@ -933,7 +933,7 @@ void CMasternodeMan::SyncSingle(CNode* pnode, const COutPoint& outpoint, CConnma
     auto it = mapMasternodes.find(outpoint);
 
     if(it != mapMasternodes.end()) {
-        if (it->second.addr.IsRFC1918() || it->second.addr.IsLocal()) return; // do not send local network masternode
+        if (it->second.addr.IsPrivate() || it->second.addr.IsLocal()) return; // do not send local network masternode
         // NOTE: send masternode regardless of its current state, the other node will need it to verify old votes.
         LogPrint("masternode", "CMasternodeMan::%s -- Sending Masternode entry: masternode=%s  addr=%s\n", __func__, outpoint.ToStringShort(), it->second.addr.ToString());
         PushDsegInvs(pnode, it->second);
@@ -947,7 +947,7 @@ void CMasternodeMan::SyncAll(CNode* pnode, CConnman& connman)
     if (!masternodeSync.IsSynced()) return;
 
     // local network
-    bool isLocal = (pnode->addr.IsRFC1918() || pnode->addr.IsLocal());
+    bool isLocal = (pnode->addr.IsPrivate() || pnode->addr.IsLocal());
 
     CService addrSquashed = Params().AllowMultiplePorts() ? (CService)pnode->addr : CService(pnode->addr, 0);
     // should only ask for this once
@@ -968,7 +968,7 @@ void CMasternodeMan::SyncAll(CNode* pnode, CConnman& connman)
     LOCK(cs);
 
     for (const auto& mnpair : mapMasternodes) {
-        if (mnpair.second.addr.IsRFC1918() || mnpair.second.addr.IsLocal()) continue; // do not send local network masternode
+        if (mnpair.second.addr.IsPrivate() || mnpair.second.addr.IsLocal()) continue; // do not send local network masternode
         // NOTE: send masternode regardless of its current state, the other node will need it to verify old votes.
         LogPrint("masternode", "CMasternodeMan::%s -- Sending Masternode entry: masternode=%s  addr=%s\n", __func__, mnpair.first.ToStringShort(), mnpair.second.addr.ToString());
         PushDsegInvs(pnode, mnpair.second);

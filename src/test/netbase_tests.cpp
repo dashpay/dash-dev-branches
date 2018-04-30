@@ -49,9 +49,9 @@ BOOST_AUTO_TEST_CASE(netbase_properties)
     BOOST_CHECK(ResolveIP("127.0.0.1").IsIPv4());
     BOOST_CHECK(ResolveIP("::FFFF:192.168.1.1").IsIPv4());
     BOOST_CHECK(ResolveIP("::1").IsIPv6());
-    BOOST_CHECK(ResolveIP("10.0.0.1").IsRFC1918());
-    BOOST_CHECK(ResolveIP("192.168.1.1").IsRFC1918());
-    BOOST_CHECK(ResolveIP("172.31.255.255").IsRFC1918());
+    BOOST_CHECK(ResolveIP("10.0.0.1").IsPrivate());
+    BOOST_CHECK(ResolveIP("192.168.1.1").IsPrivate());
+    BOOST_CHECK(ResolveIP("172.31.255.255").IsPrivate());
     BOOST_CHECK(!ResolveIP("2001:0DB8::").IsValid());
     BOOST_CHECK(!ResolveIP("169.254.1.1").IsRoutable());
     BOOST_CHECK(ResolveIP("2002::1").IsRoutable());
