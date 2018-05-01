@@ -69,7 +69,7 @@ class CNetAddr
     public:
         using DataType = std::array<unsigned char, 16>;
 
-    protected:
+    private:
         const CNetBackend *backend;
         DataType ip; // in network byte order
         uint32_t scopeId; // for scoped/link-local ipv6 addresses
@@ -159,7 +159,7 @@ class CSubNet
 /** A combination of a network address (CNetAddr) and a (TCP) port */
 class CService : public CNetAddr
 {
-    protected:
+    private:
         unsigned short port; // host order
 
     public:
