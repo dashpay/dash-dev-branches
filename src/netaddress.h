@@ -15,6 +15,7 @@
 #include <stdint.h>
 #include <string>
 #include <vector>
+#include <array>
 
 extern bool fAllowPrivateNet;
 
@@ -65,19 +66,21 @@ inline bool operator<(const CNetAddrGroup& l, const CNetAddrGroup& r)
 /** IP address (IPv6, or IPv4 using mapped IPv6 range (::FFFF:0:0/96)) */
 class CNetAddr
 {
+    public:
+        using DataType = std::array<unsigned char, 16>;
+
     protected:
         const CNetBackend *backend;
-        unsigned char ip[16]; // in network byte order
+        DataType ip; // in network byte order
         uint32_t scopeId; // for scoped/link-local ipv6 addresses
 
     public:
         CNetAddr();
         CNetAddr(const CNetBackend& netbackend);
-        void Init();
         void SetIP(const CNetAddr& ip);
 
-        const unsigned char *GetRaw() const {return ip;}
-        unsigned char *GetRaw() {return ip;}
+        const DataType& GetRaw() const {return ip;}
+        DataType& GetRaw() {return ip;}
         uint32_t GetScopeId() const {return scopeId;}
         void SetScopeId(uint32_t scopeIdIn) {scopeId = scopeIdIn;}
 
@@ -101,11 +104,16 @@ class CNetAddr
         friend bool operator!=(const CNetAddr& a, const CNetAddr& b);
         friend bool operator<(const CNetAddr& a, const CNetAddr& b);
 
-        ADD_SERIALIZE_METHODS;
+        template<typename Stream>
+        void Serialize(Stream& s) const
+        {
+            s.write(reinterpret_cast<const char *>(ip.data()), ip.size());
+        }
 
-        template <typename Stream, typename Operation>
-        inline void SerializationOp(Stream& s, Operation ser_action) {
-            READWRITE(FLATDATA(ip));
+        template<typename Stream>
+        void Unserialize(Stream& s)
+        {
+            s.read(reinterpret_cast<char *>(ip.data()), ip.size());
         }
 
         friend class CSubNet;
@@ -173,7 +181,7 @@ class CService : public CNetAddr
 
         template <typename Stream, typename Operation>
         inline void SerializationOp(Stream& s, Operation ser_action) {
-            READWRITE(FLATDATA(ip));
+            READWRITE(*static_cast<CNetAddr*>(this));
             unsigned short portN = htons(port);
             READWRITE(FLATDATA(portN));
             if (ser_action.ForRead())

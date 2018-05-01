@@ -32,15 +32,27 @@ static unsigned int GetByte(const CNetAddr& addr, unsigned int n)
     return addr.GetRaw()[15-n];
 }
 
+template<typename InputIterator>
+static bool HasPrefix(const CNetAddr& addr, InputIterator b, InputIterator e)
+{
+    return std::mismatch(b, e, std::begin(addr.GetRaw())).first == e;
+}
+
+template<typename Container>
+static bool HasPrefix(const CNetAddr& addr, const Container& prefix)
+{
+    return HasPrefix(addr, std::begin(prefix), std::end(prefix));
+}
+
 static bool IsTor(const CNetAddr& addr)
 {
-    return (memcmp(addr.GetRaw(), pchOnionCat, sizeof(pchOnionCat)) == 0);
+    return HasPrefix(addr, pchOnionCat);
 }
 
 // IPv4 mapped address (::FFFF:0:0/96, 0.0.0.0/0)
 static bool IsIPv4(const CNetAddr& addr)
 {
-    return (memcmp(addr.GetRaw(), pchIPv4, sizeof(pchIPv4)) == 0);
+    return HasPrefix(addr, pchIPv4);
 }
 
 // IPv6 address (not mapped IPv4, not Tor)
@@ -111,7 +123,7 @@ static bool IsRFC3964(const CNetAddr& addr)
 static bool IsRFC6052(const CNetAddr& addr)
 {
     static const unsigned char pchRFC6052[] = {0,0x64,0xFF,0x9B,0,0,0,0,0,0,0,0};
-    return (memcmp(addr.GetRaw(), pchRFC6052, sizeof(pchRFC6052)) == 0);
+    return HasPrefix(addr, pchRFC6052);
 }
 
 // IPv6 Teredo tunnelling (2001::/32)
@@ -125,7 +137,7 @@ static bool IsRFC4380(const CNetAddr& addr)
 static bool IsRFC4862(const CNetAddr& addr)
 {
     static const unsigned char pchRFC4862[] = {0xFE,0x80,0,0,0,0,0,0};
-    return (memcmp(addr.GetRaw(), pchRFC4862, sizeof(pchRFC4862)) == 0);
+    return HasPrefix(addr, pchRFC4862);
 }
 
 // IPv6 unique local (FC00::/7)
@@ -138,7 +150,7 @@ static bool IsRFC4193(const CNetAddr& addr)
 static bool IsRFC6145(const CNetAddr& addr)
 {
     static const unsigned char pchRFC6145[] = {0,0,0,0,0,0,0,0,0xFF,0xFF,0,0};
-    return (memcmp(addr.GetRaw(), pchRFC6145, sizeof(pchRFC6145)) == 0);
+    return HasPrefix(addr, pchRFC6145);
 }
 
 // IPv6 ORCHID (2001:10::/28)
@@ -158,7 +170,7 @@ static bool GetSockAddr(const CService& addr,
         *addrlen = sizeof(struct sockaddr_in);
         struct sockaddr_in *paddrin = (struct sockaddr_in*)paddr;
         memset(paddrin, 0, *addrlen);
-        memcpy(&paddrin->sin_addr, addr.GetRaw()+12, 4);
+        memcpy(&paddrin->sin_addr, addr.GetRaw().data()+12, 4);
         paddrin->sin_family = AF_INET;
         paddrin->sin_port = htons(addr.GetPort());
         return true;
@@ -169,7 +181,7 @@ static bool GetSockAddr(const CService& addr,
         *addrlen = sizeof(struct sockaddr_in6);
         struct sockaddr_in6 *paddrin6 = (struct sockaddr_in6*)paddr;
         memset(paddrin6, 0, *addrlen);
-        memcpy(&paddrin6->sin6_addr, addr.GetRaw(), 16);
+        memcpy(&paddrin6->sin6_addr, addr.GetRaw().data(), 16);
         paddrin6->sin6_scope_id = addr.GetScopeId();
         paddrin6->sin6_family = AF_INET6;
         paddrin6->sin6_port = htons(addr.GetPort());
@@ -184,15 +196,15 @@ static bool SetSockAddr(CService& addr, const struct sockaddr *paddr)
     case AF_INET: {
         addr = CService(CNetBackendTcp::instance);
         const auto paddr4 = reinterpret_cast<const struct sockaddr_in *>(paddr);
-        memcpy(addr.GetRaw(), pchIPv4, 12);
-        memcpy(addr.GetRaw()+12, (const uint8_t*)&paddr4->sin_addr, 4);
+        memcpy(addr.GetRaw().data(), pchIPv4, 12);
+        memcpy(addr.GetRaw().data()+12, (const uint8_t*)&paddr4->sin_addr, 4);
         addr.SetPort(ntohs(paddr4->sin_port));
         return true;
     }
     case AF_INET6: {
         addr = CService(CNetBackendTcp::instance);
         const auto paddr6 = reinterpret_cast<const struct sockaddr_in6 *>(paddr);
-        memcpy(addr.GetRaw(), (const uint8_t*)&paddr6->sin6_addr, 16);
+        memcpy(addr.GetRaw().data(), (const uint8_t*)&paddr6->sin6_addr, 16);
         addr.SetScopeId(paddr6->sin6_scope_id);
         addr.SetPort(ntohs(paddr6->sin6_port));
         return true;
@@ -221,8 +233,8 @@ CService CNetBackendTcp::addr_create(const ::in_addr& ipv4Addr,
                                      unsigned short portIn) const
 {
     CService addr{*this};
-    memcpy(addr.GetRaw(), pchIPv4, 12);
-    memcpy(addr.GetRaw()+12, reinterpret_cast<const uint8_t*>(&ipv4Addr), 4);
+    memcpy(addr.GetRaw().data(), pchIPv4, 12);
+    memcpy(addr.GetRaw().data()+12, reinterpret_cast<const uint8_t*>(&ipv4Addr), 4);
     addr.SetPort(portIn);
     return addr;
 }
@@ -231,7 +243,7 @@ CService CNetBackendTcp::addr_create(const ::in6_addr& ipv6Addr,
                                      unsigned short portIn) const
 {
     CService addr{*this};
-    memcpy(addr.GetRaw(), reinterpret_cast<const uint8_t*>(&ipv6Addr), 16);
+    memcpy(addr.GetRaw().data(), reinterpret_cast<const uint8_t*>(&ipv6Addr), 16);
     addr.SetPort(portIn);
     return addr;
 }
@@ -250,7 +262,7 @@ bool CNetBackendTcp::lookup(const char *pszName,
         if (vchAddr.size() != 16-sizeof(pchOnionCat))
             return false;
         CNetAddr addr{*this};
-        memcpy(addr.GetRaw(), pchOnionCat, sizeof(pchOnionCat));
+        memcpy(addr.GetRaw().data(), pchOnionCat, sizeof(pchOnionCat));
         for (unsigned int i=0; i<16-sizeof(pchOnionCat); i++)
             addr.GetRaw()[i + sizeof(pchOnionCat)] = vchAddr[i];
         vIP.push_back(addr);
@@ -594,10 +606,7 @@ bool CNetBackendTcp::addr_is_local(const CNetAddr& addr) const
 
    // IPv6 loopback (::1/128)
    static const unsigned char pchLocal[16] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1};
-   if (memcmp(addr.GetRaw(), pchLocal, 16) == 0)
-       return true;
-
-   return false;
+   return HasPrefix(addr, pchLocal);
 }
 
 bool CNetBackendTcp::addr_is_private(const CNetAddr& addr) const
@@ -622,12 +631,12 @@ bool CNetBackendTcp::addr_is_valid(const CNetAddr& addr) const
     // header20 vectorlen3 addr26 addr26 addr26 header20 vectorlen3 addr26 addr26 addr26...
     // so if the first length field is garbled, it reads the second batch
     // of addr misaligned by 3 bytes.
-    if (memcmp(addr.GetRaw(), pchIPv4+3, sizeof(pchIPv4)-3) == 0)
+    if (HasPrefix(addr,  std::begin(pchIPv4)+3, std::end(pchIPv4)))
         return false;
 
     // unspecified IPv6 address (::/128)
-    unsigned char ipNone6[16] = {};
-    if (memcmp(addr.GetRaw(), ipNone6, 16) == 0)
+    static const unsigned char ipNone6[16] = {};
+    if (HasPrefix(addr, ipNone6))
         return false;
 
     // documentation IPv6 address
@@ -638,12 +647,12 @@ bool CNetBackendTcp::addr_is_valid(const CNetAddr& addr) const
     {
         // INADDR_NONE
         uint32_t ipNone = INADDR_NONE;
-        if (memcmp(addr.GetRaw()+12, &ipNone, 4) == 0)
+        if (memcmp(addr.GetRaw().data()+12, &ipNone, 4) == 0)
             return false;
 
         // 0
         ipNone = 0;
-        if (memcmp(addr.GetRaw()+12, &ipNone, 4) == 0)
+        if (memcmp(addr.GetRaw().data()+12, &ipNone, 4) == 0)
             return false;
     }
 
@@ -666,7 +675,7 @@ bool CNetBackendTcp::addr_is_routable(const CNetAddr& addr) const
 std::string CNetBackendTcp::addr_str(const CNetAddr& addr) const
 {
     if (IsTor(addr))
-        return EncodeBase32(addr.GetRaw() + 6, 10) + ".onion";
+        return EncodeBase32(addr.GetRaw().data() + 6, 10) + ".onion";
     if (IsIPv4(addr))
         return strprintf("%u.%u.%u.%u",
                          GetByte(addr, 3), GetByte(addr, 2),

@@ -7,6 +7,8 @@
 #include "config/dash-config.h"
 #endif
 
+#include <algorithm>
+
 #include "netaddress.h"
 #include "netbase.h"
 #include "hash.h"
@@ -25,33 +27,26 @@ const char *CNetAddrGroup::GetBackendName() const
     return GetBackend().name();
 }
 
-void CNetAddr::Init()
-{
-    memset(ip, 0, sizeof(ip));
-    scopeId = 0;
-}
-
 void CNetAddr::SetIP(const CNetAddr& ipIn)
 {
-    memcpy(ip, ipIn.ip, sizeof(ip));
+    ip = ipIn.ip;
 }
 
 CNetAddr::CNetAddr()
-: backend{&CNetBackendTcp::instance}
+: backend{&CNetBackendTcp::instance}, ip{}, scopeId{0}
 {
-    Init();
 }
 
 CNetAddr::CNetAddr(const CNetBackend& netbackend)
-: backend{&netbackend}
+: backend{&netbackend}, ip{}, scopeId{0}
 {
-    Init();
 }
 
 bool CNetAddr::IsIPv4() const
 {
     return (&GetBackend() == &CNetBackendTcp::instance &&
-            memcmp(ip, pchIPv4, sizeof(pchIPv4)) == 0);
+            std::mismatch(std::begin(pchIPv4), std::end(pchIPv4),
+                          ip.begin()).first == std::end(pchIPv4));
 }
 
 bool CNetAddr::IsIPv6() const
@@ -68,7 +63,9 @@ bool CNetAddr::IsPrivate() const
 bool CNetAddr::IsTor() const
 {
     return (&GetBackend() == &CNetBackendTcp::instance &&
-            memcmp(ip, pchOnionCat, sizeof(pchOnionCat)) == 0);
+            std::mismatch(std::begin(pchOnionCat),
+                          std::end(pchOnionCat),
+                          ip.begin()).first == std::end(pchOnionCat));
 }
 
 bool CNetAddr::IsLocal() const
@@ -126,18 +123,18 @@ std::string CNetAddr::ToString() const
 
 bool operator==(const CNetAddr& a, const CNetAddr& b)
 {
-    return (&a.GetBackend() == &b.GetBackend() && memcmp(a.ip, b.ip, 16) == 0);
+    return (&a.GetBackend() == &b.GetBackend() && a.ip == b.ip);
 }
 
 bool operator!=(const CNetAddr& a, const CNetAddr& b)
 {
-    return (&a.GetBackend() != &b.GetBackend() || memcmp(a.ip, b.ip, 16) != 0);
+    return (&a.GetBackend() != &b.GetBackend() || a.ip != b.ip);
 }
 
 bool operator<(const CNetAddr& a, const CNetAddr& b)
 {
     return (&a.GetBackend() < &b.GetBackend() ||
-            (&a.GetBackend() == &b.GetBackend() && memcmp(a.ip, b.ip, 16) < 0));
+            (&a.GetBackend() == &b.GetBackend() && a.ip < b.ip));
 }
 
 // get canonical identifier of an address' group
@@ -206,9 +203,9 @@ bool operator<(const CService& a, const CService& b)
 
 std::vector<unsigned char> CService::GetKey() const
 {
-     std::vector<unsigned char> vKey;
+     std::vector<unsigned char> vKey(std::begin(GetRaw()),
+                                     std::begin(GetRaw())+16);
      vKey.resize(18);
-     memcpy(&vKey[0], ip, 16);
      vKey[16] = port / 0x100;
      vKey[17] = port & 0x0FF;
      return vKey;
