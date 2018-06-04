@@ -3,6 +3,29 @@
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
+# Graphene files here
+# add - allowed_args.cpp, aask for permission
+# edit bloom.cpp
+# add graphene.cpp
+# add graphene.h
+# add graphene_set.h
+# add iblt.h
+# add iblt.cpp
+# edit init.cpp
+# edit main.cpp
+# edit main.h
+# edit net.cpp
+# edit net.h
+# add parallel.cpp
+# edit protocol.cpp - add Graphene keywords
+# edit protocol.h - add Graphene keywords
+# map requestManager
+# similar changes to rpc files
+# add tests for bloom, graphene, iblt
+# thinblock
+# map unlimited
+# graphene support to util
+
 DIST_SUBDIRS = secp256k1 univalue
 
 AM_LDFLAGS = $(PTHREAD_CFLAGS) $(LIBTOOL_LDFLAGS) $(HARDENED_LDFLAGS)
