@@ -143,7 +143,7 @@ UniValue blockToJSON(const CBlock& block, const CBlockIndex* blockindex, bool tx
             tss.push_back(objTs);
         }
         else
-            txs.push_back(ts.GetHash().GetHex());
+            tss.push_back(ts.GetHash().GetHex());
     }
     result.push_back(Pair("tx", txs));
     result.push_back(Pair("ts", tss));
