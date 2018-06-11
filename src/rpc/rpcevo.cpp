@@ -36,17 +36,18 @@ void TsToJSON(const CTransition& ts, const uint256 &hashBlock, UniValue& entry)
     entry.push_back(Pair("vchUserSigSize", (int)ts.vchUserSig.size()));
     entry.push_back(Pair("vvchQuorumSigsSize", (int)::GetSerializeSize(ts.vvchQuorumSigs, SER_NETWORK, PROTOCOL_VERSION)));
 
+    entry.push_back(Pair("action", (int)ts.action));
     switch (ts.action) {
         case Transition_UpdateData:
-            entry.push_back(Pair("action", "updateData"));
+            entry.push_back(Pair("actionStr", "updateData"));
             entry.push_back(Pair("hashDataMerkleRoot", ts.hashDataMerkleRoot.GetHex()));
             break;
         case Transition_ResetKey:
-            entry.push_back(Pair("action", "resetKey"));
+            entry.push_back(Pair("actionStr", "resetKey"));
             entry.push_back(Pair("newKeyID", ts.newPubKeyID.ToString()));
             break;
         case Transition_CloseAccount:
-            entry.push_back(Pair("action", "closeAccount"));
+            entry.push_back(Pair("actionStr", "closeAccount"));
             break;
     }
 
