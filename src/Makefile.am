@@ -4,7 +4,7 @@
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 # Graphene files here
-# add - allowed_args.cpp, aask for permission
+# add - allowed_args.cpp, ask for permission
 # edit bloom.cpp
 # add graphene.cpp
 # add graphene.h
@@ -12,13 +12,11 @@
 # add iblt.h
 # add iblt.cpp
 # edit init.cpp
-# edit main.cpp
-# edit main.h
+# edit main.cpp - validation, net_processing
+# edit main.h - validation, net_processing
 # edit net.cpp
 # edit net.h
 # add parallel.cpp
-# edit protocol.cpp - add Graphene keywords
-# edit protocol.h - add Graphene keywords
 # map requestManager
 # similar changes to rpc files
 # add tests for bloom, graphene, iblt
@@ -145,6 +143,7 @@ BITCOIN_CORE_H = \
   hdchain.h \
   httprpc.h \
   httpserver.h \
+  iblt.h \
   indirectmap.h \
   init.h \
   instantx.h \
@@ -186,6 +185,7 @@ BITCOIN_CORE_H = \
   script/standard.h \
   script/ismine.h \
   spork.h \
+  stat.h \
   streams.h \
   support/allocators/secure.h \
   support/allocators/zeroafterfree.h \
@@ -193,6 +193,7 @@ BITCOIN_CORE_H = \
   support/events.h \
   support/lockedpool.h \
   sync.h \
+  thinblock.h \
   threadsafety.h \
   threadinterrupt.h \
   timedata.h \

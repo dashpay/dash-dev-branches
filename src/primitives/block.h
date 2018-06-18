@@ -8,6 +8,7 @@
 
 #include "primitives/transaction.h"
 #include "serialize.h"
+#include "sync.h"
 #include "uint256.h"
 
 /** Nodes collect new transactions into a block, hash them into a hash tree,
@@ -71,6 +72,10 @@ public:
 
 class CBlock : public CBlockHeader
 {
+private:
+    // memory only
+    mutable uint64_t nBlockSize; // Serialized block size in bytes
+
 public:
     // network and disk
     std::vector<CTransactionRef> vtx;
@@ -106,6 +111,7 @@ public:
         txoutMasternode = CTxOut();
         voutSuperblock.clear();
         fChecked = false;
+        nBlockSize=0;
     }
 
     CBlockHeader GetBlockHeader() const
@@ -121,6 +127,10 @@ public:
     }
 
     std::string ToString() const;
+
+    // Return the serialized block size in bytes. This is only done once and then the result stored
+    // in nBlockSize for future reference, saving unncessary and expensive serializations.
+    uint64_t GetBlockSize() const;
 };
 
 
@@ -159,5 +169,14 @@ struct CBlockLocator
         return vHave.empty();
     }
 };
+
+// Bitcoin Unlimited block.h
+typedef std::shared_ptr<CBlock> CBlockRef;
+static inline CBlockRef MakeBlockRef() {return std::make_shared<CBlock>(); };
+template <typename Blk>
+static inline CBlockRef MakeBlockRef(Blk &&blkIn)
+{
+    return std::make_shared<CBlock>(std::forward<Blk>(blkIn));
+}
 
 #endif // BITCOIN_PRIMITIVES_BLOCK_H

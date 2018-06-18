@@ -123,6 +123,9 @@ namespace {
     /** Stack of nodes which we have set to announce using compact blocks */
     std::list<NodeId> lNodesAnnouncingHeaderAndIDs;
 
+    /** Stack of nodes which we have set to announce using graphene blocks */
+    std::list<NodeId> lNodesAnnouncingGraphene;
+
     /** Number of preferable block download peers. */
     int nPreferredDownload = 0;
 
@@ -197,6 +200,11 @@ struct CNodeState {
     bool fPreferHeaderAndIDs;
     //! Whether this peer will send us cmpctblocks if we request them
     bool fProvidesHeaderAndIDs;
+    //! Whether this peer wants graphene (when possible) for block announcements. (bloom + iblt)
+    bool fPreferGraphene;
+    //! Whether this peer will send us graphene if we request them
+    bool fProvidesGraphene;
+
     /**
      * If we've announced last version to this peer: whether the peer sends last version in cmpctblocks/blocktxns,
      * otherwise: whether this peer sends non-last version in cmpctblocks/blocktxns.
@@ -223,6 +231,8 @@ struct CNodeState {
         fPreferHeaderAndIDs = false;
         fProvidesHeaderAndIDs = false;
         fSupportsDesiredCmpctVersion = false;
+        fPreferGraphene = false;
+        fProvidesGraphene = false;
     }
 };
 

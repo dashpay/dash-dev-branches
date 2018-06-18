@@ -39,6 +39,10 @@ const char *SENDCMPCT="sendcmpct";
 const char *CMPCTBLOCK="cmpctblock";
 const char *GETBLOCKTXN="getblocktxn";
 const char *BLOCKTXN="blocktxn";
+const char *GRAPHENEBLOCK = "grblk";
+const char *GRAPHENETX = "grblktx";
+const char *GET_GRAPHENETX = "get_grblktx";
+const char *GET_GRAPHENE = "get_grblk";
 // Dash message types
 const char *TXLOCKREQUEST="ix";
 const char *TXLOCKVOTE="txlvote";

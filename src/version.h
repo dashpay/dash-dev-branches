@@ -44,4 +44,7 @@ static const int DIP0001_PROTOCOL_VERSION = 70208;
 //! short-id-based block download starts with this version
 static const int SHORT_IDS_BLOCKS_VERSION = 70209;
 
+//! Graphene (bloom filter and IBLT) based download starts with this version
+static const int GRAPHENE_BLOCK_VERSION = 70210;
+
 #endif // BITCOIN_VERSION_H

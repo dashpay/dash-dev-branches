@@ -62,4 +62,4 @@ file(GLOB SOURCE_FILES
         src/rpc/*.h
         )
 
-add_executable(dash ${SOURCE_FILES})
+add_executable(dash ${SOURCE_FILES} src/thinblock.h src/thinblock.cpp src/stat.h)
