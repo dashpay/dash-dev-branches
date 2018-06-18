@@ -11,8 +11,10 @@
 #include "bloom.h"
 #include "compat.h"
 #include "hash.h"
+#include "iblt.h"
 #include "limitedmap.h"
 #include "netaddress.h"
+#include "primitives/block.h"
 #include "protocol.h"
 #include "random.h"
 #include "streams.h"
@@ -35,6 +37,7 @@
 #include <boost/filesystem/path.hpp>
 #include <boost/foreach.hpp>
 #include <boost/signals2/signal.hpp>
+#include <boost/lexical_cast.hpp>
 
 class CAddrMan;
 class CScheduler;
@@ -62,6 +65,9 @@ static const unsigned int MAX_PROTOCOL_MESSAGE_LENGTH = 3 * 1024 * 1024;
 static const unsigned int MAX_SUBVERSION_LENGTH = 256;
 /** Maximum number of automatic outgoing nodes */
 static const int MAX_OUTBOUND_CONNECTIONS = 8;
+/** Dash: The minimum number of graphene nodes to connect */
+/** TODO: verify number */
+static const uint8_t MIN_GRAPHENE_NODES = 8;
 /** Maximum number of addnode outgoing nodes */
 static const int MAX_ADDNODE_CONNECTIONS = 8;
 /** Maximum number if outgoing masternodes */
@@ -80,6 +86,10 @@ static const size_t MAPASKFOR_MAX_SZ = MAX_INV_SZ;
 static const size_t SETASKFOR_MAX_SZ = 2 * MAX_INV_SZ;
 /** The maximum number of peer connections to maintain. */
 static const unsigned int DEFAULT_MAX_PEER_CONNECTIONS = 125;
+/** The minimum number of xthin nodes to connect */
+static const uint8_t MIN_XTHIN_NODES = 8;
+/** The minimum number of graphene nodes to connect */
+static const uint8_t MIN_GRAPHENE_NODES = 8;
 /** The default for -maxuploadtarget. 0 = Unlimited */
 static const uint64_t DEFAULT_MAX_UPLOAD_TARGET = 0;
 /** The default timeframe for -maxuploadtarget. 1 day. */
@@ -676,6 +686,31 @@ class CNode
 {
     friend class CConnman;
 public:
+//    struct CThinBlockInFlight
+//    {
+//        int64_t nRequestTime;
+//        bool fReceived;
+//
+//        CThinBlockInFlight()
+//        {
+//            nRequestTime = GetTime();
+//            fReceived = false;
+//        }
+//    };
+
+    struct CGrapheneBlockInFlight
+    {
+        int64_t nRequestTime;
+        bool fReceived;
+
+        CGrapheneBlockInFlight()
+        {
+            nRequestTime = GetTime();
+            fReceived = false;
+        }
+
+    };
+
     // socket
     std::atomic<ServiceFlags> nServices;
     ServiceFlags nServicesExpected;
@@ -732,6 +767,8 @@ public:
     CSemaphoreGrant grantMasternodeOutbound;
     CCriticalSection cs_filter;
     CBloomFilter* pfilter;
+    // BU - Xtreme Thinblocks: a bloom filter which is separate from the one used by SPV wallets
+    CBloomFilter *pThinBlockFilter;
     std::atomic<int> nRefCount;
     const NodeId id;
 
@@ -739,6 +776,47 @@ public:
 
     std::atomic_bool fPauseRecv;
     std::atomic_bool fPauseSend;
+
+    // BUIP010 Xtreme Thinblocks: begin section
+    // CBlock thinBlock;
+    // std::vector<uint256> thinBlockHashes;
+    // std::vector<uint64_t> xThinBlockHashes;
+    // std::map<uint64_t, CTransactionRef> mapMissingTx;
+    // uint64_t nLocalThinBlockBytes; // the bytes used in creating this thinblock, updated dynamically
+    // int nSizeThinBlock; // Original on-wire size of the block. Just used for reporting
+    // int thinBlockWaitingForTxns; // if -1 then not currently waiting
+    // CCriticalSection cs_mapthinblocksinflight; // lock mapThinBlocksInFlight
+    // std::map<uint256, CThinBlockInFlight> mapThinBlocksInFlight; // thin blocks in flight and the time requested.
+    // double nGetXBlockTxCount; // Count how many get_xblocktx requests are made
+    // uint64_t nGetXBlockTxLastTime; // The last time a get_xblocktx request was made
+    // double nGetXthinCount; // Count how many get_xthin requests are made
+    // uint64_t nGetXthinLastTime; // The last time a get_xthin request was made
+    // uint32_t nXthinBloomfilterSize; // The maximum xthin bloom filter size (in bytes) that our peer will accept.
+    // BUIP010 Xtreme Thinblocks: end section
+
+    // DIPXXX Graphene blocks: begin section
+    CCriticalSection cs_ngraphenemempooltx; // lock nGrapheneMemPoolTx
+    int64_t nGrapheneMemPoolTx;
+    CBlock grapheneBlock;
+    std::vector<uint256> grapheneBlockHashes;
+    std::map<uint64_t, uint32_t> grapheneMapHashOrderIndex;
+    std::map<uint64_t, CTransaction> mapGrapheneMissingTx;
+    uint64_t nLocalGrapheneBlockBytes; // the bytes used in creating this graphene block, updated dynamically
+    int nSizeGrapheneBlock; // Original on-wire size of the block. Just used for reporting
+    int grapheneBlockWaitingForTxns; // if -1 then not currently waiting
+    CCriticalSection cs_grapheneadditionaltxs; // lock grapheneAdditionalTxs
+    std::vector<CTransactionRef> grapheneAdditionalTxs; // entire transactions included in graphene block
+    CCriticalSection cs_mapgrapheneblocksinflight; // lock mapGraheneBlocksInFlight
+    std::map<uint256, CGrapheneBlockInFlight>
+            mapGrapheneBlocksInFlight; // graphene blocks in flight and the time requested.
+    double nGetGrapheneBlockTxCount; // Count how many get_xblocktx requests are made
+    uint64_t nGetGrapheneBlockTxLastTime; // The last time a get_xblocktx request was made
+    double nGetGrapheneCount; // Count how many get_graphene requests are made
+    uint64_t nGetGrapheneLastTime; // The last time a get_graphene request was made
+    uint32_t nGrapheneBloomfilterSize; // The maximum graphene bloom filter size (in bytes) that our peer will accept.
+    // DIPXXX Graphene blocks: end section
+
+
 protected:
 
     mapMsgCmdSize mapSendBytesPerMsgCmd;
@@ -863,6 +941,25 @@ public:
         nRefCount--;
     }
 
+    // BUIP010
+//    bool ThinBlockCapable()
+//    {
+//
+//        if (nServices & NODE_XTHIN)
+//            return true;
+//        return false;
+//
+//    }
+
+
+    // DIPXXX
+    bool GrapheneCapable()
+    {
+        if (nServices & NODE_GRAPHENE)
+            return true;
+        return false;
+    }
+
 
 
     void AddAddressKnown(const CAddress& _addr)
@@ -921,6 +1018,14 @@ public:
     void AskFor(const CInv& inv);
 
     void CloseSocketDisconnect();
+
+    std::string GetLogName()
+    {
+        std::string idstr = boost::lexical_cast<std::string>(id);
+        if (fLogIPs)
+            return addrName + " (" + idstr + ") ";
+        return idstr;
+    }
 
     void copyStats(CNodeStats &stats);
 

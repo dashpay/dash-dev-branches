@@ -5,6 +5,7 @@
 #ifndef BITCOIN_BLOOM_H
 #define BITCOIN_BLOOM_H
 
+#include "consensus/consensus.h"
 #include "serialize.h"
 
 #include <vector>
@@ -57,6 +58,18 @@ private:
     CBloomFilter(unsigned int nElements, double nFPRate, unsigned int nTweak);
     friend class CRollingBloomFilter;
 
+    /** Helper function to set up bloom filter from desired number of elements and false positive rate.
+        Used by the constructors. Checks that the variables in sane ranges. */
+    void setup(unsigned int nElements,
+               double nFPRate,
+               unsigned int nTweakIn,
+               unsigned char nFlagsIn,
+               bool size_constrained,
+               uint32_t nMaxFilterSize);
+
+    //! Checks for empty and full filters to avoid wasting cpu
+    void UpdateEmptyFull();
+
 public:
     /**
      * Creates a new bloom filter which will provide the given fp rate when filled with the given number of elements
@@ -68,6 +81,11 @@ public:
      * nFlags should be one of the BLOOM_UPDATE_* enums (not _MASK)
      */
     CBloomFilter(unsigned int nElements, double nFPRate, unsigned int nTweak, unsigned char nFlagsIn);
+    CBloomFilter(unsigned int nElements,
+                 double nFPRate,
+                 unsigned int nTweak,
+                 unsigned char nFlagsIn,
+                 uint32_t nMaxFilterSize = SMALLEST_MAX_BLOOM_FILTER_SIZE);
     CBloomFilter() : isFull(true), isEmpty(false), nHashFuncs(0), nTweak(0), nFlags(0) {}
 
     ADD_SERIALIZE_METHODS;

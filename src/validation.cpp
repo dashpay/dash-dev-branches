@@ -163,6 +163,43 @@ namespace {
     /** chainwork for the last block that preciousblock has been applied to. */
     arith_uint256 nLastPreciousChainwork = 0;
 
+    CCriticalSection cs_recentRejects;
+    /**
+     * Filter for transactions that were recently rejected by
+     * AcceptToMemoryPool. These are not rerequested until the chain tip
+     * changes, at which point the entire filter is reset. Protected by
+     * cs_main.
+     *
+     * Without this filter we'd be re-requesting txs from each of our peers,
+     * increasing bandwidth consumption considerably. For instance, with 100
+     * peers, half of which relay a tx we don't accept, that might be a 50x
+     * bandwidth increase. A flooding attacker attempting to roll-over the
+     * filter using minimum-sized, 60byte, transactions might manage to send
+     * 1000/sec if we have fast peers, so we pick 120,000 to give our peers a
+     * two minute window to send invs to us.
+     *
+     * Decreasing the false positive rate is fairly cheap, so we pick one in a
+     * million to make it highly unlikely for users to have issues with this
+     * filter.
+     *
+     * Memory used: 1.7MB
+     */
+    std::unique_ptr<CRollingBloomFilter> recentRejects GUARDED_BY(cs_recentRejects);
+    uint256 hashRecentRejectsChainTip;
+    /**
+     * Keep track of transaction which were recently in a block and don't
+     * request those again.
+     *
+     * Note that we dont actually ever clear this - in cases of reorgs where
+     * transactions dropped out they were either added back to our mempool
+     * or fell out due to size limitations (in which case we'll get them again
+     * if the user really cares and re-sends).
+     *
+     * Protected by cs_recentRejects.
+     */
+
+    std::unique_ptr<CRollingBloomFilter> txn_recently_in_block GUARDED_BY(cs_recentRejects);
+
     /** Dirty block index entries. */
     std::set<CBlockIndex*> setDirtyBlockIndex;
 
@@ -1019,12 +1056,12 @@ bool AcceptToMemoryPoolWorker(CTxMemPool& pool, CValidationState& state, const C
         // Remove conflicting transactions from the mempool
         BOOST_FOREACH(const CTxMemPool::txiter it, allConflicting)
         {
-            LogPrint("mempool", "replacing tx %s with %s for %s %s additional fees, %d delta bytes\n",
-                    it->GetTx().GetHash().ToString(),
-                    hash.ToString(),
-                    FormatMoney(nModifiedFees - nConflictingFees),
-                    CURRENCY_UNIT,
-                    (int)nSize - (int)nConflictingSize);
+          //  LogPrint("mempool", "replacing tx %s with %s for %s %s additional fees, %d delta bytes\n", it->GetTx().GetHash().ToString(),
+          //           hash.ToString(),
+          //           FormatMoney(nModifiedFees - nConflictingFees),
+          //           CURRENCY_UNIT,
+          //           (int)nSize - (int)nConflictingSize );
+
             if (plTxnReplaced)
                 plTxnReplaced->push_back(it->GetSharedTx());
         }
@@ -1196,8 +1233,51 @@ bool GetTransaction(const uint256 &hash, CTransactionRef &txOut, const Consensus
 }
 
 
+bool AlreadyHaveTx(const CInv &inv)
+{
+    // Make checks for anything that requires cs_recentRejects
+    {
+        LOCK(cs_recentRejects);
+        DbgAssert(recentRejects, return false);
+        if (chainActive.Tip()->GetBlockHash() != hashRecentRejectsChainTip)
+        {
+            // If the chain tip has changed previously rejected transactions
+            // might be now valid, e.g. due to a nLockTime'd tx becoming valid,
+            // or a double-spend. Reset the rejects filter and give those
+            // txs a second chance.
+            hashRecentRejectsChainTip = chainActive.Tip()->GetBlockHash();
+            if (recentRejects)
+            {
+                recentRejects->reset();
+            }
+            else
+            {
+                recentRejects.reset(new CRollingBloomFilter(120000, 0.000001));
+            }
+        }
+        if (txn_recently_in_block->contains(inv.hash))
+            return true;
+        if (recentRejects->contains(inv.hash))
+            return true;
+    }
 
+    // Both these require either the mempool.cs or orphanpool.cs locks so we do them outside the scope
+    // of cs_recentRejects so we don't have to worry about locking orders.
+    return mempool.exists(inv.hash) || orphanpool.AlreadyHaveOrphan(inv.hash);
+}
 
+bool AlreadyHaveBlock(const CInv &inv) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+{
+    // The Request Manager functionality requires that we return true only when we actually have received
+    // the block and not when we have received the header only.  Otherwise the request manager may not
+    // be able to update its block source in order to make re-requests.
+    BlockMap::iterator mi = mapBlockIndex.find(inv.hash);
+    if (mi == mapBlockIndex.end())
+        return false;
+    if (!(mi->second->nStatus & BLOCK_HAVE_DATA))
+        return false;
+    return true;
+}
 
 
 //////////////////////////////////////////////////////////////////////////////

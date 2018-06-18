@@ -242,6 +242,23 @@ extern const char *GETBLOCKTXN;
  * @since protocol version 70209 as described by BIP 152
  */
 extern const char *BLOCKTXN;
+/**
+ * Graphene: The grapheneblock message transmits a single serialized graphene block
+ * */
+extern const char *GRAPHENEBLOCK;
+/**
+ * Graphene: The graphenetx message transmits a single serialized grblktx
+ * */
+extern const char *GRAPHENETX;
+/**
+ * Graphene: The get_graphene message transmits a single serialized get_grblktx 
+ * */
+extern const char *GET_GRAPHENETX;
+/**
+ * Graphene: The get_graphene message transmits a single serialized get_grblk
+ * */
+extern const char *GET_GRAPHENE;
+
 
 // Dash message types
 // NOTE: do NOT declare non-implmented here, we don't want them to be exposed to the outside
@@ -300,6 +317,10 @@ enum ServiceFlags : uint64_t {
     // collisions and other cases where nodes may be advertising a service they
     // do not actually support. Other service bits should be allocated via the
     // BIP process.
+
+    // NODE_GRAPHENE means that the node supports Graphene blocks
+    // If this is turned off then the node will not service nor make graphene requests
+    NODE_GRAPHENE = (1 << 5),
 };
 
 /** A CService with information about it as peer */
@@ -369,6 +390,7 @@ enum GetDataMsg {
     // Nodes may always request a MSG_CMPCT_BLOCK in a getdata, however,
     // MSG_CMPCT_BLOCK should not appear in any invs except as a part of getdata.
     MSG_CMPCT_BLOCK = 20, //!< Defined in BIP152
+    MSG_GRAPHENEBLOCK = 21,
 };
 
 /** inv message data */

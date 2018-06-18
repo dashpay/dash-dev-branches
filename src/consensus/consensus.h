@@ -21,6 +21,13 @@ inline unsigned int MaxBlockSigOps(bool fDIP0001Active /*= false */)
 /** Coinbase transaction outputs can only be spent after this number of new blocks (network rule) */
 static const int COINBASE_MATURITY = 100;
 
+/** This is the default max bloom filter size allowed on the dash network.
+ * TODO: Change comment for dash network, and the bloom filter size too
+ * In Bitcoin Unlimited we have the ability
+ *  to communicate to our peer what max bloom filter size we will accept but still observe this value as a default.
+ */
+static const unsigned int SMALLEST_MAX_BLOOM_FILTER_SIZE = 36000; // bytes
+
 /** Flags for nSequence and nLockTime locks */
 enum {
     /* Interpret sequence numbers as relative lock-time constraints. */
