@@ -12,23 +12,18 @@
 
 uint256 CBlockHeader::GetHash() const
 {
-    if (nVersion & VERSIONBITS_EVO) {
-        return HashX11(BEGIN(nVersion), END(hashTransitionsMerkleRoot));
-    } else {
-        return HashX11(BEGIN(nVersion), END(nNonce));
-    }
+    return HashX11(BEGIN(nVersion), END(nNonce));
 }
 
 std::string CBlock::ToString() const
 {
     std::stringstream s;
-    s << strprintf("CBlock(hash=%s, ver=0x%08x, hashPrevBlock=%s, hashMerkleRoot=%s, nTime=%u, nBits=%08x, nNonce=%u, hashTransitionsMerkleRoot=%s, vtx=%u, vts=%u)\n",
+    s << strprintf("CBlock(hash=%s, ver=0x%08x, hashPrevBlock=%s, hashMerkleRoot=%s, nTime=%u, nBits=%08x, nNonce=%u, vtx=%u, vts=%u)\n",
         GetHash().ToString(),
         nVersion,
         hashPrevBlock.ToString(),
         hashMerkleRoot.ToString(),
         nTime, nBits, nNonce,
-        hashTransitionsMerkleRoot.ToString(),
         vtx.size(),
         vts.size());
     for (unsigned int i = 0; i < vtx.size(); i++)

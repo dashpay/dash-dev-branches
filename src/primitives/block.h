@@ -31,9 +31,6 @@ public:
     uint32_t nBits;
     uint32_t nNonce;
 
-    // Evo
-    uint256 hashTransitionsMerkleRoot;
-
     CBlockHeader()
     {
         SetNull();
@@ -49,12 +46,6 @@ public:
         READWRITE(nTime);
         READWRITE(nBits);
         READWRITE(nNonce);
-
-        if (ContainsTransitions()) {
-            READWRITE(hashTransitionsMerkleRoot);
-        } else {
-            assert(hashTransitionsMerkleRoot.IsNull());
-        }
     }
 
     void SetNull()
@@ -65,7 +56,6 @@ public:
         nTime = 0;
         nBits = 0;
         nNonce = 0;
-        hashTransitionsMerkleRoot.SetNull();
     }
 
     bool IsNull() const
@@ -141,7 +131,6 @@ public:
         block.nTime          = nTime;
         block.nBits          = nBits;
         block.nNonce         = nNonce;
-        block.hashTransitionsMerkleRoot = hashTransitionsMerkleRoot;
         return block;
     }
 

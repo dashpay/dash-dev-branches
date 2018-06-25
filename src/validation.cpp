@@ -3366,17 +3366,6 @@ bool CheckBlock(const CBlock& block, CValidationState& state, const Consensus::P
         // while still invalidating it.
         if (mutated)
             return state.DoS(100, false, REJECT_INVALID, "bad-txns-duplicate", true, "duplicate transaction");
-
-        // Check Evo transitions merkle root
-        if (block.nVersion & VERSIONBITS_EVO) {
-            uint256 tsHashMerkleRoot2 = BlockTransitionsMerkleRoot(block, &mutated);
-            if (block.hashTransitionsMerkleRoot != tsHashMerkleRoot2)
-                return state.DoS(100, error("CheckBlock(): hashTransitionsMerkleRoot mismatch"),
-                                 REJECT_INVALID, "bad-tsnmrklroot", true);
-            // Same check as above. CVE-2012-2459
-            if (mutated)
-                return state.DoS(100, false, REJECT_INVALID, "bad-ts-duplicate", true, "duplicate transition");
-        }
     }
 
     // All potential-corruption validation must be done before we do any

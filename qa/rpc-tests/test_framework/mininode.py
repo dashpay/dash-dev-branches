@@ -520,7 +520,6 @@ class CBlockHeader(object):
             self.nTime = header.nTime
             self.nBits = header.nBits
             self.nNonce = header.nNonce
-            self.hashTransitionsMerkleRoot = header.hashTransitionsMerkleRoot
             self.sha256 = header.sha256
             self.hash = header.hash
             self.calc_sha256()
@@ -532,7 +531,6 @@ class CBlockHeader(object):
         self.nTime = 0
         self.nBits = 0
         self.nNonce = 0
-        self.hashTransitionsMerkleRoot = 0
         self.sha256 = None
         self.hash = None
 
@@ -543,9 +541,6 @@ class CBlockHeader(object):
         self.nTime = struct.unpack("<I", f.read(4))[0]
         self.nBits = struct.unpack("<I", f.read(4))[0]
         self.nNonce = struct.unpack("<I", f.read(4))[0]
-
-        if self.nVersion & VERSIONBITS_EVO:
-            self.hashTransitionsMerkleRoot = deser_uint256(f)
 
         self.sha256 = None
         self.hash = None
@@ -559,9 +554,6 @@ class CBlockHeader(object):
         r += struct.pack("<I", self.nBits)
         r += struct.pack("<I", self.nNonce)
 
-        if self.nVersion & VERSIONBITS_EVO:
-            r += ser_uint256(self.hashTransitionsMerkleRoot)
-
         return r
 
     def calc_sha256(self):
@@ -573,9 +565,6 @@ class CBlockHeader(object):
             r += struct.pack("<I", self.nTime)
             r += struct.pack("<I", self.nBits)
             r += struct.pack("<I", self.nNonce)
-
-            if self.nVersion & VERSIONBITS_EVO:
-                r += ser_uint256(self.hashTransitionsMerkleRoot)
 
             self.sha256 = uint256_from_str(dashhash(r))
             self.hash = encode(dashhash(r)[::-1], 'hex_codec').decode('ascii')
@@ -628,13 +617,6 @@ class CBlock(CBlockHeader):
             hashes.append(ser_uint256(tx.sha256))
         return self.get_merkle_root(hashes)
 
-    def calc_ts_merkle_root(self):
-        hashes = []
-        for ts in self.vts:
-            ts.calc_sha256()
-            hashes.append(ser_uint256(ts.sha256))
-        return self.get_merkle_root(hashes)
-
     def is_valid(self):
         self.calc_sha256()
         target = uint256_from_compact(self.nBits)
@@ -647,8 +629,6 @@ class CBlock(CBlockHeader):
             if not ts.is_valid():
                 return False
         if self.calc_merkle_root() != self.hashMerkleRoot:
-            return False
-        if self.calc_ts_merkle_root() != self.hashTransitionsMerkleRoot:
             return False
         return True
 
