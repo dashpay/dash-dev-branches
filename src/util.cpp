@@ -405,8 +405,8 @@ std::string formatInfoUnit(double value)
         i++;
     }
 
-    ostringstream ss;
-    ss << fixed << setprecision(2);
+    std::ostringstream ss;
+    ss << std::fixed << std::setprecision(2);
     ss << value << units[i];
     return ss.str();
 }

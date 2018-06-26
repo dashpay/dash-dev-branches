@@ -113,7 +113,9 @@ public:
 private:
     void _insert(int plusOrMinus, uint64_t k, const std::vector<uint8_t> v);
 
-    size_t valueSize;
+    // TODO: Nakul check the size_t
+    // size_t valueSize;
+    uint64_t valueSize;
     bool is_modified;
 
     std::vector<HashTableEntry> hashTable;

@@ -39,7 +39,7 @@ CGrapheneBlock::CGrapheneBlock(const CBlockRef pblock, uint64_t nReceiverMemPool
             vAdditionalTxs.push_back(tx);
 
         // Adding mempool bloom filter in Graphene block, add transactions that weren't in the mempool
-        // bloom filter of the sender.
+        // b*loom filter of the sender.
         // if (!senderMempoolFilter.contains(tx->GetHash()))
         //     vAdditionalTxs.push_back(tx);
     }
@@ -58,7 +58,7 @@ CGrapheneBlock::~CGrapheneBlock()
     }
 }
 
-CGrapheneBlockTx::CGrapheneBlockTx(uint256 blockHash, std::vector<CTransaction> &vTx)
+CGrapheneBlockTx::CGrapheneBlockTx(uint256 blockHash, std::vector<CMutableTransaction> &vTx)
 {
     blockhash = blockHash;
     vMissingTx = vTx;
@@ -613,7 +613,7 @@ bool IsGrapheneBlockValid(CNode *pfrom, const CBlockHeader &header)
 {
     // check block header
     CValidationState state;
-    if (!CheckBlockHeader(header, state, true))
+    if (!CheckBlockHeader(header, state, Params().GetConsensus() ,true))
     {
         return error("Received invalid header for graphene block %s from peer %s", header.GetHash().ToString(),
             pfrom->GetLogName());

@@ -122,7 +122,7 @@ public:
         }
         catch (std::exception &e)
         {
-            LOG(GRAPHENE, "failed to optimize symmetric difference for graphene\n");
+            LogPrint("GRAPHENE", "failed to optimize symmetric difference for graphene\n");
         }
 
         // Sender's estimate of number of items in both block and receiver mempool
@@ -137,10 +137,13 @@ public:
         else
             fpr = optSymDiff / float(nReceiverExcessItems);
 
-        // Construct Bloom filter
-        pSetFilter = new CBloomFilter(
-            nItems, fpr, insecure_rand.rand32(), BLOOM_UPDATE_ALL, std::numeric_limits<uint32_t>::max());
-        LOG(GRAPHENE, "fp rate: %f Num elements in bloom filter: %d\n", fpr, nItems);
+        // Construct Bloom Filter
+        // TODO: Chnage Bloom Filter definition and add a new one to original for this
+         pSetFilter = new CBloomFilter(
+             nItems, fpr, insecure_rand.rand32(), BLOOM_UPDATE_ALL);
+        // pSetFilter = new CBloomFilter(
+        //     nItems, fpr, insecure_rand.rand32(), BLOOM_UPDATE_ALL, std::numeric_limits<uint32_t>::max());
+        LogPrint("GRAPHENE", "fp rate: %f Num elements in bloom filter: %d\n", fpr, nItems);
 
         // Construct IBLT
         uint64_t nIbltCells = std::max((int)IBLT_CELL_MINIMUM, (int)ceil(optSymDiff));
@@ -327,7 +330,8 @@ public:
 
 private:
     bool ordered;
-    size_t nReceiverUniverseItems;
+    uint64_t nReceiverUniverseItems;
+    // size_t nReceiverUniverseItems;
     std::vector<unsigned char> encodedRank;
     CBloomFilter *pSetFilter;
     CIblt *pSetIblt;

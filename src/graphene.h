@@ -97,10 +97,11 @@ class CGrapheneBlockTx
 public:
     /** Public only for unit testing */
     uint256 blockhash;
-    std::vector<CTransaction> vMissingTx; // map of missing transactions
+    // TODO: Nakul changed to CMutableTransaction from CTransaction for copy assignment or use CTransaction&
+    std::vector<CMutableTransaction> vMissingTx; // map of *missing transactions
 
 public:
-    CGrapheneBlockTx(uint256 blockHash, std::vector<CTransaction> &vTx);
+    CGrapheneBlockTx(uint256 blockHash, std::vector<CMutableTransaction> &vTx);
     CGrapheneBlockTx() {}
     /**
      * Handle receiving a list of missing graphene block transactions from a prior request
