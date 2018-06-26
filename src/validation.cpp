@@ -1233,53 +1233,6 @@ bool GetTransaction(const uint256 &hash, CTransactionRef &txOut, const Consensus
 }
 
 
-bool AlreadyHaveTx(const CInv &inv)
-{
-    // Make checks for anything that requires cs_recentRejects
-    {
-        LOCK(cs_recentRejects);
-        DbgAssert(recentRejects, return false);
-        if (chainActive.Tip()->GetBlockHash() != hashRecentRejectsChainTip)
-        {
-            // If the chain tip has changed previously rejected transactions
-            // might be now valid, e.g. due to a nLockTime'd tx becoming valid,
-            // or a double-spend. Reset the rejects filter and give those
-            // txs a second chance.
-            hashRecentRejectsChainTip = chainActive.Tip()->GetBlockHash();
-            if (recentRejects)
-            {
-                recentRejects->reset();
-            }
-            else
-            {
-                recentRejects.reset(new CRollingBloomFilter(120000, 0.000001));
-            }
-        }
-        if (txn_recently_in_block->contains(inv.hash))
-            return true;
-        if (recentRejects->contains(inv.hash))
-            return true;
-    }
-
-    // Both these require either the mempool.cs or orphanpool.cs locks so we do them outside the scope
-    // of cs_recentRejects so we don't have to worry about locking orders.
-    return mempool.exists(inv.hash) || orphanpool.AlreadyHaveOrphan(inv.hash);
-}
-
-bool AlreadyHaveBlock(const CInv &inv) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
-{
-    // The Request Manager functionality requires that we return true only when we actually have received
-    // the block and not when we have received the header only.  Otherwise the request manager may not
-    // be able to update its block source in order to make re-requests.
-    BlockMap::iterator mi = mapBlockIndex.find(inv.hash);
-    if (mi == mapBlockIndex.end())
-        return false;
-    if (!(mi->second->nStatus & BLOCK_HAVE_DATA))
-        return false;
-    return true;
-}
-
-
 //////////////////////////////////////////////////////////////////////////////
 //
 // CBlock and CBlockIndex

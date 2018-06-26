@@ -17,6 +17,7 @@
 #include "consensus/consensus.h"
 #include "crypto/common.h"
 #include "crypto/sha256.h"
+#include "graphene.h"
 #include "hash.h"
 #include "primitives/transaction.h"
 #include "netbase.h"
@@ -153,7 +154,7 @@ static std::vector<CAddress> convertSeed6(const std::vector<SeedSpec6> &vSeedsIn
 // one by discovery.
 CAddress GetLocalAddress(const CNetAddr *paddrPeer, ServiceFlags nLocalServices)
 {
-    CAddress ret(CService(CNetAddr(),GetListenPort()), nLocalServices);
+    CAddress ret(CService(CNetAddr(), GetListenPort()), nLocalServices);
     CService addr;
     if (GetLocal(addr, paddrPeer))
     {
@@ -273,6 +274,9 @@ bool SeenLocal(const CService& addr)
     }
     return true;
 }
+
+
+
 
 
 /** check whether a given address is potentially local */
@@ -604,6 +608,30 @@ bool CConnman::IsWhitelistedRange(const CNetAddr &addr) {
 void CConnman::AddWhitelistedRange(const CSubNet &subnet) {
     LOCK(cs_vWhitelistedRange);
     vWhitelistedRange.push_back(subnet);
+}
+
+/** Graphene */
+bool CConnman::ClearLargestGrapheneBlockAndDisconnect(CNode *pfrom)
+{
+    CNode *pLargest = nullptr;
+    LOCK(cs_vNodes);
+    for (CNode *pnode : vNodes)
+    {
+        if ((pLargest == nullptr) || (pnode->nLocalGrapheneBlockBytes > pLargest->nLocalGrapheneBlockBytes))
+            pLargest = pnode;
+    }
+    if (pLargest != nullptr)
+    {
+        graphenedata.ClearGrapheneBlockData(pLargest, pLargest->grapheneBlock.GetBlockHeader().GetHash());
+        pLargest->fDisconnect = true;
+
+        // If the our node is currently using up the most graphene block bytes then return true so that we
+        // can stop processing this graphene block and let the disconnection happen.
+        if (pfrom == pLargest)
+            return true;
+    }
+
+    return false;
 }
 
 
@@ -2603,6 +2631,7 @@ bool CConnman::DisconnectNode(NodeId id)
     }
     return false;
 }
+
 
 void CConnman::RelayTransaction(const CTransaction& tx)
 {

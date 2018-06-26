@@ -253,11 +253,11 @@ extern const char *GRAPHENETX;
 /**
  * Graphene: The get_graphene message transmits a single serialized get_grblktx 
  * */
-extern const char *GET_GRAPHENETX;
+extern const char *GETGRAPHENETX;
 /**
  * Graphene: The get_graphene message transmits a single serialized get_grblk
  * */
-extern const char *GET_GRAPHENE;
+extern const char *GETGRAPHENE;
 
 
 // Dash message types
@@ -390,7 +390,9 @@ enum GetDataMsg {
     // Nodes may always request a MSG_CMPCT_BLOCK in a getdata, however,
     // MSG_CMPCT_BLOCK should not appear in any invs except as a part of getdata.
     MSG_CMPCT_BLOCK = 20, //!< Defined in BIP152
-    MSG_GRAPHENEBLOCK = 21,
+    // Nodes may always request a MSG_GRAPHENE_BLOCK in a getdata, however,
+    // MSG_GRAPHENE_BLOCK should not appear in any invs except as a part of getdata.
+    MSG_GRAPHENE_BLOCK = 21,
 };
 
 /** inv message data */

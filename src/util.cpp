@@ -394,6 +394,23 @@ int LogPrintStr(const std::string &str)
     return ret;
 }
 
+std::string formatInfoUnit(double value)
+{
+    static const char *units[] = {"B", "KB", "MB", "GB", "TB", "PB", "EB"};
+
+    size_t i = 0;
+    while ((value > 1000.0 || value < -1000.0) && i < (sizeof(units) / sizeof(units[0])) - 1)
+    {
+        value /= 1000.0;
+        i++;
+    }
+
+    ostringstream ss;
+    ss << fixed << setprecision(2);
+    ss << value << units[i];
+    return ss.str();
+}
+
 /** Interpret string as boolean, for argument parsing */
 static bool InterpretBool(const std::string& strValue)
 {

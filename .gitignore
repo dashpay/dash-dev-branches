@@ -133,3 +133,6 @@ make
 # CLion
 .idea
 cmake-build-debug
+venv
+
+
