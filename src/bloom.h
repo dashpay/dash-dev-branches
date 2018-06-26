@@ -5,7 +5,6 @@
 #ifndef BITCOIN_BLOOM_H
 #define BITCOIN_BLOOM_H
 
-#include "consensus/consensus.h"
 #include "serialize.h"
 
 #include <vector>
@@ -27,16 +26,16 @@ enum bloomflags
     BLOOM_UPDATE_NONE = 0,
     BLOOM_UPDATE_ALL = 1,
     // Only adds outpoints to the filter if the output is a pay-to-pubkey/pay-to-multisig script
-    BLOOM_UPDATE_P2PUBKEY_ONLY = 2,
+            BLOOM_UPDATE_P2PUBKEY_ONLY = 2,
     BLOOM_UPDATE_MASK = 3,
 };
 
 /**
  * BloomFilter is a probabilistic filter which SPV clients provide
  * so that we can filter the transactions we send them.
- * 
+ *
  * This allows for significantly more efficient transaction and block downloads.
- * 
+ *
  * Because bloom filters are probabilistic, a SPV node can increase the false-
  * positive rate, making us send it transactions which aren't actually its,
  * allowing clients to trade more bandwidth for more privacy by obfuscating which
@@ -58,18 +57,6 @@ private:
     CBloomFilter(unsigned int nElements, double nFPRate, unsigned int nTweak);
     friend class CRollingBloomFilter;
 
-    /** Helper function to set up bloom filter from desired number of elements and false positive rate.
-        Used by the constructors. Checks that the variables in sane ranges. */
-    void setup(unsigned int nElements,
-               double nFPRate,
-               unsigned int nTweakIn,
-               unsigned char nFlagsIn,
-               bool size_constrained,
-               uint32_t nMaxFilterSize);
-
-    //! Checks for empty and full filters to avoid wasting cpu
-    void UpdateEmptyFull();
-
 public:
     /**
      * Creates a new bloom filter which will provide the given fp rate when filled with the given number of elements
@@ -81,11 +68,6 @@ public:
      * nFlags should be one of the BLOOM_UPDATE_* enums (not _MASK)
      */
     CBloomFilter(unsigned int nElements, double nFPRate, unsigned int nTweak, unsigned char nFlagsIn);
-    CBloomFilter(unsigned int nElements,
-                 double nFPRate,
-                 unsigned int nTweak,
-                 unsigned char nFlagsIn,
-                 uint32_t nMaxFilterSize = SMALLEST_MAX_BLOOM_FILTER_SIZE);
     CBloomFilter() : isFull(true), isEmpty(false), nHashFuncs(0), nTweak(0), nFlags(0) {}
 
     ADD_SERIALIZE_METHODS;

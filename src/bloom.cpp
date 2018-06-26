@@ -4,12 +4,13 @@
 
 #include "bloom.h"
 
-#include "primitives/transaction.h"
 #include "hash.h"
+#include "primitives/transaction.h"
+#include "random.h"
 #include "script/script.h"
 #include "script/standard.h"
-#include "random.h"
 #include "streams.h"
+#include "util.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -18,6 +19,9 @@
 
 #define LN2SQUARED 0.4804530139182014246671025263266649717305529515945455
 #define LN2 0.6931471805599453094172321214581765680755001343602552
+#define MIN_N_HASH_FUNC 1
+
+using namespace std;
 
 CBloomFilter::CBloomFilter(unsigned int nElements, double nFPRate, unsigned int nTweakIn, unsigned char nFlagsIn) :
     /**

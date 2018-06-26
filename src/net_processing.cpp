@@ -643,7 +643,8 @@ bool AddOrphanTx(const CTransactionRef& tx, NodeId peer) EXCLUSIVE_LOCKS_REQUIRE
     // have been mined or received.
     // 100 orphans, each of which is at most 99,999 bytes big is
     // at most 10 megabytes of orphans and somewhat more byprev index (in the worst case):
-    unsigned int sz = GetSerializeSize(*tx, SER_NETWORK, CTransaction::CURRENT_VERSION);
+    //TODO: Nakul GetSerializeSize
+    unsigned int sz = GetSerializeSize(tx, SER_NETWORK, CTransaction::CURRENT_VERSION);
     if (sz > MAX_STANDARD_TX_SIZE)
     {
         LogPrint("mempool", "ignoring large orphan tx (size: %u, hash: %s)\n", sz, hash.ToString());
@@ -923,7 +924,8 @@ static bool ReconstructBlockFromGraphene(CNode *pfrom, const bool fXVal, int &mi
         std::set<uint256> setHashes(pfrom->grapheneBlockHashes.begin(), pfrom->grapheneBlockHashes.end());
         if (setHashes.size() != pfrom->grapheneBlockHashes.size())
         {
-            graphenedata.ClearGrapheneBlockData(pfrom, pfrom->grapheneBlock.GetBlockHeader().GetHash());
+            // TODO : Nakul ClearGrpaphene
+            // graphenedata.ClearGrapheneBlockData(pfrom, pfrom->grapheneBlock.GetBlockHeader().GetHash());
 
             Misbehaving(pfrom->GetId(), 10);
             return error("Repeating Transaction Id sequence, peer=%d", pfrom->id);
@@ -994,15 +996,16 @@ static bool ReconstructBlockFromGraphene(CNode *pfrom, const bool fXVal, int &mi
         if (graphenedata.AddGrapheneBlockBytes(nTxSize, pfrom) > maxAllowedSize)
         {
             LEAVE_CRITICAL_SECTION(cs_xval); // maintain locking order with vNodes
-            if (ClearLargestGrapheneBlockAndDisconnect(pfrom))
-            {
-                ENTER_CRITICAL_SECTION(cs_xval);
-                return error(
-                        "Reconstructed block %s (size:%llu) has caused max memory limit %llu bytes to be exceeded, peer=%d",
-                        pfrom->grapheneBlock.GetHash().ToString(), pfrom->nLocalGrapheneBlockBytes, maxAllowedSize,
-                        pfrom->id);
-            }
-            ENTER_CRITICAL_SECTION(cs_xval);
+            // TODO: Nakul ClearLargest
+//            if (ClearLargestGrapheneBlockAndDisconnect(pfrom))
+//            {
+//                ENTER_CRITICAL_SECTION(cs_xval);
+//                return error(
+//                        "Reconstructed block %s (size:%llu) has caused max memory limit %llu bytes to be exceeded, peer=%d",
+//                        pfrom->grapheneBlock.GetHash().ToString(), pfrom->nLocalGrapheneBlockBytes, maxAllowedSize,
+//                        pfrom->id);
+//            }
+//            ENTER_CRITICAL_SECTION(cs_xval);
         }
         if (pfrom->nLocalGrapheneBlockBytes > maxAllowedSize)
         {
@@ -1229,6 +1232,7 @@ bool CGrapheneBlock::process(CNode *pfrom, int nSizeGrapheneBlock, std::string s
     LogPrint("GRAPHENE", "Graphene block stats: %s\n", graphenedata.ToString().c_str());
 
     // Process the full block
+    // TODO: Nakul Handle Block Message
     //  PV->HandleBlockMessage(pfrom, strCommand, MakeBlockRef(pfrom->grapheneBlock), GetInv());
 
     return true;
@@ -3331,7 +3335,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             // Message consistency checking (FIXME: some redundancy here with AcceptBlockHeader)
             if (!IsGrapheneBlockValid(pfrom, grapheneBlock.header))
             {
-                Misbehaving(pfrom->, 100);
+                Misbehaving(pfrom->GetId(), 100);
                 LogPrintf("Received an invalid %s from peer %d\n", strCommand, pfrom->id);
 
                 graphenedata.ClearGrapheneBlockData(pfrom, grapheneBlock.header.GetHash());
@@ -3496,9 +3500,9 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                     }
                 }
             }
-            CGrapheneBlockTx grapheneBlockTx(grapheneRequestBlockTx.blockhash, vTx);
-            connman.PushMessage(pfrom, msgMaker.Make(NetMsgType::GRAPHENETX, grapheneBlockTx));
-//            pfrom->PushMessage(NetMsgType::GRAPHENETX, grapheneBlockTx);
+            // TODO: Resolve this after Copy Assignable CTransactions
+//            CGrapheneBlockTx grapheneBlockTx(grapheneRequestBlockTx.blockhash, vTx);
+//            connman.PushMessage(pfrom, msgMaker.Make(NetMsgType::GRAPHENETX, grapheneBlockTx));
         }
 
         return true;
@@ -3642,7 +3646,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             LogPrint("GRAPHENE", "Graphene block stats: %s\n", graphenedata.ToString());
 
             // TODO Nakul: Parallel Validation
-            PV->HandleBlockMessage(pfrom, strCommand, MakeBlockRef(pfrom->grapheneBlock), inv);
+//            PV->HandleBlockMessage(pfrom, strCommand, MakeBlockRef(pfrom->grapheneBlock), inv);
         }
 
         return true;
