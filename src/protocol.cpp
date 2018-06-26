@@ -41,8 +41,8 @@ const char *GETBLOCKTXN="getblocktxn";
 const char *BLOCKTXN="blocktxn";
 const char *GRAPHENEBLOCK = "grblk";
 const char *GRAPHENETX = "grblktx";
-const char *GET_GRAPHENETX = "get_grblktx";
-const char *GET_GRAPHENE = "get_grblk";
+const char *GETGRAPHENETX = "getgrblktx";
+const char *GETGRAPHENE = "getgrblk";
 // Dash message types
 const char *TXLOCKREQUEST="ix";
 const char *TXLOCKVOTE="txlvote";
@@ -132,6 +132,10 @@ const static std::string allNetMessageTypes[] = {
     NetMsgType::CMPCTBLOCK,
     NetMsgType::GETBLOCKTXN,
     NetMsgType::BLOCKTXN,
+    NetMsgType::GRAPHENEBLOCK,
+    NetMsgType::GRAPHENETX,
+    NetMsgType::GETGRAPHENETX,
+    NetMsgType::GETGRAPHENE,
     // Dash message types
     // NOTE: do NOT include non-implmented here, we want them to be "Unknown command" in ProcessMessage()
     NetMsgType::TXLOCKREQUEST,

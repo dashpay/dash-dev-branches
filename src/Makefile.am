@@ -139,6 +139,8 @@ BITCOIN_CORE_H = \
   governance-validators.h \
   governance-vote.h \
   governance-votedb.h \
+  graphene.h \
+  graphene_set.h \
   flat-database.h \
   hdchain.h \
   httprpc.h \
@@ -240,8 +242,10 @@ libdash_server_a_SOURCES = \
   chain.cpp \
   checkpoints.cpp \
   dsnotificationinterface.cpp \
+  graphene.cpp \
   httprpc.cpp \
   httpserver.cpp \
+  iblt.cpp \
   init.cpp \
   instantx.cpp \
   dbwrapper.cpp \

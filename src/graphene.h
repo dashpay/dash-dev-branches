@@ -25,6 +25,7 @@ const unsigned char MIN_MEMPOOL_INFO_BYTES = 8;
 
 class CDataStream;
 class CNode;
+class CConnman;
 
 class CMemPoolInfo
 {
@@ -66,7 +67,7 @@ public:
      * @param[in]  nHops        On the wire, nHops is zero for an incoming Graphene block
      * @return True if handling succeeded
      */
-    static bool HandleMessage(CDataStream &vRecv, CNode *pfrom, std::string strCommand, unsigned nHops);
+//    static bool HandleMessage(CDataStream &vRecv, CNode *pfrom, std::string strCommand, unsigned nHops);
 
     ADD_SERIALIZE_METHODS;
 
@@ -85,7 +86,7 @@ public:
         return ::GetSerializeSize(vAdditionalTxs, SER_NETWORK, PROTOCOL_VERSION);
     }
     CInv GetInv() { return CInv(MSG_BLOCK, header.GetHash()); }
-    bool process(CNode *pfrom, int nSizeGrapheneBlock, std::string strCommand);
+    bool process(CNode *pfrom, int nSizeGrapheneBlock, std::string strCommand, CConnman& connman);
     bool CheckBlockHeader(const CBlockHeader &block, CValidationState &state);
 };
 
@@ -107,7 +108,7 @@ public:
      * @param[in] pFrom        The node the message was from
      * @return True if handling succeeded
      */
-    static bool HandleMessage(CDataStream &vRecv, CNode *pfrom);
+//    static bool HandleMessage(CDataStream &vRecv, CNode *pfrom);
 
     ADD_SERIALIZE_METHODS;
 
@@ -138,7 +139,7 @@ public:
      * @param[in] pFrom        The node the message was from
      * @return True if handling succeeded
      */
-    static bool HandleMessage(CDataStream &vRecv, CNode *pfrom);
+//    static bool HandleMessage(CDataStream &vRecv, CNode *pfrom);
     ADD_SERIALIZE_METHODS;
 
     template <typename Stream, typename Operation>
@@ -217,8 +218,8 @@ public:
     void UpdateRank(uint64_t nRankSize);
     void UpdateGrapheneBlock(uint64_t nRankSize);
     void UpdateAdditionalTx(uint64_t nAdditionalTxSize);
-    void UpdateResponseTime(double nResponseTime);
-    void UpdateValidationTime(double nValidationTime);
+//    void UpdateResponseTime(double nResponseTime);
+//    void UpdateValidationTime(double nValidationTime);
     void UpdateInBoundReRequestedTx(int nReRequestedTx);
     void UpdateMempoolLimiterBytesSaved(unsigned int nBytesSaved);
     std::string ToString();
@@ -251,19 +252,9 @@ public:
 extern CGrapheneBlockData graphenedata; // Singleton class
 
 
-bool HaveConnectGrapheneNodes();
-bool HaveGrapheneNodes();
 bool IsGrapheneBlockEnabled();
-bool CanGrapheneBlockBeDownloaded(CNode *pto);
-void ConnectToGrapheneBlockNodes();
-void CheckNodeSupportForGrapheneBlocks();
-bool ClearLargestGrapheneBlockAndDisconnect(CNode *pfrom);
 void ClearGrapheneBlockInFlight(CNode *pfrom, uint256 hash);
-void AddGrapheneBlockInFlight(CNode *pfrom, uint256 hash);
-void SendGrapheneBlock(CBlockRef pblock, CNode *pfrom, const CInv &inv);
+//void SendGrapheneBlock(CBlockRef pblock, CNode *pfrom, const CInv &inv);
 bool IsGrapheneBlockValid(CNode *pfrom, const CBlockHeader &header);
-bool HandleGrapheneBlockRequest(CDataStream &vRecv, CNode *pfrom, const CChainParams &chainparams);
-CMemPoolInfo GetGrapheneMempoolInfo();
-uint256 GetSalt(unsigned char seed);
 
 #endif // BITCOIN_GRAPHENE_H

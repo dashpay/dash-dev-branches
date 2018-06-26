@@ -86,8 +86,6 @@ static const size_t MAPASKFOR_MAX_SZ = MAX_INV_SZ;
 static const size_t SETASKFOR_MAX_SZ = 2 * MAX_INV_SZ;
 /** The maximum number of peer connections to maintain. */
 static const unsigned int DEFAULT_MAX_PEER_CONNECTIONS = 125;
-/** The minimum number of xthin nodes to connect */
-static const uint8_t MIN_XTHIN_NODES = 8;
 /** The minimum number of graphene nodes to connect */
 static const uint8_t MIN_GRAPHENE_NODES = 8;
 /** The default for -maxuploadtarget. 0 = Unlimited */
@@ -432,6 +430,9 @@ private:
     CNode* ConnectNode(CAddress addrConnect, const char *pszDest = NULL, bool fCountFailure = false);
     bool IsWhitelistedRange(const CNetAddr &addr);
 
+    /** Graphene */
+    bool ClearLargestGrapheneBlockAndDisconnect(CNode *pfrom);
+
     void DeleteNode(CNode* pnode);
 
     NodeId GetNewNodeId();
@@ -497,6 +498,7 @@ private:
 
     /** Services this instance cares about */
     ServiceFlags nRelevantServices;
+
 
     CSemaphore *semOutbound;
     CSemaphore *semAddnode;
@@ -686,17 +688,6 @@ class CNode
 {
     friend class CConnman;
 public:
-//    struct CThinBlockInFlight
-//    {
-//        int64_t nRequestTime;
-//        bool fReceived;
-//
-//        CThinBlockInFlight()
-//        {
-//            nRequestTime = GetTime();
-//            fReceived = false;
-//        }
-//    };
 
     struct CGrapheneBlockInFlight
     {
@@ -767,8 +758,6 @@ public:
     CSemaphoreGrant grantMasternodeOutbound;
     CCriticalSection cs_filter;
     CBloomFilter* pfilter;
-    // BU - Xtreme Thinblocks: a bloom filter which is separate from the one used by SPV wallets
-    CBloomFilter *pThinBlockFilter;
     std::atomic<int> nRefCount;
     const NodeId id;
 
@@ -777,22 +766,9 @@ public:
     std::atomic_bool fPauseRecv;
     std::atomic_bool fPauseSend;
 
-    // BUIP010 Xtreme Thinblocks: begin section
-    // CBlock thinBlock;
-    // std::vector<uint256> thinBlockHashes;
-    // std::vector<uint64_t> xThinBlockHashes;
-    // std::map<uint64_t, CTransactionRef> mapMissingTx;
-    // uint64_t nLocalThinBlockBytes; // the bytes used in creating this thinblock, updated dynamically
-    // int nSizeThinBlock; // Original on-wire size of the block. Just used for reporting
-    // int thinBlockWaitingForTxns; // if -1 then not currently waiting
-    // CCriticalSection cs_mapthinblocksinflight; // lock mapThinBlocksInFlight
-    // std::map<uint256, CThinBlockInFlight> mapThinBlocksInFlight; // thin blocks in flight and the time requested.
-    // double nGetXBlockTxCount; // Count how many get_xblocktx requests are made
-    // uint64_t nGetXBlockTxLastTime; // The last time a get_xblocktx request was made
-    // double nGetXthinCount; // Count how many get_xthin requests are made
-    // uint64_t nGetXthinLastTime; // The last time a get_xthin request was made
-    // uint32_t nXthinBloomfilterSize; // The maximum xthin bloom filter size (in bytes) that our peer will accept.
-    // BUIP010 Xtreme Thinblocks: end section
+    // XThin variables: begin section
+    std::map<uint64_t, CTransactionRef> mapMissingTx;
+    // XThin variables: end section
 
     // DIPXXX Graphene blocks: begin section
     CCriticalSection cs_ngraphenemempooltx; // lock nGrapheneMemPoolTx
@@ -940,17 +916,6 @@ public:
     {
         nRefCount--;
     }
-
-    // BUIP010
-//    bool ThinBlockCapable()
-//    {
-//
-//        if (nServices & NODE_XTHIN)
-//            return true;
-//        return false;
-//
-//    }
-
 
     // DIPXXX
     bool GrapheneCapable()
