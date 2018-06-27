@@ -255,7 +255,7 @@ extern CGrapheneBlockData graphenedata; // Singleton class
 
 bool IsGrapheneBlockEnabled();
 void ClearGrapheneBlockInFlight(CNode *pfrom, uint256 hash);
-//void SendGrapheneBlock(CBlockRef pblock, CNode *pfrom, const CInv &inv);
+void SendGrapheneBlock(CBlockRef pblock, CNode *pfrom, const CInv &inv);
 bool IsGrapheneBlockValid(CNode *pfrom, const CBlockHeader &header);
 
 #endif // BITCOIN_GRAPHENE_H
