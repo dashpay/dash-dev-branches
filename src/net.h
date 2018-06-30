@@ -428,9 +428,6 @@ private:
     CNode* ConnectNode(CAddress addrConnect, const char *pszDest = NULL, bool fCountFailure = false);
     bool IsWhitelistedRange(const CNetAddr &addr);
 
-    /** Graphene */
-    bool ClearLargestGrapheneBlockAndDisconnect(CNode *pfrom);
-
     void DeleteNode(CNode* pnode);
 
     NodeId GetNewNodeId();
@@ -687,6 +684,7 @@ class CNode
     friend class CConnman;
 public:
 
+    //// Graphene begin section
     struct CGrapheneBlockInFlight
     {
         int64_t nRequestTime;
@@ -699,6 +697,7 @@ public:
         }
 
     };
+    //// Graphene end section
 
     // socket
     std::atomic<ServiceFlags> nServices;
@@ -915,7 +914,7 @@ public:
         nRefCount--;
     }
 
-    // DIPXXX
+    // Graphene begin section
     bool GrapheneCapable()
     {
         if (nServices & NODE_GRAPHENE)
@@ -923,7 +922,7 @@ public:
         return false;
     }
 
-
+    // Graphene End Section
 
     void AddAddressKnown(const CAddress& _addr)
     {
@@ -943,7 +942,6 @@ public:
             }
         }
     }
-
 
     void AddInventoryKnown(const CInv& inv)
     {
