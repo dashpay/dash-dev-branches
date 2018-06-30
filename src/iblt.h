@@ -100,12 +100,16 @@ public:
     // For debugging:
     std::string DumpTable() const;
 
+    static size_t OptimalNHash(size_t expectedNumEntries);
+    static float OptimalOverhead(size_t expectedNumEntries);
+
     ADD_SERIALIZE_METHODS;
 
     template <typename Stream, typename Operation>
     inline void SerializationOp(Stream &s, Operation ser_action)
     {
         READWRITE(valueSize);
+        READWRITE(n_hash);
         READWRITE(is_modified);
         READWRITE(hashTable);
     }
@@ -116,6 +120,7 @@ private:
     // TODO: Nakul check the size_t
     // size_t valueSize;
     uint64_t valueSize;
+    uint8_t n_hash;
     bool is_modified;
 
     std::vector<HashTableEntry> hashTable;

@@ -6,7 +6,7 @@
 #define BITCOIN_GRAPHENE_H
 
 #include "bloom.h"
-//#include "config.h"
+#include "config/dash-config.h"
 #include "consensus/validation.h"
 #include "graphene_set.h"
 #include "iblt.h"
@@ -67,7 +67,7 @@ public:
      * @param[in]  nHops        On the wire, nHops is zero for an incoming Graphene block
      * @return True if handling succeeded
      */
-//    static bool HandleMessage(CDataStream &vRecv, CNode *pfrom, std::string strCommand, unsigned nHops);
+    static bool HandleMessage(CDataStream &vRecv, CNode *pfrom, std::string strCommand, unsigned nHops, CConnman& connman);
 
     ADD_SERIALIZE_METHODS;
 
@@ -97,11 +97,10 @@ class CGrapheneBlockTx
 public:
     /** Public only for unit testing */
     uint256 blockhash;
-    // TODO: Nakul changed to CMutableTransaction from CTransaction for copy assignment or use CTransaction&
-    std::vector<CMutableTransaction> vMissingTx; // map of *missing transactions
+    std::vector<CTransaction> vMissingTx; // map of missing transactions
 
 public:
-    CGrapheneBlockTx(uint256 blockHash, std::vector<CMutableTransaction> &vTx);
+    CGrapheneBlockTx(uint256 blockHash, std::vector<CTransaction> &vTx);
     CGrapheneBlockTx() {}
     /**
      * Handle receiving a list of missing graphene block transactions from a prior request
@@ -109,7 +108,7 @@ public:
      * @param[in] pFrom        The node the message was from
      * @return True if handling succeeded
      */
-//    static bool HandleMessage(CDataStream &vRecv, CNode *pfrom);
+    static bool HandleMessage(CDataStream &vRecv, CNode *pfrom, CConnman& connman);
 
     ADD_SERIALIZE_METHODS;
 
@@ -140,7 +139,7 @@ public:
      * @param[in] pFrom        The node the message was from
      * @return True if handling succeeded
      */
-//    static bool HandleMessage(CDataStream &vRecv, CNode *pfrom);
+    static bool HandleMessage(CDataStream &vRecv, CNode *pfrom);
     ADD_SERIALIZE_METHODS;
 
     template <typename Stream, typename Operation>
@@ -219,8 +218,8 @@ public:
     void UpdateRank(uint64_t nRankSize);
     void UpdateGrapheneBlock(uint64_t nRankSize);
     void UpdateAdditionalTx(uint64_t nAdditionalTxSize);
-//    void UpdateResponseTime(double nResponseTime);
-//    void UpdateValidationTime(double nValidationTime);
+    void UpdateResponseTime(double nResponseTime);
+    void UpdateValidationTime(double nValidationTime);
     void UpdateInBoundReRequestedTx(int nReRequestedTx);
     void UpdateMempoolLimiterBytesSaved(unsigned int nBytesSaved);
     std::string ToString();
@@ -238,11 +237,11 @@ public:
     std::string ReRequestedTxToString();
     std::string MempoolLimiterBytesSavedToString();
 
-    bool CheckGrapheneBlockTimer(uint256 hash);
-    void ClearGrapheneBlockTimer(uint256 hash);
+    bool CheckGrapheneBlockTimer(const uint256 &hash);
+    void ClearGrapheneBlockTimer(const uint256 &hash);
 
     void ClearGrapheneBlockData(CNode *pfrom);
-    void ClearGrapheneBlockData(CNode *pfrom, uint256 hash);
+    void ClearGrapheneBlockData(CNode *pfrom, const uint256 &hash);
     void ClearGrapheneBlockStats();
 
     uint64_t AddGrapheneBlockBytes(uint64_t, CNode *pfrom);
@@ -253,9 +252,32 @@ public:
 extern CGrapheneBlockData graphenedata; // Singleton class
 
 
+bool HaveConnectGrapheneNodes();
+bool HaveGrapheneNodes();
 bool IsGrapheneBlockEnabled();
-void ClearGrapheneBlockInFlight(CNode *pfrom, uint256 hash);
-void SendGrapheneBlock(CBlockRef pblock, CNode *pfrom, const CInv &inv);
+bool CanGrapheneBlockBeDownloaded(CNode *pto);
+void ConnectToGrapheneBlockNodes();
+void CheckNodeSupportForGrapheneBlocks();
+bool ClearLargestGrapheneBlockAndDisconnect(CNode *pfrom);
+void ClearGrapheneBlockInFlight(CNode *pfrom, const uint256 &hash);
+void AddGrapheneBlockInFlight(CNode *pfrom, const uint256 &hash);
+void SendGrapheneBlock(CBlockRef pblock, CNode *pfrom, const CInv &inv, CConnman& connman);
 bool IsGrapheneBlockValid(CNode *pfrom, const CBlockHeader &header);
+bool HandleGrapheneBlockRequest(CDataStream &vRecv, CNode *pfrom, const CChainParams &chainparams);
+CMemPoolInfo GetGrapheneMempoolInfo();
+uint256 GetSalt(unsigned char seed);
+
+// Xpress Validation: begin
+// Transactions that have already been accepted into the memory pool do not need to be
+// re-verified and can avoid having to do a second and expensive CheckInputs() when
+// processing a new block.  (Protected by cs_xval)
+extern std::set<uint256> setPreVerifiedTxHash;
+
+// Orphans that are added to the thinblock must be verifed since they have never been
+// accepted into the memory pool.  (Protected by cs_xval)
+extern std::set<uint256> setUnVerifiedOrphanTxHash;
+
+extern CCriticalSection cs_xval;
+// Xpress Validation: end
 
 #endif // BITCOIN_GRAPHENE_H

@@ -149,6 +149,10 @@ static const int MAX_UNCONNECTING_HEADERS = 10;
 
 static const bool DEFAULT_PEERBLOOMFILTERS = true;
 
+CCriticalSection cs_xval;
+std::set<uint256> setPreVerifiedTxHash GUARDED_BY(cs_xval);
+std::set<uint256> setUnVerifiedOrphanTxHash GUARDED_BY(cs_xval);
+
 //DEFAULT_MAX_MESSAGE_SIZE_MULTIPLIER = 16; // Allowed messages lengths will be this * the excessive block size
 
 struct BlockHasher

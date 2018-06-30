@@ -14,16 +14,14 @@
 #include "util.h"
 
 #include <cmath>
-#include <numeric>
 
 #define LN2SQUARED 0.4804530139182014246671025263266649717305529515945455
 
 const uint8_t FILTER_CELL_SIZE = 1;
 const uint8_t IBLT_CELL_SIZE = 17;
 const uint32_t LARGE_MEM_POOL_SIZE = 10000000;
-const uint8_t N_IBLT_HASH = 3; // This should match N_HASH from iblt.cpp
 const float FILTER_FPR_MAX = 0.999;
-const uint8_t IBLT_CELL_MINIMUM = 3;
+const uint8_t IBLT_CELL_MINIMUM = 2;
 const uint8_t IBLT_VALUE_SIZE = 0;
 const std::vector<uint8_t> IBLT_NULL_VALUE = {};
 const unsigned char WORD_BITS = 8;
@@ -57,7 +55,7 @@ public:
         assert(nReceiverPoolTx >= nBlockTxs - 1); // Assume reciever is missing only one tx
 
         if (nReceiverPoolTx > LARGE_MEM_POOL_SIZE)
-            throw error("Receiver mempool is too large for optimization");
+            throw std::runtime_error("Receiver mempool is too large for optimization");
 
         // Because we assumed the receiver is only missing only one tx
         uint64_t nBlockAndReceiverPoolTx = nBlockTxs - 1;
@@ -77,8 +75,10 @@ public:
             uint64_t a) { return floor(FILTER_CELL_SIZE * (-1 / LN2SQUARED * nBlockTxs * log(fpr(a)) / 8)); };
 
         auto L = [](uint64_t a) {
-            uint64_t padded_cells = a + a / 2;
-            uint64_t cells = N_IBLT_HASH * int(ceil(padded_cells / float(N_IBLT_HASH)));
+            uint8_t n_iblt_hash = CIblt::OptimalNHash(a);
+            float iblt_overhead = CIblt::OptimalOverhead(a);
+            uint64_t padded_cells = (int)(iblt_overhead * a);
+            uint64_t cells = n_iblt_hash * int(ceil(padded_cells / float(n_iblt_hash)));
 
             return IBLT_CELL_SIZE * cells;
         };
@@ -120,14 +120,14 @@ public:
             if (nItems < nReceiverUniverseItems + 1)
                 optSymDiff = OptimalSymDiff(nItems, nReceiverUniverseItems);
         }
-        catch (std::exception &e)
+        catch (const std::runtime_error &e)
         {
-            LogPrint("GRAPHENE", "failed to optimize symmetric difference for graphene\n");
+            LogPrint("GRAPHENE", "failed to optimize symmetric difference for graphene: %s\n", e.what());
         }
 
         // Sender's estimate of number of items in both block and receiver mempool
         // This is the parameter "mu" from the graphene paper
-        uint64_t nItemIntersect = std::min(nItems, (uint64_t) nReceiverUniverseItems) - 1;
+        uint64_t nItemIntersect = std::min(nItems, (uint64_t)nReceiverUniverseItems) - 1;
 
         // Set false positive rate for Bloom filter based on optSymDiff
         double fpr;
@@ -137,12 +137,12 @@ public:
         else
             fpr = optSymDiff / float(nReceiverExcessItems);
 
-        // Construct Bloom Filter
-        // TODO: Chnage Bloom Filter definition and add a new one to original for this
-         pSetFilter = new CBloomFilter(
-             nItems, fpr, insecure_rand.rand32(), BLOOM_UPDATE_ALL);
-        // pSetFilter = new CBloomFilter(
-        //     nItems, fpr, insecure_rand.rand32(), BLOOM_UPDATE_ALL, std::numeric_limits<uint32_t>::max());
+        // TODO: Nakul max elements
+        // Construct Bloom filter
+        pSetFilter = new CBloomFilter(
+            nItems, fpr, insecure_rand.rand32(), BLOOM_UPDATE_ALL);
+//        pSetFilter = new CBloomFilter(
+//            nItems, fpr, insecure_rand.rand32(), BLOOM_UPDATE_ALL, std::numeric_limits<uint32_t>::max());
         LogPrint("GRAPHENE", "fp rate: %f Num elements in bloom filter: %d\n", fpr, nItems);
 
         // Construct IBLT
@@ -157,7 +157,7 @@ public:
             pSetFilter->insert(itemHash);
 
             if (mapCheapHashes.count(cheapHash))
-                throw error("Cheap hash collision while encoding graphene set");
+                throw std::runtime_error("Cheap hash collision while encoding graphene set");
 
             pSetIblt->insert(cheapHash, IBLT_NULL_VALUE);
             mapCheapHashes[cheapHash] = itemHash;
@@ -195,7 +195,7 @@ public:
             uint64_t cheapHash = itemHash.GetCheapHash();
 
             if (mapCheapHashes.count(cheapHash))
-                throw error("Cheap hash collision while decoding graphene set");
+                throw std::runtime_error("Cheap hash collision while decoding graphene set");
 
             if ((*pSetFilter).contains(itemHash))
             {
@@ -214,7 +214,7 @@ public:
         std::set<std::pair<uint64_t, std::vector<uint8_t> > > receiverHas;
 
         if (!((*pSetIblt) - localIblt).listEntries(senderHas, receiverHas))
-            throw error("Graphene set IBLT did not decode");
+            throw std::runtime_error("Graphene set IBLT did not decode");
 
         // Remove false positives from receiverSet
         for (const std::pair<uint64_t, std::vector<uint8_t> > &kv : receiverHas)
@@ -330,8 +330,7 @@ public:
 
 private:
     bool ordered;
-    uint64_t nReceiverUniverseItems;
-    // size_t nReceiverUniverseItems;
+    size_t nReceiverUniverseItems;
     std::vector<unsigned char> encodedRank;
     CBloomFilter *pSetFilter;
     CIblt *pSetIblt;

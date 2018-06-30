@@ -242,6 +242,15 @@ extern const char *GETBLOCKTXN;
  * @since protocol version 70209 as described by BIP 152
  */
 extern const char *BLOCKTXN;
+
+/**
+ * Contains a 1-byte bool and 8-byte LE version number.
+ * Indicates that a node is willing to provide blocks via "grapheneblock" messages.
+ * May indicate that a node prefers to receive new block announcements via a
+ * "grapheneblock" message rather than an "inv", depending on message contents.
+ * @since protocol version 70209 as described by BIP 152
+ */
+extern const char *SENDGRAPHENE;
 /**
  * Graphene: The grapheneblock message transmits a single serialized graphene block
  * */
@@ -320,7 +329,7 @@ enum ServiceFlags : uint64_t {
 
     // NODE_GRAPHENE means that the node supports Graphene blocks
     // If this is turned off then the node will not service nor make graphene requests
-    NODE_GRAPHENE = (1 << 5),
+     NODE_GRAPHENE = (1 << 5),
 };
 
 /** A CService with information about it as peer */

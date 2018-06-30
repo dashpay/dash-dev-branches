@@ -11,7 +11,7 @@
  */
 
 
-static const int PROTOCOL_VERSION = 70209;
+static const int PROTOCOL_VERSION = 70301;
 
 //! initial proto version, to be increased after version/verack negotiation
 static const int INIT_PROTO_VERSION = 209;
@@ -45,6 +45,6 @@ static const int DIP0001_PROTOCOL_VERSION = 70208;
 static const int SHORT_IDS_BLOCKS_VERSION = 70209;
 
 //! Graphene (bloom filter and IBLT) based download starts with this version
-static const int GRAPHENE_BLOCK_VERSION = 70210;
+static const int GRAPHENE_BLOCK_VERSION = 70301;
 
 #endif // BITCOIN_VERSION_H

@@ -15,6 +15,7 @@
 #include "consensus/consensus.h"
 #include "consensus/merkle.h"
 #include "consensus/validation.h"
+#include "graphene.h"
 #include "hash.h"
 #include "init.h"
 #include "policy/policy.h"
