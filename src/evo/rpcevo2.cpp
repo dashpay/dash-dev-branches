@@ -10,7 +10,10 @@
 #include "rpc/server.h"
 #include "utilmoneystr.h"
 #include "validation.h"
+
+#ifdef ENABLE_WALLET
 #include "wallet/wallet.h"
+#endif//ENABLE_WALLET
 
 #include "evo/subtx.h"
 #include "evo/users.h"
@@ -182,16 +185,20 @@ UniValue getuser(const UniValue& params, bool fHelp)
 // Allows to specify Dash address or priv key. In case of Dash address, the priv key is taken from the wallet
 static CKey ParsePrivKey(const std::string &strKeyOrAddress) {
     CBitcoinAddress address;
-    if (address.SetString(strKeyOrAddress)) {
+    if (address.SetString(strKeyOrAddress) && address.IsValid()) {
+#ifdef ENABLE_WALLET
         CKeyID keyId;
         CKey key;
         if (!address.GetKeyID(keyId) || !pwalletMain->GetKey(keyId, key))
             throw std::runtime_error(strprintf("non-wallet or invalid address %s", strKeyOrAddress));
         return key;
+#else//ENABLE_WALLET
+        throw std::runtime_error("addresses not supported in no-wallet builds");
+#endif//ENABLE_WALLET
     }
 
     CBitcoinSecret secret;
-    if (!secret.SetString(strKeyOrAddress))
+    if (!secret.SetString(strKeyOrAddress) || !secret.IsValid())
         throw std::runtime_error(strprintf("invalid priv-key/address %s", strKeyOrAddress));
     return secret.GetKey();
 }
@@ -200,6 +207,7 @@ static CKey GetKeyFromParamsOrWallet(const UniValue &params, int paramPos, const
     if (params.size() > paramPos)
         return ParsePrivKey(params[paramPos].get_str());
 
+#ifdef ENABLE_WALLET
     CEvoUser user;
     if (!evoUserDB->GetUser(regTxId, user)) {
         throw std::runtime_error(strprintf("user %s not found", regTxId.ToString()));
@@ -211,6 +219,9 @@ static CKey GetKeyFromParamsOrWallet(const UniValue &params, int paramPos, const
         throw std::runtime_error(strprintf("wallet key with id %s not found", pubKeyID.ToString()));
     }
     return key;
+#else//ENABLE_WALLET
+    throw std::runtime_error("unable to get key from wallet in no-wallet builds");
+#endif//ENABLE_WALLET
 }
 
 static uint256 GetLastTransitionFromParams(const UniValue& params, int paramPos, const uint256 &regTxId) {
@@ -281,6 +292,7 @@ UniValue createrawsubtx(const UniValue& params, bool fHelp)
     return EncodeHexTx(rawTx);
 }
 
+#ifdef ENABLE_WALLET
 UniValue createsubtx(const UniValue& params, bool fHelp)
 {
     if (params.size() == 0 || fHelp) {
@@ -303,6 +315,7 @@ UniValue createsubtx(const UniValue& params, bool fHelp)
 
     return signedTx;
 }
+#endif//ENABLE_WALLET
 
 UniValue createrawtransition(const UniValue& params, bool fHelp) {
     if (fHelp || (params.size() != 4 && params.size() != 5))
