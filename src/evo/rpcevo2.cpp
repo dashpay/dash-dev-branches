@@ -36,17 +36,18 @@ void TsToJSON(const CTransition& ts, const uint256 &hashBlock, UniValue& entry)
     entry.push_back(Pair("vchUserSigSize", (int)ts.vchUserSig.size()));
     entry.push_back(Pair("vvchQuorumSigsSize", (int)::GetSerializeSize(ts.vvchQuorumSigs, SER_NETWORK, PROTOCOL_VERSION)));
 
+    entry.push_back(Pair("action", (int)ts.action));
     switch (ts.action) {
         case Transition_UpdateData:
-            entry.push_back(Pair("action", "updateData"));
+            entry.push_back(Pair("actionStr", "updateData"));
             entry.push_back(Pair("hashDataMerkleRoot", ts.hashDataMerkleRoot.GetHex()));
             break;
         case Transition_ResetKey:
-            entry.push_back(Pair("action", "resetKey"));
+            entry.push_back(Pair("actionStr", "resetKey"));
             entry.push_back(Pair("newKeyID", ts.newPubKeyID.ToString()));
             break;
         case Transition_CloseAccount:
-            entry.push_back(Pair("action", "closeAccount"));
+            entry.push_back(Pair("actionStr", "closeAccount"));
             break;
     }
 
@@ -106,11 +107,11 @@ static void User2Json(const CEvoUser &user, bool withSubTxAndTs, bool detailed, 
                 UniValue e(UniValue::VOBJ);
 
                 uint256 hashBlock;
-                CTransaction tx;
+                CTransactionRef tx;
                 if (!GetTransaction(txid, tx, Params().GetConsensus(), hashBlock, false))
                     throw std::runtime_error(strprintf("SubTx %s not found", txid.ToString()));
 
-                SubTxToJSON(tx, e);
+                SubTxToJSON(*tx, e);
                 subTxArr.push_back(e);
             } else {
                 subTxArr.push_back(txid.ToString());
@@ -159,9 +160,9 @@ static uint256 GetRegTxId(const std::string &regTxIdOrUserName) {
     throw std::runtime_error(strprintf("user %s not found", regTxIdOrUserName));
 }
 
-UniValue getuser(const UniValue& params, bool fHelp)
+UniValue getuser(const JSONRPCRequest& request)
 {
-    if (fHelp || (params.size() != 1 && params.size() != 2 && params.size() != 3))
+    if (request.fHelp || (request.params.size() != 1 && request.params.size() != 2 && request.params.size() != 3))
         throw std::runtime_error(
                 "getuser \"regTxId|username\" ( includeMempool verbose )\n"
                 "\nGet registered user in JSON format as defined by dash-schema.\n"
@@ -170,21 +171,21 @@ UniValue getuser(const UniValue& params, bool fHelp)
                 + HelpExampleRpc("getuser", "\"alice\"")
         );
 
-    uint256 regTxId = GetRegTxId(params[0].get_str());
+    uint256 regTxId = GetRegTxId(request.params[0].get_str());
     bool verbose = false;
     bool includeMempool = true;
-    if (params.size() > 1) {
-        includeMempool = params[1].get_bool();
+    if (request.params.size() > 1) {
+        includeMempool = request.params[1].get_bool();
     }
-    if (params.size() > 2) {
-        verbose = params[2].get_bool();
+    if (request.params.size() > 2) {
+        verbose = request.params[2].get_bool();
     }
 
     CEvoUser user;
     bool fromMempool = false;
     if (!evoUserDB->GetUser(regTxId, user)) {
         if (!includeMempool || !BuildUserFromMempool(regTxId, user))
-            throw std::runtime_error(strprintf("failed to read user %s from db", params[0].get_str()));
+            throw std::runtime_error(strprintf("failed to read user %s from db", request.params[0].get_str()));
         fromMempool = true;
     }
 
@@ -253,9 +254,9 @@ static uint256 GetLastTransitionFromParams(const UniValue& params, int paramPos,
     return user.GetHashLastTransition();
 }
 
-UniValue createrawsubtx(const UniValue& params, bool fHelp)
+UniValue createrawsubtx(const JSONRPCRequest& request)
 {
-    if (fHelp || params.size() == 0)
+    if (request.fHelp || request.params.size() == 0)
         throw std::runtime_error(
                 "createrawsubtx type args...\n"
                 "\nCreates a raw (unfunded/unsigned) SubTx. Arguments depend on type of SubTx to be created.\n"
@@ -273,14 +274,14 @@ UniValue createrawsubtx(const UniValue& params, bool fHelp)
     CDataStream ds(SER_DISK, CLIENT_VERSION);
     CAmount creditBurnAmount = 0;
 
-    std::string action = params[0].get_str();
+    std::string action = request.params[0].get_str();
 
     if (action == "register") {
-        std::string userName = params[1].get_str();
-        CKey key = ParsePrivKey(params[2].get_str());
+        std::string userName = request.params[1].get_str();
+        CKey key = ParsePrivKey(request.params[2].get_str());
 
-        if (!ParseMoney(params[3].get_str(), creditBurnAmount))
-            throw std::runtime_error(strprintf("failed to parse fee: %s", params[1].get_str()));
+        if (!ParseMoney(request.params[3].get_str(), creditBurnAmount))
+            throw std::runtime_error(strprintf("failed to parse fee: %s", request.params[1].get_str()));
 
         CSubTxData subTxData;
         subTxData.action = SubTxAction_Register;
@@ -291,9 +292,9 @@ UniValue createrawsubtx(const UniValue& params, bool fHelp)
 
         ds << subTxData;
     } else if (action == "topup") {
-        uint256 regTxId = GetRegTxId(params[1].get_str());
-        if (!ParseMoney(params[2].get_str(), creditBurnAmount))
-            throw std::runtime_error(strprintf("failed to parse fee: %s", params[1].get_str()));
+        uint256 regTxId = GetRegTxId(request.params[1].get_str());
+        if (!ParseMoney(request.params[2].get_str(), creditBurnAmount))
+            throw std::runtime_error(strprintf("failed to parse fee: %s", request.params[1].get_str()));
 
         CSubTxData subTxData;
         subTxData.action = SubTxAction_TopUp;
@@ -316,35 +317,37 @@ UniValue createrawsubtx(const UniValue& params, bool fHelp)
 }
 
 #ifdef ENABLE_WALLET
-extern UniValue fundrawtransaction(const UniValue& params, bool fHelp);
-extern UniValue signrawtransaction(const UniValue& params, bool fHelp);
+extern UniValue fundrawtransaction(const JSONRPCRequest& request);
+extern UniValue signrawtransaction(const JSONRPCRequest& request);
 
-UniValue createsubtx(const UniValue& params, bool fHelp)
+UniValue createsubtx(const JSONRPCRequest& request)
 {
-    if (params.size() == 0 || fHelp) {
+    if (request.params.size() == 0 || request.fHelp) {
         throw std::runtime_error(
                 "createsubtx args...\n"
                 "\nCreates, funds and signs a SubTx. Arguments are the same as for createrawsubtx\n"
         );
     }
 
-    UniValue rawSubTx = createrawsubtx(params, fHelp);
+    UniValue rawSubTx = createrawsubtx(request);
 
-    UniValue fundParams(UniValue::VARR);
-    fundParams.push_back(rawSubTx);
-    UniValue fundResult = fundrawtransaction(fundParams, false);
+    JSONRPCRequest fundRequest;
+    fundRequest.params.setArray();
+    fundRequest.params.push_back(rawSubTx);
+    UniValue fundResult = fundrawtransaction(fundRequest);
     UniValue fundedTx = fundResult["hex"];
 
-    UniValue signParams(UniValue::VARR);
-    signParams.push_back(fundedTx);
-    UniValue signedTx = signrawtransaction(signParams, false);
+    JSONRPCRequest signReqeust;
+    signReqeust.params.setArray();
+    signReqeust.params.push_back(fundedTx);
+    UniValue signedTx = signrawtransaction(signReqeust);
 
     return signedTx;
 }
 #endif//ENABLE_WALLET
 
-UniValue createrawtransition(const UniValue& params, bool fHelp) {
-    if (fHelp || (params.size() != 4 && params.size() != 5))
+UniValue createrawtransition(const JSONRPCRequest& request) {
+    if (request.fHelp || (request.params.size() != 4 && request.params.size() != 5))
         throw std::runtime_error(
                 "createrawtransition type args...\n"
                 "\nCreates a raw transition. Arguments depend on type of transition to be created.\n"
@@ -363,22 +366,22 @@ UniValue createrawtransition(const UniValue& params, bool fHelp) {
                 + HelpExampleCli("createrawtransition", "close \"bob\" 0.00001")
         );
 
-    std::string action = params[0].get_str();
+    std::string action = request.params[0].get_str();
 
     CTransition ts;
     ts.nVersion = CTransition::CURRENT_VERSION;
-    ts.hashRegTx = GetRegTxId(params[1].get_str());
-    if (!ParseMoney(params[2].get_str(), ts.nFee))
-        throw std::runtime_error(strprintf("invalid fee %s", params[2].get_str()));
+    ts.hashRegTx = GetRegTxId(request.params[1].get_str());
+    if (!ParseMoney(request.params[2].get_str(), ts.nFee))
+        throw std::runtime_error(strprintf("invalid fee %s", request.params[2].get_str()));
 
     if (action == "update") {
         ts.action = Transition_UpdateData;
-        ts.hashDataMerkleRoot = ParseHashStr(params[3].get_str(), "merkleRoot");
-        ts.hashPrevTransition = GetLastTransitionFromParams(params, 4, ts.hashRegTx);
+        ts.hashDataMerkleRoot = ParseHashStr(request.params[3].get_str(), "merkleRoot");
+        ts.hashPrevTransition = GetLastTransitionFromParams(request.params, 4, ts.hashRegTx);
     } else if (action == "resetkey") {
         ts.action = Transition_ResetKey;
-        ts.newPubKeyID = ParsePrivKey(params[3].get_str()).GetPubKey().GetID();
-        ts.hashPrevTransition = GetLastTransitionFromParams(params, 4, ts.hashRegTx);
+        ts.newPubKeyID = ParsePrivKey(request.params[3].get_str()).GetPubKey().GetID();
+        ts.hashPrevTransition = GetLastTransitionFromParams(request.params, 4, ts.hashRegTx);
     } else if (action == "close") {
         ts.action = Transition_CloseAccount;
     }
@@ -388,10 +391,10 @@ UniValue createrawtransition(const UniValue& params, bool fHelp) {
     return HexStr(ds.begin(), ds.end());
 }
 
-UniValue signrawtransition(const UniValue& params, bool fHelp) {
-    if (fHelp || (params.size() != 1) && params.size() != 2)
+UniValue signrawtransition(const JSONRPCRequest& request) {
+    if (request.fHelp || (request.params.size() != 1) && request.params.size() != 2)
         throw std::runtime_error(
-                "signrawtransition \"hexTs\" ( \"key\" )\n"
+                "signrawtransition \"hex_ts\" ( \"key\" )\n"
                 "\nSigns a raw transition. If the key is omitted, it will lookup the current pubKey of the user and\n"
                 "then try to get the private key from the wallet.\n"
                 "\nExamples:\n"
@@ -399,13 +402,13 @@ UniValue signrawtransition(const UniValue& params, bool fHelp) {
                 + HelpExampleRpc("signrawtransition", "\"myHexTs\"")
         );
 
-    std::string hexTs = params[0].get_str();
+    std::string hexTs = request.params[0].get_str();
     CDataStream ds(ParseHex(hexTs), SER_DISK, CLIENT_VERSION);
 
     CTransition ts;
     ds >> ts;
 
-    CKey userKey = GetKeyFromParamsOrWallet(params, 1, ts.hashRegTx);
+    CKey userKey = GetKeyFromParamsOrWallet(request.params, 1, ts.hashRegTx);
     if (!CMessageSigner::SignMessage(ts.MakeSignMessage(), ts.vchUserSig, userKey))
         throw std::runtime_error(strprintf("could not sign transition for for user %s. keyId=%s", ts.hashRegTx.ToString(), userKey.GetPubKey().GetID().ToString()));
 
@@ -414,23 +417,24 @@ UniValue signrawtransition(const UniValue& params, bool fHelp) {
     return HexStr(ds2.begin(), ds2.end());
 }
 
-UniValue createtransition(const UniValue& params, bool fHelp) {
-    if (fHelp || (params.size() != 4 && params.size() != 5))
+UniValue createtransition(const JSONRPCRequest& request) {
+    if (request.fHelp || (request.params.size() != 4 && request.params.size() != 5))
         throw std::runtime_error(
                 "createtransition args...\n"
                 "\nCreates a raw transition and signs it. Arguments are the same as for createrawtransition.\n"
         );
 
-    UniValue rawTs = createrawtransition(params, fHelp);
+    UniValue rawTs = createrawtransition(request);
 
-    UniValue signParams(UniValue::VARR);
-    signParams.push_back(rawTs.get_str());
-    UniValue signedTs = signrawtransition(signParams, false);
+    JSONRPCRequest signRequest;
+    signRequest.params.setArray();
+    signRequest.params.push_back(rawTs.get_str());
+    UniValue signedTs = signrawtransition(signRequest);
     return signedTs;
 }
 
-UniValue sendrawtransition(const UniValue& params, bool fHelp) {
-    if (fHelp || (params.size() != 1 && params.size() != 2))
+UniValue sendrawtransition(const JSONRPCRequest& request) {
+    if (request.fHelp || (request.params.size() != 1 && request.params.size() != 2))
         throw std::runtime_error(
                 "sendrawtransition \"hexTs\" ( relay )\n"
                 "\nSends a signed transition to the network.\n"
@@ -440,10 +444,10 @@ UniValue sendrawtransition(const UniValue& params, bool fHelp) {
                 + HelpExampleRpc("sendrawtransition", "\"myHexTs\", \"false\"")
         );
 
-    std::string hexTs = params[0].get_str();
+    std::string hexTs = request.params[0].get_str();
     bool relay = true;
-    if (params.size() == 2) {
-        relay = params[1].get_bool();
+    if (request.params.size() == 2) {
+        relay = request.params[1].get_bool();
     }
 
     CDataStream ds(ParseHex(hexTs), SER_DISK, CLIENT_VERSION);
@@ -469,8 +473,8 @@ UniValue sendrawtransition(const UniValue& params, bool fHelp) {
     return UniValue(ts.GetHash().ToString());
 }
 
-UniValue gettransition(const UniValue &params, bool fHelp) {
-    if (fHelp || params.size() != 1)
+UniValue gettransition(const JSONRPCRequest &request) {
+    if (request.fHelp || request.params.size() != 1)
         throw std::runtime_error(
                 "gettransition \"tsHash\"\n"
                 "\nGet transition with hash \"tsHash\" and output a json object.\n"
@@ -479,7 +483,7 @@ UniValue gettransition(const UniValue &params, bool fHelp) {
                 + HelpExampleRpc("gettransition", "\"tsHash\", \"false\"")
         );
 
-    uint256 tsHash = ParseHashStr(params[0].get_str(), "tsHash");
+    uint256 tsHash = ParseHashStr(request.params[0].get_str(), "tsHash");
 
     bool fromMempool = false;
     CTransition ts;
@@ -502,17 +506,17 @@ UniValue gettransition(const UniValue &params, bool fHelp) {
 static const CRPCCommand commands[] =
         { //  category              name                      actor (function)         okSafeMode
                 //  --------------------- ------------------------  -----------------------  ----------
-                { "evo",                "getuser",                &getuser,                true  },
-                { "evo",                "createrawsubtx",         &createrawsubtx,         true  },
-                { "evo",                "createrawtransition",    &createrawtransition,    true  },
-                { "evo",                "createtransition",       &createtransition,       true  },
-                { "evo",                "signrawtransition",      &signrawtransition,      true  },
-                { "evo",                "sendrawtransition",      &sendrawtransition,      true  },
-                { "evo",                "gettransition",          &gettransition,          true  },
+                { "evo",                "getuser",                &getuser,                true, {"user", "include_mempool", "verbose"}  },
+                { "evo",                "createrawsubtx",         &createrawsubtx,         true, {}  },
+                { "evo",                "createrawtransition",    &createrawtransition,    true, {}  },
+                { "evo",                "createtransition",       &createtransition,       true, {}  },
+                { "evo",                "signrawtransition",      &signrawtransition,      true, {"hex_ts", "key"}  },
+                { "evo",                "sendrawtransition",      &sendrawtransition,      true, {"hex_ts", "relay"}  },
+                { "evo",                "gettransition",          &gettransition,          true, {"ts_hash"}  },
 
 #ifdef ENABLE_WALLET
                 // createsubtx requires the wallet to be enabled to fund the SubTx
-                { "evo",                "createsubtx",            &createsubtx,            true  },
+                { "evo",                "createsubtx",            &createsubtx,            true, {}  },
 #endif//ENABLE_WALLET
         };
 
