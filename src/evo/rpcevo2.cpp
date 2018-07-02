@@ -361,7 +361,6 @@ UniValue createrawtransition(const UniValue& params, bool fHelp) {
                 + HelpExampleCli("createrawtransition", "update \"bob\" 0.00001 \"1234123412341234123412341234123412341234123412341234123412341234\"")
                 + HelpExampleCli("createrawtransition", "resetkey \"bob\" 0.00001 \"93Fd7XY2zF4q9YKTZUSFxLgp4Xs7MuaMnvY9kpvH7V8oXWqsCC1\"")
                 + HelpExampleCli("createrawtransition", "close \"bob\" 0.00001")
-                + HelpExampleRpc("createrawtransition", "\"topup\", \"bob\" \"0.02\"")
         );
 
     std::string action = params[0].get_str();
