@@ -40,7 +40,7 @@ void TsToJSON(const CTransition& ts, const uint256 &hashBlock, UniValue& entry)
     switch (ts.action) {
         case Transition_UpdateData:
             entry.push_back(Pair("actionStr", "updateData"));
-            entry.push_back(Pair("hashDataMerkleRoot", ts.hashDataMerkleRoot.GetHex()));
+            entry.push_back(Pair("hashSTPacket", ts.hashSTPacket.GetHex()));
             break;
         case Transition_ResetKey:
             entry.push_back(Pair("actionStr", "resetKey"));
@@ -91,7 +91,7 @@ static void User2Json(const CEvoUser &user, bool withSubTxAndTs, bool detailed, 
     json.push_back(std::make_pair("regtxid", user.GetRegTxId().ToString()));
     json.push_back(std::make_pair("pubkeyid", user.GetCurPubKeyID().ToString()));
     json.push_back(std::make_pair("credits", user.GetCreditBalance()));
-    json.push_back(std::make_pair("data", user.GetCurHashDataMerkleRoot().ToString()));
+    json.push_back(std::make_pair("data", user.GetCurHashSTPacket().ToString()));
 
     std::string state;
     if (user.IsClosed())
@@ -357,7 +357,7 @@ UniValue createrawtransition(const JSONRPCRequest& request) {
                 "of that user is taken. This will also consider unconfirmed (only in mempool) users and\n"
                 "transitions.\n"
                 "\nAvailable types:\n"
-                "  createrawtransition update   \"regTxId|username\" fee \"merkleRoot\" ( \"prevTransition\" ) - Update account data\n"
+                "  createrawtransition update   \"regTxId|username\" fee \"hashSTPacket\" ( \"prevTransition\" ) - Update account data\n"
                 "  createrawtransition resetkey \"regTxId|username\" fee \"newKey\"     ( \"prevTransition\" ) - Reset user key\n"
                 "  createrawtransition close    \"regTxId|username\" fee              ( \"prevTransition\" ) - Close account\n"
                 "\nExamples:\n"
@@ -376,7 +376,7 @@ UniValue createrawtransition(const JSONRPCRequest& request) {
 
     if (action == "update") {
         ts.action = Transition_UpdateData;
-        ts.hashDataMerkleRoot = ParseHashStr(request.params[3].get_str(), "merkleRoot");
+        ts.hashSTPacket = ParseHashStr(request.params[3].get_str(), "hashSTPacket");
         ts.hashPrevTransition = GetLastTransitionFromParams(request.params, 4, ts.hashRegTx);
     } else if (action == "resetkey") {
         ts.action = Transition_ResetKey;

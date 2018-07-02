@@ -19,7 +19,7 @@ static bool CheckTransitionSignatures(const CTransition &ts, const CEvoUser &use
 }
 
 static bool Process_UpdateData(const CTransition &ts, CEvoUser &user, CValidationState &state) {
-    user.PushHashDataMerkleRoot(ts.hashDataMerkleRoot);
+    user.PushHashSTPacket(ts.hashSTPacket);
     return true;
 }
 
@@ -34,9 +34,9 @@ static bool Process_CloseAccount(const CTransition &ts, CEvoUser &user, CValidat
 }
 
 static bool Undo_UpdateData(const CTransition &ts, CEvoUser &user, CValidationState &state) {
-    uint256 hashDataMerkleRoot = user.PopHashDataMerkleRoot();
-    if (hashDataMerkleRoot != ts.hashDataMerkleRoot)
-        return state.Error(strprintf("unexpected hashDataMerkleRoot %s for user %s. Expected %s", hashDataMerkleRoot.ToString(), user.GetRegTxId().ToString(), ts.hashDataMerkleRoot.ToString()));
+    uint256 hashSTPacket = user.PopHashSTPacket();
+    if (hashSTPacket != ts.hashSTPacket)
+        return state.Error(strprintf("unexpected hashSTPacket %s for user %s. Expected %s", hashSTPacket.ToString(), user.GetRegTxId().ToString(), ts.hashSTPacket.ToString()));
     return true;
 }
 

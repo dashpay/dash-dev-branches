@@ -31,7 +31,7 @@ public:
     uint256 hashPrevTransition;
 
     // only valid for type == Transition_UpdateData
-    uint256 hashDataMerkleRoot;
+    uint256 hashSTPacket;
 
     // only valid for type == Transition_ResetKey
     CKeyID newPubKeyID;
@@ -56,7 +56,7 @@ public:
 
         switch (action) {
             case Transition_UpdateData:
-                READWRITE(hashDataMerkleRoot);
+                READWRITE(hashSTPacket);
                 break;
             case Transition_ResetKey:
                 READWRITE(newPubKeyID);
@@ -83,7 +83,7 @@ public:
         this->nFee = r.nFee;
         this->hashRegTx = r.hashRegTx;
         this->hashPrevTransition = r.hashPrevTransition;
-        this->hashDataMerkleRoot = r.hashDataMerkleRoot;
+        this->hashSTPacket = r.hashSTPacket;
         this->newPubKeyID = r.newPubKeyID;
         this->vchUserSig = r.vchUserSig;
         this->vvchQuorumSigs = r.vvchQuorumSigs;
