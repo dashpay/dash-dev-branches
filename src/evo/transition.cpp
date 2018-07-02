@@ -17,13 +17,13 @@ uint256 CTransition::GetHash() const {
 
 std::string CTransition::ToString() const {
     std::string str;
-    str += strprintf("CTransition(hash=%s, ver=%d, fee=%d, hashRegTx=%s, hashPrevTransition=%s, hashDataMerkleRoot=%s)\n",
+    str += strprintf("CTransition(hash=%s, ver=%d, fee=%d, hashRegTx=%s, hashPrevTransition=%s, hashSTPacket=%s)\n",
                      GetHash().ToString().substr(0,10),
                      nVersion,
                      nFee,
                      hashRegTx.ToString(),
                      hashPrevTransition.ToString(),
-                     hashDataMerkleRoot.ToString());
+                     hashSTPacket.ToString());
     return str;
 }
 
@@ -36,7 +36,7 @@ std::string CTransition::MakeSignMessage() const {
     ss << "|" << hashPrevTransition.ToString();
     switch (action) {
         case Transition_UpdateData:
-            ss << "|" << hashDataMerkleRoot.ToString();
+            ss << "|" << hashSTPacket.ToString();
             break;
         case Transition_ResetKey:
             ss << "|" << newPubKeyID.ToString();

@@ -444,7 +444,7 @@ class CTransition(object):
             self.fee = 0
             self.hashRegTx = 0
             self.hashPrevTransition = 0
-            self.hashDataMerkleRoot = 0
+            self.hashSTPacket = 0
             self.newPubKeyID = 0
             self.vchUserSig = b""
             self.vvchQuorumSigs = []
@@ -456,7 +456,7 @@ class CTransition(object):
             self.fee = ts.fee
             self.hashRegTx = ts.hashRegTx
             self.hashPrevTransition = ts.hashPrevTransition
-            self.hashDataMerkleRoot = ts.hashDataMerkleRoot
+            self.hashSTPacket = ts.hashSTPacket
             self.newPubKeyID = ts.newPubKeyID
             self.vchUserSig = ts.vchUserSig
             self.vvchQuorumSigs = ts.vvchQuorumSigs
@@ -471,7 +471,7 @@ class CTransition(object):
         self.hashPrevTransition = deser_uint256(f)
 
         if self.action == 1:
-            self.hashDataMerkleRoot = deser_uint256(f)
+            self.hashSTPacket = deser_uint256(f)
         elif self.action == 2:
             self.newPubKeyID = deser_uint160(f)
         elif self.action == 3:
@@ -492,7 +492,7 @@ class CTransition(object):
         r += ser_uint256(self.hashPrevTransition)
 
         if self.action == 1:
-            r += ser_uint256(self.hashDataMerkleRoot)
+            r += ser_uint256(self.hashSTPacket)
         elif self.action == 2:
             r += ser_uint160(self.newPubKeyID)
         elif self.action == 3:

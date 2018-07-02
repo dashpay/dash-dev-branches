@@ -18,7 +18,7 @@ private:
     std::string userName;
     std::vector<CKeyID> pubKeyIDs;
     std::vector<uint256> subTxIds;
-    std::vector<uint256> hashDataMerkleRoots;
+    std::vector<uint256> hashSTPackets;
     uint256 hashLastTransition;
 
     CAmount topupCredits{};
@@ -32,7 +32,7 @@ public:
             : regTxId(_regTxId),
               userName(_userName),
               pubKeyIDs{_pubKeyID},
-              hashDataMerkleRoots{uint256()} // start with 000... hashDataMerkleRoot
+              hashSTPackets{uint256()} // start with 000... hashSTPacket
     {}
 
     ADD_SERIALIZE_METHODS;
@@ -45,7 +45,7 @@ public:
         READWRITE(userName);
         READWRITE(pubKeyIDs);
         READWRITE(subTxIds);
-        READWRITE(hashDataMerkleRoots);
+        READWRITE(hashSTPackets);
         READWRITE(hashLastTransition);
         READWRITE(topupCredits);
         READWRITE(spentCredits);
@@ -115,18 +115,18 @@ public:
         return subTxIds;
     }
 
-    void PushHashDataMerkleRoot(const uint256 &h) {
-        hashDataMerkleRoots.push_back(h);
+    void PushHashSTPacket(const uint256 &h) {
+        hashSTPackets.push_back(h);
     }
-    uint256 PopHashDataMerkleRoot() {
-        assert(hashDataMerkleRoots.size() != 0);
-        uint256 ret(hashDataMerkleRoots.back());
-        hashDataMerkleRoots.pop_back();
+    uint256 PopHashSTPacket() {
+        assert(hashSTPackets.size() != 0);
+        uint256 ret(hashSTPackets.back());
+        hashSTPackets.pop_back();
         return ret;
     }
-    const uint256 &GetCurHashDataMerkleRoot() const {
-        assert(hashDataMerkleRoots.size() != 0);
-        return hashDataMerkleRoots.back();
+    const uint256 &GetCurHashSTPacket() const {
+        assert(hashSTPackets.size() != 0);
+        return hashSTPackets.back();
     }
 
     const uint256 &GetHashLastTransition() const {
