@@ -3041,8 +3041,6 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             }
             CGrapheneBlockTx grapheneBlockTx(grapheneRequestBlockTx.blockhash, vTx);
             connman.PushMessage(pfrom, msgMaker.Make(NetMsgType::GRAPHENETX, grapheneBlockTx);
-            // pfrom->PushMessage(NetMsgType::GRAPHENETX, grapheneBlockTx);
-            // pfrom->blocksSent += 1;
         }
 
         return true;
@@ -3074,6 +3072,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         }
 
         LogPrint("GRAPHENE", "Received grblocktx for %s peer=%s\n", inv.hash.ToString(), pfrom->GetLogName());
+
         {
             // Do not process unrequested grblocktx unless from an expedited node.
             LOCK(pfrom->cs_mapgrapheneblocksinflight);
