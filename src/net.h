@@ -365,6 +365,15 @@ public:
 
     void AddWhitelistedRange(const CSubNet &subnet);
 
+    /** CConnman Graphene Begin Section */
+    bool ClearLargestGrapheneBlockAndDisconnect(CNode *pfrom);
+    bool HaveGrapheneNodes();
+    bool HaveConnectGrapheneNodes();
+    void CheckNodeSupportForGrapheneBlocks();
+    void ConnectToGrapheneBlockNodes();
+
+    /** CConnman Graphene End Section */
+
     ServiceFlags GetLocalServices() const;
 
     //!set the max outbound target in bytes

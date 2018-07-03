@@ -67,7 +67,6 @@ public:
      * @param[in]  nHops        On the wire, nHops is zero for an incoming Graphene block
      * @return True if handling succeeded
      */
-    static bool HandleMessage(CDataStream &vRecv, CNode *pfrom, std::string strCommand, unsigned nHops, CConnman& connman);
 
     ADD_SERIALIZE_METHODS;
 
@@ -108,7 +107,6 @@ public:
      * @param[in] pFrom        The node the message was from
      * @return True if handling succeeded
      */
-    static bool HandleMessage(CDataStream &vRecv, CNode *pfrom, CConnman& connman);
 
     ADD_SERIALIZE_METHODS;
 
@@ -139,7 +137,6 @@ public:
      * @param[in] pFrom        The node the message was from
      * @return True if handling succeeded
      */
-    static bool HandleMessage(CDataStream &vRecv, CNode *pfrom);
     ADD_SERIALIZE_METHODS;
 
     template <typename Stream, typename Operation>
@@ -252,18 +249,18 @@ public:
 extern CGrapheneBlockData graphenedata; // Singleton class
 
 
-bool HaveConnectGrapheneNodes();
-bool HaveGrapheneNodes();
+// bool HaveConnectGrapheneNodes();
+// bool HaveGrapheneNodes();
 bool IsGrapheneBlockEnabled();
 bool CanGrapheneBlockBeDownloaded(CNode *pto);
-void ConnectToGrapheneBlockNodes();
-void CheckNodeSupportForGrapheneBlocks();
-bool ClearLargestGrapheneBlockAndDisconnect(CNode *pfrom);
+// void ConnectToGrapheneBlockNodes();
+// void CheckNodeSupportForGrapheneBlocks();
+// bool ClearLargestGrapheneBlockAndDisconnect(CNode *pfrom);
 void ClearGrapheneBlockInFlight(CNode *pfrom, const uint256 &hash);
 void AddGrapheneBlockInFlight(CNode *pfrom, const uint256 &hash);
-void SendGrapheneBlock(CBlockRef pblock, CNode *pfrom, const CInv &inv, CConnman& connman);
+// void SendGrapheneBlock(CBlockRef pblock, CNode *pfrom, const CInv &inv, CConnman& connman);
 bool IsGrapheneBlockValid(CNode *pfrom, const CBlockHeader &header);
-bool HandleGrapheneBlockRequest(CDataStream &vRecv, CNode *pfrom, const CChainParams &chainparams);
+// bool HandleGrapheneBlockRequest(CDataStream &vRecv, CNode *pfrom, const CChainParams &chainparams);
 CMemPoolInfo GetGrapheneMempoolInfo();
 uint256 GetSalt(unsigned char seed);
 

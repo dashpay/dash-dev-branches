@@ -612,7 +612,7 @@ void CConnman::AddWhitelistedRange(const CSubNet &subnet) {
     vWhitelistedRange.push_back(subnet);
 }
 
-/** Graphene */
+/** CConnman Graphene Begin Section */
 bool CConnman::ClearLargestGrapheneBlockAndDisconnect(CNode *pfrom)
 {
     CNode *pLargest = nullptr;
@@ -636,6 +636,113 @@ bool CConnman::ClearLargestGrapheneBlockAndDisconnect(CNode *pfrom)
     return false;
 }
 
+bool CConnman::HaveGrapheneNodes()
+{
+    {
+        LOCK(cs_vNodes);
+        for (CNode *pnode : vNodes)
+            if (pnode->GrapheneCapable())
+                return true;
+    }
+
+    return false;
+}
+
+bool CConnman::HaveConnectGrapheneNodes()
+{
+    // Strip the port from then list of all the current in and outbound ip addresses
+    std::vector<std::string> vNodesIP;
+    {
+        // TODO: Nakul cs_vNodes
+        LOCK(cs_vNodes);
+        for (const CNode *pnode : vNodes)
+        {
+            int pos = pnode->addrName.rfind(":");
+            if (pos <= 0)
+                vNodesIP.push_back(pnode->addrName);
+            else
+                vNodesIP.push_back(pnode->addrName.substr(0, pos));
+        }
+    }
+
+    // Create a set used to check for cross connected nodes.
+    // A cross connected node is one where we have a connect-graphene connection to
+    // but we also have another inbound connection which is also using
+    // connect-graphene. In those cases we have created a dead-lock where no blocks
+    // can be downloaded unless we also have at least one additional connect-graphene
+    // connection to a different node.
+    std::set<std::string> nNotCrossConnected;
+
+    int nConnectionsOpen = 0;
+    for (const std::string &strAddrNode : mapMultiArgs["-connect-graphene"])
+    {
+        std::string strGrapheneNode;
+        int pos = strAddrNode.rfind(":");
+        if (pos <= 0)
+            strGrapheneNode = strAddrNode;
+        else
+            strGrapheneNode = strAddrNode.substr(0, pos);
+        for (const std::string &strAddr : vNodesIP)
+        {
+            if (strAddr == strGrapheneNode)
+            {
+                nConnectionsOpen++;
+                if (!nNotCrossConnected.count(strAddr))
+                    nNotCrossConnected.insert(strAddr);
+                else
+                    nNotCrossConnected.erase(strAddr);
+            }
+        }
+    }
+    if (nNotCrossConnected.size() > 0)
+        return true;
+    else if (nConnectionsOpen > 0)
+        LogPrint("GRAPHENE", "You have a cross connected graphene block node - we may download regular blocks until you "
+                "resolve the issue\n");
+
+    return false; // Connections are either not open or they are cross connected.
+
+}
+
+void CConnman::CheckNodeSupportForGrapheneBlocks()
+{
+    if (IsGrapheneBlockEnabled())
+    {
+        // Check that a nodes pointed to with connect-graphene actually supports graphene blocks
+        for (const std::string &strAddr : mapMultiArgs["-connect-graphene"])
+        {
+            // TODO: Nakul, use CConnman FindNode
+            CNode* node = FindNode(strAddr);
+            if (node && !node->GrapheneCapable())
+            {
+                LogPrintf("ERROR: You are trying to use connect-graphene but to a node that does not support it "
+                     "- Protocol Version: %d peer=%d\n",
+                    node->nVersion, node->id);
+            }
+        }
+    }
+
+}
+
+void CConnman::ConnectToGrapheneBlockNodes()
+{
+    // Connect to specific addresses
+    if (IsArgSet("-connect-graphene") && mapMultiArgs["-connect-graphene"].size() > 0)
+    {
+        for (const std::string &strAddr : mapMultiArgs["-connect-graphene"])
+        {
+            CAddress addr;
+            // NOTE: Because the only nodes we are connecting to here are the ones the user put in their
+            // dash.conf/commandline args as "-connect-graphene", we don't use the semaphore to limit outbound
+            //      connections
+            OpenNetworkConnection(addr, false, NULL, strAddr.c_str(), false, false, false, false);
+            MilliSleep(500);
+        }
+    }
+
+}
+
+/** CConnman Graphene End Section */
 
 std::string CNode::GetAddrName() const {
     LOCK(cs_addrName);
