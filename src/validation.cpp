@@ -47,8 +47,6 @@
 #include "evo/deterministicmns.h"
 #include "evo/cbtx.h"
 #include "evo/subtx.h"
-#include "evo/tsmempool.h"
-#include "evo/tsvalidation.h"
 
 #include <atomic>
 #include <sstream>
@@ -525,7 +523,9 @@ bool CheckTransaction(const CTransaction& tx, CValidationState &state, bool fChe
                 tx.nType != TRANSACTION_PROVIDER_UPDATE_SERVICE &&
                 tx.nType != TRANSACTION_PROVIDER_UPDATE_REGISTRAR &&
                 tx.nType != TRANSACTION_PROVIDER_UPDATE_REVOKE &&
-                tx.nType != TRANSACTION_COINBASE) {
+                tx.nType != TRANSACTION_COINBASE &&
+                tx.nType != TRANSACTION_SUBTX_REGISTER &&
+                tx.nType != TRANSACTION_SUBTX_TOPUP) {
             return state.DoS(100, false, REJECT_INVALID, "bad-txns-type");
         }
         if (tx.IsCoinBase() && tx.nType != TRANSACTION_COINBASE)
@@ -664,15 +664,11 @@ bool AcceptToMemoryPoolWorker(CTxMemPool& pool, CValidationState& state, const C
     if (pool.existsProviderTxConflict(tx)) {
         return state.DoS(0, false, REJECT_DUPLICATE, "protx-dup");
     }
-    if (IsSubTx(tx)) {
-        if (!CheckSubTx(tx, state))
-            return false;
-        CSubTxData subTxData;
-        GetSubTxData(tx, subTxData);
-        if (subTxData.action == SubTxAction_Register) {
-            if (pool.existsSubTxRegisterUserName(subTxData.userName))
-                return state.DoS(0, false, REJECT_DUPLICATE, "subtx-dup-username");
-        }
+    if (tx.nType == TRANSACTION_SUBTX_REGISTER) {
+        CSubTxRegister subTx;
+        GetTxPayloadAssert(tx, subTx);
+        if (pool.existsSubTxRegisterUserName(subTx.userName))
+            return state.DoS(0, false, REJECT_DUPLICATE, "subtx-dup-username");
 
         // TODO topups are rejected atm when the user does not exist yet, even when a register SubTx is in the mempool
     }
@@ -2367,7 +2363,8 @@ static bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockInd
     int64_t nTime3 = GetTimeMicros(); nTimeConnect += nTime3 - nTime2;
     LogPrint("bench", "      - Connect %u transactions: %.2fms (%.3fms/tx, %.3fms/txin) [%.2fs]\n", (unsigned)block.vtx.size(), 0.001 * (nTime3 - nTime2), 0.001 * (nTime3 - nTime2) / block.vtx.size(), nInputs <= 1 ? 0 : 0.001 * (nTime3 - nTime2) / (nInputs-1), nTimeConnect * 0.000001);
 
-    if (!ProcessSpecialTxsInBlock(block, pindex, state))
+    CAmount specialTxsFee = 0;
+    if (!ProcessSpecialTxsInBlock(block, pindex, state, specialTxsFee))
         return false;
 
     // DASH : MODIFIED TO CHECK MASTERNODE PAYMENTS AND SUPERBLOCKS
@@ -2379,9 +2376,7 @@ static bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockInd
     // to recognize that block is actually invalid.
     // TODO: resync data (both ways?) and try to reprocess this block later.
     CAmount blockReward = nFees + GetBlockSubsidy(pindex->pprev->nBits, pindex->pprev->nHeight, chainparams.GetConsensus());
-
-    CAmount transitionFees = CalcTransitionFeesForBlock(block);
-    blockReward += transitionFees;
+    blockReward += specialTxsFee;
 
     std::string strError = "";
     if (!IsBlockValueValid(block, pindex->nHeight, blockReward, strError)) {
@@ -2690,9 +2685,6 @@ bool static DisconnectTip(CValidationState& state, const CChainParams& chainpara
     // block that were added back and cleans up the mempool state.
     mempool.UpdateTransactionsFromBlock(vHashUpdate);
 
-    // Readd transitions to mempool
-    tsMempool.ReAddForReorg(block);
-
     // Update chainActive and related variables.
     UpdateTip(pindexDelete->pprev, chainparams);
     // Let wallets know transactions went from 1-confirmed to
@@ -2771,24 +2763,8 @@ bool static ConnectTip(CValidationState& state, const CChainParams& chainparams,
     // Remove conflicting transactions from the mempool.;
     mempool.removeForBlock(blockConnecting.vtx, pindexNew->nHeight);
 
-    // Remove transitions from new block from mempool
-    tsMempool.RemoveForBlock(*pblock);
-
     // Update chainActive & related variables.
     UpdateTip(pindexNew, chainparams);
-
-    // Relay transitions which got valid now
-    bool containsSubTxOrTs = !pblock->vts.empty();
-    if (!containsSubTxOrTs) { asd
-        for (const CTransaction &tx : pblock->vtx) {
-            if (IsSubTx(tx)) {
-                containsSubTxOrTs = true;
-                break;
-            }
-        }
-    }
-    if (containsSubTxOrTs)
-        RelayNowValidTransitions();
 
     int64_t nTime6 = GetTimeMicros(); nTimePostConnect += nTime6 - nTime5; nTimeTotal += nTime6 - nTime1;
     LogPrint("bench", "  - Connect postprocess: %.2fms [%.2fs]\n", (nTime6 - nTime5) * 0.001, nTimePostConnect * 0.000001);

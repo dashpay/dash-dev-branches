@@ -72,7 +72,7 @@ TestingSetup::TestingSetup(const std::string& chainName) : BasicTestingSetup(cha
         pblocktree = new CBlockTreeDB(1 << 20, true);
         pcoinsdbview = new CCoinsViewDB(1 << 23, true);
         deterministicMNManager = new CDeterministicMNManager(*evoDb);
-        evoUserDB = new CEvoUserDB(*evoDb);
+        evoUserManager = new CEvoUserManager(*evoDb);
         pcoinsTip = new CCoinsViewCache(pcoinsdbview);
         InitBlockIndex(chainparams);
         {
@@ -96,7 +96,7 @@ TestingSetup::~TestingSetup()
         UnloadBlockIndex();
         delete pcoinsTip;
         delete deterministicMNManager;
-        delete evoUserDB;
+        delete evoUserManager;
         delete pcoinsdbview;
         delete pblocktree;
         delete evoDb;

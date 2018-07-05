@@ -33,7 +33,6 @@
 #include "evo/providertx.h"
 #include "evo/cbtx.h"
 #include "evo/subtx.h"
-#include "evo/tsvalidation.h"
 
 #include <stdint.h>
 
@@ -170,7 +169,37 @@ void TxToJSON(const CTransaction& tx, const uint256 hashBlock, UniValue& entry)
             cbTx.ToJson(proTxObj);
             entry.push_back(Pair("cbTx", proTxObj));
         }
-    } subtx
+    } else if (tx.nType == TRANSACTION_SUBTX_REGISTER) {
+        CSubTxRegister subTx;
+        if (GetTxPayload(tx, subTx)) {
+            UniValue proTxObj = subTx.ToJson();
+            entry.push_back(Pair("subTxRegister", proTxObj));
+        }
+    } else if (tx.nType == TRANSACTION_SUBTX_TOPUP) {
+        CSubTxTopup subTx;
+        if (GetTxPayload(tx, subTx)) {
+            UniValue proTxObj = subTx.ToJson();
+            entry.push_back(Pair("subTxTopup", proTxObj));
+        }
+    } else if (tx.nType == TRANSACTION_SUBTX_RESETKEY) {
+        CSubTxResetKey subTx;
+        if (GetTxPayload(tx, subTx)) {
+            UniValue proTxObj = subTx.ToJson();
+            entry.push_back(Pair("subTxRegister", proTxObj));
+        }
+    } else if (tx.nType == TRANSACTION_SUBTX_CLOSEACCOUNT) {
+        CSubTxCloseAccount subTx;
+        if (GetTxPayload(tx, subTx)) {
+            UniValue proTxObj = subTx.ToJson();
+            entry.push_back(Pair("subTxCloseAccount", proTxObj));
+        }
+    } else if (tx.nType == TRANSACTION_SUBTX_TRANSITION) {
+        CSubTxTransition subTx;
+        if (GetTxPayload(tx, subTx)) {
+            UniValue proTxObj = subTx.ToJson();
+            entry.push_back(Pair("subTxTransition", proTxObj));
+        }
+    }
 
     if (!hashBlock.IsNull()) {
         entry.push_back(Pair("blockhash", hashBlock.GetHex()));
@@ -1001,7 +1030,6 @@ UniValue sendrawtransaction(const JSONRPCRequest& request)
         throw JSONRPCError(RPC_CLIENT_P2P_DISABLED, "Error: Peer-to-peer functionality missing or disabled");
 
     g_connman->RelayTransaction(*tx);
-    RelayNowValidTransitions();
 
     return hashTx.GetHex();
 }

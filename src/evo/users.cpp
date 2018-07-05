@@ -4,139 +4,443 @@
 
 #include "messagesigner.h"
 #include "users.h"
+#include "user.h"
+#include "subtx.h"
+#include "txmempool.h"
+#include "script/standard.h"
+#include "consensus/validation.h"
+#include "specialtx.h"
+#include "util.h"
 
-CEvoUserDB *evoUserDB;
+CEvoUserManager *evoUserManager;
 
-static const char DB_USER = 'U';
-static const char DB_USER_BY_NAME = 'u';
-static const char DB_TRANSITION = 'T';
-static const char DB_TRANSITION_BLOCK_HASH = 't';
-
-bool CEvoUser::VerifySig(const std::string &msg, const std::vector<unsigned char> &sig, std::string &errorRet) const {
-    return CMessageSigner::VerifyMessage(GetCurPubKeyID(), sig, msg, errorRet);
+CEvoUserManager::CEvoUserManager(CEvoDB& _evoDb)
+        : userDb(_evoDb)
+{
 }
 
-CEvoUserDB::CEvoUserDB(size_t nCacheSize, bool fMemory, bool fWipe)
-        : db(GetDataDir() / "users", nCacheSize, fMemory, fWipe),
-          dbTransaction(db){
-}
-
-bool CEvoUserDB::WriteUser(const CEvoUser &user) {
-    LOCK(cs);
-    dbTransaction.Write(std::make_pair(DB_USER, user.GetRegTxId()), user);
-    dbTransaction.Write(std::make_pair(DB_USER_BY_NAME, user.GetUserName()), user.GetRegTxId());
-    return true;
-}
-
-bool CEvoUserDB::DeleteUser(const uint256 &regTxId) {
-    LOCK(cs);
-
-    CEvoUser user;
-    if (!GetUser(regTxId, user))
-        return false;
-
-    dbTransaction.Erase(std::make_pair(DB_USER, regTxId));
-    dbTransaction.Erase(std::make_pair(DB_USER_BY_NAME, user.GetUserName()));
-    return true;
-}
-
-bool CEvoUserDB::GetUser(const uint256 &regTxId, CEvoUser &user) {
-    LOCK(cs);
-    return dbTransaction.Read(std::make_pair(DB_USER, regTxId), user);
-}
-
-bool CEvoUserDB::GetUserIdByName(const std::string &userName, uint256 &regTxId) {
-    LOCK(cs);
-    return dbTransaction.Read(std::make_pair(DB_USER_BY_NAME, userName), regTxId);
-}
-
-bool CEvoUserDB::UserExists(const uint256 &regTxId) {
-    LOCK(cs);
-    return dbTransaction.Exists(std::make_pair(DB_USER, regTxId));
-}
-
-bool CEvoUserDB::UserNameExists(const std::string &userName) {
-    LOCK(cs);
-    return dbTransaction.Exists(std::make_pair(DB_USER_BY_NAME, userName));
-}
-
-bool CEvoUserDB::WriteTransition(const CTransition &ts) {
-    LOCK(cs);
-    dbTransaction.Write(std::make_pair(DB_TRANSITION, ts.GetHash()), ts);
-    return true;
-}
-
-bool CEvoUserDB::DeleteTransition(const uint256 &tsHash) {
-    LOCK(cs);
-    dbTransaction.Erase(std::make_pair(DB_TRANSITION, tsHash));
-    return true;
-}
-
-bool CEvoUserDB::TransitionExists(const uint256 &tsHash) {
-    LOCK(cs);
-    return dbTransaction.Exists(std::make_pair(DB_TRANSITION, tsHash));
-}
-
-bool CEvoUserDB::GetTransition(const uint256 &tsHash, CTransition &ts) {
-    LOCK(cs);
-    return dbTransaction.Read(std::make_pair(DB_TRANSITION, tsHash), ts);
-}
-
-bool CEvoUserDB::GetLastTransitionForUser(const uint256 &regTxId, CTransition &ts) {
-    LOCK(cs);
-    std::vector<CTransition> tmp;
-    if (!GetTransitionsForUser(regTxId, 1, tmp))
-        return false;
-    if (tmp.empty())
-        return false;
-    ts = tmp[0];
-    return true;
-}
-
-bool CEvoUserDB::GetTransitionsForUser(const uint256 &regTxId, int maxCount, std::vector<CTransition> &transitions) {
-    LOCK(cs);
-    CEvoUser user;
-    if (!GetUser(regTxId, user))
-        return false;
-
-    transitions.clear();
-    uint256 tsHash = user.GetHashLastTransition();
-    while ((maxCount == -1 || (int)transitions.size() < maxCount) && !tsHash.IsNull()) {
-        CTransition ts;
-        if (!GetTransition(tsHash, ts))
-            return false;
-        transitions.push_back(ts);
-        tsHash = ts.hashPrevTransition;
+static CAmount GetTxBurnAmount(const CTransaction& tx)
+{
+    CAmount burned = 0;
+    for (auto& txo : tx.vout) {
+        txnouttype type;
+        std::vector<std::vector<unsigned char> > solutions;
+        if (Solver(txo.scriptPubKey, type, solutions)) {
+            if (type == TX_NULL_DATA) {
+                burned += txo.nValue;
+            }
+        }
     }
-    std::reverse(transitions.begin(), transitions.end());
+    return burned;
+}
+
+bool CEvoUserManager::CheckSubTxRegister(const CTransaction& tx, const CBlockIndex* pindexPrev, CValidationState& state)
+{
+    LOCK(cs);
+
+    CSubTxRegister subTx;
+    if (!GetTxPayload(tx, subTx)) {
+        return state.DoS(10, false, REJECT_INVALID, "bad-subtx-payload");
+    }
+    if (subTx.nVersion != CSubTxRegister::CURRENT_VERSION) {
+        return state.DoS(10, false, REJECT_INVALID, "bad-subtx-version");
+    }
+
+    if (userDb.UserNameExists(subTx.userName)) {
+        return state.DoS(100, false, REJECT_INVALID, "bad-subtx-dupusername");
+    }
+
+    CAmount topupAmount = GetTxBurnAmount(tx);
+
+    if (topupAmount < MIN_SUBTX_TOPUP) {
+        return state.DoS(100, false, REJECT_INVALID, "bad-subtx-lowtopup");
+    }
+
+    std::string verifyError;
+    if (!CHashSigner::VerifyHash(subTx.GetSignHash(), subTx.pubKeyID, subTx.vchSig, verifyError)) {
+        return state.DoS(100, false, REJECT_INVALID, "bad-subtx-sig", false, verifyError);
+    }
+
+    // TODO check username validity
+
     return true;
 }
 
-bool CEvoUserDB::WriteTransitionBlockHash(const uint256 &tsHash, const uint256 &blockHash) {
+bool CEvoUserManager::ProcessSubTxRegister(const CTransaction &tx, const CBlockIndex* pindex, CValidationState& state, CAmount& specialTxFees)
+{
     LOCK(cs);
-    dbTransaction.Write(std::make_pair(DB_TRANSITION_BLOCK_HASH, tsHash), blockHash);
+
+    CSubTxRegister subTx;
+    if (!GetTxPayload(tx, subTx)) {
+        return state.DoS(10, false, REJECT_INVALID, "bad-subtx-payload");
+    }
+
+    CAmount topupAmount = GetTxBurnAmount(tx);
+
+    CEvoUser user(tx.GetHash(), subTx.userName, subTx.pubKeyID);
+    user.AddTopUp(topupAmount);
+    userDb.PushPubKey(tx.GetHash(), subTx.pubKeyID);
+    userDb.WriteUser(user);
+    userDb.WriteUnspentSubTx(tx.GetHash(), tx.GetHash());
+
     return true;
 }
 
-bool CEvoUserDB::GetTransitionBlockHash(const uint256 &tsHash, uint256 &blockHash) {
+bool CEvoUserManager::UndoSubTxRegister(const CTransaction &tx, const CBlockIndex* pindex)
+{
     LOCK(cs);
-    return dbTransaction.Read(std::make_pair(DB_TRANSITION_BLOCK_HASH, tsHash), blockHash);
-}
 
-bool CEvoUserDB::DeleteTransitionBlockHash(const uint256 &tsHash) {
-    LOCK(cs);
-    dbTransaction.Erase(std::make_pair(DB_TRANSITION_BLOCK_HASH, tsHash));
+    CSubTxRegister subTx;
+    if (!GetTxPayload(tx, subTx)) {
+        return error("CEvoUserManager::%s -- invalid subtx payload", __func__);
+    }
+
+    userDb.DeleteUser(tx.GetHash());
+    userDb.DeleteUnspentSubTx(tx.GetHash(), tx.GetHash());
     return true;
 }
 
-bool CEvoUserDB::Commit() {
-    return dbTransaction.Commit();
+template<class SubTx>
+static bool GetSubTxAndUser(CEvoUserDb& userDb, const CTransaction& tx, SubTx& subTxRet, CEvoUser& userRet, bool includeMempool, CValidationState& state, bool allowClosed = false)
+{
+    if (!GetTxPayload(tx, subTxRet)) {
+        return state.DoS(10, false, REJECT_INVALID, "bad-subtx-payload");
+    }
+    if (subTxRet.nVersion != SubTx::CURRENT_VERSION) {
+        return state.DoS(10, false, REJECT_INVALID, "bad-subtx-version");
+    }
+
+    bool userValid = false;
+    if (userDb.GetUser(subTxRet.regTxId, userRet)) {
+        userValid = true;
+    } else if (includeMempool && evoUserManager->BuildUserFromMempool(subTxRet.regTxId, userRet)) {
+        userValid = true;
+    }
+    if (!userValid) {
+        // Low DoS score as peers may not know about this user yet
+        return state.DoS(10, false, REJECT_TS_NOUSER, "bad-subtx-nouser");
+    }
+
+    if (includeMempool) {
+        evoUserManager->TopupUserFromMempool(userRet);
+        evoUserManager->ApplyUserTransitionsFromMempool(userRet, tx.GetHash());
+    }
+
+    if (!allowClosed && userRet.IsClosed()) {
+        return state.DoS(100, false, REJECT_INVALID, "bad-subtx-accountclosed");
+    }
+    return true;
 }
 
-void CEvoUserDB::Rollback() {
-    dbTransaction.Clear();
+template<class SubTx>
+static bool CheckSubTxForUser(CEvoUserDb& userDb, const CTransaction& tx, SubTx& subTxRet, CEvoUser& userRet, bool includeMempool, CValidationState& state)
+{
+    if (!GetSubTxAndUser(userDb, tx, subTxRet, userRet, includeMempool, state)) {
+        return false;
+    }
+
+    if (subTxRet.hashPrevSubTx != userRet.GetCurSubTx()) {
+        return state.DoS(10, false, REJECT_INVALID, "bad-subtx-ancenstor");
+    }
+    if (userDb.HasUnspentSubTx(subTxRet.regTxId, subTxRet.hashPrevSubTx)) {
+        return state.DoS(10, false, REJECT_INVALID, "bad-subtx-ancenstor");
+    }
+
+    std::string strError;
+    if (!CHashSigner::VerifyHash(subTxRet.GetSignHash(), userRet.GetCurPubKeyID(), subTxRet.vchSig, strError)) {
+        // TODO immediately ban?
+        return state.DoS(10, false, REJECT_INVALID, "bad-subtx-sig");
+    }
+
+    return true;
 }
 
-bool CEvoUserDB::IsTransactionClean() {
-    return dbTransaction.IsClean();
+template<class SubTx>
+static bool CheckSubTxAndFeeForUser(CEvoUserDb& userDb,const CTransaction& tx, SubTx& subTxRet, CEvoUser& userRet, bool includeMempool, CValidationState& state)
+{
+    if (!CheckSubTxForUser(userDb, tx, subTxRet, userRet, includeMempool, state)) {
+        return false;
+    }
+
+    // TODO min fee depending on TS size
+    if (subTxRet.creditFee < EVO_TS_MIN_FEE || subTxRet.creditFee > EVO_TS_MAX_FEE) {
+        return state.DoS(100, false, REJECT_INVALID, "bad-subtx-fee");
+    }
+
+    if (userRet.GetCreditBalance() < subTxRet.creditFee) {
+        // Low DoS score as peers may not know about the low balance (e.g. due to not mined topups)
+        return state.DoS(10, false, REJECT_INSUFFICIENTFEE, "bad-subtx-nocredits");
+    }
+    return true;
+}
+
+bool CEvoUserManager::CheckSubTxTopup(const CTransaction& tx, const CBlockIndex* pindexPrev, CValidationState& state)
+{
+    LOCK(cs);
+
+    CSubTxTopup subTx;
+    CEvoUser user;
+    if (!GetSubTxAndUser(userDb, tx, subTx, user, false, state)) {
+        return false;
+    }
+
+    CAmount topupAmount = GetTxBurnAmount(tx);
+    if (topupAmount < MIN_SUBTX_TOPUP) {
+        return state.DoS(100, false, REJECT_INVALID, "bad-subtx-lowtopup");
+    }
+
+    return true;
+}
+
+bool CEvoUserManager::ProcessSubTxTopup(const CTransaction &tx, const CBlockIndex* pindex, CValidationState& state, CAmount& specialTxFees)
+{
+    LOCK(cs);
+
+    CSubTxTopup subTx;
+    CEvoUser user;
+    if (!GetSubTxAndUser(userDb, tx, subTx, user, false, state)) {
+        return false;
+    }
+
+    CAmount topupAmount = GetTxBurnAmount(tx);
+    user.AddTopUp(topupAmount);
+    userDb.WriteUser(user);
+    return true;
+}
+
+bool CEvoUserManager::UndoSubTxTopup(const CTransaction &tx, const CBlockIndex* pindex)
+{
+    LOCK(cs);
+
+    CSubTxTopup subTx;
+    CEvoUser user;
+    CValidationState dummyState;
+    if (!GetSubTxAndUser(userDb, tx, subTx, user, false, dummyState)) {
+        return false;
+    }
+
+    CAmount topupAmount = GetTxBurnAmount(tx);
+    user.AddTopUp(-topupAmount);
+    userDb.WriteUser(user);
+    return true;
+}
+
+bool CEvoUserManager::CheckSubTxResetKey(const CTransaction& tx, const CBlockIndex* pindexPrev, CValidationState& state)
+{
+    LOCK(cs);
+
+    CSubTxResetKey subTx;
+    CEvoUser user;
+    if (!CheckSubTxAndFeeForUser(userDb, tx, subTx, user, false, state)) {
+        return false;
+    }
+    return true;
+}
+
+bool CEvoUserManager::ProcessSubTxResetKey(const CTransaction &tx, const CBlockIndex* pindex, CValidationState& state, CAmount& specialTxFees)
+{
+    LOCK(cs);
+
+    CSubTxResetKey subTx;
+    CEvoUser user;
+    if (!GetSubTxAndUser(userDb, tx, subTx, user, false, state)) {
+        return false;
+    }
+
+    user.SetCurSubTx(tx.GetHash());
+    user.SetCurPubKeyID(subTx.newPubKeyId);
+    user.AddSpend(subTx.creditFee);
+    specialTxFees += subTx.creditFee;
+    userDb.WriteUser(user);
+
+    userDb.PushPubKey(subTx.regTxId, subTx.newPubKeyId);
+    userDb.DeleteUnspentSubTx(subTx.regTxId, subTx.hashPrevSubTx);
+    userDb.WriteUnspentSubTx(subTx.regTxId, tx.GetHash());
+
+    return true;
+}
+
+bool CEvoUserManager::UndoSubTxResetKey(const CTransaction &tx, const CBlockIndex* pindex)
+{
+    LOCK(cs);
+
+    CSubTxResetKey subTx;
+    CEvoUser user;
+    CValidationState dummyState;
+    if (!GetSubTxAndUser(userDb, tx, subTx, user, false, dummyState)) {
+        return false;
+    }
+    CKeyID oldTop, newTop;
+    userDb.PopPubKey(subTx.regTxId, oldTop, newTop);
+    if (oldTop != subTx.newPubKeyId || newTop.IsNull()) {
+        return error("CEvoUserManager::%s -- unexpected key %s popped from user %s. Expected %s",
+                     __func__, oldTop.ToString(), user.GetRegTxId().ToString(), subTx.newPubKeyId.ToString());
+    }
+    user.SetCurSubTx(subTx.hashPrevSubTx);
+    user.SetCurPubKeyID(newTop);
+    user.AddSpend(-subTx.creditFee);
+    userDb.WriteUser(user);
+    userDb.DeleteUnspentSubTx(subTx.regTxId, tx.GetHash());
+    userDb.WriteUnspentSubTx(subTx.regTxId, subTx.hashPrevSubTx);
+    return true;
+}
+
+bool CEvoUserManager::CheckSubTxCloseAccount(const CTransaction& tx, const CBlockIndex* pindexPrev, CValidationState& state)
+{
+    LOCK(cs);
+
+    CSubTxResetKey subTx;
+    CEvoUser user;
+    if (!CheckSubTxAndFeeForUser(userDb, tx, subTx, user, false, state)) {
+        return false;
+    }
+    return true;
+}
+
+bool CEvoUserManager::ProcessSubTxCloseAccount(const CTransaction &tx, const CBlockIndex* pindex, CValidationState& state, CAmount& specialTxFees)
+{
+    LOCK(cs);
+
+    CSubTxCloseAccount subTx;
+    CEvoUser user;
+    if (!GetSubTxAndUser(userDb, tx, subTx, user, false, state)) {
+        return false;
+    }
+    user.SetCurSubTx(tx.GetHash());
+    user.AddSpend(subTx.creditFee);
+    specialTxFees += subTx.creditFee;
+    user.SetClosed(true);
+    userDb.WriteUser(user);
+
+    userDb.DeleteUnspentSubTx(subTx.regTxId, subTx.hashPrevSubTx);
+    userDb.WriteUnspentSubTx(subTx.regTxId, tx.GetHash());
+    return true;
+}
+
+bool CEvoUserManager::UndoSubTxCloseAccount(const CTransaction &tx, const CBlockIndex* pindex)
+{
+    LOCK(cs);
+
+    CSubTxCloseAccount subTx;
+    CEvoUser user;
+    CValidationState dummyState;
+    if (!GetSubTxAndUser(userDb, tx, subTx, user, false, dummyState, true)) {
+        return false;
+    }
+    user.SetCurSubTx(subTx.hashPrevSubTx);
+    user.SetClosed(false);
+    user.AddSpend(-subTx.creditFee);
+    userDb.WriteUser(user);
+    userDb.DeleteUnspentSubTx(subTx.regTxId, tx.GetHash());
+    userDb.WriteUnspentSubTx(subTx.regTxId, subTx.hashPrevSubTx);
+    return true;
+}
+
+
+bool CEvoUserManager::CheckSubTxTransition(const CTransaction& tx, const CBlockIndex* pindexPrev, CValidationState& state)
+{
+    LOCK(cs);
+
+    CSubTxTransition subTx;
+    CEvoUser user;
+    if (!CheckSubTxAndFeeForUser(userDb, tx, subTx, user, false, state)) {
+        return false;
+    }
+    if (subTx.hashPrevSubTx != user.GetCurSubTx()) {
+        return state.DoS(10, false, REJECT_TS_ANCESTOR, "bad-subtx-ts-ancestor");
+    }
+    return true;
+}
+
+bool CEvoUserManager::ProcessSubTxTransition(const CTransaction &tx, const CBlockIndex* pindex, CValidationState& state, CAmount& specialTxFees)
+{
+    LOCK(cs);
+
+    CSubTxTransition subTx;
+    CEvoUser user;
+    if (!GetSubTxAndUser(userDb, tx, subTx, user, false, state)) {
+        return false;
+    }
+
+    user.SetCurSubTx(tx.GetHash());
+    user.SetCurHashSTPacket(subTx.hashSTPacket);
+    user.AddSpend(subTx.creditFee);
+    specialTxFees += subTx.creditFee;
+    userDb.WriteUser(user);
+
+    userDb.PushHashSTPacket(subTx.regTxId, subTx.hashSTPacket);
+    userDb.DeleteUnspentSubTx(subTx.regTxId, subTx.hashPrevSubTx);
+    userDb.WriteUnspentSubTx(subTx.regTxId, tx.GetHash());
+    return true;
+}
+
+bool CEvoUserManager::UndoSubTxTransition(const CTransaction &tx, const CBlockIndex* pindex)
+{
+    LOCK(cs);
+
+    CSubTxTransition subTx;
+    CEvoUser user;
+    CValidationState dummyState;
+    if (!GetSubTxAndUser(userDb, tx, subTx, user, false, dummyState)) {
+        return false;
+    }
+    uint256 oldTop, newTop;
+    userDb.PopHashSTPacket(subTx.regTxId, oldTop, newTop);
+    if (oldTop != subTx.hashSTPacket) {
+        return error("CEvoUserManager::%s -- popped hashSTPacket %s for user %s. Expected %s",
+                     __func__, oldTop.ToString(), user.GetRegTxId().ToString(), subTx.hashSTPacket.ToString());
+    }
+    user.SetCurSubTx(subTx.hashPrevSubTx);
+    user.SetCurHashSTPacket(newTop);
+    user.AddSpend(-subTx.creditFee);
+    userDb.WriteUser(user);
+    userDb.DeleteUnspentSubTx(subTx.regTxId, tx.GetHash());
+    userDb.WriteUnspentSubTx(subTx.regTxId, subTx.hashPrevSubTx);
+    return true;
+}
+
+bool CEvoUserManager::BuildUserFromMempool(const uint256& regTxId, CEvoUser& user)
+{
+    auto tx = mempool.get(regTxId);
+    if (tx == nullptr) {
+        return false;
+    }
+
+    CValidationState dummyState;
+    if (!CheckSubTxRegister(*tx, nullptr, dummyState)) {
+        return false;
+    }
+
+    CSubTxRegister subTx;
+    GetTxPayloadAssert(*tx, subTx);
+
+    user = CEvoUser(regTxId, subTx.userName, subTx.pubKeyID);
+    user.AddTopUp(GetTxBurnAmount(*tx));
+
+    return true;
+}
+
+bool CEvoUserManager::TopupUserFromMempool(CEvoUser& user)
+{
+    std::vector<CTransactionRef> topups;
+    if (!mempool.getTopupsForUser(user.GetRegTxId(), topups))
+        return false;
+
+    bool didTopup = false;
+    for (const auto &tx : topups) {
+        CValidationState dummyState;
+        if (!CheckSubTxTopup(*tx, nullptr, dummyState)) {
+            continue;
+        }
+        CAmount topupAmount = GetTxBurnAmount(*tx);
+        user.AddTopUp(topupAmount);
+        didTopup = true;
+    }
+    return didTopup;
+}
+
+bool CEvoUserManager::ApplyUserTransitionsFromMempool(CEvoUser& user, const uint256& stopAtTs)
+{
+    // TODO
+    return true;
 }
