@@ -23,8 +23,6 @@
 #include "random.h"
 #include "netaddress.h"
 
-#include "evo/transition.h"
-
 #undef foreach
 #include "boost/multi_index_container.hpp"
 #include "boost/multi_index/ordered_index.hpp"
@@ -117,6 +115,9 @@ private:
     CAmount nModFeesWithAncestors;
     unsigned int nSigOpCountWithAncestors;
 
+    // Used to track parent transactions through the indirectmap mapNextTx
+    COutPoint subTxDummyOutPoint;
+
 public:
     CTxMemPoolEntry(const CTransactionRef& _tx, const CAmount& _nFee,
                     int64_t _nTime, double _entryPriority, unsigned int _entryHeight,
@@ -163,6 +164,9 @@ public:
     unsigned int GetSigOpCountWithAncestors() const { return nSigOpCountWithAncestors; }
 
     mutable size_t vTxHashesIdx; //!< Index in mempool's vTxHashes
+
+    const COutPoint* GetSubTxDummyOutPoint() const { return &subTxDummyOutPoint; }
+    COutPoint* GetSubTxDummyOutPoint() { return &subTxDummyOutPoint; }
 };
 
 // Helpers for modifying CTxMemPool::mapTx, which is a boost multi_index.
@@ -587,8 +591,8 @@ public:
     void removeProTxPubKeyConflicts(const CTransaction &tx, const CKeyID &keyId);
     void removeProTxConflicts(const CTransaction &tx);
     void removeSubTxTopups(const uint256 &regTxId);
+    void removeSubTxsForUser(const uint256 &regTxId);
     void removeSubTxConflicts(const CTransaction &tx);
-    void removeTsConflicts(const CTransition &ts);
     void removeForBlock(const std::vector<CTransactionRef>& vtx, unsigned int nBlockHeight);
 
     void clear();
@@ -705,7 +709,8 @@ public:
     }
 
     bool getRegTxIdFromUserName(const std::string &userName, uint256 &regTxId) const;
-    bool getTopupsForUser(const uint256 &regTxId, std::vector<CTransaction> &result) const;
+    bool getTopupsForUser(const uint256 &regTxId, std::vector<CTransactionRef> &result) const;
+    std::vector<CTransactionRef> getSubTxsForUser(const uint256 &regTxId) const;
 
     /** Estimate fee rate needed to get into the next nBlocks
      *  If no answer can be given at nBlocks, return an estimate

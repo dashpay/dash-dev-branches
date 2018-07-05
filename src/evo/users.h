@@ -2,191 +2,57 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#ifndef DASH_USERS_H
-#define DASH_USERS_H
+#ifndef DASH_EVO_USERS_H
+#define DASH_EVO_USERS_H
 
 #include "sync.h"
 #include "pubkey.h"
-#include "dbwrapper.h"
 #include "uint256.h"
 #include "serialize.h"
-#include "transition.h"
+#include "amount.h"
 
-class CEvoUser {
-private:
-    uint256 regTxId;
-    std::string userName;
-    std::vector<CKeyID> pubKeyIDs;
-    std::vector<uint256> subTxIds;
-    std::vector<uint256> hashSTPackets;
-    uint256 hashLastTransition;
+#include "usersdb.h"
 
-    CAmount topupCredits{};
-    CAmount spentCredits{};
+class CTransaction;
+class CBlockIndex;
+class CValidationState;
 
-    bool closed{};
-
-public:
-    CEvoUser() {}
-    CEvoUser(const uint256 &_regTxId, const std::string &_userName, const CKeyID &_pubKeyID)
-            : regTxId(_regTxId),
-              userName(_userName),
-              pubKeyIDs{_pubKeyID},
-              hashSTPackets{uint256()} // start with 000... hashSTPacket
-    {}
-
-    ADD_SERIALIZE_METHODS;
-
-    template <typename Stream, typename Operation>
-    inline void SerializationOp(Stream& s, Operation ser_action, int nType, int nVersion) {
-        //READWRITE(*const_cast<int32_t*>(&this->nVersion));
-        //nVersion = this->nVersion;
-        READWRITE(regTxId);
-        READWRITE(userName);
-        READWRITE(pubKeyIDs);
-        READWRITE(subTxIds);
-        READWRITE(hashSTPackets);
-        READWRITE(hashLastTransition);
-        READWRITE(topupCredits);
-        READWRITE(spentCredits);
-        READWRITE(closed);
-    }
-
-    const uint256 &GetRegTxId() const {
-        return regTxId;
-    }
-
-    const std::string &GetUserName() const {
-        return userName;
-    }
-
-    CAmount GetTopUpCredits() const {
-        return topupCredits;
-    }
-
-    CAmount GetSpentCredits() const {
-        return spentCredits;
-    }
-
-    CAmount GetCreditBalance() const {
-        return topupCredits - spentCredits;
-    }
-
-    void AddTopUp(CAmount amount) {
-        topupCredits += amount;
-    }
-
-    void AddSpend(CAmount amount) {
-        spentCredits += amount;
-    }
-
-    void SetClosed(bool _closed) {
-        closed = _closed;
-    }
-
-    bool IsClosed() const {
-        return closed;
-    }
-
-    void PushPubKeyID(const CKeyID &keyID) {
-        pubKeyIDs.push_back(keyID);
-    }
-    CKeyID PopPubKeyID() {
-        assert(pubKeyIDs.size() != 0);
-        CKeyID ret(pubKeyIDs.back());
-        pubKeyIDs.pop_back();
-        return ret;
-    }
-    const CKeyID &GetCurPubKeyID() const {
-        assert(pubKeyIDs.size() != 0);
-        return pubKeyIDs.back();
-    }
-    
-    void PushSubTx(const uint256 &subTxId) {
-        subTxIds.push_back(subTxId);
-    }
-    uint256 PopSubTx() {
-        assert(subTxIds.size() != 0);
-        uint256 ret(subTxIds.back());
-        subTxIds.pop_back();
-        return ret;
-    }
-    const std::vector<uint256> &GetSubTxIds() const {
-        return subTxIds;
-    }
-
-    void PushHashSTPacket(const uint256 &h) {
-        hashSTPackets.push_back(h);
-    }
-    uint256 PopHashSTPacket() {
-        assert(hashSTPackets.size() != 0);
-        uint256 ret(hashSTPackets.back());
-        hashSTPackets.pop_back();
-        return ret;
-    }
-    const uint256 &GetCurHashSTPacket() const {
-        assert(hashSTPackets.size() != 0);
-        return hashSTPackets.back();
-    }
-
-    const uint256 &GetHashLastTransition() const {
-        return hashLastTransition;
-    }
-    void SetHashLastTransition(const uint256 &tsHash) {
-        hashLastTransition = tsHash;
-    }
-
-    bool VerifySig(const std::string &msg, const std::vector<unsigned char> &sig, std::string &errorRet) const;
-};
-
-class CEvoUserDB {
+class CEvoUserManager {
 public:
     CCriticalSection cs;
 
-    struct RAIITransaction {
-        CEvoUserDB &userDb;
-        RAIITransaction(CEvoUserDB &_userDb) : userDb(_userDb) {}
-        ~RAIITransaction() {
-            userDb.Rollback();
-        }
-    };
-
 private:
-    CDBWrapper db;
-    CDBTransaction dbTransaction;
+    CEvoUserDb userDb;
 
 public:
-    CEvoUserDB(size_t nCacheSize, bool fMemory=false, bool fWipe=false);
+    CEvoUserManager(CEvoDB& _evoDb);
 
-    bool WriteUser(const CEvoUser &user);
-    bool DeleteUser(const uint256 &regTxId);
+    bool CheckSubTxRegister(const CTransaction& tx, const CBlockIndex* pindexPrev, CValidationState& state);
+    bool ProcessSubTxRegister(const CTransaction &tx, const CBlockIndex* pindex, CValidationState& state, CAmount& specialTxFees);
+    bool UndoSubTxRegister(const CTransaction &tx, const CBlockIndex* pindex);
 
-    bool GetUser(const uint256 &regTxId, CEvoUser &user);
-    bool GetUserIdByName(const std::string &userName, uint256 &regTxId);
-    bool UserExists(const uint256 &regTxId);
-    bool UserNameExists(const std::string &userName);
+    bool CheckSubTxTopup(const CTransaction& tx, const CBlockIndex* pindexPrev, CValidationState& state);
+    bool ProcessSubTxTopup(const CTransaction &tx, const CBlockIndex* pindex, CValidationState& state, CAmount& specialTxFees);
+    bool UndoSubTxTopup(const CTransaction &tx, const CBlockIndex* pindex);
 
-    bool WriteTransition(const CTransition &ts);
-    bool DeleteTransition(const uint256 &tsHash);
-    bool TransitionExists(const uint256 &tsHash);
-    bool GetTransition(const uint256 &tsHash, CTransition &ts);
-    bool GetLastTransitionForUser(const uint256 &regTxId, CTransition &ts);
-    bool GetTransitionsForUser(const uint256 &regTxId, int maxCount, std::vector<CTransition> &transitions);
+    bool CheckSubTxResetKey(const CTransaction& tx, const CBlockIndex* pindexPrev, CValidationState& state);
+    bool ProcessSubTxResetKey(const CTransaction &tx, const CBlockIndex* pindex, CValidationState& state, CAmount& specialTxFees);
+    bool UndoSubTxResetKey(const CTransaction &tx, const CBlockIndex* pindex);
 
-    bool WriteTransitionBlockHash(const uint256 &tsHash, const uint256 &blockHash);
-    bool GetTransitionBlockHash(const uint256 &tsHash, uint256 &blockHash);
-    bool DeleteTransitionBlockHash(const uint256 &tsHash);
+    bool CheckSubTxCloseAccount(const CTransaction& tx, const CBlockIndex* pindexPrev, CValidationState& state);
+    bool ProcessSubTxCloseAccount(const CTransaction &tx, const CBlockIndex* pindex, CValidationState& state, CAmount& specialTxFees);
+    bool UndoSubTxCloseAccount(const CTransaction &tx, const CBlockIndex* pindex);
 
-    bool Commit();
-    void Rollback();
-    bool IsTransactionClean();
+    bool CheckSubTxTransition(const CTransaction& tx, const CBlockIndex* pindexPrev, CValidationState& state);
+    bool ProcessSubTxTransition(const CTransaction &tx, const CBlockIndex* pindex, CValidationState& state, CAmount& specialTxFees);
+    bool UndoSubTxTransition(const CTransaction &tx, const CBlockIndex* pindex);
 
-    std::unique_ptr<RAIITransaction> BeginTransaction() {
-        assert(IsTransactionClean());
-        return std::unique_ptr<RAIITransaction>(new RAIITransaction(*this));
-    }
+public:
+    bool BuildUserFromMempool(const uint256& regTxId, CEvoUser& user);
+    bool TopupUserFromMempool(CEvoUser& user);
+    bool ApplyUserTransitionsFromMempool(CEvoUser& user, const uint256& stopAtTs);
 };
 
-extern CEvoUserDB *evoUserDB;
+extern CEvoUserManager *evoUserManager;
 
-#endif //DASH_USERS_H
+#endif //DASH_EVO_USERS_H
