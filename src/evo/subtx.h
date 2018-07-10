@@ -189,6 +189,8 @@ public:
     UniValue ToJson() const;
 };
 
+uint256 GetRegTxIdFromSubTx(const CTransaction& tx);
 uint256 GetSubTxHashPrevSubTx(const CTransaction& tx);
+UniValue SubTxToJson(const CTransaction& tx);
 
 #endif //DASH_EVO_SUBTX_H
