@@ -47,10 +47,14 @@ public:
     bool ProcessSubTxTransition(const CTransaction &tx, const CBlockIndex* pindex, CValidationState& state, CAmount& specialTxFees);
     bool UndoSubTxTransition(const CTransaction &tx, const CBlockIndex* pindex);
 
+    bool GetUser(const uint256& regTxId, CEvoUser& user);
+    bool GetUserIdByName(const std::string& userName, uint256& regTxIdRet);
+    std::vector<uint256> ListUserSubTxs(const uint256& regTxId);
+
 public:
     bool BuildUserFromMempool(const uint256& regTxId, CEvoUser& user);
     bool TopupUserFromMempool(CEvoUser& user);
-    bool ApplyUserTransitionsFromMempool(CEvoUser& user, const uint256& stopAtTs);
+    bool ApplyUserSubTxsFromMempool(CEvoUser& user, const uint256& stopAtSubTx = uint256());
 };
 
 extern CEvoUserManager *evoUserManager;

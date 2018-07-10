@@ -29,12 +29,17 @@ public:
     bool UserExists(const uint256& regTxId);
     bool UserNameExists(const std::string& userName);
 
+    void PushSubTx(const uint256& regTxId, const uint256& hashSubTx);
+    bool PopSubTx(const uint256& regTxId, uint256& oldTop, uint256& newTop);
+    std::vector<uint256> ListUserSubTxs(const uint256& regTxId, size_t maxCount = std::numeric_limits<size_t>::max());
+
     void PushPubKey(const uint256& regTxId, const CKeyID& keyId);
     bool PopPubKey(const uint256& regTxId, CKeyID& oldTop, CKeyID& newTop);
 
     void PushHashSTPacket(const uint256& regTxId, const uint256& hashSTPacket);
     bool PopHashSTPacket(const uint256& regTxId, uint256& oldTop, uint256& newTop);
 
+    // TODO really needed?
     void WriteUnspentSubTx(const uint256& regTxId, const uint256& subTxHash);
     void DeleteUnspentSubTx(const uint256& regTxId, const uint256& subTxHash);
     bool HasUnspentSubTx(const uint256& regTxId, const uint256& subTxHash);
@@ -94,6 +99,20 @@ private:
         GetStackItem(db, k, topIndex, newTopItem);
         return true;
     }
+
+    template<typename DB, typename K, typename V>
+    void ListStackItems(DB& db, const K& k, std::vector<V>& ret)
+    {
+        ret.clear();
+        size_t i = 0;
+        while (true) {
+            V v;
+            if (!GetStackItem(db, k, i, v)) {
+                break;
+            }
+            ret.emplace_back(std::move(v));
+        }
+    };
 };
 
 #endif //DASH_EVO_USERDB_H

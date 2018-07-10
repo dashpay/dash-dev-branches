@@ -26,6 +26,7 @@ UniValue CSubTxTopup::ToJson() const
 UniValue CSubTxResetKey::ToJson() const
 {
     UniValue v(UniValue::VOBJ);
+    v.push_back(Pair("version", nVersion));
     v.push_back(Pair("regTxId", regTxId.ToString()));
     v.push_back(Pair("hashPrevSubTx", hashPrevSubTx.ToString()));
     v.push_back(Pair("creditFee", creditFee));
@@ -36,6 +37,7 @@ UniValue CSubTxResetKey::ToJson() const
 UniValue CSubTxCloseAccount::ToJson() const
 {
     UniValue v(UniValue::VOBJ);
+    v.push_back(Pair("version", nVersion));
     v.push_back(Pair("regTxId", regTxId.ToString()));
     v.push_back(Pair("hashPrevSubTx", hashPrevSubTx.ToString()));
     v.push_back(Pair("creditFee", creditFee));
@@ -45,11 +47,37 @@ UniValue CSubTxCloseAccount::ToJson() const
 UniValue CSubTxTransition::ToJson() const
 {
     UniValue v(UniValue::VOBJ);
+    v.push_back(Pair("version", nVersion));
     v.push_back(Pair("regTxId", regTxId.ToString()));
     v.push_back(Pair("hashPrevSubTx", hashPrevSubTx.ToString()));
     v.push_back(Pair("creditFee", creditFee));
     v.push_back(Pair("hashSTPacket", hashSTPacket.ToString()));
     return v;
+}
+
+template<typename SubTx>
+uint256 GetRegTxIdFromSubTxHelper(const CTransaction& tx)
+{
+    SubTx subTx;
+    if (!GetTxPayload(tx, subTx)) {
+        return uint256();
+    }
+
+    return subTx.regTxId;
+}
+
+uint256 GetRegTxIdFromSubTx(const CTransaction& tx)
+{
+    if (tx.nType == TRANSACTION_SUBTX_REGISTER) {
+        return tx.GetHash();
+    } else if (tx.nType == TRANSACTION_SUBTX_RESETKEY) {
+        return GetRegTxIdFromSubTxHelper<CSubTxResetKey>(tx);
+    } else if (tx.nType == TRANSACTION_SUBTX_CLOSEACCOUNT) {
+        return GetRegTxIdFromSubTxHelper<CSubTxCloseAccount>(tx);
+    } else if (tx.nType == TRANSACTION_SUBTX_TRANSITION) {
+        return GetRegTxIdFromSubTxHelper<CSubTxTransition>(tx);
+    }
+    return uint256();
 }
 
 uint256 GetSubTxHashPrevSubTx(const CTransaction& tx)
@@ -68,4 +96,34 @@ uint256 GetSubTxHashPrevSubTx(const CTransaction& tx)
         return subTx.hashPrevSubTx;
     }
     return uint256();
+}
+
+template<typename SubTx>
+UniValue SubTxToJsonHelper(const CTransaction& tx)
+{
+    SubTx subTx;
+    if (!GetTxPayload(tx, subTx)) {
+        UniValue json(UniValue::VOBJ);
+        json.push_back(Pair("error", "invalid tx payload"));
+        return json;
+    }
+
+    return subTx.ToJson();
+}
+
+UniValue SubTxToJson(const CTransaction& tx)
+{
+    if (tx.nType == TRANSACTION_SUBTX_REGISTER) {
+        return SubTxToJsonHelper<CSubTxRegister>(tx);
+    } else if (tx.nType == TRANSACTION_SUBTX_RESETKEY) {
+        return SubTxToJsonHelper<CSubTxResetKey>(tx);
+    } else if (tx.nType == TRANSACTION_SUBTX_CLOSEACCOUNT) {
+        return SubTxToJsonHelper<CSubTxCloseAccount>(tx);
+    } else if (tx.nType == TRANSACTION_SUBTX_TRANSITION) {
+        return SubTxToJsonHelper<CSubTxTransition>(tx);
+    }
+
+    UniValue json(UniValue::VOBJ);
+    json.push_back(Pair("error", "unknown tx type"));
+    return json;
 }

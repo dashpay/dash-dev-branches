@@ -8,11 +8,12 @@
 #include "evodb.h"
 #include "user.h"
 
-static const std::string DB_USER = "subtx_U";
-static const std::string DB_USER_BY_NAME = "subtx_u";
-static const std::string DB_USER_PUBKEY = "subtx_pk";
-static const std::string DB_USER_HASHSTPACKET = "subtx_hst";
-static const std::string DB_UNSPENT_SUBTX = "subtx_s";
+static const std::string DB_USER = "user_u";
+static const std::string DB_USER_BY_NAME = "user_n";
+static const std::string DB_USER_SUBTX = "user_s";
+static const std::string DB_USER_PUBKEY = "user_pk";
+static const std::string DB_USER_HASHSTPACKET = "user_hst";
+static const std::string DB_UNSPENT_SUBTX = "user_S";
 
 CEvoUserDb::CEvoUserDb(CEvoDB& _evoDb)
         : evoDb(_evoDb)
@@ -47,6 +48,23 @@ bool CEvoUserDb::UserExists(const uint256& regTxId) {
 
 bool CEvoUserDb::UserNameExists(const std::string& userName) {
     return evoDb.Exists(std::make_pair(DB_USER_BY_NAME, userName));
+}
+
+void CEvoUserDb::PushSubTx(const uint256& regTxId, const uint256& hashSubTx)
+{
+    PushStack(evoDb, std::make_pair(DB_USER_SUBTX, regTxId), hashSubTx);
+}
+
+bool CEvoUserDb::PopSubTx(const uint256& regTxId, uint256& oldTop, uint256& newTop)
+{
+    return PopStackItem(evoDb, std::make_pair(DB_USER_SUBTX, regTxId), oldTop, newTop);
+}
+
+std::vector<uint256> CEvoUserDb::ListUserSubTxs(const uint256& regTxId, size_t maxCount)
+{
+    std::vector<uint256> ret;
+    ListStackItems(evoDb, std::make_pair(DB_USER_SUBTX, regTxId), ret);
+    return ret;
 }
 
 void CEvoUserDb::PushPubKey(const uint256& regTxId, const CKeyID& keyId)

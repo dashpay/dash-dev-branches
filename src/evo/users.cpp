@@ -79,6 +79,7 @@ bool CEvoUserManager::ProcessSubTxRegister(const CTransaction &tx, const CBlockI
 
     CEvoUser user(tx.GetHash(), subTx.userName, subTx.pubKeyID);
     user.AddTopUp(topupAmount);
+    userDb.PushSubTx(tx.GetHash(), tx.GetHash());
     userDb.PushPubKey(tx.GetHash(), subTx.pubKeyID);
     userDb.WriteUser(user);
     userDb.WriteUnspentSubTx(tx.GetHash(), tx.GetHash());
@@ -95,6 +96,10 @@ bool CEvoUserManager::UndoSubTxRegister(const CTransaction &tx, const CBlockInde
         return error("CEvoUserManager::%s -- invalid subtx payload", __func__);
     }
 
+    uint256 oldTopSubTx, newTopSubTx;
+    if (!userDb.PopSubTx(tx.GetHash(), oldTopSubTx, newTopSubTx) || oldTopSubTx != tx.GetHash()) {
+        return error("CEvoUserManager::%s -- unexpected subTx popped. expected %s, popped %s", __func__, tx.GetHash().ToString(), oldTopSubTx.ToString());
+    }
     userDb.DeleteUser(tx.GetHash());
     userDb.DeleteUnspentSubTx(tx.GetHash(), tx.GetHash());
     return true;
@@ -123,7 +128,7 @@ static bool GetSubTxAndUser(CEvoUserDb& userDb, const CTransaction& tx, SubTx& s
 
     if (includeMempool) {
         evoUserManager->TopupUserFromMempool(userRet);
-        evoUserManager->ApplyUserTransitionsFromMempool(userRet, tx.GetHash());
+        evoUserManager->ApplyUserSubTxsFromMempool(userRet, tx.GetHash());
     }
 
     if (!allowClosed && userRet.IsClosed()) {
@@ -204,6 +209,7 @@ bool CEvoUserManager::ProcessSubTxTopup(const CTransaction &tx, const CBlockInde
 
     CAmount topupAmount = GetTxBurnAmount(tx);
     user.AddTopUp(topupAmount);
+    // We don't push the subTx hash here as everyone can topup a users credits and the order is also not important
     userDb.WriteUser(user);
     return true;
 }
@@ -253,6 +259,7 @@ bool CEvoUserManager::ProcessSubTxResetKey(const CTransaction &tx, const CBlockI
     specialTxFees += subTx.creditFee;
     userDb.WriteUser(user);
 
+    userDb.PushSubTx(subTx.regTxId, tx.GetHash());
     userDb.PushPubKey(subTx.regTxId, subTx.newPubKeyId);
     userDb.DeleteUnspentSubTx(subTx.regTxId, subTx.hashPrevSubTx);
     userDb.WriteUnspentSubTx(subTx.regTxId, tx.GetHash());
@@ -270,6 +277,12 @@ bool CEvoUserManager::UndoSubTxResetKey(const CTransaction &tx, const CBlockInde
     if (!GetSubTxAndUser(userDb, tx, subTx, user, false, dummyState)) {
         return false;
     }
+
+    uint256 oldTopSubTx, newTopSubTx;
+    if (!userDb.PopSubTx(subTx.regTxId, oldTopSubTx, newTopSubTx) || oldTopSubTx != tx.GetHash()) {
+        return error("CEvoUserManager::%s -- unexpected subTx popped. expected %s, popped %s", __func__, tx.GetHash().ToString(), oldTopSubTx.ToString());
+    }
+
     CKeyID oldTop, newTop;
     userDb.PopPubKey(subTx.regTxId, oldTop, newTop);
     if (oldTop != subTx.newPubKeyId || newTop.IsNull()) {
@@ -311,7 +324,7 @@ bool CEvoUserManager::ProcessSubTxCloseAccount(const CTransaction &tx, const CBl
     specialTxFees += subTx.creditFee;
     user.SetClosed(true);
     userDb.WriteUser(user);
-
+    userDb.PushSubTx(subTx.regTxId, tx.GetHash());
     userDb.DeleteUnspentSubTx(subTx.regTxId, subTx.hashPrevSubTx);
     userDb.WriteUnspentSubTx(subTx.regTxId, tx.GetHash());
     return true;
@@ -330,6 +343,12 @@ bool CEvoUserManager::UndoSubTxCloseAccount(const CTransaction &tx, const CBlock
     user.SetCurSubTx(subTx.hashPrevSubTx);
     user.SetClosed(false);
     user.AddSpend(-subTx.creditFee);
+
+    uint256 oldTopSubTx, newTopSubTx;
+    if (!userDb.PopSubTx(subTx.regTxId, oldTopSubTx, newTopSubTx) || oldTopSubTx != tx.GetHash()) {
+        return error("CEvoUserManager::%s -- unexpected subTx popped. expected %s, popped %s", __func__, tx.GetHash().ToString(), oldTopSubTx.ToString());
+    }
+
     userDb.WriteUser(user);
     userDb.DeleteUnspentSubTx(subTx.regTxId, tx.GetHash());
     userDb.WriteUnspentSubTx(subTx.regTxId, subTx.hashPrevSubTx);
@@ -367,7 +386,7 @@ bool CEvoUserManager::ProcessSubTxTransition(const CTransaction &tx, const CBloc
     user.AddSpend(subTx.creditFee);
     specialTxFees += subTx.creditFee;
     userDb.WriteUser(user);
-
+    userDb.PushSubTx(subTx.regTxId, tx.GetHash());
     userDb.PushHashSTPacket(subTx.regTxId, subTx.hashSTPacket);
     userDb.DeleteUnspentSubTx(subTx.regTxId, subTx.hashPrevSubTx);
     userDb.WriteUnspentSubTx(subTx.regTxId, tx.GetHash());
@@ -384,6 +403,12 @@ bool CEvoUserManager::UndoSubTxTransition(const CTransaction &tx, const CBlockIn
     if (!GetSubTxAndUser(userDb, tx, subTx, user, false, dummyState)) {
         return false;
     }
+
+    uint256 oldTopSubTx, newTopSubTx;
+    if (!userDb.PopSubTx(subTx.regTxId, oldTopSubTx, newTopSubTx) || oldTopSubTx != tx.GetHash()) {
+        return error("CEvoUserManager::%s -- unexpected subTx popped. expected %s, popped %s", __func__, tx.GetHash().ToString(), oldTopSubTx.ToString());
+    }
+
     uint256 oldTop, newTop;
     userDb.PopHashSTPacket(subTx.regTxId, oldTop, newTop);
     if (oldTop != subTx.hashSTPacket) {
@@ -439,8 +464,26 @@ bool CEvoUserManager::TopupUserFromMempool(CEvoUser& user)
     return didTopup;
 }
 
-bool CEvoUserManager::ApplyUserTransitionsFromMempool(CEvoUser& user, const uint256& stopAtTs)
+bool CEvoUserManager::ApplyUserSubTxsFromMempool(CEvoUser& user, const uint256& stopAtSubTx)
 {
     // TODO
     return true;
+}
+
+bool CEvoUserManager::GetUser(const uint256& regTxId, CEvoUser& user)
+{
+    LOCK(cs);
+    return userDb.GetUser(regTxId, user);
+}
+
+bool CEvoUserManager::GetUserIdByName(const std::string& userName, uint256& regTxIdRet)
+{
+    LOCK(cs);
+    return userDb.GetUserIdByName(userName, regTxIdRet);
+}
+
+std::vector<uint256> CEvoUserManager::ListUserSubTxs(const uint256& regTxId)
+{
+    LOCK(cs);
+    return userDb.ListUserSubTxs(regTxId);
 }

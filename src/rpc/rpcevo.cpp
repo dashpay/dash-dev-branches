@@ -28,7 +28,7 @@ extern UniValue sendrawtransaction(const JSONRPCRequest& request);
 #endif//ENABLE_WALLET
 
 // Allows to specify Dash address or priv key. In case of Dash address, the priv key is taken from the wallet
-static CKey ParsePrivKey(const std::string &strKeyOrAddress, bool allowAddresses = true) {
+CKey ParsePrivKey(const std::string &strKeyOrAddress, bool allowAddresses = true) {
     CBitcoinAddress address;
     if (allowAddresses && address.SetString(strKeyOrAddress) && address.IsValid()) {
 #ifdef ENABLE_WALLET
