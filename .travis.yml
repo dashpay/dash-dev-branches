@@ -32,6 +32,9 @@ env:
     # DOCKER_HUB_PASSWORD
     - secure: "RLzlMhfLqwSBrZqJOVOd61suXBn+HtUR3vOZfuFYF/Qmjjj5TE41+rObZmzc54hP/ZL+OH6blnibpvfDXlX+eN38ivFQfuxkJIGL68SJsEwNBRwW39Yw6Hl5RdI41MLCH7ByN15wifLp1JKBilHJ7XGMOUjI7P0yl7JjX8GBXUCtJbVLRugo80/yn+XQ1NdnlpbpYHNjMEQFWSODPa3pSK5McWvyQjDZDgS+IkdrZmIYJPMa7bmKH5I/edUPSmXQT905FgEwq9u8XR0SyBopli21EK9l6GkXIIvmDTYz5vT26Apvi2B4Aoazlklg+KNRUJuLGerpt6kbnU0gMSUChVkFfFhOk6GRSN3a/AUfD2FOudvMhet2QvlPHx+GYdEUr5XVo5HW42pHsqfD6eDtHd8VLTsHP0q4C8V85fNMv21lkkehy2ry8fx/RRy6x4O2wg2mua+79UkGKXp75gMKzWEcth34PCFCOu37l2F8R/ANnrQ52K/8vIQ88TtU2OpYX89fHjLojBxu+WKEBGZH2LRPsZBOUHeeO5C/xKDrhZU24ORnMW8wg66Qg5GIX1KI4a8yp73Mpues5hzpJ6wkMuRrQt40ymKndLCjv8KSd+5BfP6Or/KIrzDNYdZaasjk7JNi6rcZmm9d3fTAo+Ja/mjpUCIOo3SX14luzVCJIig="
     - DOCKER_BUILD=false
+    - DOCKER_REPO=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+    - DOCKER_IMAGE=dashevo/dashcore
+    - DOCKER_TAG=evo
 
   matrix:
     - BUILD_TARGET=arm-linux
@@ -46,6 +49,12 @@ env:
 before_cache:
   # Save builder image
   - docker save dash-builder-$BUILD_TARGET-$TRAVIS_JOB_NUMBER $(docker history -q dash-builder-$BUILD_TARGET-$TRAVIS_JOB_NUMBER | grep -v \<missing\>) | gzip -2 > $HOME/cache/docker/dash-builder-$BUILD_TARGET.tar.gz
+
+before_install:
+    # setup aws/docker
+    - pip3 install -U pip awscli
+    - aws configure set region $AWS_REGION
+    - $(aws ecr get-login --no-include-email)
 
 install:
     # Our scripts try to be Travis agnostic
@@ -66,7 +75,7 @@ before_script:
     # See https://github.com/travis-ci/travis-ci/issues/4704. If this gets fixed, this line can also be removed.
     - python3 -c 'import os,sys,fcntl; flags = fcntl.fcntl(sys.stdout, fcntl.F_GETFL); fcntl.fcntl(sys.stdout, fcntl.F_SETFL, flags&~os.O_NONBLOCK);'
     # Build docker image only for develop branch of the main repo
-    - if [ "$TRAVIS_REPO_SLUG" != "dashpay/dash" -o "$TRAVIS_BRANCH" != "develop" -o "$TRAVIS_PULL_REQUEST" != "false" ]; then export DOCKER_BUILD="false"; echo DOCKER_BUILD=$DOCKER_BUILD; fi
+    - if [ "$TRAVIS_REPO_SLUG" != "dashevo/dash-evo-branches" -o "$TRAVIS_BRANCH" != "evo" -o "$TRAVIS_PULL_REQUEST" != "false" ]; then export DOCKER_BUILD="false"; echo DOCKER_BUILD=$DOCKER_BUILD; fi
 script:
     - export TRAVIS_COMMIT_LOG=`git log --format=fuller -1`
     # Our scripts try to be Travis agnostic
@@ -82,4 +91,4 @@ after_script:
     - echo $TRAVIS_COMMIT_RANGE
     - echo $TRAVIS_COMMIT_LOG
 after_success:
-    - if [ "$DOCKER_BUILD" = "true" ]; then docker login -u $DOCKER_HUB_USER -p $DOCKER_HUB_PASSWORD && ./docker/push-docker.sh; fi
+    - if [ "$DOCKER_BUILD" = "true" ]; then ./docker/push-docker.sh; fi
