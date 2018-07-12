@@ -25,6 +25,7 @@
 
 #include "evo/specialtx.h"
 #include "evo/cbtx.h"
+#include "evo/subtx.h"
 
 #include <stdint.h>
 
@@ -122,6 +123,7 @@ UniValue blockToJSON(const CBlock& block, const CBlockIndex* blockindex, bool tx
     result.push_back(Pair("versionHex", strprintf("%08x", block.nVersion)));
     result.push_back(Pair("merkleroot", block.hashMerkleRoot.GetHex()));
     UniValue txs(UniValue::VARR);
+    UniValue transitions(UniValue::VARR);
     for(const auto& tx : block.vtx)
     {
         if(txDetails)
@@ -132,8 +134,21 @@ UniValue blockToJSON(const CBlock& block, const CBlockIndex* blockindex, bool tx
         }
         else
             txs.push_back(tx->GetHash().GetHex());
+
+        if (tx->nType == TRANSACTION_SUBTX_TRANSITION) {
+            CSubTxTransition subTx;
+            if (GetTxPayload(*tx, subTx)) {
+                if (txDetails) {
+                    UniValue objTs = subTx.ToJson();
+                    transitions.push_back(objTs);
+                } else {
+                    transitions.push_back(tx->GetHash().ToString());
+                }
+            }
+        }
     }
     result.push_back(Pair("tx", txs));
+    result.push_back(Pair("ts", transitions));
     if (!block.vtx[0]->vExtraPayload.empty()) {
         CCbTx cbTx;
         if (GetTxPayload(block.vtx[0]->vExtraPayload, cbTx)) {
