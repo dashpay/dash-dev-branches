@@ -693,7 +693,7 @@ class CNode
     friend class CConnman;
 public:
 
-    //// Graphene begin section
+    //// Graphene: In Flight begin section
     struct CGrapheneBlockInFlight
     {
         int64_t nRequestTime;
@@ -783,14 +783,13 @@ public:
     std::vector<uint256> grapheneBlockHashes;
     std::map<uint64_t, uint32_t> grapheneMapHashOrderIndex;
     std::map<uint64_t, CTransaction> mapGrapheneMissingTx;
+    CCriticalSection cs_mapgrapheneblocksinflight; // lock mapGraheneBlocksInFlight
+    std::map<uint256, CGrapheneBlockInFlight> mapGrapheneBlocksInFlight; // graphene blocks in flight and the time requested.
     uint64_t nLocalGrapheneBlockBytes; // the bytes used in creating this graphene block, updated dynamically
     int nSizeGrapheneBlock; // Original on-wire size of the block. Just used for reporting
     int grapheneBlockWaitingForTxns; // if -1 then not currently waiting
     CCriticalSection cs_grapheneadditionaltxs; // lock grapheneAdditionalTxs
     std::vector<CTransactionRef> grapheneAdditionalTxs; // entire transactions included in graphene block
-    CCriticalSection cs_mapgrapheneblocksinflight; // lock mapGraheneBlocksInFlight
-    std::map<uint256, CGrapheneBlockInFlight>
-            mapGrapheneBlocksInFlight; // graphene blocks in flight and the time requested.
     double nGetGrapheneBlockTxCount; // Count how many get_xblocktx requests are made
     uint64_t nGetGrapheneBlockTxLastTime; // The last time a get_xblocktx request was made
     double nGetGrapheneCount; // Count how many get_graphene requests are made

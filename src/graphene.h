@@ -85,7 +85,7 @@ public:
         return ::GetSerializeSize(vAdditionalTxs, SER_NETWORK, PROTOCOL_VERSION);
     }
     CInv GetInv() { return CInv(MSG_BLOCK, header.GetHash()); }
-    bool process(CNode *pfrom, int nSizeGrapheneBlock, std::string strCommand, CConnman& connman);
+    // bool process(CNode *pfrom, int nSizeGrapheneBlock, std::string strCommand, CConnman& connman);
     bool CheckBlockHeader(const CBlockHeader &block, CValidationState &state);
 };
 
@@ -96,10 +96,10 @@ class CGrapheneBlockTx
 public:
     /** Public only for unit testing */
     uint256 blockhash;
-    std::vector<CTransaction> vMissingTx; // map of missing transactions
+    std::vector<CTransactionRef> vMissingTx; // map of missing transactions
 
 public:
-    CGrapheneBlockTx(uint256 blockHash, std::vector<CTransaction> &vTx);
+    CGrapheneBlockTx(uint256 blockHash, std::vector<CTransactionRef> vTx);
     CGrapheneBlockTx() {}
     /**
      * Handle receiving a list of missing graphene block transactions from a prior request
@@ -263,18 +263,5 @@ bool IsGrapheneBlockValid(CNode *pfrom, const CBlockHeader &header);
 // bool HandleGrapheneBlockRequest(CDataStream &vRecv, CNode *pfrom, const CChainParams &chainparams);
 CMemPoolInfo GetGrapheneMempoolInfo();
 uint256 GetSalt(unsigned char seed);
-
-// Xpress Validation: begin
-// Transactions that have already been accepted into the memory pool do not need to be
-// re-verified and can avoid having to do a second and expensive CheckInputs() when
-// processing a new block.  (Protected by cs_xval)
-extern std::set<uint256> setPreVerifiedTxHash;
-
-// Orphans that are added to the thinblock must be verifed since they have never been
-// accepted into the memory pool.  (Protected by cs_xval)
-extern std::set<uint256> setUnVerifiedOrphanTxHash;
-
-extern CCriticalSection cs_xval;
-// Xpress Validation: end
 
 #endif // BITCOIN_GRAPHENE_H
