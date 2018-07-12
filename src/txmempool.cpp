@@ -1093,6 +1093,12 @@ void CTxMemPool::check(const CCoinsViewCache *pcoins) const
             assert(it3->second == &tx);
             i++;
         }
+        if (!it->GetSubTxDummyOutPoint()->IsNull()) {
+            auto it4 = mapTx.find(it->GetSubTxDummyOutPoint()->hash);
+            if (it4 != mapTx.end()) {
+                setParentCheck.emplace(it4);
+            }
+        }
         assert(setParentCheck == GetMemPoolParents(it));
         // Verify ancestor state is correct.
         setEntries setAncestors;

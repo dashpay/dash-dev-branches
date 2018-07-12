@@ -47,6 +47,8 @@
 #include "evo/deterministicmns.h"
 #include "evo/cbtx.h"
 #include "evo/subtx.h"
+#include "evo/user.h"
+#include "evo/users.h"
 
 #include <atomic>
 #include <sstream>
@@ -525,7 +527,10 @@ bool CheckTransaction(const CTransaction& tx, CValidationState &state, bool fChe
                 tx.nType != TRANSACTION_PROVIDER_UPDATE_REVOKE &&
                 tx.nType != TRANSACTION_COINBASE &&
                 tx.nType != TRANSACTION_SUBTX_REGISTER &&
-                tx.nType != TRANSACTION_SUBTX_TOPUP) {
+                tx.nType != TRANSACTION_SUBTX_TOPUP &&
+                tx.nType != TRANSACTION_SUBTX_RESETKEY &&
+                tx.nType != TRANSACTION_SUBTX_CLOSEACCOUNT &&
+                tx.nType != TRANSACTION_SUBTX_TRANSITION) {
             return state.DoS(100, false, REJECT_INVALID, "bad-txns-type");
         }
         if (tx.IsCoinBase() && tx.nType != TRANSACTION_COINBASE)
@@ -534,10 +539,27 @@ bool CheckTransaction(const CTransaction& tx, CValidationState &state, bool fChe
         return state.DoS(100, false, REJECT_INVALID, "bad-txns-type");
     }
 
+    bool allowEmptyVin = false;
+    bool allowEmptyVout = false;
+
+    switch (tx.nType) {
+        case TRANSACTION_SUBTX_REGISTER:
+        case TRANSACTION_SUBTX_TOPUP:
+        case TRANSACTION_SUBTX_RESETKEY:
+        case TRANSACTION_SUBTX_CLOSEACCOUNT:
+        case TRANSACTION_SUBTX_TRANSITION:
+            allowEmptyVin = true;
+            allowEmptyVout = true;
+            break;
+        default:
+            allowEmptyVin = false;
+            allowEmptyVout = false;
+    }
+
     // Basic checks that don't depend on any context
-    if (tx.vin.empty())
+    if (!allowEmptyVin && tx.vin.empty())
         return state.DoS(10, false, REJECT_INVALID, "bad-txns-vin-empty");
-    if (tx.vout.empty())
+    if (!allowEmptyVout && tx.vout.empty())
         return state.DoS(10, false, REJECT_INVALID, "bad-txns-vout-empty");
     // Size limits
     if (::GetSerializeSize(tx, SER_NETWORK, PROTOCOL_VERSION) > MAX_LEGACY_BLOCK_SIZE)
@@ -649,7 +671,7 @@ bool AcceptToMemoryPoolWorker(CTxMemPool& pool, CValidationState& state, const C
     if (!ContextualCheckTransaction(tx, state, chainActive.Tip()))
         return error("%s: ContextualCheckTransaction: %s, %s", __func__, hash.ToString(), FormatStateMessage(state));
 
-    if (!CheckSpecialTx(tx, chainActive.Tip(), state))
+    if (!CheckSpecialTx(tx, chainActive.Tip(), true, state))
         return false;
 
     // Coinbase is only valid in a block, not as a loose transaction
@@ -791,6 +813,27 @@ bool AcceptToMemoryPoolWorker(CTxMemPool& pool, CValidationState& state, const C
             }
         }
 
+        uint256 hashPrevSubTx = GetSubTxHashPrevSubTx(tx);
+        if (!hashPrevSubTx.IsNull()) {
+            if (mempool.mapNextTx.count(COutPoint(hashPrevSubTx, (uint32_t)-1))) {
+                return state.Invalid(false, REJECT_CONFLICT, "subtx-mempool-conflict");
+            }
+            uint256 regTxId = GetRegTxIdFromSubTx(tx);
+            assert(!regTxId.IsNull());
+
+            CEvoUser user;
+            if (!evoUserManager->GetUser(regTxId, user, true)) {
+                return state.Invalid(false, REJECT_CONFLICT, "subtx-mempool-nouser");
+            }
+            if (user.GetCurSubTx() != hashPrevSubTx) {
+                // we handle this the same way as we would handle orphan transactions
+                if (pfMissingInputs) {
+                    *pfMissingInputs = true;
+                }
+                return false;
+            }
+        }
+
         // Bring the best block into scope
         view.GetBestBlock();
 
@@ -816,7 +859,7 @@ bool AcceptToMemoryPoolWorker(CTxMemPool& pool, CValidationState& state, const C
         nSigOps += GetP2SHSigOpCount(tx, view);
 
         CAmount nValueOut = tx.GetValueOut();
-        CAmount nFees = nValueIn-nValueOut;
+        CAmount nFees = nValueIn - nValueOut + GetSubTxFee(tx);
         // nModifiedFees includes any fee deltas from PrioritiseTransaction
         CAmount nModifiedFees = nFees;
         double nPriorityDummy = 0;

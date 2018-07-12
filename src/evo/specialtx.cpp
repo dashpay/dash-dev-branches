@@ -16,7 +16,7 @@
 #include "cbtx.h"
 #include "subtx.h"
 
-bool CheckSpecialTx(const CTransaction& tx, const CBlockIndex* pindexPrev, CValidationState& state)
+bool CheckSpecialTx(const CTransaction& tx, const CBlockIndex* pindexPrev, bool forMempool, CValidationState& state)
 {
     AssertLockHeld(cs_main);
 
@@ -47,7 +47,7 @@ bool CheckSpecialTx(const CTransaction& tx, const CBlockIndex* pindexPrev, CVali
         case TRANSACTION_SUBTX_CLOSEACCOUNT:
             return evoUserManager->CheckSubTxCloseAccount(tx, pindexPrev, state);
         case TRANSACTION_SUBTX_TRANSITION:
-            return evoUserManager->CheckSubTxTransition(tx, pindexPrev, state);
+            return evoUserManager->CheckSubTxTransition(tx, pindexPrev, forMempool, state);
     }
 
     return state.DoS(10, false, REJECT_INVALID, "bad-tx-type");
@@ -115,7 +115,7 @@ bool ProcessSpecialTxsInBlock(const CBlock& block, const CBlockIndex* pindex, CV
 
     for (int i = 0; i < (int)block.vtx.size(); i++) {
         const CTransaction& tx = *block.vtx[i];
-        if (!CheckSpecialTx(tx, pindex->pprev, state))
+        if (!CheckSpecialTx(tx, pindex->pprev, false, state))
             return false;
         if (!ProcessSpecialTx(tx, pindex, state, specialTxFees))
             return false;

@@ -10,7 +10,7 @@
 UniValue CSubTxRegister::ToJson() const
 {
     UniValue v(UniValue::VOBJ);
-    v.push_back(Pair("unserName", userName));
+    v.push_back(Pair("userName", userName));
     v.push_back(Pair("pubKeyId", pubKeyID.ToString()));
     v.push_back(Pair("vchSigSize", (int)vchSig.size()));
     return v;
@@ -78,6 +78,29 @@ uint256 GetRegTxIdFromSubTx(const CTransaction& tx)
         return GetRegTxIdFromSubTxHelper<CSubTxTransition>(tx);
     }
     return uint256();
+}
+
+template<typename SubTx>
+CAmount GetSubTxFeeHelper(const CTransaction& tx)
+{
+    SubTx subTx;
+    if (!GetTxPayload(tx, subTx)) {
+        return 0;
+    }
+
+    return subTx.creditFee;
+}
+
+CAmount GetSubTxFee(const CTransaction& tx)
+{
+    if (tx.nType == TRANSACTION_SUBTX_RESETKEY) {
+        return GetSubTxFeeHelper<CSubTxResetKey>(tx);
+    } else if (tx.nType == TRANSACTION_SUBTX_CLOSEACCOUNT) {
+        return GetSubTxFeeHelper<CSubTxCloseAccount>(tx);
+    } else if (tx.nType == TRANSACTION_SUBTX_TRANSITION) {
+        return GetSubTxFeeHelper<CSubTxTransition>(tx);
+    }
+    return 0;
 }
 
 uint256 GetSubTxHashPrevSubTx(const CTransaction& tx)
