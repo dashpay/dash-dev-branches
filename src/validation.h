@@ -45,6 +45,7 @@ class CScriptCheck;
 class CTxMemPool;
 class CValidationInterface;
 class CValidationState;
+class CGrapheneBlockData;
 struct ChainTxData;
 
 struct LockPoints;
@@ -149,9 +150,24 @@ static const int MAX_UNCONNECTING_HEADERS = 10;
 
 static const bool DEFAULT_PEERBLOOMFILTERS = true;
 
-CCriticalSection cs_xval;
-std::set<uint256> setPreVerifiedTxHash GUARDED_BY(cs_xval);
-std::set<uint256> setUnVerifiedOrphanTxHash GUARDED_BY(cs_xval);
+/** Graphene Section */
+
+// Graphenedata
+// extern CGrapheneBlockData graphenedata; // Singleton class
+
+// Xpress Validation: begin
+// Transactions that have already been accepted into the memory pool do not need to be
+// re-verified and can avoid having to do a second and expensive CheckInputs() when
+// processing a new block.  (Protected by cs_xval)
+extern std::set<uint256> setPreVerifiedTxHash;
+
+// Orphans that are added to the thinblock must be verifed since they have never been
+// accepted into the memory pool.  (Protected by cs_xval)
+extern std::set<uint256> setUnVerifiedOrphanTxHash;
+
+extern CCriticalSection cs_xval;
+// Xpress Validation: end
+
 
 //DEFAULT_MAX_MESSAGE_SIZE_MULTIPLIER = 16; // Allowed messages lengths will be this * the excessive block size
 

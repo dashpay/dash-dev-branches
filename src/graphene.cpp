@@ -10,7 +10,7 @@
 //#include "expedited.h"
 #include "net.h"
 #include "netmessagemaker.h"
-#include "net_processing.h"
+// #include "net_processing.h"
 //#include "parallel.h"
 #include "policy/policy.h"
 #include "pow.h"
@@ -52,7 +52,7 @@ CGrapheneBlock::~CGrapheneBlock()
     }
 }
 
-CGrapheneBlockTx::CGrapheneBlockTx(uint256 blockHash, std::vector<CTransaction> &vTx)
+CGrapheneBlockTx::CGrapheneBlockTx(uint256 blockHash, std::vector<CTransactionRef> vTx)
 {
     blockhash = blockHash;
     vMissingTx = vTx;
@@ -74,229 +74,6 @@ bool CGrapheneBlock::CheckBlockHeader(const CBlockHeader &block, CValidationStat
     if (header.GetBlockTime() > GetAdjustedTime() + 2 * 60 * 60)
         return state.Invalid(
             error("CheckBlockHeader(): block timestamp too far in the future"), REJECT_INVALID, "time-too-new");
-
-    return true;
-}
-
-bool CGrapheneBlock::process(CNode *pfrom,
-    int nSizeGrapheneBlock,
-    std::string strCommand, CConnman& connman) // TODO: request from the "best" txn source not necessarily from the block source
-{
-    const CNetMsgMaker msgMaker(pfrom->GetSendVersion());
-    // In PV we must prevent two graphene blocks from simulaneously processing from that were recieved from the
-    // same peer. This would only happen as in the example of an expedited block coming in
-    // after an graphene request, because we would never explicitly request two graphene blocks from the same peer.
-    // TODO: Nakul PV
-    // if (PV->IsAlreadyValidating(pfrom->id))
-        // return false;
-
-    // Xpress Validation - only perform xval if the chaintip matches the last blockhash in the graphene block
-    // TODO: Nakul XVal
-    // bool fXVal;
-    // {
-    //     LOCK(cs_main);
-    //     fXVal = (header.hashPrevBlock == chainActive.Tip()->GetBlockHash()) ? true : false;
-    // }
-
-    graphenedata.ClearGrapheneBlockData(pfrom);
-    pfrom->nSizeGrapheneBlock = nSizeGrapheneBlock;
-
-    uint256 nullhash;
-    pfrom->grapheneBlock.nVersion = header.nVersion;
-    pfrom->grapheneBlock.nBits = header.nBits;
-    pfrom->grapheneBlock.nNonce = header.nNonce;
-    pfrom->grapheneBlock.nTime = header.nTime;
-    pfrom->grapheneBlock.hashMerkleRoot = header.hashMerkleRoot;
-    pfrom->grapheneBlock.hashPrevBlock = header.hashPrevBlock;
-    pfrom->grapheneBlockHashes.clear();
-    pfrom->grapheneBlockHashes.resize(nBlockTxs, nullhash);
-
-    {
-        LOCK(pfrom->cs_grapheneadditionaltxs);
-
-        pfrom->grapheneAdditionalTxs.clear();
-        for (auto tx : vAdditionalTxs)
-            pfrom->grapheneAdditionalTxs.push_back(tx);
-    }
-
-    vTxHashes.reserve(nBlockTxs);
-
-    // Create a map of all 8 bytes tx hashes pointing to their full tx hash counterpart
-    // We need to check all transaction sources (orphan list, mempool, and new (incoming) transactions in this block)
-    // for a collision.
-    int missingCount = 0;
-    int unnecessaryCount = 0;
-    bool collision = false;
-    std::set<uint256> passingTxHashes;
-    std::map<uint64_t, uint256> mapPartialTxHash;
-    std::vector<uint256> memPoolHashes;
-    std::set<uint64_t> setHashesToRequest;
-
-    bool fMerkleRootCorrect = true;
-    {
-        // Do the orphans first before taking the mempool.cs lock, so that we maintain correct locking order.
-        // LOCK(orphanpool.cs);
-        for (auto &kv : mapOrphanTransactions)
-        {
-            uint64_t cheapHash = kv.first.GetCheapHash();
-
-            if (mapPartialTxHash.count(cheapHash)) // Check for collisions
-                collision = true;
-
-            mapPartialTxHash[cheapHash] = kv.first;
-        }
-
-        // We don't have to keep the lock on mempool.cs here to do mempool.queryHashes
-        // but we take the lock anyway so we don't have to re-lock again later.
-        LOCK(cs_xval);
-        mempool.queryHashes(memPoolHashes);
-
-        for (const uint256 &hash : memPoolHashes)
-        {
-            uint64_t cheapHash = hash.GetCheapHash();
-
-            if (mapPartialTxHash.count(cheapHash)) // Check for collisions
-                collision = true;
-
-            mapPartialTxHash[cheapHash] = hash;
-        }
-
-        if (!collision)
-        {
-            std::vector<uint256> localHashes;
-            for (const std::pair<uint64_t, uint256> &kv : mapPartialTxHash)
-                localHashes.push_back(kv.second);
-
-            // Add full transactions included in the block
-            for (auto &tx : vAdditionalTxs)
-                localHashes.push_back(tx->GetHash());
-
-            try
-            {
-                std::vector<uint64_t> blockCheapHashes = pGrapheneSet->Reconcile(localHashes);
-
-                // Sort out what hashes we have from the complete set of cheapHashes
-                uint64_t nGrapheneTxsPossessed = 0;
-                for (size_t i = 0; i < blockCheapHashes.size(); i++)
-                {
-                    uint64_t cheapHash = blockCheapHashes[i];
-
-                    if (mapPartialTxHash.count(cheapHash) > 0)
-                    {
-                        pfrom->grapheneBlockHashes[i] = mapPartialTxHash[cheapHash];
-
-                        // Update mapHashOrderIndex so it is available if we later receive missing txs
-                        pfrom->grapheneMapHashOrderIndex[cheapHash] = i;
-                        nGrapheneTxsPossessed++;
-                    }
-                    else
-                        setHashesToRequest.insert(cheapHash);
-                }
-
-                graphenedata.AddGrapheneBlockBytes(nGrapheneTxsPossessed * sizeof(uint64_t), pfrom);
-            }
-            catch (const std::runtime_error &e)
-            {
-                std::vector<CInv> vGetData;
-                vGetData.push_back(CInv(MSG_BLOCK, header.GetHash()));
-                connman.PushMessage(pfrom, msgMaker.Make(NetMsgType::GETDATA, vGetData));
-
-                LogPrint("GRAPHENE", "Graphene set could not be reconciled; requesting a full block for peer %d: %s\n",
-                    pfrom->id, e.what());
-
-                graphenedata.ClearGrapheneBlockData(pfrom, header.GetHash());
-
-                return true;
-            }
-
-            // Reconstruct the block if there are no hashes to re-request
-            if (setHashesToRequest.empty())
-            {
-                bool mutated;
-                uint256 merkleroot = ComputeMerkleRoot(pfrom->grapheneBlockHashes, &mutated);
-                if (header.hashMerkleRoot != merkleroot || mutated)
-                    fMerkleRootCorrect = false;
-                else
-                {
-                    if (!ReconstructBlock(pfrom, fXVal, missingCount, unnecessaryCount))
-                        return false;
-                }
-            }
-        }
-    } // End locking cs_orphancache, mempool.cs and cs_xval
-    LogPrint("GRAPHENE", "Total in-memory graphene bytes size is %ld bytes\n", graphenedata.GetGrapheneBlockBytes());
-
-    // These must be checked outside of the mempool.cs lock or deadlock may occur.
-    // A merkle root mismatch here does not cause a ban because and expedited node will forward an graphene
-    // without checking the merkle root, therefore we don't want to ban our expedited nodes. Just request
-    // a full block if a mismatch occurs.
-    // Also, there is a remote possiblity of a Tx hash collision therefore if it occurs we request a full
-    // block.
-    //////////////// Maybe this should raise a ban in graphene? /////////////
-    if (collision || !fMerkleRootCorrect)
-    {
-        std::vector<CInv> vGetData;
-        vGetData.push_back(CInv(MSG_BLOCK, header.GetHash()));
-        connman.PushMessage(pfrom, msgMaker.Make(NetMsgType::GETDATA, vGetData));
-
-        if (!fMerkleRootCorrect)
-            return error(
-                "Mismatched merkle root on grapheneblock: requesting a full block, peer=%s", pfrom->GetLogName());
-        else
-            return error("TX HASH COLLISION for grapheneblock: requesting a full block, peer=%s", pfrom->GetLogName());
-
-        graphenedata.ClearGrapheneBlockData(pfrom, header.GetHash());
-        return true;
-    }
-
-    pfrom->grapheneBlockWaitingForTxns = missingCount;
-    LogPrint("GRAPHENE", "Graphene block waiting for: %d, unnecessary: %d, total txns: %d received txns: %d\n",
-        pfrom->grapheneBlockWaitingForTxns, unnecessaryCount, pfrom->grapheneBlock.vtx.size(),
-        pfrom->mapMissingTx.size());
-
-    // If there are any missing hashes or transactions then we request them here.
-    // This must be done outside of the mempool.cs lock or may deadlock.
-    if (setHashesToRequest.size() > 0)
-    {
-        pfrom->grapheneBlockWaitingForTxns = setHashesToRequest.size();
-        CRequestGrapheneBlockTx grapheneBlockTx(header.GetHash(), setHashesToRequest);
-        connman.PushMessage(pfrom, msgMaker.Make(NetMsgType::GETGRAPHENETX, grapheneBlockTx));
-
-        // Update run-time statistics of graphene block bandwidth savings
-        graphenedata.UpdateInBoundReRequestedTx(pfrom->grapheneBlockWaitingForTxns);
-
-        return true;
-    }
-
-    // If there are still any missing transactions then we must clear out the graphene block data
-    // and re-request a full block (This should never happen because we just checked the various pools).
-    if (missingCount > 0)
-    {
-        // Since we can't process this graphene block then clear out the data from memory
-        graphenedata.ClearGrapheneBlockData(pfrom, header.GetHash());
-
-        std::vector<CInv> vGetData;
-        vGetData.push_back(CInv(MSG_BLOCK, header.GetHash()));
-        connman.PushMessage(pfrom, msgMaker.Make(NetMsgType::GETDATA, vGetData));
-
-        return error("Still missing transactions for graphene block: re-requesting a full block");
-    }
-
-    // We now have all the transactions that are in this block
-    pfrom->grapheneBlockWaitingForTxns = -1;
-    int blockSize = ::GetSerializeSize(pfrom->grapheneBlock, SER_NETWORK, CBlock::CURRENT_VERSION);
-    LogPrint("GRAPHENE",
-        "Reassembled graphene block for %s (%d bytes). Message was %d bytes, compression ratio %3.2f, peer=%d\n",
-        pfrom->grapheneBlock.GetHash().ToString(), blockSize, pfrom->nSizeGrapheneBlock,
-        ((float)blockSize) / ((float)pfrom->nSizeGrapheneBlock), pfrom->id);
-
-    // Update run-time statistics of graphene block bandwidth savings
-    graphenedata.UpdateInBound(pfrom->nSizeGrapheneBlock, blockSize);
-    LogPrint("GRAPHENE", "Graphene block stats: %s\n", graphenedata.ToString().c_str());
-
-    //TODO: Nakul PV
-    // Process the full block
-//    PV->HandleBlockMessage(pfrom, strCommand, MakeBlockRef(pfrom->grapheneBlock), GetInv());
 
     return true;
 }
@@ -421,8 +198,8 @@ void CGrapheneBlockData::UpdateResponseTime(double nResponseTime)
     LOCK(cs_graphenestats);
 
     // only update stats if IBD is complete
-    // TODO: Nakul IsChainNearlySyncd
-    if (IsChainNearlySyncd() && IsGrapheneBlockEnabled())
+    // TODO: Nakul IsChainNearlySyncd() &&
+    if (IsGrapheneBlockEnabled())
         updateStats(mapGrapheneBlockResponseTime, nResponseTime);
 }
 
@@ -431,8 +208,8 @@ void CGrapheneBlockData::UpdateValidationTime(double nValidationTime)
     LOCK(cs_graphenestats);
 
     // only update stats if IBD is complete
-    // TODO: Nakul IsChainNearlySyncd
-    if (IsChainNearlySyncd() && IsGrapheneBlockEnabled())
+    // TODO: Nakul IsChainNearlySyncd &&
+    if (IsGrapheneBlockEnabled())
         updateStats(mapGrapheneBlockValidationTime, nValidationTime);
 }
 
@@ -833,9 +610,13 @@ bool CanGrapheneBlockBeDownloaded(CNode *pto)
         // to the peer that has invoked -connect-graphene.
 
         // Check if this node is also a connect-graphene node
-        for (const std::string &strAddrNode : mapMultiArgs["-connect-graphene"])
-            if (pto->addrName == strAddrNode)
-                return true;
+        if (mapMultiArgs.count("-connect-graphene") > 0)
+        {
+            BOOST_FOREACH(const std::string &strAddrNode , mapMultiArgs.at("-connect-graphene") )
+            {
+                if (pto->GetAddrName() == strAddrNode) return true;
+            }
+        }
     }
 
     return false;
@@ -858,10 +639,10 @@ bool IsGrapheneBlockValid(CNode *pfrom, const CBlockHeader &header)
 {
     // check block header
     CValidationState state;
-    if (!CheckBlockHeader(header, state, true))
+    if (!CheckBlockHeader(header, state, Params().GetConsensus(), true))
     {
-        return error("Received invalid header for graphene block %s from peer %s", header.GetHash().ToString(),
-            pfrom->GetLogName());
+        return error("Received invalid header for graphene block %s from peer %d", header.GetHash().ToString(),
+            pfrom->id);
     }
     if (state.Invalid())
     {

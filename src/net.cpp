@@ -672,25 +672,29 @@ bool CConnman::HaveConnectGrapheneNodes()
     std::set<std::string> nNotCrossConnected;
 
     int nConnectionsOpen = 0;
-    for (const std::string &strAddrNode : mapMultiArgs["-connect-graphene"])
+    if (mapMultiArgs.count("connect-graphene") > 0)
     {
-        std::string strGrapheneNode;
-        int pos = strAddrNode.rfind(":");
-        if (pos <= 0)
-            strGrapheneNode = strAddrNode;
-        else
-            strGrapheneNode = strAddrNode.substr(0, pos);
-        for (const std::string &strAddr : vNodesIP)
+        BOOST_FOREACH (const std::string &strAddrNode , mapMultiArgs.at( "-connect-graphene" ) )
         {
-            if (strAddr == strGrapheneNode)
+            std::string strGrapheneNode;
+            int pos = strAddrNode.rfind(":");
+            if (pos <= 0)
+                strGrapheneNode = strAddrNode;
+            else
+                strGrapheneNode = strAddrNode.substr(0, pos);
+            for (const std::string &strAddr : vNodesIP)
             {
-                nConnectionsOpen++;
-                if (!nNotCrossConnected.count(strAddr))
-                    nNotCrossConnected.insert(strAddr);
-                else
-                    nNotCrossConnected.erase(strAddr);
+                if (strAddr == strGrapheneNode)
+                {
+                    nConnectionsOpen++;
+                    if (!nNotCrossConnected.count(strAddr))
+                        nNotCrossConnected.insert(strAddr);
+                    else
+                        nNotCrossConnected.erase(strAddr);
+                }
             }
         }
+
     }
     if (nNotCrossConnected.size() > 0)
         return true;
@@ -707,15 +711,18 @@ void CConnman::CheckNodeSupportForGrapheneBlocks()
     if (IsGrapheneBlockEnabled())
     {
         // Check that a nodes pointed to with connect-graphene actually supports graphene blocks
-        for (const std::string &strAddr : mapMultiArgs["-connect-graphene"])
+        if (mapMultiArgs.count("-connect-graphene") > 0)
         {
-            // TODO: Nakul, use CConnman FindNode
-            CNode* node = FindNode(strAddr);
-            if (node && !node->GrapheneCapable())
+            BOOST_FOREACH (const std::string &strAddr , mapMultiArgs.at("-connect-graphene"))
             {
-                LogPrintf("ERROR: You are trying to use connect-graphene but to a node that does not support it "
-                     "- Protocol Version: %d peer=%d\n",
-                    node->nVersion, node->id);
+                // TODO: Nakul, use CConnman FindNode
+                CNode* node = FindNode(strAddr);
+                if (node && !node->GrapheneCapable())
+                {
+                    LogPrintf("ERROR: You are trying to use connect-graphene but to a node that does not support it "
+                            "- Protocol Version: %d peer=%d\n",
+                            node->nVersion, node->id);
+                }
             }
         }
     }
@@ -725,9 +732,9 @@ void CConnman::CheckNodeSupportForGrapheneBlocks()
 void CConnman::ConnectToGrapheneBlockNodes()
 {
     // Connect to specific addresses
-    if (IsArgSet("-connect-graphene") && mapMultiArgs["-connect-graphene"].size() > 0)
+    if (IsArgSet("-connect-graphene") && mapMultiArgs.count("-connect-graphene" ) > 0)
     {
-        for (const std::string &strAddr : mapMultiArgs["-connect-graphene"])
+        BOOST_FOREACH (const std::string &strAddr , mapMultiArgs.at( "-connect-graphene" ) )
         {
             CAddress addr;
             // NOTE: Because the only nodes we are connecting to here are the ones the user put in their

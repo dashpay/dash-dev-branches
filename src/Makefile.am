@@ -125,6 +125,7 @@ BITCOIN_CORE_H = \
   httprpc.h \
   httpserver.h \
   iblt.h \
+  iblt_params.h \
   indirectmap.h \
   init.h \
   instantx.h \

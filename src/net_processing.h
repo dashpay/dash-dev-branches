@@ -47,13 +47,13 @@ static const unsigned int DEFAULT_BLOCK_RECONSTRUCTION_EXTRA_TXN = 100;
 // Transactions that have already been accepted into the memory pool do not need to be
 // re-verified and can avoid having to do a second and expensive CheckInputs() when
 // processing a new block.  (Protected by cs_xval)
-extern std::set<uint256> setPreVerifiedTxHash;
+// extern std::set<uint256> setPreVerifiedTxHash;
 
 // Orphans that are added to the thinblock must be verifed since they have never been
 // accepted into the memory pool.  (Protected by cs_xval)
-extern std::set<uint256> setUnVerifiedOrphanTxHash;
+// extern std::set<uint256> setUnVerifiedOrphanTxHash;
 
-extern CCriticalSection cs_xval;
+// extern CCriticalSection cs_xval;
 // Xpress Validation: end
 
 
@@ -61,14 +61,6 @@ extern CCriticalSection cs_xval;
 void RegisterNodeSignals(CNodeSignals& nodeSignals);
 /** Unregister a network node */
 void UnregisterNodeSignals(CNodeSignals& nodeSignals);
-
-
-/** Block already on disk */
-bool static AlreadyHave(const CInv& inv);
-
-
-/** Update tracking information about which blocks a peer is assumed to have. */
-void UpdateBlockAvailability(NodeId nodeid, const uint256 &hash);
 
 class PeerLogicValidation : public CValidationInterface {
 private:

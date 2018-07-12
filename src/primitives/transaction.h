@@ -241,6 +241,8 @@ public:
     CTransaction(const CMutableTransaction &tx);
     CTransaction(CMutableTransaction &&tx);
 
+    CTransaction &operator=(const CTransaction &tx);
+
     template <typename Stream>
     inline void Serialize(Stream& s) const {
         s << this->nVersion;
@@ -254,11 +256,13 @@ public:
     template <typename Stream>
     CTransaction(deserialize_type, Stream& s) : CTransaction(CMutableTransaction(deserialize, s)) {}
 
-    bool IsNull() const {
+    bool IsNull() const 
+    {
         return vin.empty() && vout.empty();
     }
 
-    const uint256& GetHash() const {
+    const uint256& GetHash() const 
+    {
         return hash;
     }
 
