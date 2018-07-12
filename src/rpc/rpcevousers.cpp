@@ -58,6 +58,8 @@ static UniValue User2Json(const CEvoUser &user, bool withSubTxAndTs, bool detail
 
         // TODO include mempool
     }
+
+    return json;
 }
 
 static uint256 GetRegTxId(const std::string &regTxIdOrUserName) {
@@ -100,15 +102,8 @@ UniValue getuser(const JSONRPCRequest& request)
 
     CEvoUser user;
     bool fromMempool = false;
-    if (!evoUserManager->GetUser(regTxId, user)) {
-        if (!includeMempool || !evoUserManager->BuildUserFromMempool(regTxId, user))
-            throw std::runtime_error(strprintf("failed to read user %s from db", request.params[0].get_str()));
-        fromMempool = true;
-    }
-
-    if (includeMempool) {
-        fromMempool |= evoUserManager->TopupUserFromMempool(user);
-        fromMempool |= evoUserManager->ApplyUserSubTxsFromMempool(user);
+    if (!evoUserManager->GetUser(regTxId, user, true, &fromMempool)) {
+        throw std::runtime_error(strprintf("user %s not found", request.params[0].get_str()));
     }
 
     UniValue result = User2Json(user, true, verbose);
@@ -126,7 +121,7 @@ static CKey GetKeyFromParamsOrWallet(const UniValue &params, int paramPos, const
 
 #ifdef ENABLE_WALLET
     CEvoUser user;
-    if (!evoUserManager->GetUser(regTxId, user) && !evoUserManager->BuildUserFromMempool(regTxId, user)) {
+    if (!evoUserManager->GetUser(regTxId, user, true)) {
         throw std::runtime_error(strprintf("user %s not found", regTxId.ToString()));
     }
 
@@ -146,9 +141,8 @@ static uint256 GetPrevSubTxFromParams(const UniValue& params, int paramPos, cons
         return ParseHashStr(params[paramPos].get_str(), "hashLastTransition");
 
     CEvoUser user;
-    if (!evoUserManager->GetUser(regTxId, user) && !evoUserManager->BuildUserFromMempool(regTxId, user))
+    if (!evoUserManager->GetUser(regTxId, user, true))
         throw std::runtime_error(strprintf("user %s not found", regTxId.ToString()));
-    evoUserManager->ApplyUserSubTxsFromMempool(user);
     return user.GetCurSubTx();
 }
 

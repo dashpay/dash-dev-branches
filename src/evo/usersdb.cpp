@@ -13,7 +13,6 @@ static const std::string DB_USER_BY_NAME = "user_n";
 static const std::string DB_USER_SUBTX = "user_s";
 static const std::string DB_USER_PUBKEY = "user_pk";
 static const std::string DB_USER_HASHSTPACKET = "user_hst";
-static const std::string DB_UNSPENT_SUBTX = "user_S";
 
 CEvoUserDb::CEvoUserDb(CEvoDB& _evoDb)
         : evoDb(_evoDb)
@@ -85,22 +84,4 @@ void CEvoUserDb::PushHashSTPacket(const uint256& regTxId, const uint256& hashSTP
 bool CEvoUserDb::PopHashSTPacket(const uint256& regTxId, uint256& oldTop, uint256& newTop)
 {
     return PopStackItem(evoDb, std::make_pair(DB_USER_HASHSTPACKET, regTxId), oldTop, newTop);
-}
-
-void CEvoUserDb::WriteUnspentSubTx(const uint256& regTxId, const uint256& subTxHash)
-{
-    uint256 key = ::SerializeHash(std::make_pair(regTxId, subTxHash));
-    evoDb.Write(std::make_pair(DB_UNSPENT_SUBTX, key), 1);
-}
-
-void CEvoUserDb::DeleteUnspentSubTx(const uint256& regTxId, const uint256& subTxHash)
-{
-    uint256 key = ::SerializeHash(std::make_pair(regTxId, subTxHash));
-    evoDb.Erase(std::make_pair(DB_UNSPENT_SUBTX, key));
-}
-
-bool CEvoUserDb::HasUnspentSubTx(const uint256& regTxId, const uint256& subTxHash)
-{
-    uint256 key = ::SerializeHash(std::make_pair(regTxId, subTxHash));
-    return evoDb.Exists(std::make_pair(DB_UNSPENT_SUBTX, key));
 }

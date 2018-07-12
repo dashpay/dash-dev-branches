@@ -111,7 +111,7 @@ static std::string SignAndSendSpecialTx(const CMutableTransaction& tx)
 {
     LOCK(cs_main);
     CValidationState state;
-    if (!CheckSpecialTx(tx, NULL, state))
+    if (!CheckSpecialTx(tx, NULL, true, state))
         throw std::runtime_error(FormatStateMessage(state));
 
     CDataStream ds(SER_NETWORK, PROTOCOL_VERSION);

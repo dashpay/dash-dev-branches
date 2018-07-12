@@ -39,11 +39,6 @@ public:
     void PushHashSTPacket(const uint256& regTxId, const uint256& hashSTPacket);
     bool PopHashSTPacket(const uint256& regTxId, uint256& oldTop, uint256& newTop);
 
-    // TODO really needed?
-    void WriteUnspentSubTx(const uint256& regTxId, const uint256& subTxHash);
-    void DeleteUnspentSubTx(const uint256& regTxId, const uint256& subTxHash);
-    bool HasUnspentSubTx(const uint256& regTxId, const uint256& subTxHash);
-
 private:
     template<typename DB, typename K, typename V>
     void PushStack(DB& db, const K& k, const V& v)
@@ -111,6 +106,7 @@ private:
                 break;
             }
             ret.emplace_back(std::move(v));
+            i++;
         }
     };
 };

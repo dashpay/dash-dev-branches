@@ -190,6 +190,7 @@ public:
 };
 
 uint256 GetRegTxIdFromSubTx(const CTransaction& tx);
+CAmount GetSubTxFee(const CTransaction& tx);
 uint256 GetSubTxHashPrevSubTx(const CTransaction& tx);
 UniValue SubTxToJson(const CTransaction& tx);
 
