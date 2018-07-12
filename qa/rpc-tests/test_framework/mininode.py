@@ -41,7 +41,7 @@ from test_framework.siphash import siphash256
 import dash_hash
 
 BIP0031_VERSION = 60000
-MY_VERSION = 70210  # MIN_PEER_PROTO_VERSION
+MY_VERSION = 70211
 MY_SUBVERSION = b"/python-mininode-tester:0.0.3/"
 MY_RELAY = 1 # from version 70001 onwards, fRelay should be appended to version messages (BIP37)
 
@@ -120,13 +120,13 @@ def deser_uint256(f):
 def ser_uint256(u):
     rs = b""
     for i in range(8):
-        rs += struct.pack("<I", u & 0xFFFFFFFFL)
+        rs += struct.pack("<I", u & 0xFFFFFFFF)
         u >>= 32
     return rs
 
 
 def deser_uint160(f):
-    r = 0L
+    r = 0
     for i in range(5):
         t = struct.unpack("<I", f.read(4))[0]
         r += t << (i * 32)

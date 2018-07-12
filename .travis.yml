@@ -52,7 +52,7 @@ before_cache:
 
 before_install:
     # setup aws/docker
-    - pip install -U pip awscli
+    - pip3 install -U pip awscli
     - aws configure set region $AWS_REGION
     - $(aws ecr get-login --no-include-email)
 
