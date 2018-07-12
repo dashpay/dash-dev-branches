@@ -10,15 +10,18 @@
 UniValue CSubTxRegister::ToJson() const
 {
     UniValue v(UniValue::VOBJ);
+    v.push_back(Pair("txType", "subTxRegister"));
+    v.push_back(Pair("version", nVersion));
     v.push_back(Pair("userName", userName));
     v.push_back(Pair("pubKeyId", pubKeyID.ToString()));
-    v.push_back(Pair("vchSigSize", (int)vchSig.size()));
     return v;
 }
 
 UniValue CSubTxTopup::ToJson() const
 {
     UniValue v(UniValue::VOBJ);
+    v.push_back(Pair("txType", "subTxTopup"));
+    v.push_back(Pair("version", nVersion));
     v.push_back(Pair("regTxId", regTxId.ToString()));
     return v;
 }
@@ -26,6 +29,7 @@ UniValue CSubTxTopup::ToJson() const
 UniValue CSubTxResetKey::ToJson() const
 {
     UniValue v(UniValue::VOBJ);
+    v.push_back(Pair("txType", "subTxResetKey"));
     v.push_back(Pair("version", nVersion));
     v.push_back(Pair("regTxId", regTxId.ToString()));
     v.push_back(Pair("hashPrevSubTx", hashPrevSubTx.ToString()));
@@ -37,6 +41,7 @@ UniValue CSubTxResetKey::ToJson() const
 UniValue CSubTxCloseAccount::ToJson() const
 {
     UniValue v(UniValue::VOBJ);
+    v.push_back(Pair("txType", "subTxCloseAccount"));
     v.push_back(Pair("version", nVersion));
     v.push_back(Pair("regTxId", regTxId.ToString()));
     v.push_back(Pair("hashPrevSubTx", hashPrevSubTx.ToString()));
@@ -47,6 +52,7 @@ UniValue CSubTxCloseAccount::ToJson() const
 UniValue CSubTxTransition::ToJson() const
 {
     UniValue v(UniValue::VOBJ);
+    v.push_back(Pair("txType", "subTxTransition"));
     v.push_back(Pair("version", nVersion));
     v.push_back(Pair("regTxId", regTxId.ToString()));
     v.push_back(Pair("hashPrevSubTx", hashPrevSubTx.ToString()));
