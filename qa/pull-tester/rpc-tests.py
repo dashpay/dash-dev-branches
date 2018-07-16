@@ -166,7 +166,8 @@ testScripts = [
     'listsinceblock.py',
     'p2p-leaktests.py',
     'p2p-compactblocks.py',
-    'p2p-grapheneblock.py',
+    'p2p-grapheneblocks.py',
+    'compare_block_compression.py',
 ]
 if ENABLE_ZMQ:
     testScripts.append('zmq_test.py')

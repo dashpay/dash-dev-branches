@@ -24,39 +24,6 @@ static constexpr int64_t HEADERS_DOWNLOAD_TIMEOUT_PER_HEADER = 1000; // 1ms/head
 /** Default number of orphan+recently-replaced txn to keep around for block reconstruction */
 static const unsigned int DEFAULT_BLOCK_RECONSTRUCTION_EXTRA_TXN = 100;
 
-//struct IteratorComparator
-//{
-//    template<typename I>
-//    bool operator()(const I& a, const I& b)
-//    {
-//        return &(*a) < &(*b);
-//    }
-//};
-//
-//struct COrphanTx {
-//    // When modifying, adapt the copy of this definition in tests/DoS_tests.
-//    CTransactionRef tx;
-//    NodeId fromPeer;
-//    int64_t nTimeExpire;
-//};
-//std::map<uint256, COrphanTx> mapOrphanTransactions GUARDED_BY(cs_main);
-//std::map<COutPoint, std::set<std::map<uint256, COrphanTx>::iterator, IteratorComparator>> mapOrphanTransactionsByPrev GUARDED_BY(cs_main);
-//void EraseOrphansFor(NodeId peer) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
-
-// Xpress Validation: begin
-// Transactions that have already been accepted into the memory pool do not need to be
-// re-verified and can avoid having to do a second and expensive CheckInputs() when
-// processing a new block.  (Protected by cs_xval)
-// extern std::set<uint256> setPreVerifiedTxHash;
-
-// Orphans that are added to the thinblock must be verifed since they have never been
-// accepted into the memory pool.  (Protected by cs_xval)
-// extern std::set<uint256> setUnVerifiedOrphanTxHash;
-
-// extern CCriticalSection cs_xval;
-// Xpress Validation: end
-
-
 /** Register with a network node to receive its signals */
 void RegisterNodeSignals(CNodeSignals& nodeSignals);
 /** Unregister a network node */

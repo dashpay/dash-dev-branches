@@ -152,9 +152,6 @@ static const bool DEFAULT_PEERBLOOMFILTERS = true;
 
 /** Graphene Section */
 
-// Graphenedata
-// extern CGrapheneBlockData graphenedata; // Singleton class
-
 // Xpress Validation: begin
 // Transactions that have already been accepted into the memory pool do not need to be
 // re-verified and can avoid having to do a second and expensive CheckInputs() when

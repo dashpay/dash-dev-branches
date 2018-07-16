@@ -24,6 +24,12 @@
 
 // static bool ReconstructBlock(CNode *pfrom, const bool fXVal, int &missingCount, int &unnecessaryCount);
 
+//
+// Global variables
+//
+
+CGrapheneBlockData graphenedata;
+
 CMemPoolInfo::CMemPoolInfo(uint64_t nTx) { this->nTx = nTx; }
 CMemPoolInfo::CMemPoolInfo() { this->nTx = 0; }
 CGrapheneBlock::CGrapheneBlock(const CBlockRef pblock, uint64_t nReceiverMemPoolTx)

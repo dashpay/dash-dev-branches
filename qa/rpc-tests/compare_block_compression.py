@@ -49,11 +49,11 @@ class BlockTest(BitcoinTestFramework):
         if self.block_type == 'graphene':
             node_opts.append("-debug=graphene")
             node_opts.append("-use-grapheneblocks=1")
-            node_opts.append("-use-thinblocks=0")
-        elif self.block_type == 'thin':
-            node_opts.append("-debug=thin")
-            node_opts.append("-use-grapheneblocks=0")
-            node_opts.append("-use-thinblocks=1")
+            # node_opts.append("-use-thinblocks=0")
+        # elif self.block_type == 'thin':
+        #     node_opts.append("-debug=thin")
+        #     node_opts.append("-use-grapheneblocks=0")
+        #     node_opts.append("-use-thinblocks=1")
 
         self.nodes = [start_node(i, self.options.tmpdir, node_opts) for i in range(self.n_nodes)]
 
@@ -161,10 +161,10 @@ class BlockTest(BitcoinTestFramework):
             self.stats['full_tx_size'] = self.extract_bytes(self.extract_stats(self.nodes[0])['graphene_additional_tx_size'])
 
             self.stats['total_size'] = self.stats['block_size'] + self.stats['mempool_info_size'] - self.stats['full_tx_size']
-        elif self.block_type == 'thin':
-            self.stats['block_size'] = self.extract_bytes(self.extract_stats(self.nodes[0])['thin_block_size'])
-            self.stats['filter_size'] = self.extract_bytes(self.extract_stats(self.nodes[0])['inbound_bloom_filters'])
-            self.stats['full_tx_size'] = self.extract_bytes(self.extract_stats(self.nodes[0])['thin_full_tx'])
+        # elif self.block_type == 'thin':
+        #     self.stats['block_size'] = self.extract_bytes(self.extract_stats(self.nodes[0])['thin_block_size'])
+        #     self.stats['filter_size'] = self.extract_bytes(self.extract_stats(self.nodes[0])['inbound_bloom_filters'])
+        #     self.stats['full_tx_size'] = self.extract_bytes(self.extract_stats(self.nodes[0])['thin_full_tx'])
 
             self.stats['total_size'] = self.stats['block_size'] + self.stats['filter_size'] - self.stats['full_tx_size']
 
