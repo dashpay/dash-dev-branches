@@ -4,9 +4,16 @@
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 
+from test_framework.mininode import *
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import *
+from test_framework.blocktools import create_block, create_coinbase
+from test_framework.siphash import siphash256
+from test_framework.script import CScript, OP_TRUE
 
+'''
+GrapheneBlockTest -- test graphene blocks
+'''
 
 class GrapheneBlockTest(BitcoinTestFramework):
     expected_stats = {"enabled",
@@ -37,10 +44,10 @@ class GrapheneBlockTest(BitcoinTestFramework):
             "-rpcservertimeout=0",
             "-debug=graphene",
             "-use-grapheneblocks=1",
-            "-use-thinblocks=0",
-            "-excessiveblocksize=6000000",
-            "-blockprioritysize=6000000",
-            "-blockmaxsize=6000000"]
+            # "-use-thinblocks=0",
+            "-excessiveblocksize=2000000",
+            # "-blockprioritysize=6000000",
+            "-blockmaxsize=1000000"]
 
         self.nodes = [
             start_node(0, self.options.tmpdir, node_opts),
@@ -48,7 +55,10 @@ class GrapheneBlockTest(BitcoinTestFramework):
             start_node(2, self.options.tmpdir, node_opts)
         ]
 
-        interconnect_nodes(self.nodes)
+        # interconnect_nodes(self.nodes)
+        connect_nodes_bi(self.nodes, 0, 1)
+        connect_nodes_bi(self.nodes, 0, 2)
+        connect_nodes_bi(self.nodes, 1, 2)
         self.is_network_split = False
         self.sync_all()
 

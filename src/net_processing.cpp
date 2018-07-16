@@ -77,10 +77,10 @@ static std::vector<std::pair<uint256, CTransactionRef>> vExtraTxnForCompact GUAR
 static const uint64_t RANDOMIZER_ID_ADDRESS_RELAY = 0x3cac0035b5866b90ULL; // SHA256("main address relay")[0:8]
 
 /** Graphene begin section */
-CGrapheneBlockData graphenedata;
-std::set<uint256> setPreVerifiedTxHash;
-std::set<uint256> setUnVerifiedOrphanTxHash;
+// CGrapheneBlockData graphenedata;
 CCriticalSection cs_xval;
+std::set<uint256> setPreVerifiedTxHash GUARDED_BY(cs_xval);
+std::set<uint256> setUnVerifiedOrphanTxHash GUARDED_BY(cs_xval);
 
 // CStatHistory, added only for "extern" in stat.h
 const char *sampleNames[] = {"sec10", "min5", "hourly", "daily", "monthly"};

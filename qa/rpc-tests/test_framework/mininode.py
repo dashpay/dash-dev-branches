@@ -243,7 +243,8 @@ class CInv(object):
         0: "Error",
         1: "TX",
         2: "Block",
-        20: "CompactBlock"
+        20: "CompactBlock",
+        21: "GrapheneBlock"
     }
 
     def __init__(self, t=0, h=0):
