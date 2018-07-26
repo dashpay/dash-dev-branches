@@ -151,7 +151,7 @@ def sync_blocks(rpc_connections, *, wait=1, timeout=60):
     # variables (chainActive vs latestBlock) and the former gets updated
     # earlier.
     maxheight = max(x.getblockcount() for x in rpc_connections)
-    pdb.set_trace()
+    # pdb.set_trace()
     start_time = cur_time = time.time()
     while cur_time <= start_time + timeout:
         tips = [r.waitforblockheight(maxheight, int(wait * 1000)) for r in rpc_connections]

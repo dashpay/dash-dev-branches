@@ -16,6 +16,9 @@ class uint256;
 //! 20,000 items with fp rate < 0.1% or 10,000 items and <0.0001%
 static const unsigned int MAX_BLOOM_FILTER_SIZE = 36000; // bytes
 static const unsigned int MAX_HASH_FUNCS = 50;
+// TODO: Nakul, SMALLEST_MAX_BLOOM_FILTER_SIZE, argument?
+/* static const unsigned int SMALLEST_MAX_BLOOM_FILTER_SIZE = 100; */
+
 
 /**
  * First two bits of nFlags control how much IsRelevantAndUpdate actually updates
@@ -57,6 +60,23 @@ private:
     CBloomFilter(unsigned int nElements, double nFPRate, unsigned int nTweak);
     friend class CRollingBloomFilter;
 
+
+    /** Helper function to set up bloom filter from desired number of elements and false positive rate.
+        Used by the constructors. Checks that the variables in sane ranges. */
+    void setup(unsigned int nElements,
+        double nFPRate,
+        unsigned int nTweakIn,
+        unsigned char nFlagsIn,
+        bool size_constrained,
+        uint32_t nMaxFilterSize);
+    /** Alternative setup function that guarantees the false positive rate does not exceed nFPRate. */
+    void setupGuaranteeFPR(unsigned int nElements,
+        double nFPRate,
+        unsigned int nTweakIn,
+        unsigned char nFlagsIn,
+        bool size_constrained,
+        uint32_t nMaxFilterSize);
+
 public:
     /**
      * Creates a new bloom filter which will provide the given fp rate when filled with the given number of elements
@@ -68,6 +88,10 @@ public:
      * nFlags should be one of the BLOOM_UPDATE_* enums (not _MASK)
      */
     CBloomFilter(unsigned int nElements, double nFPRate, unsigned int nTweak, unsigned char nFlagsIn);    CBloomFilter() : isFull(true), isEmpty(false), nHashFuncs(0), nTweak(0), nFlags(0) {}
+    /**
+     * Add the option to force the bloom filter setup to guarantee the false positive rate does not exceed nFPRate.
+     */
+    CBloomFilter(unsigned int nElements,double nFPRate,unsigned int nTweak,unsigned char nFlagsIn,bool fGuaranteeFPR,uint32_t nMaxFilterSize);
 
     ADD_SERIALIZE_METHODS;
 

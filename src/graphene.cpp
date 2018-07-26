@@ -504,7 +504,6 @@ bool CGrapheneBlockData::CheckGrapheneBlockTimer(const uint256 &hash)
         if (elapsed > 10000)
         {
             LogPrint("GRAPHENE", "Preferential Graphene Block timer exceeded - downloading regular block instead\n");
-
             return false;
         }
     }
@@ -597,8 +596,8 @@ uint64_t CGrapheneBlockData::GetGrapheneBlockBytes() { return nGrapheneBlockByte
 
 bool IsGrapheneBlockEnabled()
 {
-    //TODO: Nakul , should I check the services the node is offering or this argument
-    return GetBoolArg("-use-graphene-blocks", true);
+    //TODO: Nakul , should I check the services the node is offering or this argument, Replace function with bool type
+    return fGrapheneBlockEnabled;
 }
 
 bool CanGrapheneBlockBeDownloaded(CNode *pto)

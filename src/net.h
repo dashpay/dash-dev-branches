@@ -925,6 +925,7 @@ public:
     // Graphene begin section
     bool GrapheneCapable()
     {
+        LogPrintf("nServices %d, NODE_GRAPHENE %s\n", nServices, NODE_GRAPHENE);
         if (nServices & NODE_GRAPHENE)
             return true;
         return false;

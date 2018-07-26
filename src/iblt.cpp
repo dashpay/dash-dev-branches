@@ -107,10 +107,13 @@ void CIblt::resize(size_t _expectedNumEntries, size_t _valueSize)
 
     // reduce probability of failure by increasing by overhead factor
     size_t nEntries = (size_t)(_expectedNumEntries * OptimalOverhead(_expectedNumEntries));
+    /* std::cout<<_expectedNumEntries<<" "<<n_hash<<" "<<nEntries<<std::endl; */
     // ... make nEntries exactly divisible by n_hash
     while (n_hash * (nEntries / n_hash) != nEntries)
         ++nEntries;
     hashTable.resize(nEntries);
+    /* std::cout<<n_hash<<" "<<nEntries<<std::endl; */
+    /* std::cout<<_expectedNumEntries<<" "<<n_hash<<" "<<nEntries<<std::endl; */
 }
 
 void CIblt::_insert(int plusOrMinus, uint64_t k, const std::vector<uint8_t> v)

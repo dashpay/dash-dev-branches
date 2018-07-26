@@ -14,6 +14,7 @@
 #include "util.h"
 
 #include <cmath>
+#include <numeric>
 
 #define LN2SQUARED 0.4804530139182014246671025263266649717305529515945455
 
@@ -137,12 +138,8 @@ public:
         else
             fpr = optSymDiff / float(nReceiverExcessItems);
 
-        // TODO: Nakul max elements
         // Construct Bloom filter
-        pSetFilter = new CBloomFilter(
-            nItems, fpr, insecure_rand.rand32(), BLOOM_UPDATE_ALL);
-//        pSetFilter = new CBloomFilter(
-//            nItems, fpr, insecure_rand.rand32(), BLOOM_UPDATE_ALL, std::numeric_limits<uint32_t>::max());
+        pSetFilter = new CBloomFilter(nItems, fpr, insecure_rand.rand32(), BLOOM_UPDATE_ALL, true, std::numeric_limits<uint32_t>::max());
         LogPrint("GRAPHENE", "fp rate: %f Num elements in bloom filter: %d\n", fpr, nItems);
 
         // Construct IBLT
@@ -209,7 +206,6 @@ public:
         mapCheapHashes.clear();
 
         // Determine difference between sender and receiver IBLTs
-        CIblt diffIblt = (*pSetIblt) - localIblt;
         std::set<std::pair<uint64_t, std::vector<uint8_t> > > senderHas;
         std::set<std::pair<uint64_t, std::vector<uint8_t> > > receiverHas;
 

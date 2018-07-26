@@ -37,6 +37,7 @@ from threading import Thread
 import logging
 import copy
 from test_framework.siphash import siphash256
+import pdb
 
 import dash_hash
 
@@ -53,6 +54,7 @@ COIN = 100000000 # 1 btc in satoshis
 NODE_NETWORK = (1 << 0)
 NODE_GETUTXO = (1 << 1)
 NODE_BLOOM = (1 << 2)
+NODE_GRAPHENE = (1 << 5)
 
 # Keep our own socket map for asyncore, so that we can track disconnects
 # ourselves (to workaround an issue with closing an asyncore socket when
@@ -1275,6 +1277,153 @@ class msg_blocktxn(object):
     def __repr__(self):
         return "msg_blocktxn(block_transactions=%s)" % (repr(self.block_transactions))
 
+class CBloomFilter:
+    def __init__(self, vData=None):
+        self.vData = vData
+        self.nHashFuncs = None
+        self.nTweak = None
+        self.nFlags = None
+
+    def deserialize(self, f):
+        self.vData = deser_string(f)
+        self.nHashFuncs = struct.unpack("<I", f.read(4))[0]
+        self.nTweak = struct.unpack("<I", f.read(4))[0]
+        self.nFlags = struct.unpack("<B", f.read(1))[0]
+        return self
+
+    def serialize(self):
+        r = b""
+        r += ser_string(f, self.vData)
+        r += struct.pack("<I", self.nHashFuncs)
+        r += struct.pack("<I", self.nTweak)
+        r += struct.pack("<B", self.nFlags)
+        return r
+
+    def __repr__(self):
+        return "%s(vData=%s)" % (self.__class__.__name__, self.vData)
+
+class CMemPoolSize:
+    def __init__(self, vData=None):
+        self.vData = vData
+        self.nHashFuncs = None
+        self.nTweak = None
+        self.nFlags = None
+
+    def deserialize(self, f):
+        self.vData = deser_string(f)
+        self.nHashFuncs = struct.unpack("<I", f.read(4))[0]
+        self.nTweak = struct.unpack("<I", f.read(4))[0]
+        self.nFlags = struct.unpack("<B", f.read(1))[0]
+        return self
+
+    def serialize(self):
+        r = b""
+        r += ser_string(f, self.vData)
+        r += struct.pack("<I", self.nHashFuncs)
+        r += struct.pack("<I", self.nTweak)
+        r += struct.pack("<B", self.nFlags)
+        return r
+
+    def __repr__(self):
+        return "%s(vData=%s)" % (self.__class__.__name__, self.vData)
+
+class CIblt:
+    def __init__(self):
+        self.expectedNumEntries = None
+        self.valueSize = None
+
+        def deserialize(self,f):
+            self.expectedNumEntries = struct.unpack("<I", f.read(4))[0]
+            self.valueSize = struct.unpack("<I", f.read(4))[0]
+
+        def serialize(self):
+            r = b""
+            r += struct.pack("<I", self.expectedNumEntries)
+            r += struct.pack("<I", self.valueSize)
+
+# class CGrapheneSet:
+#     def __init__(self):
+
+class msg_grblk(object):
+    command = b"grblk"
+
+    def __init__(self):
+        self.graphene_Block = GrapheneBlock()
+
+    def deserialize(self, f):
+        self.graphene_block.deserialize(f)
+
+    def serialize(self):
+        r = b""
+        r += self.graphene_block.serialize()
+        return r
+
+class msg_getgrblk(object):
+    command = b"getgrblk"
+
+    # TODO: Nakul, iblt, GrapheneSet
+    def __init__(self, inv=None, graphene_set=None):
+        self.inv = inv
+        self.graphene_set = CGrapheneSet()
+
+    def deserialize(self, f):
+        self.inv = CInv()
+        self.inv.deserialize(f)
+        self.graphene_set = CGrapheneSet()
+        self.graphene_set.deserialize(f)
+        return self
+
+    def serialize(self):
+        r = b""
+        r += self.inv.serialize()
+        r += self.graphene_set.serialize()
+        return r
+
+    def __repr__(self):
+        return "%s(inv=%s,filter=%s,iblt=%s)" % (self.__class__.__name__,
+                repr(self.inv), repr(self.filter), repr(self.iblt))
+
+class msg_grblktx(object):
+    command = b"grblktx"
+
+    def __init__(self):
+        self.grblktx = GrapheneBlockTransactions()
+
+    def deserialize(self, f):
+        self.grblktx.deserialize(f)
+
+    def serialize(self):
+        r = b""
+        r += self.grblktx.serialize()
+        return r
+
+    def __repr__(self):
+        return "msg_grblktx(grblktx=%s)" % (repr(self.grblktx))
+
+class msg_getgrblktx(object):
+    command = b"getgrblktx"
+
+    def __init__(self, blockhash=None, qhashes=None):
+        self.blockhash = blockhash
+        self.setCheapHashesToRequest = qhashes
+
+    def deserialize(self, f):
+        self.blockhash = deser_uint256(f)
+        self.setCheapHashesToRequest = deser_vector(f, QHash)
+        return self
+
+    def serialize(self):
+        r = b""
+        r += ser_uint256(self.blockhash)
+        r += ser_vector(self.setCheapHashesToRequest)
+        return r
+
+    def __repr__(self):
+        return "%s(blockhash=%s,qhash=%s)" % (self.__class__.__name__,
+                repr(self.blockhash), repr(self.setCheapHashesToRequest))
+
+
+
 # This is what a callback should look like for NodeConn
 # Reimplement the on_* functions to provide handling for events
 class NodeConnCB(object):
@@ -1359,6 +1508,10 @@ class NodeConnCB(object):
     def on_cmpctblock(self, conn, message): pass
     def on_getblocktxn(self, conn, message): pass
     def on_blocktxn(self, conn, message): pass
+    def on_grblk(self, conn, message): pass
+    def on_grblktx(self, conn, message): pass
+    def on_getgrblktx(self, conn, message): pass
+    def on_getgrblk(self, conn, message): pass
 
 # More useful callbacks and functions for NodeConnCB's which have a single NodeConn
 class SingleNodeConnCB(NodeConnCB):
@@ -1415,7 +1568,11 @@ class NodeConn(asyncore.dispatcher):
         b"sendcmpct": msg_sendcmpct,
         b"cmpctblock": msg_cmpctblock,
         b"getblocktxn": msg_getblocktxn,
-        b"blocktxn": msg_blocktxn
+        b"blocktxn": msg_blocktxn,
+        b"grblk": msg_grblk,
+        b"getgrblk": msg_getgrblk,
+        b"grblktx": msg_grblktx,
+        b"getgrblktx":msg_getgrblktx
     }
     MAGIC_BYTES = {
         "mainnet": b"\xbf\x0c\x6b\xbd",   # mainnet

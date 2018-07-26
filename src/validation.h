@@ -151,6 +151,7 @@ static const int MAX_UNCONNECTING_HEADERS = 10;
 static const bool DEFAULT_PEERBLOOMFILTERS = true;
 
 /** Graphene Section */
+static const bool DEFAULT_USE_GRAPHENE_BLOCKS = false;
 
 // Xpress Validation: begin
 // Transactions that have already been accepted into the memory pool do not need to be

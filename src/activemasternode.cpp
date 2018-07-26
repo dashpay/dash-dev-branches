@@ -14,9 +14,9 @@ CActiveMasternode activeMasternode;
 
 void CActiveMasternode::ManageState(CConnman& connman)
 {
-    LogPrint("masternode", "CActiveMasternode::ManageState -- Start\n");
+    /* LogPrint("masternode", "CActiveMasternode::ManageState -- Start\n"); */
     if(!fMasternodeMode) {
-        LogPrint("masternode", "CActiveMasternode::ManageState -- Not a masternode, returning\n");
+        /* LogPrint("masternode", "CActiveMasternode::ManageState -- Not a masternode, returning\n"); */
         return;
     }
 
@@ -30,7 +30,7 @@ void CActiveMasternode::ManageState(CConnman& connman)
         nState = ACTIVE_MASTERNODE_INITIAL;
     }
 
-    LogPrint("masternode", "CActiveMasternode::ManageState -- status = %s, type = %s, pinger enabled = %d\n", GetStatus(), GetTypeString(), fPingerEnabled);
+    /* LogPrint("masternode", "CActiveMasternode::ManageState -- status = %s, type = %s, pinger enabled = %d\n", GetStatus(), GetTypeString(), fPingerEnabled); */
 
     if(eType == MASTERNODE_UNKNOWN) {
         ManageStateInitial(connman);

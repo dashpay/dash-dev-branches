@@ -4,6 +4,7 @@
 
 #include "bloom.h"
 
+#include "consensus/consensus.h"
 #include "hash.h"
 #include "primitives/transaction.h"
 #include "random.h"
@@ -22,6 +23,63 @@
 #define MIN_N_HASH_FUNC 1
 
 using namespace std;
+
+void CBloomFilter::setup(unsigned int nElements,
+    double nFPRate,
+    unsigned int nTweakIn,
+    unsigned char nFlagsIn,
+    bool fSizeConstrained,
+    uint32_t nMaxFilterSize = SMALLEST_MAX_BLOOM_FILTER_SIZE)
+{
+    if (nElements == 0)
+    {
+        LogPrintf("Construction of empty CBloomFilter attempted.\n");
+        nElements = 1;
+    }
+    unsigned int nDesiredSize = (unsigned int)(-1 / LN2SQUARED * nElements * log(nFPRate) / 8);
+
+    if (fSizeConstrained)
+        nDesiredSize = min(nDesiredSize, nMaxFilterSize);
+
+    vData.resize(nDesiredSize, 0);
+    isFull = vData.size() == 0;
+    isEmpty = true;
+
+    nHashFuncs = (unsigned int)(vData.size() * 8 / nElements * LN2);
+
+    if (fSizeConstrained)
+        nHashFuncs = min(nHashFuncs, MAX_HASH_FUNCS);
+
+    nTweak = nTweakIn;
+    nFlags = nFlagsIn;
+}
+
+void CBloomFilter::setupGuaranteeFPR(unsigned int nElements,
+    double nFPRate,
+    unsigned int nTweakIn,
+    unsigned char nFlagsIn,
+    bool fSizeConstrained,
+    uint32_t nMaxFilterSize = SMALLEST_MAX_BLOOM_FILTER_SIZE)
+{
+    if (nElements == 0)
+    {
+        LogPrintf("Construction of empty CBloomFilter attempted.\n");
+        nElements = 1;
+    }
+    unsigned int nDesiredSize = (unsigned int)(ceil(-1 / LN2SQUARED * nElements * log(nFPRate) / 8));
+
+    vData.resize(nDesiredSize, 0);
+    isFull = vData.size() == 0;
+    isEmpty = true;
+
+    nHashFuncs = (unsigned int)max(MIN_N_HASH_FUNC, int(vData.size() * 8 / nElements * LN2));
+
+    if (fSizeConstrained)
+        nHashFuncs = min(nHashFuncs, MAX_HASH_FUNCS);
+
+    nTweak = nTweakIn;
+    nFlags = nFlagsIn;
+}
 
 CBloomFilter::CBloomFilter(unsigned int nElements, double nFPRate, unsigned int nTweakIn, unsigned char nFlagsIn) :
     /**
@@ -52,6 +110,19 @@ CBloomFilter::CBloomFilter(unsigned int nElements, double nFPRate, unsigned int 
     nTweak(nTweakIn),
     nFlags(BLOOM_UPDATE_NONE)
 {
+}
+
+CBloomFilter::CBloomFilter(unsigned int nElements,
+    double nFPRate,
+    unsigned int nTweakIn,
+    unsigned char nFlagsIn,
+    bool fGuaranteeFPR,
+    uint32_t nMaxFilterSize)
+{
+    if (fGuaranteeFPR)
+        setupGuaranteeFPR(nElements, nFPRate, nTweakIn, nFlagsIn, true, nMaxFilterSize);
+    else
+        setup(nElements, nFPRate, nTweakIn, nFlagsIn, true, nMaxFilterSize);
 }
 
 inline unsigned int CBloomFilter::Hash(unsigned int nHashNum, const std::vector<unsigned char>& vDataToHash) const

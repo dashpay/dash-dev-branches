@@ -118,8 +118,8 @@ private:
     void _insert(int plusOrMinus, uint64_t k, const std::vector<uint8_t> v);
 
     // TODO: Nakul check the size_t
-    // size_t valueSize;
-    uint64_t valueSize;
+    size_t valueSize;
+    /* uint64_t valueSize; */
     uint8_t n_hash;
     bool is_modified;
 

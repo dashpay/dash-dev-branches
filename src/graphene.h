@@ -22,6 +22,7 @@
 #include <vector>
 
 const unsigned char MIN_MEMPOOL_INFO_BYTES = 8;
+extern bool fGrapheneBlockEnabled;
 
 class CDataStream;
 class CNode;
