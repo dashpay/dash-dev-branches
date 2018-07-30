@@ -183,6 +183,13 @@ public:
         return (std::string(begin(), end()));
     }
 
+    std::string hex() const
+    {
+        char psz[size() * 2 + 1];
+        for (unsigned int i = 0; i < vch.size(); i++)
+            sprintf(psz + i * 2, "%02x", vch[i]);
+        return std::string(psz, psz + size() * 2);
+    }
 
     //
     // Vector subset

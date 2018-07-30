@@ -11,6 +11,8 @@
 #include "serialize.h"
 #include "users.h"
 #include "univalue.h"
+#include "util.h"
+#include "streams.h"
 
 static const CAmount MIN_SUBTX_TOPUP = 0.0001 * COIN;
 
@@ -43,6 +45,9 @@ public:
 
     uint256 GetHash() const
     {
+        CDataStream ss(SER_DISK, 0);
+        ss << *this;
+        LogPrintf("CSubTxRegister::GetHash, tmpdata:[bin:%s][hex:%s]", ss.str().c_str(), ss.hex().c_str());
         return ::SerializeHash(*this);
     }
 
@@ -50,6 +55,9 @@ public:
     {
         CSubTxRegister tmp = *this;
         tmp.vchSig.clear();
+        CDataStream ss(SER_DISK, 0);
+        ss << tmp;
+        LogPrintf("CSubTxRegister::GetSignHash, tmpdata:[bin:%s][hex:%s]", ss.str().c_str(), ss.hex().c_str());
         return ::SerializeHash(tmp);
     }
 
