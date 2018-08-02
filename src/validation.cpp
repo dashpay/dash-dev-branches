@@ -90,6 +90,8 @@ int64_t nMaxTipAge = DEFAULT_MAX_TIP_AGE;
 bool fEnableReplacement = DEFAULT_ENABLE_REPLACEMENT;
 
 std::atomic<bool> fDIP0001ActiveAtTip{false};
+static std::atomic<uint64_t> nLargestBlockSeen{DEFAULT_BLOCK_MAX_SIZE}; // track the largest block we've seen
+static std::atomic<bool> fIsChainNearlySynced{false};
 
 uint256 hashAssumeValid;
 
@@ -1386,6 +1388,30 @@ CAmount GetMasternodePayment(int nHeight, CAmount blockValue)
     return ret;
 }
 
+
+uint64_t LargestBlockSeen(uint64_t nBlockSize)                                   
+{                                                                                
+    // C++98 lacks the capability to do static initialization properly           
+    // so we need a runtime check to make sure it is.                            
+    // This can be removed when moving to C++11 .                                
+    if (nBlockSize < DEFAULT_BLOCK_MAX_SIZE)                            
+    {                                                                            
+        nBlockSize = DEFAULT_BLOCK_MAX_SIZE;                            
+    }                                                                            
+                                                                                 
+    // Return the largest block size that we have seen since startup             
+    uint64_t nSize = nLargestBlockSeen.load();                                   
+    while (nBlockSize > nSize)                                                   
+    {                                                                            
+        if (nLargestBlockSeen.compare_exchange_weak(nSize, nBlockSize))          
+        {                                                                        
+            return nBlockSize;                                                   
+        }                                                                        
+    }                                                                            
+                                                                                 
+    return nSize;                                                                
+} 
+
 bool IsInitialBlockDownload()
 {
     // Once this function has returned false, it must remain false.
@@ -1409,6 +1435,27 @@ bool IsInitialBlockDownload()
     latchToFalse.store(true, std::memory_order_relaxed);
     return false;
 }
+
+// fIsChainNearlySynced is updated only during startup and whenever we receive a header.
+// This way we avoid having to lock cs_main so often which tends to be a bottleneck.
+void IsChainNearlySyncedInit()                                                    
+{                                                                                
+    LOCK(cs_main);                                                               
+    if (!pindexBestHeader)                                                       
+    {                                                                            
+        // Not nearly synced if we don't have any blocks!                        
+        fIsChainNearlySynced.store(false);                                        
+    }                                                                            
+    else                                                                         
+    {                                                                            
+        if (chainActive.Height() < pindexBestHeader->nHeight - 2)                
+            fIsChainNearlySynced.store(false);                                    
+        else                                                                     
+            fIsChainNearlySynced.store(true);                                     
+    }                                                                            
+}                                                                                
+                                                                                 
+bool IsChainNearlySynced() { return fIsChainNearlySynced.load(); } 
 
 CBlockIndex *pindexBestForkTip = NULL, *pindexBestForkBase = NULL;
 
@@ -2777,7 +2824,7 @@ void ReprocessBlocks(int nBlocks)
  * Return the tip of the chain with the most work in it, that isn't
  * known to be invalid (it's however far from certain to be valid).
  */
-static CBlockIndex* FindMostWorkChain() {
+CBlockIndex* FindMostWorkChain() {
     do {
         CBlockIndex *pindexNew = NULL;
 

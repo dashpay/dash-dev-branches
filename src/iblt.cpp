@@ -30,6 +30,19 @@ SOFTWARE.
 #include <utility>
 
 static const size_t N_HASHCHECK = 11;
+// It's extremely unlikely that an IBLT will decode with fewer
+// than 1 cell for every 10 items.
+static const float MIN_OVERHEAD = 0.1;
+
+// mask that can be reduced to reduce the number of checksum bits in the IBLT
+// -- ANY VALUE OTHER THAN 0xffffffff IS FOR TESTING ONLY! --
+static const uint32_t KEYCHECK_MASK = 0xffffffff;
+
+static inline uint32_t keyChecksumCalc(const std::vector<uint8_t> &kvec)
+{
+    return MurmurHash3(N_HASHCHECK, kvec) & KEYCHECK_MASK;
+}
+
 
 template <typename T>
 std::vector<uint8_t> ToVec(T number)
@@ -47,14 +60,14 @@ bool HashTableEntry::isPure() const
 {
     if (count == 1 || count == -1)
     {
-        uint32_t check = MurmurHash3(N_HASHCHECK, ToVec(keySum));
+        uint32_t check = keyChecksumCalc(ToVec(keySum));
         return (keyCheck == check);
     }
     return false;
 }
 
 bool HashTableEntry::empty() const { return (count == 0 && keySum == 0 && keyCheck == 0); }
-void HashTableEntry::addValue(const std::vector<uint8_t> v)
+void HashTableEntry::addValue(const std::vector<uint8_t> &v)
 {
     if (v.empty())
     {
@@ -72,19 +85,14 @@ void HashTableEntry::addValue(const std::vector<uint8_t> v)
 
 CIblt::CIblt()
 {
-    valueSize = 0;
     n_hash = 1;
     is_modified = false;
+    version = 0;
 }
 
-CIblt::CIblt(size_t _expectedNumEntries, size_t _valueSize) : is_modified(false)
+CIblt::CIblt(size_t _expectedNumEntries) : is_modified(false), version(0) { CIblt::resize(_expectedNumEntries); }
+CIblt::CIblt(const CIblt &other) : is_modified(false), version(0)
 {
-    CIblt::resize(_expectedNumEntries, _valueSize);
-}
-
-CIblt::CIblt(const CIblt &other) : is_modified(false)
-{
-    valueSize = other.valueSize;
     n_hash = other.n_hash;
     hashTable = other.hashTable;
 }
@@ -95,34 +103,35 @@ void CIblt::reset()
     size_t size = this->size();
     hashTable.clear();
     hashTable.resize(size);
+    is_modified = false;
 }
 
 size_t CIblt::size() { return hashTable.size(); }
-void CIblt::resize(size_t _expectedNumEntries, size_t _valueSize)
+void CIblt::resize(size_t _expectedNumEntries)
 {
     assert(is_modified == false);
 
-    CIblt::valueSize = _valueSize;
     CIblt::n_hash = OptimalNHash(_expectedNumEntries);
 
     // reduce probability of failure by increasing by overhead factor
     size_t nEntries = (size_t)(_expectedNumEntries * OptimalOverhead(_expectedNumEntries));
-    /* std::cout<<_expectedNumEntries<<" "<<n_hash<<" "<<nEntries<<std::endl; */
     // ... make nEntries exactly divisible by n_hash
     while (n_hash * (nEntries / n_hash) != nEntries)
         ++nEntries;
     hashTable.resize(nEntries);
-    /* std::cout<<n_hash<<" "<<nEntries<<std::endl; */
-    /* std::cout<<_expectedNumEntries<<" "<<n_hash<<" "<<nEntries<<std::endl; */
 }
 
-void CIblt::_insert(int plusOrMinus, uint64_t k, const std::vector<uint8_t> v)
+void CIblt::_insert(int plusOrMinus, uint64_t k, const std::vector<uint8_t> &v)
 {
-    assert(v.size() == valueSize);
+    if (!n_hash)
+        return;
+    size_t bucketsPerHash = hashTable.size() / n_hash;
+    if (!bucketsPerHash)
+        return;
 
     std::vector<uint8_t> kvec = ToVec(k);
+    const uint32_t kchk = keyChecksumCalc(kvec);
 
-    size_t bucketsPerHash = hashTable.size() / n_hash;
     for (size_t i = 0; i < n_hash; i++)
     {
         size_t startEntry = i * bucketsPerHash;
@@ -131,7 +140,7 @@ void CIblt::_insert(int plusOrMinus, uint64_t k, const std::vector<uint8_t> v)
         HashTableEntry &entry = hashTable.at(startEntry + (h % bucketsPerHash));
         entry.count += plusOrMinus;
         entry.keySum ^= k;
-        entry.keyCheck ^= MurmurHash3(N_HASHCHECK, kvec);
+        entry.keyCheck ^= kchk;
         if (entry.empty())
         {
             entry.valueSum.clear();
@@ -145,15 +154,21 @@ void CIblt::_insert(int plusOrMinus, uint64_t k, const std::vector<uint8_t> v)
     is_modified = true;
 }
 
-void CIblt::insert(uint64_t k, const std::vector<uint8_t> v) { _insert(1, k, v); }
-void CIblt::erase(uint64_t k, const std::vector<uint8_t> v) { _insert(-1, k, v); }
+void CIblt::insert(uint64_t k, const std::vector<uint8_t> &v) { _insert(1, k, v); }
+void CIblt::erase(uint64_t k, const std::vector<uint8_t> &v) { _insert(-1, k, v); }
 bool CIblt::get(uint64_t k, std::vector<uint8_t> &result) const
 {
     result.clear();
 
+
+    if (!n_hash)
+        return false;
+    size_t bucketsPerHash = hashTable.size() / n_hash;
+    if (!bucketsPerHash)
+        return false;
+
     std::vector<uint8_t> kvec = ToVec(k);
 
-    size_t bucketsPerHash = hashTable.size() / n_hash;
     for (size_t i = 0; i < n_hash; i++)
     {
         size_t startEntry = i * bucketsPerHash;
@@ -199,7 +214,9 @@ bool CIblt::get(uint64_t k, std::vector<uint8_t> &result) const
                 return true;
             }
             ++nErased;
-            peeled._insert(-entry.count, entry.keySum, entry.valueSum);
+            // NOTE: Need to create a copy of valueSum here as entry is just a reference!
+            std::vector<uint8_t> vec = entry.valueSum;
+            peeled._insert(-entry.count, entry.keySum, vec);
         }
     }
     if (nErased > 0)
@@ -216,6 +233,7 @@ bool CIblt::listEntries(std::set<std::pair<uint64_t, std::vector<uint8_t> > > &p
     CIblt peeled = *this;
 
     size_t nErased = 0;
+    size_t nTotalErased = 0;
     do
     {
         nErased = 0;
@@ -232,15 +250,24 @@ bool CIblt::listEntries(std::set<std::pair<uint64_t, std::vector<uint8_t> > > &p
                 {
                     negative.insert(std::make_pair(entry.keySum, entry.valueSum));
                 }
-                peeled._insert(-entry.count, entry.keySum, entry.valueSum);
+                // NOTE: Need to create a copy of valueSum here as entry is just a reference!
+                std::vector<uint8_t> vec = entry.valueSum;
+                peeled._insert(-entry.count, entry.keySum, vec);
                 ++nErased;
             }
         }
-    } while (nErased > 0);
+        nTotalErased += nErased;
+    } while (nErased > 0 && nTotalErased < peeled.hashTable.size() / MIN_OVERHEAD);
+
+    if (!n_hash)
+        return false;
+    size_t peeled_bucketsPerHash = peeled.hashTable.size() / n_hash;
+    if (!peeled_bucketsPerHash)
+        return false;
 
     // If any buckets for one of the hash functions is not empty,
     // then we didn't peel them all:
-    for (size_t i = 0; i < peeled.hashTable.size() / n_hash; i++)
+    for (size_t i = 0; i < peeled_bucketsPerHash; i++)
     {
         if (peeled.hashTable.at(i).empty() != true)
             return false;
@@ -251,7 +278,6 @@ bool CIblt::listEntries(std::set<std::pair<uint64_t, std::vector<uint8_t> > > &p
 CIblt CIblt::operator-(const CIblt &other) const
 {
     // IBLT's must be same params/size:
-    assert(valueSize == other.valueSize);
     assert(hashTable.size() == other.hashTable.size());
 
     CIblt result(*this);
@@ -285,7 +311,7 @@ std::string CIblt::DumpTable() const
     {
         const HashTableEntry &entry = hashTable.at(i);
         result << entry.count << " " << entry.keySum << " ";
-        result << (MurmurHash3(N_HASHCHECK, ToVec(entry.keySum)) == entry.keyCheck ? "true" : "false");
+        result << (keyChecksumCalc(ToVec(entry.keySum)) == entry.keyCheck ? "true" : "false");
         result << "\n";
     }
 

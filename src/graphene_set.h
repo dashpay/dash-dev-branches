@@ -23,7 +23,6 @@ const uint8_t IBLT_CELL_SIZE = 17;
 const uint32_t LARGE_MEM_POOL_SIZE = 10000000;
 const float FILTER_FPR_MAX = 0.999;
 const uint8_t IBLT_CELL_MINIMUM = 2;
-const uint8_t IBLT_VALUE_SIZE = 0;
 const std::vector<uint8_t> IBLT_NULL_VALUE = {};
 const unsigned char WORD_BITS = 8;
 
@@ -100,7 +99,8 @@ public:
         return optSymDiff;
     }
 
-    CGrapheneSet() : pSetFilter(nullptr), pSetIblt(nullptr) {}
+    // The default constructor is for 2-phase construction via deserialization
+    CGrapheneSet() : ordered(false), nReceiverUniverseItems(0), pSetFilter(nullptr), pSetIblt(nullptr) {}
     CGrapheneSet(size_t _nReceiverUniverseItems,
         const std::vector<uint256> &_itemHashes,
         bool _ordered = false,
@@ -123,7 +123,7 @@ public:
         }
         catch (const std::runtime_error &e)
         {
-            LogPrint("GRAPHENE", "failed to optimize symmetric difference for graphene: %s\n", e.what());
+            LogPrint("Graphene", "failed to optimize symmetric difference for graphene: %s\n", e.what());
         }
 
         // Sender's estimate of number of items in both block and receiver mempool
@@ -139,12 +139,13 @@ public:
             fpr = optSymDiff / float(nReceiverExcessItems);
 
         // Construct Bloom filter
-        pSetFilter = new CBloomFilter(nItems, fpr, insecure_rand.rand32(), BLOOM_UPDATE_ALL, true, std::numeric_limits<uint32_t>::max());
-        LogPrint("GRAPHENE", "fp rate: %f Num elements in bloom filter: %d\n", fpr, nItems);
+        pSetFilter = new CBloomFilter(
+            nItems, fpr, insecure_rand.rand32(), BLOOM_UPDATE_ALL, true, std::numeric_limits<uint32_t>::max());
+        LogPrint("Graphene", "fp rate: %f Num elements in bloom filter: %d\n", fpr, nItems);
 
         // Construct IBLT
         uint64_t nIbltCells = std::max((int)IBLT_CELL_MINIMUM, (int)ceil(optSymDiff));
-        pSetIblt = new CIblt(nIbltCells, IBLT_VALUE_SIZE);
+        pSetIblt = new CIblt(nIbltCells);
         std::map<uint64_t, uint256> mapCheapHashes;
 
         for (const uint256 &itemHash : _itemHashes)
@@ -180,6 +181,8 @@ public:
         }
     }
 
+    // Pass the transaction hashes that the local machine has to reconcile with the remote and return a list
+    // of cheap hashes in the block in the correct order
     std::vector<uint64_t> Reconcile(const std::vector<uint256> &receiverItemHashes)
     {
         std::set<uint64_t> receiverSet;
@@ -191,20 +194,44 @@ public:
         {
             uint64_t cheapHash = itemHash.GetCheapHash();
 
-            if (mapCheapHashes.count(cheapHash))
+            auto ir = mapCheapHashes.insert(std::make_pair(cheapHash, itemHash));
+            if (!ir.second)
+            {
                 throw std::runtime_error("Cheap hash collision while decoding graphene set");
+            }
 
             if ((*pSetFilter).contains(itemHash))
             {
                 receiverSet.insert(cheapHash);
                 localIblt.insert(cheapHash, IBLT_NULL_VALUE);
             }
-
-            mapCheapHashes[cheapHash] = itemHash;
         }
 
         mapCheapHashes.clear();
+        return Reconcile(receiverSet, localIblt);
+    }
 
+    // Pass a map of cheap hash to transaction hashes that the local machine has to reconcile with the remote and
+    // return a list of cheap hashes in the block in the correct order
+    std::vector<uint64_t> Reconcile(const std::map<uint64_t, uint256> &mapCheapHashes)
+    {
+        std::set<uint64_t> receiverSet;
+        CIblt localIblt((*pSetIblt));
+        localIblt.reset();
+
+        for (const auto &entry : mapCheapHashes)
+        {
+            if ((*pSetFilter).contains(entry.second))
+            {
+                receiverSet.insert(entry.first);
+                localIblt.insert(entry.first, IBLT_NULL_VALUE);
+            }
+        }
+        return Reconcile(receiverSet, localIblt);
+    }
+
+    std::vector<uint64_t> Reconcile(std::set<uint64_t> &receiverSet, const CIblt &localIblt)
+    {
         // Determine difference between sender and receiver IBLTs
         std::set<std::pair<uint64_t, std::vector<uint8_t> > > senderHas;
         std::set<std::pair<uint64_t, std::vector<uint8_t> > > receiverHas;
@@ -315,6 +342,8 @@ public:
     {
         READWRITE(ordered);
         READWRITE(nReceiverUniverseItems);
+        if (nReceiverUniverseItems > LARGE_MEM_POOL_SIZE)
+            throw std::runtime_error("nReceiverUniverseItems exceeds threshold for excessive mempool size");
         READWRITE(encodedRank);
         if (!pSetFilter)
             pSetFilter = new CBloomFilter();

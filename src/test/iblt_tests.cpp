@@ -8,7 +8,6 @@
 #include "utilstrencodings.h"
 
 const std::vector<uint8_t> IBLT_NULL_VALUE = {};
-const uint8_t IBLT_NULL_VALUE_SIZE = 0;
 
 std::vector<uint8_t> PseudoRandomValue(uint32_t n)
 {
@@ -27,7 +26,7 @@ BOOST_AUTO_TEST_CASE(iblt_handles_small_quantities)
 	bool allPassed = true;
 	for (size_t nItems=1;nItems < 100;nItems++)
 	{
-		CIblt t(nItems, IBLT_NULL_VALUE_SIZE);
+		CIblt t(nItems);
 
 		for (size_t i=0;i < nItems;i++)
 			t.insert(i, IBLT_NULL_VALUE);
@@ -39,9 +38,42 @@ BOOST_AUTO_TEST_CASE(iblt_handles_small_quantities)
 	BOOST_CHECK(allPassed);
 }
 
+BOOST_AUTO_TEST_CASE(iblt_reset)
+{
+    CIblt t;
+    t.insert(0, ParseHex("00000000"));
+    bool gotResult;
+    std::vector<uint8_t> result;
+    gotResult = t.get(21, result);
+    BOOST_CHECK(!gotResult);  // anything could have been inserted into a zero length IBLT
+
+    t.reset();
+    t.resize(20);
+    t.insert(0, ParseHex("00000000"));
+    t.insert(1, ParseHex("00000001"));
+    t.insert(11, ParseHex("00000011"));
+
+    gotResult = t.get(0, result);
+    BOOST_CHECK(gotResult && result == ParseHex("00000000"));
+
+    t.reset();
+
+    gotResult = t.get(0, result);
+    BOOST_CHECK(gotResult && (result.size()==0));
+
+    t.resize(40);
+
+    t.insert(0, ParseHex("00000000"));
+    t.insert(1, ParseHex("00000001"));
+    t.insert(11, ParseHex("00000011"));
+
+    gotResult = t.get(0, result);
+    BOOST_CHECK(gotResult && result == ParseHex("00000000"));
+}
+
 BOOST_AUTO_TEST_CASE(iblt_erases_properly)
 {
-    CIblt t(20, 4);
+    CIblt t(20);
     t.insert(0, ParseHex("00000000"));
     t.insert(1, ParseHex("00000001"));
     t.insert(11, ParseHex("00000011"));
@@ -78,7 +110,7 @@ BOOST_AUTO_TEST_CASE(iblt_erases_properly)
 
 BOOST_AUTO_TEST_CASE(iblt_handles_overload)
 {
-    CIblt t(20, 4);
+    CIblt t(20);
 
     // 1,000 values in an IBLT that has room for 20,
     // all lookups should fail.
@@ -109,7 +141,7 @@ BOOST_AUTO_TEST_CASE(iblt_handles_overload)
 BOOST_AUTO_TEST_CASE(iblt_lists_entries_properly)
 {
     std::set<std::pair<uint64_t, std::vector<uint8_t> > > expected;
-    CIblt t(20, 4);
+    CIblt t(20);
     for (int i = 0; i < 20; i++)
     {
         t.insert(i, PseudoRandomValue(i * 2));
@@ -122,8 +154,8 @@ BOOST_AUTO_TEST_CASE(iblt_lists_entries_properly)
 
 BOOST_AUTO_TEST_CASE(iblt_performs_subtraction_properly)
 {
-    CIblt t1(11, 4);
-    CIblt t2(11, 4);
+    CIblt t1(11);
+    CIblt t2(11);
 
     for (int i = 0; i < 195; i++)
     {
@@ -159,7 +191,7 @@ BOOST_AUTO_TEST_CASE(iblt_performs_subtraction_properly)
     BOOST_CHECK(negative == expectedPositive);
 
 
-    CIblt emptyIBLT(11, 4);
+    CIblt emptyIBLT(11);
     std::set<std::pair<uint64_t, std::vector<uint8_t> > > emptySet;
 
     // Test edge cases for empty IBLT:

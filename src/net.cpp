@@ -753,6 +753,21 @@ void CConnman::ConnectToGrapheneBlockNodes()
 
 }
 
+int CConnman::TotalGrapheneBlocksInFlight()
+{
+    int nTotalGrapheneBlocksInFlight = 0;
+    LOCK(cs_vNodes);
+    for (CNode *pnode : vNodes)
+    {
+        LOCK(pnode->cs_mapgrapheneblocksinflight);
+        if (pnode->mapGrapheneBlocksInFlight.size() > 0)
+            nTotalGrapheneBlocksInFlight++;
+    }
+
+    return nTotalGrapheneBlocksInFlight;
+}
+
+
 /** CConnman Graphene End Section */
 
 std::string CNode::GetAddrName() const {

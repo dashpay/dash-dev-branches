@@ -131,6 +131,12 @@ double CGrapheneBlockData::average(std::map<int64_t, uint64_t> &map)
     return (double)accum / map.size();
 }
 
+void CGrapheneBlockData::IncrementDecodeFailures()
+{
+    LOCK(cs_graphenestats);
+    nDecodeFailures += 1;
+}
+
 void CGrapheneBlockData::UpdateInBound(uint64_t nGrapheneBlockSize, uint64_t nOriginalBlockSize)
 {
     LOCK(cs_graphenestats);
@@ -659,9 +665,11 @@ bool IsGrapheneBlockValid(CNode *pfrom, const CBlockHeader &header)
 }
 
 CMemPoolInfo GetGrapheneMempoolInfo() { return CMemPoolInfo(mempool.size()); }
-uint256 GetSalt(unsigned char seed)
+
+void RequestFailoverBlock(CNode *pfrom, uint256 blockHash, CConnman& connman)
 {
-    std::vector<unsigned char> vec(32);
-    vec[0] = seed;
-    return uint256(vec);
+    LogPrint("Graphene", "Requesting full block as failover from peer %d\n", pfrom->id);
+    std::vector<CInv> vGetData;
+    vGetData.push_back(CInv(MSG_BLOCK, blockHash));
+    connman.PushMessage(pfrom, CNetMsgMaker(pfrom->GetSendVersion()).Make(NetMsgType::GETDATA, vGetData));
 }

@@ -163,6 +163,9 @@ private:
     CStatHistory<uint64_t> nOriginalSize;
     CStatHistory<uint64_t> nGrapheneSize;
     CStatHistory<uint64_t> nBlocks;
+    CStatHistory<uint64_t> nInBoundBlocks;
+    CStatHistory<uint64_t> nOutBoundBlocks;
+    CStatHistory<uint64_t> nDecodeFailures;
     CStatHistory<uint64_t> nMempoolLimiterBytesSaved;
     CStatHistory<uint64_t> nTotalMemPoolInfoBytes;
     CStatHistory<uint64_t> nTotalFilterBytes;
@@ -207,6 +210,7 @@ protected:
     //! Virtual method so it can be overridden for better unit testing
     virtual int64_t getTimeForStats() { return GetTimeMillis(); }
 public:
+    void IncrementDecodeFailures();
     void UpdateInBound(uint64_t nGrapheneBlockSize, uint64_t nOriginalBlockSize);
     void UpdateOutBound(uint64_t nGrapheneBlockSize, uint64_t nOriginalBlockSize);
     void UpdateOutBoundMemPoolInfo(uint64_t nMemPoolInfoSize);
@@ -263,6 +267,6 @@ void AddGrapheneBlockInFlight(CNode *pfrom, const uint256 &hash);
 bool IsGrapheneBlockValid(CNode *pfrom, const CBlockHeader &header);
 // bool HandleGrapheneBlockRequest(CDataStream &vRecv, CNode *pfrom, const CChainParams &chainparams);
 CMemPoolInfo GetGrapheneMempoolInfo();
-uint256 GetSalt(unsigned char seed);
+void RequestFailoverBlock(CNode *pfrom, uint256 blockHash, CConnman& connman);
 
 #endif // BITCOIN_GRAPHENE_H

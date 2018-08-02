@@ -75,11 +75,8 @@ BOOST_AUTO_TEST_CASE(graphene_set_decodes_multiple_sizes)
             for (size_t j=1;j < 11;j++)
                 receiverItems.push_back(SerializeHash(nItems+j+SEED));
 
-            CGrapheneSet senderGrapheneSet(receiverItems.size(), senderItems, true, false);
-            BOOST_CHECKPOINT("Reconcile begin");
+            CGrapheneSet senderGrapheneSet(receiverItems.size(), senderItems, true, true);
             std::vector<uint64_t> reconciledCheapHashes = senderGrapheneSet.Reconcile(receiverItems);
-
-            BOOST_CHECKPOINT("Reconcile end");
 
             BOOST_CHECK_EQUAL_COLLECTIONS(reconciledCheapHashes.begin(), reconciledCheapHashes.end(),
                 senderCheapHashes.begin(), senderCheapHashes.end());
@@ -103,7 +100,7 @@ BOOST_AUTO_TEST_CASE(graphene_set_decodes_multiple_sizes)
 
 BOOST_AUTO_TEST_CASE(graphene_set_finds_optimal_settings)
 {
-    const int SERIALIZATION_OVERHEAD = 10;
+    const int SERIALIZATION_OVERHEAD = 11;
     FastRandomContext insecure_rand(true);
     CGrapheneSet grapheneSet;
 
@@ -118,8 +115,8 @@ BOOST_AUTO_TEST_CASE(graphene_set_finds_optimal_settings)
     int a = 1;
     for (a = 1; a < m - mu; a++)
     {
-        CBloomFilter filter(n, fpr(a), insecure_rand.rand32(), BLOOM_UPDATE_ALL );
-        CIblt iblt(a, IBLT_VALUE_SIZE);
+        CBloomFilter filter(n, fpr(a), insecure_rand.rand32(), BLOOM_UPDATE_ALL);
+        CIblt iblt(a);
 
         size_t filterBytes = ::GetSerializeSize(filter, SER_NETWORK, PROTOCOL_VERSION) - SERIALIZATION_OVERHEAD;
         size_t ibltBytes = ::GetSerializeSize(iblt, SER_NETWORK, PROTOCOL_VERSION) - SERIALIZATION_OVERHEAD;

@@ -371,6 +371,7 @@ public:
     bool HaveConnectGrapheneNodes();
     void CheckNodeSupportForGrapheneBlocks();
     void ConnectToGrapheneBlockNodes();
+    int TotalGrapheneBlocksInFlight();
 
     /** CConnman Graphene End Section */
 
@@ -930,6 +931,7 @@ public:
             return true;
         return false;
     }
+
 
     // Graphene End Section
 

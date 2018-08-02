@@ -164,6 +164,7 @@ extern std::set<uint256> setPreVerifiedTxHash;
 extern std::set<uint256> setUnVerifiedOrphanTxHash;
 
 extern CCriticalSection cs_xval;
+extern uint64_t LargestBlockSeen(uint64_t nBlockSize = 0);
 // Xpress Validation: end
 
 
@@ -307,6 +308,9 @@ std::string GetWarnings(const std::string& strFor);
 bool GetTransaction(const uint256 &hash, CTransactionRef &tx, const Consensus::Params& params, uint256 &hashBlock, bool fAllowSlow = false);
 /** Find the best known block, and make it the tip of the block chain */
 bool ActivateBestChain(CValidationState& state, const CChainParams& chainparams, std::shared_ptr<const CBlock> pblock = std::shared_ptr<const CBlock>());
+
+extern bool IsChainNearlySynced();
+extern void IsChainNearlySyncedInit();
 
 double ConvertBitsToDouble(unsigned int nBits);
 CAmount GetBlockSubsidy(int nBits, int nHeight, const Consensus::Params& consensusParams, bool fSuperblockPartOnly = false);
@@ -510,6 +514,8 @@ bool ReadBlockFromDisk(CBlock& block, const CBlockIndex* pindex, const Consensus
 /** Reprocess a number of blocks to try and get on the correct chain again **/
 bool DisconnectBlocks(int blocks);
 void ReprocessBlocks(int nBlocks);
+
+CBlockIndex* FindMostWorkChain();
 
 /** Context-independent validity checks */
 bool CheckBlockHeader(const CBlockHeader& block, CValidationState& state, const Consensus::Params& consensusParams, bool fCheckPOW = true);
