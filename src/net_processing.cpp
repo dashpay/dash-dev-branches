@@ -444,6 +444,7 @@ void MaybeSetPeerAsAnnouncingHeaderAndIDs(NodeId nodeid, CConnman& connman) {
                 // blocks using compact encodings.
                 connman.ForNode(lNodesAnnouncingHeaderAndIDs.front(), [&connman, fAnnounceUsingCMPCTBLOCK, nCMPCTBLOCKVersion](CNode* pnodeStop){
                     connman.PushMessage(pnodeStop, CNetMsgMaker(pnodeStop->GetSendVersion()).Make(NetMsgType::SENDCMPCT, fAnnounceUsingCMPCTBLOCK, nCMPCTBLOCKVersion));
+                    LogPrintf("fAnnounceUsingCMPCTBLOCK _1_: %d\n", fAnnounceUsingCMPCTBLOCK);
                     return true;
                 });
                 lNodesAnnouncingHeaderAndIDs.pop_front();
@@ -451,6 +452,7 @@ void MaybeSetPeerAsAnnouncingHeaderAndIDs(NodeId nodeid, CConnman& connman) {
             fAnnounceUsingCMPCTBLOCK = true;
             connman.PushMessage(pfrom, CNetMsgMaker(pfrom->GetSendVersion()).Make(NetMsgType::SENDCMPCT, fAnnounceUsingCMPCTBLOCK, nCMPCTBLOCKVersion));
             lNodesAnnouncingHeaderAndIDs.push_back(pfrom->GetId());
+            LogPrintf("fAnnounceUsingCMPCTBLOCK _2_: %d\n", fAnnounceUsingCMPCTBLOCK);
             return true;
         });
     }
@@ -792,10 +794,13 @@ void PeerLogicValidation::SyncTransaction(const CTransaction& tx, const CBlockIn
 static CCriticalSection cs_most_recent_block;
 static std::shared_ptr<const CBlock> most_recent_block;
 static std::shared_ptr<const CBlockHeaderAndShortTxIDs> most_recent_compact_block;
+// static std::shared_ptr<const CGrapheneBlock> most_recent_graphene_block;
 static uint256 most_recent_block_hash;
 
 void PeerLogicValidation::NewPoWValidBlock(const CBlockIndex *pindex, const std::shared_ptr<const CBlock>& pblock) 
 {
+    
+    // std::shared_ptr<const CGrapheneBlock> pgrapheneblock = std::make_shared<const CGrapheneBlock> (*pblock);
     std::shared_ptr<const CBlockHeaderAndShortTxIDs> pcmpctblock = std::make_shared<const CBlockHeaderAndShortTxIDs> (*pblock);
     const CNetMsgMaker msgMaker(PROTOCOL_VERSION);
 
@@ -813,6 +818,7 @@ void PeerLogicValidation::NewPoWValidBlock(const CBlockIndex *pindex, const std:
         most_recent_block_hash = hashBlock;
         most_recent_block = pblock;
         most_recent_compact_block = pcmpctblock;
+        // most_recent_graphene_block = pgrapheneblock;
     }
 
     connman->ForEachNode([this, &pcmpctblock, pindex, &msgMaker, &hashBlock](CNode* pnode) {
@@ -3121,19 +3127,42 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                         // Can't download any more from this peer
                         break;
                     }
-                    vGetData.push_back(CInv(MSG_BLOCK, pindex->GetBlockHash()));
-                    MarkBlockAsInFlight(pfrom->GetId(), pindex->GetBlockHash(), chainparams.GetConsensus(), pindex);
-                    LogPrint("net", "Requesting block %s from  peer=%d\n",
-                            pindex->GetBlockHash().ToString(), pfrom->id);
+                    // TODO: Nakul vulnerability
+                    if (fGrapheneBlockEnabled && CanGrapheneBlockBeDownloaded(pfrom))
+                    {
+                        vGetData.push_back(CInv(MSG_GRAPHENE_BLOCK, pindex->GetBlockHash()));
+                        AddGrapheneBlockInFlight(pfrom, pindex->GetBlockHash());
+                        LogPrint("net", "Requesting Graphene block %s from  peer=%d\n",
+                                pindex->GetBlockHash().ToString(), pfrom->id);
+                    }
+                    else
+                    {
+                        vGetData.push_back(CInv(MSG_BLOCK, pindex->GetBlockHash()));
+                        MarkBlockAsInFlight(pfrom->GetId(), pindex->GetBlockHash(), chainparams.GetConsensus(), pindex);
+                        LogPrint("net", "Requesting block %s from  peer=%d\n",
+                                pindex->GetBlockHash().ToString(), pfrom->id);
+
+                    }
                 }
+
                 if (vGetData.size() > 1) {
                     LogPrint("net", "Downloading blocks toward %s (%d) via headers direct fetch\n",
                             pindexLast->GetBlockHash().ToString(), pindexLast->nHeight);
                 }
+
                 if (vGetData.size() > 0) {
                     if (nodestate->fSupportsDesiredCmpctVersion && vGetData.size() == 1 && mapBlocksInFlight.size() == 1 && pindexLast->pprev->IsValid(BLOCK_VALID_CHAIN)) {
-                        // In any case, we want to download using a compact block, not a regular one
-                        vGetData[0] = CInv(MSG_CMPCT_BLOCK, vGetData[0].hash);
+                        if (fGrapheneBlockEnabled && CanGrapheneBlockBeDownloaded(pfrom))
+                        {
+                            // In any case, we want to download using a graphene block, not a regular one
+                            vGetData[0] = CInv(MSG_GRAPHENE_BLOCK, vGetData[0].hash);
+
+                        }
+                        else
+                        {
+                            // In any case, we want to download using a compact block, not a regular one
+                            vGetData[0] = CInv(MSG_CMPCT_BLOCK, vGetData[0].hash);
+                        }
                     }
                     connman.PushMessage(pfrom, msgMaker.Make(NetMsgType::GETDATA, vGetData));
                 }
@@ -3165,7 +3194,33 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             mapBlockSource.emplace(hash, std::make_pair(pfrom->GetId(), true));
         }
         bool fNewBlock = false;
-        ProcessNewBlock(chainparams, pblock, forceProcessing, &fNewBlock);
+        bool processed = ProcessNewBlock(chainparams, pblock, forceProcessing, &fNewBlock);
+        if (fGrapheneBlockEnabled && processed)
+        {
+            int nTotalGrapheneBlocksInFlight = 0;
+            {
+                LOCK(pfrom->cs_mapgrapheneblocksinflight);                                   
+                if (pfrom->mapGrapheneBlocksInFlight.count(hash))                        
+                {
+                    pfrom->mapGrapheneBlocksInFlight[hash].fReceived = true;   
+                    graphenedata.ClearGrapheneBlockData(pfrom, hash);
+
+                    nTotalGrapheneBlocksInFlight = connman.TotalGrapheneBlocksInFlight();
+
+                }
+
+            }
+
+            if (nTotalGrapheneBlocksInFlight == 0)
+            {
+                graphenedata.ResetGrapheneBlockBytes();
+                LOCK(cs_xval);
+                setPreVerifiedTxHash.clear();
+                setUnVerifiedOrphanTxHash.clear();
+            }
+
+        }
+
         if (fNewBlock)
             pfrom->nLastBlockTime = GetTime();
     }
@@ -4081,7 +4136,7 @@ bool SendMessages(CNode* pto, CConnman& connman, const std::atomic<bool>& interr
         }
 
         // Start block sync
-        LogPrintf("SendMessages: BlockSync for Nakul\n");
+        // LogPrintf("SendMessages: BlockSync for Nakul\n");
         if (pindexBestHeader == NULL)
             pindexBestHeader = chainActive.Tip();
         bool fFetch = state.fPreferredDownload || (nPreferredDownload == 0 && !pto->fClient && !pto->fOneShot); // Download if this is a nice peer, or we have no nice peers and this one might do.
@@ -4182,7 +4237,7 @@ bool SendMessages(CNode* pto, CConnman& connman, const std::atomic<bool>& interr
                 }
             }
 
-            LogPrintf("SendMessages: compact for Nakul : %d\n", state.fPreferHeaderAndIDs );
+            // LogPrintf("SendMessages: compact for Nakul : %d\n", state.fPreferHeaderAndIDs );
             if (!fRevertToInv && !vHeaders.empty()) {
                 if (vHeaders.size() == 1 && state.fPreferHeaderAndIDs) {
                     // We only send up to 1 block as header-and-ids, as otherwise
@@ -4223,7 +4278,7 @@ bool SendMessages(CNode* pto, CConnman& connman, const std::atomic<bool>& interr
                     fRevertToInv = true;
             }
 
-            LogPrintf("SendMessages: fRevertToInv for Nakul : %d\n", fRevertToInv );
+            // LogPrintf("SendMessages: fRevertToInv for Nakul : %d\n", fRevertToInv );
             if (fRevertToInv) {
                 // If falling back to using an inv, just try to inv the tip.
                 // The last entry in vBlockHashesToAnnounce was our tip at some point
@@ -4449,7 +4504,7 @@ bool SendMessages(CNode* pto, CConnman& connman, const std::atomic<bool>& interr
         // Message: getdata (blocks)
         //
 
-        LogPrintf("SendMessages: getdata for Nakul, fGrapheneEnabled: %d\n", fGrapheneBlockEnabled);
+        // LogPrintf("SendMessages: getdata for Nakul, fGrapheneEnabled: %d\n", fGrapheneBlockEnabled);
         std::vector<CInv> vGetData;
         if (!pto->fClient && (fFetch || !IsInitialBlockDownload()) && state.nBlocksInFlight < MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
             std::vector<const CBlockIndex*> vToDownload;
