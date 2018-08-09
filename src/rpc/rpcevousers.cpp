@@ -241,7 +241,7 @@ UniValue createsubtx(const JSONRPCRequest& request)
 #endif//ENABLE_WALLET
 
 UniValue createrawtransition(const JSONRPCRequest& request) {
-    if (request.fHelp || (request.params.size() != 4 && request.params.size() != 5))
+    if (request.fHelp || (request.params.size() != 3 && request.params.size() != 4 && request.params.size() != 5))
         throw std::runtime_error(
                 "createrawtransition type args...\n"
                 "\nCreates a raw transition. Arguments depend on type of transition to be created.\n"
@@ -363,7 +363,7 @@ UniValue signrawtransition(const JSONRPCRequest& request) {
 }
 
 UniValue createtransition(const JSONRPCRequest& request) {
-    if (request.fHelp || (request.params.size() != 4 && request.params.size() != 5))
+    if (request.fHelp || (request.params.size() != 3 && request.params.size() != 4 && request.params.size() != 5))
         throw std::runtime_error(
                 "createtransition args...\n"
                 "\nCreates a raw transition and signs it. Arguments are the same as for createrawtransition.\n"
