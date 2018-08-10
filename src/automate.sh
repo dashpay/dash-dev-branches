@@ -43,18 +43,23 @@ sleep 15
 ./dash-cli -regtest -debug -use-grapheneblocks=1 -port=8332 -rpcport=8333 addnode "172.17.0.1:8336" "onetry"
 ./dash-cli -regtest -debug -use-grapheneblocks=1 -port=8334 -rpcport=8335 addnode "172.17.0.1:8336" "onetry"
 
-./dash-cli -regtest -debug -use-grapheneblocks=1 -port=8330 -rpcport=8331 getconnectioncount
-./dash-cli -regtest -debug -use-grapheneblocks=1 -port=8332 -rpcport=8333 getconnectioncount
-./dash-cli -regtest -debug -use-grapheneblocks=1 -port=8334 -rpcport=8335 getconnectioncount
-./dash-cli -regtest -debug -use-grapheneblocks=1 -port=8336 -rpcport=8337 getconnectioncount
-
-./dash-cli -regtest -debug -use-grapheneblocks=1 -port=8332 -rpcport=8333 generate 202
-./dash-cli -regtest -debug -use-grapheneblocks=1 -port=8334 -rpcport=8335 generate 202
-./dash-cli -regtest -debug -use-grapheneblocks=1 -port=8336 -rpcport=8337 generate 202
-./dash-cli -regtest -debug -use-grapheneblocks=1 -port=8330 -rpcport=8331 generate 202
-
-./dash-cli -regtest -debug -use-grapheneblocks=1 -port=8330 -rpcport=8331 getbalance 
-./dash-cli -regtest -debug -use-grapheneblocks=1 -port=8332 -rpcport=8333 getbalance
-./dash-cli -regtest -debug -use-grapheneblocks=1 -port=8334 -rpcport=8335 getbalance
-./dash-cli -regtest -debug -use-grapheneblocks=1 -port=8336 -rpcport=8337 getbalance
+# sleep 1
+# ./dash-cli -regtest -debug -use-grapheneblocks=1 -port=8330 -rpcport=8331 getconnectioncount
+# ./dash-cli -regtest -debug -use-grapheneblocks=1 -port=8332 -rpcport=8333 getconnectioncount
+# ./dash-cli -regtest -debug -use-grapheneblocks=1 -port=8334 -rpcport=8335 getconnectioncount
+# ./dash-cli -regtest -debug -use-grapheneblocks=1 -port=8336 -rpcport=8337 getconnectioncount
+#
+# sleep 10
+# ./dash-cli -regtest -debug -use-grapheneblocks=1 -port=8332 -rpcport=8333 generate 202
+# sleep 10
+# ./dash-cli -regtest -debug -use-grapheneblocks=1 -port=8334 -rpcport=8335 generate 202
+# sleep 10
+# ./dash-cli -regtest -debug -use-grapheneblocks=1 -port=8336 -rpcport=8337 generate 202
+# sleep 10
+# ./dash-cli -regtest -debug -use-grapheneblocks=1 -port=8330 -rpcport=8331 generate 202
+#
+# ./dash-cli -regtest -debug -use-grapheneblocks=1 -port=8330 -rpcport=8331 getbalance 
+# ./dash-cli -regtest -debug -use-grapheneblocks=1 -port=8332 -rpcport=8333 getbalance
+# ./dash-cli -regtest -debug -use-grapheneblocks=1 -port=8334 -rpcport=8335 getbalance
+# ./dash-cli -regtest -debug -use-grapheneblocks=1 -port=8336 -rpcport=8337 getbalance
 

@@ -799,8 +799,6 @@ static uint256 most_recent_block_hash;
 
 void PeerLogicValidation::NewPoWValidBlock(const CBlockIndex *pindex, const std::shared_ptr<const CBlock>& pblock) 
 {
-    
-    // std::shared_ptr<const CGrapheneBlock> pgrapheneblock = std::make_shared<const CGrapheneBlock> (*pblock);
     std::shared_ptr<const CBlockHeaderAndShortTxIDs> pcmpctblock = std::make_shared<const CBlockHeaderAndShortTxIDs> (*pblock);
     const CNetMsgMaker msgMaker(PROTOCOL_VERSION);
 
@@ -822,22 +820,22 @@ void PeerLogicValidation::NewPoWValidBlock(const CBlockIndex *pindex, const std:
     }
 
     connman->ForEachNode([this, &pcmpctblock, pindex, &msgMaker, &hashBlock](CNode* pnode) {
-        // TODO: Avoid the repeated-serialization here
-        if (pnode->fDisconnect)
+            // TODO: Avoid the repeated-serialization here
+            if (pnode->fDisconnect)
             return;
-        ProcessBlockAvailability(pnode->GetId());
-        CNodeState &state = *State(pnode->GetId());
-        // If the peer has, or we announced to them the previous block already,
-        // but we don't think they have this one, go ahead and announce it
-        if (state.fPreferHeaderAndIDs &&
-                !PeerHasHeader(&state, pindex) && PeerHasHeader(&state, pindex->pprev)) {
+            ProcessBlockAvailability(pnode->GetId());
+            CNodeState &state = *State(pnode->GetId());
+            // If the peer has, or we announced to them the previous block already,
+            // but we don't think they have this one, go ahead and announce it
+            if (state.fPreferHeaderAndIDs &&
+                    !PeerHasHeader(&state, pindex) && PeerHasHeader(&state, pindex->pprev)) {
 
             LogPrint("net", "%s sending header-and-ids %s to peer=%d\n", "PeerLogicValidation::NewPoWValidBlock",
                     hashBlock.ToString(), pnode->id);
             connman->PushMessage(pnode, msgMaker.Make(NetMsgType::CMPCTBLOCK, *pcmpctblock));
             state.pindexBestHeaderSent = pindex;
-        }
-    });
+            }
+            });
 }
 
 void PeerLogicValidation::UpdatedBlockTip(const CBlockIndex *pindexNew, const CBlockIndex *pindexFork, bool fInitialDownload)
@@ -1144,7 +1142,6 @@ void static ProcessGetData(CNode* pfrom, const Consensus::Params& consensusParam
 		    else if (inv.type == MSG_GRAPHENE_BLOCK)
 		    {
 			LogPrint("GRAPHENE", "Sending graphene block by INV queue getdata message\n");
-                        // TODO: Check whether this is GETGRAPHENE or not
 			SendGrapheneBlock(MakeBlockRef(block), pfrom, inv, connman);
 		    }
 
@@ -1516,7 +1513,6 @@ void HandleGrapheneBlockMessage(CNode *pfrom, const std::string strCommand, CBlo
     // or thinblock but we still need to maintain a
     // map*BlocksInFlight entry so that we don't re-request a full block
     // from the same node while the block is processing.
-    
     {
         LOCK(pfrom->cs_mapgrapheneblocksinflight);
         if (pfrom->mapGrapheneBlocksInFlight.count(inv.hash))
@@ -3246,7 +3242,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         pfrom->nGetGrapheneCount *= std::pow(1.0 - 1.0 / 150.0, (double)(nNow - pfrom->nGetGrapheneLastTime));
         pfrom->nGetGrapheneLastTime = nNow;
         pfrom->nGetGrapheneCount += 1;
-        LogPrint("GRAPHENE", "nGetGrapheneCount is %f\n", pfrom->nGetGrapheneCount);
+        LogPrint("Graphene", "nGetGrapheneCount is %f\n", pfrom->nGetGrapheneCount);
         if (chainparams.NetworkIDString() == "main") // other networks have variable mining rates
         {
             if (pfrom->nGetGrapheneCount >= 20)
@@ -3364,7 +3360,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
 
                 //TODO: Nakul, nHops
                 graphenedata.ClearGrapheneBlockData(pfrom, grapheneBlock.header.GetHash());
-                LogPrint("GRAPHENE","Received grapheneblock but returning because we already have block data %s from peer %d size %d bytes\n",
+                LogPrint("GRAPHENE","Received graphene block but returning because we already have block data %s from peer %d size %d bytes\n",
                          inv.hash.ToString(), pfrom->id, nSizeGrapheneBlock);
                 return true;
             }
@@ -4051,6 +4047,23 @@ public:
     }
 };
 
+static bool CheckForDownloadTimeout(CNode *pto, bool fReceived, int64_t &nRequestTime)                                       
+{                                                                                                                            
+    // Use a timeout of 6 times the retry inverval before disconnecting.  This way only a max of 6                           
+    // re-requested thinblocks or graphene blocks could be in memory at any one time.                                        
+    if (!fReceived && (GetTime() - nRequestTime) > 6 * TIMEOUT_INTERVAL)                                        
+    {                                                                                                                        
+        if (!pto->fWhitelisted && Params().NetworkIDString() != "regtest")                                                   
+        {                                                                                                                    
+            LogPrint("Graphene", "ERROR: Disconnecting peer %d due to grapheneblock download timeout exceeded (%d secs)\n",                 
+                pto->id, (GetTime() - nRequestTime));                                                              
+            pto->fDisconnect = true;                                                                                         
+            return true;                                                                                                     
+        }                                                                                                                    
+    }                                                                                                                        
+    return false;                                                                                                            
+} 
+
 bool SendMessages(CNode* pto, CConnman& connman, const std::atomic<bool>& interruptMsgProc)
 {
     const Consensus::Params& consensusParams = Params().GetConsensus();
@@ -4090,6 +4103,20 @@ bool SendMessages(CNode* pto, CConnman& connman, const std::atomic<bool>& interr
                 connman.PushMessage(pto, msgMaker.Make(NetMsgType::PING));
             }
         }
+
+        // Check to see if there are any graphene blocks in flight that have gone beyond the               
+        // timeout interval. If so then we need to disconnect them so that the thinblock data is nullified.              
+        // We could null the associated data here but that would possibly cause a node to be banned later if             
+        // the thinblock or graphene block finally did show up, so instead we just disconnect this slow node.            
+        if (!pto->mapGrapheneBlocksInFlight.empty())                                                                     
+        {                                                                                                                
+            LOCK(pto->cs_mapgrapheneblocksinflight);                                                                     
+            for (auto &item : pto->mapGrapheneBlocksInFlight)                                                            
+            {                                                                                                            
+                if (CheckForDownloadTimeout(pto, item.second.fReceived, item.second.nRequestTime))                       
+                    break;                                                                                               
+            }                                                                                                            
+        }  
 
         TRY_LOCK(cs_main, lockMain); // Acquire cs_main for IsInitialBlockDownload() and CNodeState()
         if (!lockMain)
@@ -4136,7 +4163,6 @@ bool SendMessages(CNode* pto, CConnman& connman, const std::atomic<bool>& interr
         }
 
         // Start block sync
-        // LogPrintf("SendMessages: BlockSync for Nakul\n");
         if (pindexBestHeader == NULL)
             pindexBestHeader = chainActive.Tip();
         bool fFetch = state.fPreferredDownload || (nPreferredDownload == 0 && !pto->fClient && !pto->fOneShot); // Download if this is a nice peer, or we have no nice peers and this one might do.
@@ -4237,7 +4263,8 @@ bool SendMessages(CNode* pto, CConnman& connman, const std::atomic<bool>& interr
                 }
             }
 
-            // LogPrintf("SendMessages: compact for Nakul : %d\n", state.fPreferHeaderAndIDs );
+            // LogPrintf("fRevertToInv: %d\n " ,fRevertToInv);
+
             if (!fRevertToInv && !vHeaders.empty()) {
                 if (vHeaders.size() == 1 && state.fPreferHeaderAndIDs) {
                     // We only send up to 1 block as header-and-ids, as otherwise
@@ -4278,7 +4305,6 @@ bool SendMessages(CNode* pto, CConnman& connman, const std::atomic<bool>& interr
                     fRevertToInv = true;
             }
 
-            // LogPrintf("SendMessages: fRevertToInv for Nakul : %d\n", fRevertToInv );
             if (fRevertToInv) {
                 // If falling back to using an inv, just try to inv the tip.
                 // The last entry in vBlockHashesToAnnounce was our tip at some point
@@ -4495,6 +4521,27 @@ bool SendMessages(CNode* pto, CConnman& connman, const std::atomic<bool>& interr
             }
         }
 
+        //
+        // Message: getdata (blocks)
+        //
+        // std::vector<CInv> vGetData;
+        // if (!pto->fClient && (fFetch || !IsInitialBlockDownload()) && state.nBlocksInFlight < MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
+        //     std::vector<const CBlockIndex*> vToDownload;
+        //     NodeId staller = -1;
+        //     FindNextBlocksToDownload(pto->GetId(), MAX_BLOCKS_IN_TRANSIT_PER_PEER - state.nBlocksInFlight, vToDownload, staller, consensusParams);
+        //     BOOST_FOREACH(const CBlockIndex *pindex, vToDownload) {
+        //         vGetData.push_back(CInv(MSG_BLOCK, pindex->GetBlockHash()));
+        //         MarkBlockAsInFlight(pto->GetId(), pindex->GetBlockHash(), consensusParams, pindex);
+        //         LogPrint("net", "Requesting block %s (%d) peer=%d\n", pindex->GetBlockHash().ToString(),
+        //             pindex->nHeight, pto->id);
+        //     }
+        //     if (state.nBlocksInFlight == 0 && staller != -1) {
+        //         if (State(staller)->nStallingSince == 0) {
+        //             State(staller)->nStallingSince = nNow;
+        //             LogPrint("net", "Stall started peer=%d\n", staller);
+        //         }
+        //     }
+        // }
         //  
         // Message: getgraphene blocks
         //  
@@ -4504,7 +4551,7 @@ bool SendMessages(CNode* pto, CConnman& connman, const std::atomic<bool>& interr
         // Message: getdata (blocks)
         //
 
-        // LogPrintf("SendMessages: getdata for Nakul, fGrapheneEnabled: %d\n", fGrapheneBlockEnabled);
+        // LogPrintf("SendMessages: getdata for Nakul, fGrapheneEnabled: %d, fSyncStarted: %d, nSyncStarted: %d\n", fGrapheneBlockEnabled, state.fSyncStarted, nSyncStarted);
         std::vector<CInv> vGetData;
         if (!pto->fClient && (fFetch || !IsInitialBlockDownload()) && state.nBlocksInFlight < MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
             std::vector<const CBlockIndex*> vToDownload;
@@ -4571,6 +4618,7 @@ bool SendMessages(CNode* pto, CConnman& connman, const std::atomic<bool>& interr
                 {
                     vGetData.push_back(CInv(MSG_BLOCK, pindex->GetBlockHash()));
                     MarkBlockAsInFlight(pto->GetId(), pindex->GetBlockHash(), consensusParams, pindex);
+                    LogPrintf("Asking for block on getdata: Nakul\n");
                     LogPrint("net", "Requesting block %s (%d) peer=%d\n", pindex->GetBlockHash().ToString(),
                             pindex->nHeight, pto->id);
 
@@ -4590,6 +4638,7 @@ bool SendMessages(CNode* pto, CConnman& connman, const std::atomic<bool>& interr
         //
         while (!pto->mapAskFor.empty() && (*pto->mapAskFor.begin()).first <= nNow)
         {
+            LogPrintf("Nakul, mapAskFor\n");
             const CInv& inv = (*pto->mapAskFor.begin()).second;
             if (!AlreadyHave(inv))
             {
