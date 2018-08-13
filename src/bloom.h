@@ -16,8 +16,6 @@ class uint256;
 //! 20,000 items with fp rate < 0.1% or 10,000 items and <0.0001%
 static const unsigned int MAX_BLOOM_FILTER_SIZE = 36000; // bytes
 static const unsigned int MAX_HASH_FUNCS = 50;
-// TODO: Nakul, SMALLEST_MAX_BLOOM_FILTER_SIZE, argument?
-/* static const unsigned int SMALLEST_MAX_BLOOM_FILTER_SIZE = 100; */
 
 
 /**

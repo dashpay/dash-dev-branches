@@ -657,7 +657,6 @@ bool CConnman::HaveConnectGrapheneNodes()
     // Strip the port from then list of all the current in and outbound ip addresses
     std::vector<std::string> vNodesIP;
     {
-        // TODO: Nakul cs_vNodes
         LOCK(cs_vNodes);
         for (const CNode *pnode : vNodes)
         {
@@ -721,7 +720,6 @@ void CConnman::CheckNodeSupportForGrapheneBlocks()
         {
             BOOST_FOREACH (const std::string &strAddr , mapMultiArgs.at("-connect-graphene"))
             {
-                // TODO: Nakul, use CConnman FindNode
                 CNode* node = FindNode(strAddr);
                 if (node && !node->GrapheneCapable())
                 {

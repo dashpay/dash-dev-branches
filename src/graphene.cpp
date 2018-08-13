@@ -4,20 +4,13 @@
 
 #include "graphene.h"
 #include "chainparams.h"
-//#include "connmgr.h"
 #include "consensus/merkle.h"
-//#include "dosman.h"
-//#include "expedited.h"
 #include "net.h"
 #include "netmessagemaker.h"
-// #include "net_processing.h"
-//#include "parallel.h"
 #include "policy/policy.h"
 #include "pow.h"
-//#include "requestManager.h"
 #include "timedata.h"
 #include "txmempool.h"
-//#include "txorphanpool.h"
 #include "util.h"
 #include "utiltime.h"
 #include "validation.h"
@@ -210,7 +203,6 @@ void CGrapheneBlockData::UpdateResponseTime(double nResponseTime)
     LOCK(cs_graphenestats);
 
     // only update stats if IBD is complete
-    // TODO: Nakul IsChainNearlySyncd() &&
     if (IsGrapheneBlockEnabled())
         updateStats(mapGrapheneBlockResponseTime, nResponseTime);
 }
@@ -220,7 +212,6 @@ void CGrapheneBlockData::UpdateValidationTime(double nValidationTime)
     LOCK(cs_graphenestats);
 
     // only update stats if IBD is complete
-    // TODO: Nakul IsChainNearlySyncd &&
     if (IsGrapheneBlockEnabled())
         updateStats(mapGrapheneBlockValidationTime, nValidationTime);
 }
@@ -602,7 +593,6 @@ uint64_t CGrapheneBlockData::GetGrapheneBlockBytes() { return nGrapheneBlockByte
 
 bool IsGrapheneBlockEnabled()
 {
-    //TODO: Nakul , should I check the services the node is offering or this argument, Replace function with bool type
     return fGrapheneBlockEnabled;
 }
 

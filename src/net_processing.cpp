@@ -1397,7 +1397,6 @@ inline void static SendGrapheneBlock(const CBlockRef pblock, CNode *pfrom, const
 
 static bool ReconstructBlock(CNode *pfrom, const bool fXVal, int &missingCount, int &unnecessaryCount, CConnman& connman)
 {
-    // TODO: Nakul cs_xval, to another lock
     AssertLockHeld(cs_xval);
 
     // We must have all the full tx hashes by this point.  We first check for any repeating
@@ -1423,7 +1422,7 @@ static bool ReconstructBlock(CNode *pfrom, const bool fXVal, int &missingCount, 
     //        from the blockchain, on a 32bit system.
     CTransactionRef dummyptx = nullptr;
     uint32_t nTxSize = sizeof(dummyptx);
-    // TODO: Nakul, maxAllowedSize
+    // TODO: maxAllowedSize dynamic maxAllowedSize
     uint64_t maxAllowedSize = nTxSize * 16 * 2000000 / 158;
     // uint64_t maxAllowedSize = nTxSize * maxMessageSizeMultiplier * excessiveBlockSize / 158;
 
@@ -1535,7 +1534,7 @@ void HandleGrapheneBlockMessage(CNode *pfrom, const std::string strCommand, CBlo
     if (state.IsInvalid(nDoS))
     {
         LogPrintf("Invalid block due to %s\n", state.GetRejectReason().c_str());
-        // TODO: Nakul, Reject Reason
+        // TODO: Reject Reason
         if (!strCommand.empty())
         {
             connman.PushMessage(pfrom, CNetMsgMaker(pfrom->GetSendVersion()).Make(NetMsgType::REJECT, strCommand, REJECT_OBSOLETE));
@@ -1552,7 +1551,7 @@ void HandleGrapheneBlockMessage(CNode *pfrom, const std::string strCommand, CBlo
         // best fully-validated block
         // so we can download another fork of headers (and blocks).              
         // ActivateBestChain(state, chainparams);
-        //TODO: Nakul, FindMostWorkChain
+        //TODO: FindMostWorkChain
         CBlockIndex *mostWork = FindMostWorkChain();                             
         CBlockIndex *tip = chainActive.Tip();                                    
         // ActivateBestChain(state, chainparams);
@@ -1615,8 +1614,6 @@ void HandleGrapheneBlockMessage(CNode *pfrom, const std::string strCommand, CBlo
         setUnVerifiedOrphanTxHash.clear();                                   
     }
 
-    //TODO: Nakul, ClearOrphanCache
-    //PV->ClearOrphanCache(pblock)
     EraseOrphanTx(pblock->GetHash());
 
     
@@ -1633,15 +1630,7 @@ bool ProcessGrapheneBlock(CNode *pfrom, int nSizeGrapheneBlock, std::string strC
 {
     const CNetMsgMaker msgMaker(pfrom->GetSendVersion());
 
-    // In PV we must prevent two graphene blocks from simulaneously processing from that were recieved from the
-    // same peer. This would only happen as in the example of an expedited block coming in
-    // after a graphene request, because we would never explicitly request two graphene blocks from the same peer.
-    // TODO: Nakul PV
-    // if (PV->IsAlreadyValidating(pfrom->id))
-        // return false;
-
     // Xpress Validation - only perform xval if the chaintip matches the last blockhash in the graphene block
-    // TODO: Nakul XVal
     bool fXVal;
     {
         LOCK(cs_main);
@@ -1669,7 +1658,6 @@ bool ProcessGrapheneBlock(CNode *pfrom, int nSizeGrapheneBlock, std::string strC
             pfrom->grapheneAdditionalTxs.push_back(tx);
     }
 
-    //TODO: Nakul, grapheneBlock.vTxHashes
     grapheneBlock.vTxHashes.reserve(grapheneBlock.nBlockTxs);
 
     // Create a map of all 8 bytes tx hashes pointing to their full tx hash counterpart
@@ -3123,7 +3111,6 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                         // Can't download any more from this peer
                         break;
                     }
-                    // TODO: Nakul vulnerability
                     if (fGrapheneBlockEnabled && CanGrapheneBlockBeDownloaded(pfrom))
                     {
                         vGetData.push_back(CInv(MSG_GRAPHENE_BLOCK, pindex->GetBlockHash()));
@@ -3358,7 +3345,6 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                 // Tell the Request Manager we received this block
                 // AlreadyReceived(inv);
 
-                //TODO: Nakul, nHops
                 graphenedata.ClearGrapheneBlockData(pfrom, grapheneBlock.header.GetHash());
                 LogPrint("GRAPHENE","Received graphene block but returning because we already have block data %s from peer %d size %d bytes\n",
                          inv.hash.ToString(), pfrom->id, nSizeGrapheneBlock);
@@ -3510,7 +3496,6 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             // Do not process unrequested grblocktx unless from an expedited node.
             LOCK(pfrom->cs_mapgrapheneblocksinflight);
 
-            // TODO: Nakul connmgr functionality, && !connmgr->IsExpeditedUpstream(pfrom)
             if (!pfrom->mapGrapheneBlocksInFlight.count(inv.hash) )
             {
                 Misbehaving(pfrom->GetId(), 10);
@@ -3526,8 +3511,6 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         }
         if (fAlreadyHave)
         {
-            // TODO: Nakul, AlreadyReceived(inv)
-            // requester.AlreadyReceived(inv);
             graphenedata.ClearGrapheneBlockData(pfrom, inv.hash);
 
             LogPrint("GRAPHENE", "Received grblocktx but returning because we already have this block %s on disk, peer=%d\n",
@@ -3561,7 +3544,6 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         }
         LogPrint("GRAPHENE", "Merkle Root check passed for %s peer=%s\n", inv.hash.ToString(), pfrom->GetLogName());
 
-        // TODO: Nakul fXVal, else checkhashPrevBlock
         // Xpress Validation - only perform xval if the chaintip matches the last blockhash in the graphene block
         bool fXVal;
         {
@@ -3575,8 +3557,6 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         // With grapheneBlocks the vTxHashes contains only the first 8 bytes of the tx hash.
         {
 
-            // TODO: Nakul, Locking
-            // LOCK2(orphanpool.cs, cs_xval);
             LOCK2(cs_main, cs_xval);
             if (!ReconstructBlock(pfrom, fXVal, missingCount, unnecessaryCount, connman))
                 return false;
@@ -3602,7 +3582,6 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
 
             // for compression statistics, we have to add up the size of grapheneblock and the re-requested grapheneBlockTx.
             int nSizeGrapheneBlockTx = msgSize;
-            // TODO: Nakul, test for correct serialize size of block
             int blockSize = ::GetSerializeSize(pfrom->grapheneBlock, SER_NETWORK, PROTOCOL_VERSION);
             LogPrint("GRAPHENE", "Reassembled xblocktx for %s (%d bytes). Message was %d bytes (graphene block) and %d bytes "
                     "(re-requested tx), compression ratio %3.2f, peer=%d\n",
@@ -3615,8 +3594,8 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             graphenedata.UpdateInBound(nSizeGrapheneBlockTx + pfrom->nSizeGrapheneBlock, blockSize);
             LogPrint("GRAPHENE", "Graphene block stats: %s\n", graphenedata.ToString());
 
-            // TODO: Nakul Handle PV
             // PV->HandleBlockMessage(pfrom, strCommand, MakeBlockRef(pfrom->grapheneBlock), inv);
+            HandleGrapheneBlockMessage(pfrom, strCommand, MakeBlockRef(pfrom->grapheneBlock), inv, connman);
         }
 
         return true;
@@ -4521,31 +4500,9 @@ bool SendMessages(CNode* pto, CConnman& connman, const std::atomic<bool>& interr
             }
         }
 
-        //
-        // Message: getdata (blocks)
-        //
-        // std::vector<CInv> vGetData;
-        // if (!pto->fClient && (fFetch || !IsInitialBlockDownload()) && state.nBlocksInFlight < MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
-        //     std::vector<const CBlockIndex*> vToDownload;
-        //     NodeId staller = -1;
-        //     FindNextBlocksToDownload(pto->GetId(), MAX_BLOCKS_IN_TRANSIT_PER_PEER - state.nBlocksInFlight, vToDownload, staller, consensusParams);
-        //     BOOST_FOREACH(const CBlockIndex *pindex, vToDownload) {
-        //         vGetData.push_back(CInv(MSG_BLOCK, pindex->GetBlockHash()));
-        //         MarkBlockAsInFlight(pto->GetId(), pindex->GetBlockHash(), consensusParams, pindex);
-        //         LogPrint("net", "Requesting block %s (%d) peer=%d\n", pindex->GetBlockHash().ToString(),
-        //             pindex->nHeight, pto->id);
-        //     }
-        //     if (state.nBlocksInFlight == 0 && staller != -1) {
-        //         if (State(staller)->nStallingSince == 0) {
-        //             State(staller)->nStallingSince = nNow;
-        //             LogPrint("net", "Stall started peer=%d\n", staller);
-        //         }
-        //     }
-        // }
         //  
         // Message: getgraphene blocks
         //  
-        //  TODO: Nakul
 
         //
         // Message: getdata (blocks)
@@ -4558,15 +4515,15 @@ bool SendMessages(CNode* pto, CConnman& connman, const std::atomic<bool>& interr
             NodeId staller = -1;
             FindNextBlocksToDownload(pto->GetId(), MAX_BLOCKS_IN_TRANSIT_PER_PEER - state.nBlocksInFlight, vToDownload, staller, consensusParams);
             BOOST_FOREACH(const CBlockIndex *pindex, vToDownload) {
-            LogPrintf("SendMessages for Nakul block message getdata, getgraphene\n");
+            // LogPrintf("SendMessages for Nakul block message getdata, getgraphene\n");
                 if (fGrapheneBlockEnabled)
                 {
                     CInv inv2(MSG_GRAPHENE_BLOCK, pindex->GetBlockHash());
                     CDataStream ss(SER_NETWORK, PROTOCOL_VERSION);
                     CBloomFilter filterMemPool;
 
-                    LogPrintf("SendMessages: connman.HaveGrapheneNodes : %d , grapheneData.checkGrapheneBlockTimer(inv2.hash): %d  \n",connman.HaveGrapheneNodes(), graphenedata.CheckGrapheneBlockTimer(inv2.hash));
-                    LogPrintf("SendMessages: pto->mapGrapheneBlocksInFlight size: %d, CanGrapheneBeDownloaded: %d\n", pto->mapGrapheneBlocksInFlight.size(),  CanGrapheneBlockBeDownloaded(pto));
+                    // LogPrintf("SendMessages: connman.HaveGrapheneNodes : %d , grapheneData.checkGrapheneBlockTimer(inv2.hash): %d  \n",connman.HaveGrapheneNodes(), graphenedata.CheckGrapheneBlockTimer(inv2.hash));
+                    // LogPrintf("SendMessages: pto->mapGrapheneBlocksInFlight size: %d, CanGrapheneBeDownloaded: %d\n", pto->mapGrapheneBlocksInFlight.size(),  CanGrapheneBlockBeDownloaded(pto));
                     if (connman.HaveGrapheneNodes() && graphenedata.CheckGrapheneBlockTimer(inv2.hash))
                     {
                         /* LogPrintf("SendMessages: connman.HaveGrapheneNodes : %d , grapheneData.checkGrapheneBlockTimer(inv2.hash): %d  \n",connman.HaveGrapheneNodes(), graphenedata.CheckGrapheneBlockTimer(inv2.hash)); */
@@ -4618,7 +4575,6 @@ bool SendMessages(CNode* pto, CConnman& connman, const std::atomic<bool>& interr
                 {
                     vGetData.push_back(CInv(MSG_BLOCK, pindex->GetBlockHash()));
                     MarkBlockAsInFlight(pto->GetId(), pindex->GetBlockHash(), consensusParams, pindex);
-                    LogPrintf("Asking for block on getdata: Nakul\n");
                     LogPrint("net", "Requesting block %s (%d) peer=%d\n", pindex->GetBlockHash().ToString(),
                             pindex->nHeight, pto->id);
 
@@ -4638,7 +4594,6 @@ bool SendMessages(CNode* pto, CConnman& connman, const std::atomic<bool>& interr
         //
         while (!pto->mapAskFor.empty() && (*pto->mapAskFor.begin()).first <= nNow)
         {
-            LogPrintf("Nakul, mapAskFor\n");
             const CInv& inv = (*pto->mapAskFor.begin()).second;
             if (!AlreadyHave(inv))
             {
