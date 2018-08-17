@@ -3063,7 +3063,8 @@ public:
 
 bool SendMessages(CNode* pto, CConnman& connman, const std::atomic<bool>& interruptMsgProc)
 {
-    const Consensus::Params& consensusParams = Params().GetConsensus();
+    const CChainParams& params = Params();
+    const Consensus::Params& consensusParams = params.GetConsensus();
     {
         // Don't send anything until the version handshake is complete
         if (!pto->fSuccessfullyConnected || pto->fDisconnect)
@@ -3227,12 +3228,21 @@ bool SendMessages(CNode* pto, CConnman& connman, const std::atomic<bool>& interr
                         break;
                     }
                     pBestIndex = pindex;
+                    bool isPrevDevnetGenesisBlock = false;
+                    if (params.NetworkIDString() == CBaseChainParams::DEVNET &&
+                        pindex->pprev != nullptr &&
+                        pindex->pprev->GetBlockHash() == params.DevNetGenesisBlock().GetHash()) {
+                        // even though the devnet genesis block was never transferred through the wire and thus not
+                        // appear anywhere in the node state where we track what other nodes have or not have, we can
+                        // assume that the other node already knows the devnet genesis block
+                        isPrevDevnetGenesisBlock = true;
+                    }
                     if (fFoundStartingHeader) {
                         // add this to the headers message
                         vHeaders.push_back(pindex->GetBlockHeader());
                     } else if (PeerHasHeader(&state, pindex)) {
                         continue; // keep looking for the first new block
-                    } else if (pindex->pprev == NULL || PeerHasHeader(&state, pindex->pprev)) {
+                    } else if (pindex->pprev == NULL || PeerHasHeader(&state, pindex->pprev) || isPrevDevnetGenesisBlock) {
                         // Peer doesn't have this header but they do have the prior one.
                         // Start sending headers.
                         fFoundStartingHeader = true;
