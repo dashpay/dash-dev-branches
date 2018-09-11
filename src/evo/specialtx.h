@@ -42,7 +42,7 @@ inline bool GetTxPayload(const CTransaction& tx, T& obj)
 template <typename T>
 inline void GetTxPayloadAssert(const CTransaction& tx, T& obj)
 {
-    if (!GetTxPayload(tx.extraPayload, obj)) {
+    if (!GetTxPayload(tx.vExtraPayload, obj)) {
         assert(false);
     }
 }
