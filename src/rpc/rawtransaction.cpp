@@ -185,7 +185,7 @@ void TxToJSON(const CTransaction& tx, const uint256 hashBlock, UniValue& entry)
         CSubTxResetKey subTx;
         if (GetTxPayload(tx, subTx)) {
             UniValue proTxObj = subTx.ToJson();
-            entry.push_back(Pair("subTxRegister", proTxObj));
+            entry.push_back(Pair("subTxReset", proTxObj));
         }
     } else if (tx.nType == TRANSACTION_SUBTX_CLOSEACCOUNT) {
         CSubTxCloseAccount subTx;
