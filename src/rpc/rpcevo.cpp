@@ -519,7 +519,8 @@ UniValue protx_list(const JSONRPCRequest& request)
             setOutpts.emplace(outpt.hash);
         }
 
-        for (const auto& dmn : deterministicMNManager->GetListAtChainTip().all_range()) {
+        auto range = deterministicMNManager->GetListAtChainTip().all_range();
+        for (const auto& dmn : range) {
             if (setOutpts.count(dmn->proTxHash) ||
                     pwalletMain->HaveKey(dmn->pdmnState->keyIDOwner) ||
                     pwalletMain->HaveKey(dmn->pdmnState->keyIDOperator) ||
