@@ -225,20 +225,26 @@ public:
         return mnMap.size();
     }
 
-    typedef boost::any_range<const CDeterministicMNCPtr&, boost::forward_traversal_tag> range_type;
-
-    range_type all_range() const
+    std::vector<CDeterministicMNCPtr> all_range() const
     {
-        return boost::adaptors::transform(mnMap, [] (const MnMap::value_type& p) -> const CDeterministicMNCPtr& {
-            return p.second;
-        });
+        std::vector<CDeterministicMNCPtr> v;
+        v.reserve(mnMap.size());
+        for (auto& p : mnMap) {
+            v.emplace_back(p.second);
+        }
+        return v;
     }
 
-    range_type valid_range() const
+    std::vector<CDeterministicMNCPtr> valid_range() const
     {
-        return boost::adaptors::filter(all_range(), [&] (const CDeterministicMNCPtr& dmn) -> bool {
-            return IsMNValid(dmn);
-        });
+        std::vector<CDeterministicMNCPtr> v;
+        v.reserve(mnMap.size());
+        for (auto& p : mnMap) {
+            if (IsMNValid(p.second)) {
+                v.emplace_back(p.second);
+            }
+        }
+        return v;
     }
 
     size_t all_count() const

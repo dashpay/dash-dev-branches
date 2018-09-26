@@ -543,7 +543,7 @@ UniValue protx_list(const JSONRPCRequest& request)
         bool detailed = request.params.size() > 3 ? ParseBoolV(request.params[3], "detailed") : false;
 
         CDeterministicMNList mnList = deterministicMNManager->GetListForBlock(chainActive[height]->GetBlockHash());
-        CDeterministicMNList::range_type range;
+        std::vector<CDeterministicMNCPtr> range;
 
         if (type == "valid") {
             range = mnList.valid_range();
