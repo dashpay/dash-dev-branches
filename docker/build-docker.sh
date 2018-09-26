@@ -13,8 +13,8 @@ mkdir docker/bin
 cp $BUILD_DIR/src/dashd docker/bin/
 cp $BUILD_DIR/src/dash-cli docker/bin/
 cp $BUILD_DIR/src/dash-tx docker/bin/
-strip docker/bin/dashd
-strip docker/bin/dash-cli
-strip docker/bin/dash-tx
+#strip docker/bin/dashd
+#strip docker/bin/dash-cli
+#strip docker/bin/dash-tx
 
 docker build --pull -t $DOCKER_IMAGE:$DOCKER_TAG -f docker/Dockerfile docker
