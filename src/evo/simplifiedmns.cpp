@@ -42,7 +42,7 @@ void CSimplifiedMNListEntry::ToJson(UniValue& obj) const
     obj.push_back(Pair("proRegTxHash", proRegTxHash.ToString()));
     obj.push_back(Pair("service", service.ToString(false)));
     obj.push_back(Pair("keyIDOperator", keyIDOperator.ToString()));
-    obj.push_back(Pair("keyIDVoting", keyIDOperator.ToString()));
+    obj.push_back(Pair("keyIDVoting", keyIDVoting.ToString()));
     obj.push_back(Pair("isValid", isValid));
 }
 
