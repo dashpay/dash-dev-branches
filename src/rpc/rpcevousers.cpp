@@ -113,11 +113,11 @@ UniValue getuser(const JSONRPCRequest& request)
 }
 
 // TODO move this into a header
-CKey ParsePrivKey(const std::string &strKeyOrAddress, bool allowAddresses);
+CKey ParsePrivKey(CWallet* pwallet, const std::string &strKeyOrAddress, bool allowAddresses);
 
-static CKey GetKeyFromParamsOrWallet(const UniValue &params, int paramPos, const uint256 &regTxId) {
+static CKey GetKeyFromParamsOrWallet(CWallet* pwallet, const UniValue &params, int paramPos, const uint256 &regTxId) {
     if (params.size() > paramPos)
-        return ParsePrivKey(params[paramPos].get_str(), true);
+        return ParsePrivKey(pwallet, params[paramPos].get_str(), true);
 
 #ifdef ENABLE_WALLET
     CEvoUser user;
@@ -163,6 +163,8 @@ UniValue createrawsubtx(const JSONRPCRequest& request)
                 + HelpExampleRpc("createrawsubtx", "\"topup\", \"alice\", \"0.02\"")
         );
 
+    CWallet* pwallet = GetWalletForJSONRPCRequest(request);
+
     CDataStream ds(SER_DISK, CLIENT_VERSION);
     CAmount creditBurnAmount = 0;
 
@@ -173,7 +175,7 @@ UniValue createrawsubtx(const JSONRPCRequest& request)
 
     if (action == "register") {
         std::string userName = request.params[1].get_str();
-        CKey key = ParsePrivKey(request.params[2].get_str(), true);
+        CKey key = ParsePrivKey(pwallet, request.params[2].get_str(), true);
 
         if (!ParseMoney(request.params[3].get_str(), creditBurnAmount))
             throw std::runtime_error(strprintf("failed to parse fee: %s", request.params[1].get_str()));
@@ -260,6 +262,8 @@ UniValue createrawtransition(const JSONRPCRequest& request) {
                 + HelpExampleCli("createrawtransition", "close \"bob\" 0.00001")
         );
 
+    CWallet* pwallet = GetWalletForJSONRPCRequest(request);
+
     std::string action = request.params[0].get_str();
 
     uint256 regTxId = GetRegTxId(request.params[1].get_str());
@@ -285,7 +289,7 @@ UniValue createrawtransition(const JSONRPCRequest& request) {
         subTx.regTxId = regTxId;
         subTx.creditFee = credetFee;
         subTx.hashPrevSubTx = GetPrevSubTxFromParams(request.params, 4, regTxId);
-        subTx.newPubKeyId = ParsePrivKey(request.params[3].get_str(), true).GetPubKey().GetID();;
+        subTx.newPubKeyId = ParsePrivKey(pwallet, request.params[3].get_str(), true).GetPubKey().GetID();;
 
         rawTx.nType = TRANSACTION_SUBTX_RESETKEY;
         SetTxPayload(rawTx, subTx);
@@ -328,6 +332,8 @@ UniValue signrawtransition(const JSONRPCRequest& request) {
                 + HelpExampleRpc("signrawtransition", "\"myHexTs\"")
         );
 
+    CWallet* pwallet = GetWalletForJSONRPCRequest(request);
+
     std::string hexTs = request.params[0].get_str();
     CDataStream ds(ParseHex(hexTs), SER_DISK, CLIENT_VERSION);
 
@@ -340,7 +346,7 @@ UniValue signrawtransition(const JSONRPCRequest& request) {
         throw std::runtime_error("failed to get regTxId from subTx");
     }
 
-    CKey userKey = GetKeyFromParamsOrWallet(request.params, 1, regTxId);
+    CKey userKey = GetKeyFromParamsOrWallet(pwallet, request.params, 1, regTxId);
     if (!userKey.IsValid()) {
         throw std::runtime_error("invalid key");
     }
