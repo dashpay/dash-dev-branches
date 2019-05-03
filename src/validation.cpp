@@ -2246,6 +2246,7 @@ static bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockInd
 
     // DASH : MODIFIED TO CHECK MASTERNODE PAYMENTS AND SUPERBLOCKS
 
+    CAmount specialTxsFee = 0;
     if (!ProcessSpecialTxsInBlock(block, pindex, state, specialTxsFee, fJustCheck, fScriptChecks)) {
         return error("ConnectBlock(DASH): ProcessSpecialTxsInBlock for block %s failed with %s",
                      pindex->GetBlockHash().ToString(), FormatStateMessage(state));
