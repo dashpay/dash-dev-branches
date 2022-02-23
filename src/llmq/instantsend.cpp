@@ -29,20 +29,17 @@
 namespace llmq
 {
 
-static const std::string INPUTLOCK_REQUESTID_PREFIX = "inlock";
-static const std::string ISLOCK_REQUESTID_PREFIX = "islock";
+static const std::string_view INPUTLOCK_REQUESTID_PREFIX = "inlock";
+static const std::string_view ISLOCK_REQUESTID_PREFIX = "islock";
 
-static const std::string DB_ISLOCK_BY_HASH = "is_i";
-static const std::string DB_HASH_BY_TXID = "is_tx";
-static const std::string DB_HASH_BY_OUTPOINT = "is_in";
-static const std::string DB_MINED_BY_HEIGHT_AND_HASH = "is_m";
-static const std::string DB_ARCHIVED_BY_HEIGHT_AND_HASH = "is_a1";
-static const std::string DB_ARCHIVED_BY_HASH = "is_a2";
+static const std::string_view DB_ISLOCK_BY_HASH = "is_i";
+static const std::string_view DB_HASH_BY_TXID = "is_tx";
+static const std::string_view DB_HASH_BY_OUTPOINT = "is_in";
+static const std::string_view DB_MINED_BY_HEIGHT_AND_HASH = "is_m";
+static const std::string_view DB_ARCHIVED_BY_HEIGHT_AND_HASH = "is_a1";
+static const std::string_view DB_ARCHIVED_BY_HASH = "is_a2";
 
-static const std::string DB_VERSION = "is_v";
-
-const int CInstantSendDb::CURRENT_VERSION;
-const uint8_t CInstantSendLock::CURRENT_VERSION;
+static const std::string_view DB_VERSION = "is_v";
 
 std::unique_ptr<CInstantSendManager> quorumInstantSendManager;
 
@@ -74,7 +71,7 @@ void CInstantSendDb::Upgrade(const CTxMemPool& mempool)
         CInstantSendLock islock;
 
         auto it = std::unique_ptr<CDBIterator>(db->NewIterator());
-        auto firstKey = std::make_tuple(DB_ISLOCK_BY_HASH, uint256());
+        auto firstKey = std::make_tuple(std::string{DB_ISLOCK_BY_HASH}, uint256());
         it->Seek(firstKey);
         decltype(firstKey) curKey;
 
@@ -143,9 +140,9 @@ void CInstantSendDb::RemoveInstantSendLock(CDBBatch& batch, const uint256& hash,
     }
 }
 
-static std::tuple<std::string, uint32_t, uint256> BuildInversedISLockKey(const std::string& k, int nHeight, const uint256& islockHash)
+static std::tuple<std::string, uint32_t, uint256> BuildInversedISLockKey(std::string_view k, int nHeight, const uint256& islockHash)
 {
-    return std::make_tuple(k, htobe32(std::numeric_limits<uint32_t>::max() - nHeight), islockHash);
+    return std::make_tuple(std::string{k}, htobe32(std::numeric_limits<uint32_t>::max() - nHeight), islockHash);
 }
 
 void CInstantSendDb::WriteInstantSendLockMined(const uint256& hash, int nHeight)
@@ -303,7 +300,7 @@ size_t CInstantSendDb::GetInstantSendLockCount() const
 {
     LOCK(cs_db);
     auto it = std::unique_ptr<CDBIterator>(db->NewIterator());
-    auto firstKey = std::make_tuple(DB_ISLOCK_BY_HASH, uint256());
+    auto firstKey = std::make_tuple(std::string{DB_ISLOCK_BY_HASH}, uint256());
 
     it->Seek(firstKey);
 
@@ -383,7 +380,7 @@ std::vector<uint256> CInstantSendDb::GetInstantSendLocksByParent(const uint256& 
 {
     AssertLockHeld(cs_db);
     auto it = std::unique_ptr<CDBIterator>(db->NewIterator());
-    auto firstKey = std::make_tuple(DB_HASH_BY_OUTPOINT, COutPoint(parent, 0));
+    auto firstKey = std::make_tuple(std::string{DB_HASH_BY_OUTPOINT}, COutPoint(parent, 0));
     it->Seek(firstKey);
 
     std::vector<uint256> result;
@@ -752,7 +749,7 @@ void CInstantSendManager::HandleNewInstantSendLockRecoveredSig(const llmq::CReco
     pendingInstantSendLocks.emplace(hash, std::make_pair(-1, islock));
 }
 
-void CInstantSendManager::ProcessMessage(const CNode& pfrom, const std::string& msg_type, CDataStream& vRecv)
+void CInstantSendManager::ProcessMessage(const CNode& pfrom, std::string_view msg_type, CDataStream& vRecv)
 {
     if (!IsInstantSendEnabled()) {
         return;
