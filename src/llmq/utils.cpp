@@ -385,7 +385,7 @@ std::vector<std::vector<CDeterministicMNCPtr>> CLLMQUtils::GetQuorumQuarterMembe
                     }
                 }
             }
-            break;
+            return quarterQuorumMembers;
         }
         case SnapshotSkipMode::MODE_SKIPPING_ENTRIES: // List holds entries to be skipped
         {
@@ -415,14 +415,13 @@ std::vector<std::vector<CDeterministicMNCPtr>> CLLMQUtils::GetQuorumQuarterMembe
                     }
                 }
             }
-            break;
+            return quarterQuorumMembers;
         }
         case SnapshotSkipMode::MODE_NO_SKIPPING_ENTRIES: // List holds entries to be kept
-            [[fallthrough]]; //TODO Mode 2 will be written. Not used now
         case SnapshotSkipMode::MODE_ALL_SKIPPED: // Every node was skipped. Returning empty quarterQuorumMembers
-            {}
+        default:
+            return {};
     }
-    return quarterQuorumMembers;
 }
 
 std::pair<CDeterministicMNList, CDeterministicMNList> CLLMQUtils::GetMNUsageBySnapshot(Consensus::LLMQType llmqType, const CBlockIndex* pQuorumBaseBlockIndex, const llmq::CQuorumSnapshot& snapshot, int nHeight)
