@@ -351,25 +351,26 @@ void CLLMQUtils::BuildQuorumSnapshot(const Consensus::LLMQParams& llmqParams, co
 
 std::vector<std::vector<CDeterministicMNCPtr>> CLLMQUtils::GetQuorumQuarterMembersBySnapshot(const Consensus::LLMQParams& llmqParams, const CBlockIndex* pQuorumBaseBlockIndex, const llmq::CQuorumSnapshot& snapshot, int nHeight)
 {
-    auto numQuorums = static_cast<size_t>(llmqParams.signingActiveQuorumCount);
-    auto quorumSize = static_cast<size_t>(llmqParams.size);
-    auto quarterSize = quorumSize / 4;
-
-    std::vector<std::vector<CDeterministicMNCPtr>> quarterQuorumMembers(numQuorums);
-
-    const CBlockIndex* pWorkBlockIndex = pQuorumBaseBlockIndex->GetAncestor(pQuorumBaseBlockIndex->nHeight - 8);
-    auto modifier = ::SerializeHash(std::make_pair(llmqParams.type, pWorkBlockIndex->GetBlockHash()));
-
-    auto [MnsUsedAtH, MnsNotUsedAtH] = CLLMQUtils::GetMNUsageBySnapshot(llmqParams.type, pQuorumBaseBlockIndex, snapshot, nHeight);
-
-    auto sortedMnsUsedAtH = MnsUsedAtH.CalculateQuorum(MnsUsedAtH.GetAllMNsCount(), modifier);
-    auto sortedMnsNotUsedAtH = MnsNotUsedAtH.CalculateQuorum(MnsNotUsedAtH.GetAllMNsCount(), modifier);
-    auto sortedCombinedMns = std::move(sortedMnsNotUsedAtH);
-    for (auto& m : sortedMnsUsedAtH) {
-        sortedCombinedMns.push_back(std::move(m));
+    std::vector<CDeterministicMNCPtr> sortedCombinedMns;
+    {
+        const CBlockIndex* pWorkBlockIndex = pQuorumBaseBlockIndex->GetAncestor(pQuorumBaseBlockIndex->nHeight - 8);
+        const auto modifier = ::SerializeHash(std::make_pair(llmqParams.type, pWorkBlockIndex->GetBlockHash()));
+        const auto [MnsUsedAtH, MnsNotUsedAtH] = CLLMQUtils::GetMNUsageBySnapshot(llmqParams.type, pQuorumBaseBlockIndex, snapshot, nHeight);
+        // the list begins with all the unused MNs
+        auto sortedMnsNotUsedAtH = MnsNotUsedAtH.CalculateQuorum(MnsNotUsedAtH.GetAllMNsCount(), modifier);
+        sortedCombinedMns = std::move(sortedMnsNotUsedAtH);
+        // Now add the already used MNs to the end of the list
+        auto sortedMnsUsedAtH = MnsUsedAtH.CalculateQuorum(MnsUsedAtH.GetAllMNsCount(), modifier);
+        std::move(sortedMnsUsedAtH.begin(), sortedMnsUsedAtH.end(), std::back_inserter(sortedCombinedMns));
     }
 
     if (sortedCombinedMns.empty()) return {};
+
+    auto numQuorums = size_t(llmqParams.signingActiveQuorumCount);
+    auto quorumSize = size_t(llmqParams.size);
+    auto quarterSize = quorumSize / 4;
+
+    std::vector<std::vector<CDeterministicMNCPtr>> quarterQuorumMembers(numQuorums);
 
     //Mode 0: No skipping
     if (snapshot.mnSkipListMode == SnapshotSkipMode::MODE_NO_SKIPPING) {
