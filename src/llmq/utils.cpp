@@ -369,6 +369,8 @@ std::vector<std::vector<CDeterministicMNCPtr>> CLLMQUtils::GetQuorumQuarterMembe
         sortedCombinedMns.push_back(std::move(m));
     }
 
+    if (sortedCombinedMns.empty()) return quarterQuorumMembers;
+
     //Mode 0: No skipping
     if (snapshot.mnSkipListMode == SnapshotSkipMode::MODE_NO_SKIPPING) {
         auto itm = sortedCombinedMns.begin();
