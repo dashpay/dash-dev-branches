@@ -469,7 +469,7 @@ public:
         CCoinControl coin_control;
         coin_control.destChange = fund_destination;
         coin_control.fRequireAllInputs = false;
-        for (const auto& output : AvailableCoinsListUnspent(*m_wallet).all()) {
+        for (const auto& output : AvailableCoinsListUnspent(*m_wallet).All()) {
             CTxDestination destination;
             if (ExtractDestination(output.txout.scriptPubKey, destination) && destination == fund_destination) {
                 coin_control.Select(output.outpoint);

@@ -25,6 +25,8 @@ std::optional<OutputType> ParseOutputType(const std::string& type)
 {
     if (type == OUTPUT_TYPE_STRING_LEGACY) {
         return OutputType::LEGACY;
+    } else if (type == OUTPUT_TYPE_STRING_UNKNOWN) {
+        return OutputType::UNKNOWN;
     }
     return std::nullopt;
 }

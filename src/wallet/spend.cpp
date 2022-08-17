@@ -81,24 +81,62 @@ int64_t CalculateMaximumSignedTxSize(const CTransaction &tx, const CWallet *wall
     return CalculateMaximumSignedTxSize(tx, wallet, txouts, coin_control);
 }
 
-uint64_t CoinsResult::size() const
+size_t CoinsResult::Size() const
 {
-    return legacy.size() + other.size();
+    size_t size{0};
+    for (const auto& it : coins) {
+        size += it.second.size();
+    }
+    return size;
 }
 
-std::vector<COutput> CoinsResult::all() const
+std::vector<COutput> CoinsResult::All() const
 {
     std::vector<COutput> all;
-    all.reserve(this->size());
-    all.insert(all.end(), legacy.begin(), legacy.end());
-    all.insert(all.end(), other.begin(), other.end());
+    all.reserve(coins.size());
+    for (const auto& it : coins) {
+        all.insert(all.end(), it.second.begin(), it.second.end());
+    }
     return all;
 }
 
-void CoinsResult::clear()
+void CoinsResult::Clear() {
+    coins.clear();
+}
+
+void CoinsResult::Erase(std::set<COutPoint>& preset_coins)
 {
-    legacy.clear();
-    other.clear();
+    for (auto& it : coins) {
+        auto& vec = it.second;
+        auto i = std::find_if(vec.begin(), vec.end(), [&](const COutput &c) { return preset_coins.count(c.outpoint);});
+        if (i != vec.end()) {
+            vec.erase(i);
+            break;
+        }
+    }
+}
+
+void CoinsResult::Shuffle(FastRandomContext& rng_fast)
+{
+    for (auto& it : coins) {
+        ::Shuffle(it.second.begin(), it.second.end(), rng_fast);
+    }
+}
+
+void CoinsResult::Add(OutputType type, const COutput& out)
+{
+    coins[type].emplace_back(out);
+}
+
+static OutputType GetOutputType(TxoutType type, bool is_from_p2sh)
+{
+    switch (type) {
+        case TxoutType::SCRIPTHASH:
+        case TxoutType::PUBKEYHASH:
+            return OutputType::LEGACY;
+        default:
+            return OutputType::UNKNOWN;
+    }
 }
 
 CoinsResult AvailableCoins(const CWallet& wallet,
@@ -227,21 +265,17 @@ CoinsResult AvailableCoins(const CWallet& wallet,
             // a P2SH (legacy). We can determine this from the redeemScript.
             // If the output is not solvable, it will be classified as a P2SH (legacy),
             // since we have no way of knowing otherwise without the redeemScript
+            bool is_from_p2sh{false};
             if (type == TxoutType::SCRIPTHASH && solvable) {
                 CScript script;
                 if (!provider->GetCScript(CScriptID(uint160(script_solutions[0])), script)) continue;
                 type = Solver(script, script_solutions);
+                is_from_p2sh = true;
             }
 
             COutput coin(outpoint, output, nDepth, input_bytes, spendable, solvable, safeTx, wtx.GetTxTime(), tx_from_me, feerate);
-            switch (type) {
-            case TxoutType::SCRIPTHASH:
-            case TxoutType::PUBKEYHASH:
-                result.legacy.push_back(coin);
-                break;
-            default:
-                result.other.push_back(coin);
-            };
+
+            result.Add(GetOutputType(type, is_from_p2sh), coin);
 
             // Cache total amount as we go
             result.total_amount += output.nValue;
@@ -253,7 +287,7 @@ CoinsResult AvailableCoins(const CWallet& wallet,
             }
 
             // Checks the maximum number of UTXO's.
-            if (nMaximumCount > 0 && result.size() >= nMaximumCount) {
+            if (nMaximumCount > 0 && result.Size() >= nMaximumCount) {
                 return result;
             }
         }
@@ -309,7 +343,7 @@ std::map<CTxDestination, std::vector<COutput>> ListCoins(const CWallet& wallet)
 
     std::map<CTxDestination, std::vector<COutput>> result;
 
-    for (COutput& coin : AvailableCoinsListUnspent(wallet).all()) {
+    for (COutput& coin : AvailableCoinsListUnspent(wallet).All()) {
         CTxDestination address;
         if ((coin.spendable || (wallet.IsWalletFlagSet(WALLET_FLAG_DISABLE_PRIVATE_KEYS) && coin.solvable)) &&
             ExtractDestination(FindNonChangeParentOutput(wallet, coin.outpoint).scriptPubKey, address)) {
@@ -439,22 +473,25 @@ std::optional<SelectionResult> AttemptSelection(const CWallet& wallet, const CAm
 {
     // Run coin selection on each OutputType and compute the Waste Metric
     std::vector<SelectionResult> results;
-    if (auto result{ChooseSelectionResult(wallet, nTargetValue, eligibility_filter, available_coins.legacy, coin_selection_params)}) {
-        results.push_back(*result);
-    }
-
-    // If we can't fund the transaction from any individual OutputType, run coin selection
-    // over all available coins, else pick the best solution from the results
-    if (results.size() == 0) {
-        if (allow_mixed_output_types) {
-            if (auto result{ChooseSelectionResult(wallet, nTargetValue, eligibility_filter, available_coins.all(), coin_selection_params)}) {
-                return result;
-            }
+    for (const auto& it : available_coins.coins) {
+        if (auto result{ChooseSelectionResult(wallet, nTargetValue, eligibility_filter, it.second, coin_selection_params)}) {
+            results.push_back(*result);
         }
-        return std::optional<SelectionResult>();
-    };
-    std::optional<SelectionResult> result{*std::min_element(results.begin(), results.end())};
-    return result;
+    }
+    // If we have at least one solution for funding the transaction without mixing, choose the minimum one according to waste metric
+    // and return the result
+    if (results.size() > 0) return *std::min_element(results.begin(), results.end());
+
+    // If we can't fund the transaction from any individual OutputType, run coin selection one last time
+    // over all available coins, which would allow mixing
+    if (allow_mixed_output_types) {
+        if (auto result{ChooseSelectionResult(wallet, nTargetValue, eligibility_filter, available_coins.All(), coin_selection_params)}) {
+            return result;
+        }
+    }
+    // Either mixing is not allowed and we couldn't find a solution from any single OutputType, or mixing was allowed and we still couldn't
+    // find a solution using all available coins
+    return std::nullopt;
 };
 
 std::optional<SelectionResult> ChooseSelectionResult(const CWallet& wallet, const CAmount& nTargetValue, const CoinEligibilityFilter& eligibility_filter, const std::vector<COutput>& available_coins,
@@ -568,7 +605,7 @@ std::optional<SelectionResult> SelectCoins(const CWallet& wallet, CoinsResult& a
             // Calculate the smallest set of inputs required to meet nTargetValue from available_coins
             bool success{false};
             OutputGroup preset_candidates(coin_selection_params);
-            for (const COutput& out : available_coins.all()) {
+            for (const COutput& out : available_coins.All()) {
                 if (!out.spendable) continue;
                 if (preset_coins.count(out.outpoint)) {
                     preset_candidates.Insert(out, /*ancestors=*/0, /*descendants=*/0, /*positive_only=*/false);
@@ -598,8 +635,7 @@ std::optional<SelectionResult> SelectCoins(const CWallet& wallet, CoinsResult& a
 
     // remove preset inputs from coins so that Coin Selection doesn't pick them.
     if (coin_control.HasSelected()) {
-        available_coins.legacy.erase(remove_if(available_coins.legacy.begin(), available_coins.legacy.end(), [&](const COutput& c) { return preset_coins.count(c.outpoint); }), available_coins.legacy.end());
-        available_coins.other.erase(remove_if(available_coins.other.begin(), available_coins.other.end(), [&](const COutput& c) { return preset_coins.count(c.outpoint); }), available_coins.other.end());
+        available_coins.Erase(preset_coins);
     }
 
     unsigned int limit_ancestor_count = 0;
@@ -611,12 +647,11 @@ std::optional<SelectionResult> SelectCoins(const CWallet& wallet, CoinsResult& a
 
     // form groups from remaining coins; note that preset coins will not
     // automatically have their associated (same address) coins included
-    if (coin_control.m_avoid_partial_spends && available_coins.size() > OUTPUT_GROUP_MAX_ENTRIES) {
+    if (coin_control.m_avoid_partial_spends && available_coins.Size() > OUTPUT_GROUP_MAX_ENTRIES) {
         // Cases where we have 101+ outputs all pointing to the same destination may result in
         // privacy leaks as they will potentially be deterministically sorted. We solve that by
         // explicitly shuffling the outputs before processing
-        Shuffle(available_coins.legacy.begin(), available_coins.legacy.end(), coin_selection_params.rng_fast);
-        Shuffle(available_coins.other.begin(), available_coins.other.end(), coin_selection_params.rng_fast);
+        available_coins.Shuffle(coin_selection_params.rng_fast);
     }
 
     SelectionResult preselected(preset_inputs.GetSelectionAmount(), SelectionAlgorithm::MANUAL);
