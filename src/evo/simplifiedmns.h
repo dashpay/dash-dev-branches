@@ -28,7 +28,7 @@ public:
     CService service;
     CBLSLazyPublicKey pubKeyOperator;
     CKeyID keyIDVoting;
-    bool isValid;
+    bool isValid{false};
     CScript scriptPayout; // mem-only
     CScript scriptOperatorPayout; // mem-only
 
@@ -78,6 +78,7 @@ public:
     explicit CSimplifiedMNList(const CDeterministicMNList& dmnList);
 
     uint256 CalcMerkleRoot(bool* pmutated = nullptr) const;
+    bool operator==(const CSimplifiedMNList& rhs) const;
 };
 
 /// P2P messages
