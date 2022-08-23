@@ -250,6 +250,15 @@ public:
         consensus.vDeployments[Consensus::DEPLOYMENT_DIP0024].nThresholdMin = 2420;   // 60% of 4032
         consensus.vDeployments[Consensus::DEPLOYMENT_DIP0024].nFalloffCoeff = 5;      // this corresponds to 10 periods
 
+        // Deployment of basic BLS scheme
+        consensus.vDeployments[Consensus::DEPLOYMENT_BASIC_BLS_SCHEME].bit = 8;
+        consensus.vDeployments[Consensus::DEPLOYMENT_BASIC_BLS_SCHEME].nStartTime = 0;
+        consensus.vDeployments[Consensus::DEPLOYMENT_BASIC_BLS_SCHEME].nTimeout = 999999999999ULL;
+        consensus.vDeployments[Consensus::DEPLOYMENT_BASIC_BLS_SCHEME].nWindowSize = 400;
+        consensus.vDeployments[Consensus::DEPLOYMENT_BASIC_BLS_SCHEME].nThresholdStart = 240; // 80% of 300
+        consensus.vDeployments[Consensus::DEPLOYMENT_BASIC_BLS_SCHEME].nThresholdMin = 180;   // 60% of 300
+        consensus.vDeployments[Consensus::DEPLOYMENT_BASIC_BLS_SCHEME].nFalloffCoeff = 5;     // this corresponds to 10 periods
+
         // The best chain should have at least this much work.
         consensus.nMinimumChainWork = uint256S("0x0000000000000000000000000000000000000000000076f91fbc02922ce2226e"); // 1718500
 
@@ -475,6 +484,15 @@ public:
         consensus.vDeployments[Consensus::DEPLOYMENT_DIP0024].nThresholdMin = 60;   // 60% of 100
         consensus.vDeployments[Consensus::DEPLOYMENT_DIP0024].nFalloffCoeff = 5;      // this corresponds to 10 periods
 
+        // Deployment of basic BLS scheme
+        consensus.vDeployments[Consensus::DEPLOYMENT_BASIC_BLS_SCHEME].bit = 8;
+        consensus.vDeployments[Consensus::DEPLOYMENT_BASIC_BLS_SCHEME].nStartTime = 0;
+        consensus.vDeployments[Consensus::DEPLOYMENT_BASIC_BLS_SCHEME].nTimeout = 999999999999ULL;
+        consensus.vDeployments[Consensus::DEPLOYMENT_BASIC_BLS_SCHEME].nWindowSize = 400;
+        consensus.vDeployments[Consensus::DEPLOYMENT_BASIC_BLS_SCHEME].nThresholdStart = 240; // 80% of 300
+        consensus.vDeployments[Consensus::DEPLOYMENT_BASIC_BLS_SCHEME].nThresholdMin = 180;   // 60% of 300
+        consensus.vDeployments[Consensus::DEPLOYMENT_BASIC_BLS_SCHEME].nFalloffCoeff = 5;     // this corresponds to 10 periods
+
         // The best chain should have at least this much work.
         consensus.nMinimumChainWork = uint256S("0x000000000000000000000000000000000000000000000000027babbb45da9fa4"); // 771500
 
@@ -670,6 +688,15 @@ public:
         consensus.vDeployments[Consensus::DEPLOYMENT_DIP0024].nThresholdStart = 80; // 80% of 100
         consensus.vDeployments[Consensus::DEPLOYMENT_DIP0024].nThresholdMin = 60;   // 60% of 100
         consensus.vDeployments[Consensus::DEPLOYMENT_DIP0024].nFalloffCoeff = 5;    // this corresponds to 10 periods
+
+        // Deployment of basic BLS scheme
+        consensus.vDeployments[Consensus::DEPLOYMENT_BASIC_BLS_SCHEME].bit = 8;
+        consensus.vDeployments[Consensus::DEPLOYMENT_BASIC_BLS_SCHEME].nStartTime = 0;
+        consensus.vDeployments[Consensus::DEPLOYMENT_BASIC_BLS_SCHEME].nTimeout = 999999999999ULL;
+        consensus.vDeployments[Consensus::DEPLOYMENT_BASIC_BLS_SCHEME].nWindowSize = 400;
+        consensus.vDeployments[Consensus::DEPLOYMENT_BASIC_BLS_SCHEME].nThresholdStart = 240; // 80% of 300
+        consensus.vDeployments[Consensus::DEPLOYMENT_BASIC_BLS_SCHEME].nThresholdMin = 180;   // 60% of 300
+        consensus.vDeployments[Consensus::DEPLOYMENT_BASIC_BLS_SCHEME].nFalloffCoeff = 5;     // this corresponds to 10 periods
 
         // The best chain should have at least this much work.
         consensus.nMinimumChainWork = uint256S("0x000000000000000000000000000000000000000000000000000000000000000");
@@ -911,6 +938,15 @@ public:
         consensus.vDeployments[Consensus::DEPLOYMENT_DIP0024].nThresholdStart = 240; // 80% of 300
         consensus.vDeployments[Consensus::DEPLOYMENT_DIP0024].nThresholdMin = 180;   // 60% of 300
         consensus.vDeployments[Consensus::DEPLOYMENT_DIP0024].nFalloffCoeff = 5;     // this corresponds to 10 periods
+
+        // Deployment of basic BLS scheme
+        consensus.vDeployments[Consensus::DEPLOYMENT_BASIC_BLS_SCHEME].bit = 8;
+        consensus.vDeployments[Consensus::DEPLOYMENT_BASIC_BLS_SCHEME].nStartTime = 0;
+        consensus.vDeployments[Consensus::DEPLOYMENT_BASIC_BLS_SCHEME].nTimeout = 999999999999ULL;
+        consensus.vDeployments[Consensus::DEPLOYMENT_BASIC_BLS_SCHEME].nWindowSize = 400;
+        consensus.vDeployments[Consensus::DEPLOYMENT_BASIC_BLS_SCHEME].nThresholdStart = 240; // 80% of 300
+        consensus.vDeployments[Consensus::DEPLOYMENT_BASIC_BLS_SCHEME].nThresholdMin = 180;   // 60% of 300
+        consensus.vDeployments[Consensus::DEPLOYMENT_BASIC_BLS_SCHEME].nFalloffCoeff = 5;     // this corresponds to 10 periods
 
         // The best chain should have at least this much work.
         consensus.nMinimumChainWork = uint256S("0x00");

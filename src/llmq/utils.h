@@ -93,6 +93,7 @@ Consensus::LLMQType GetInstantSendLLMQType(const CQuorumManager& qman, const CBl
 Consensus::LLMQType GetInstantSendLLMQType(bool deterministic);
 bool IsDIP0024Active(const CBlockIndex* pindex);
 static bool IsInstantSendLLMQTypeShared();
+bool IsBasicBLSSchemeActive(const CBlockIndex* pindex);
 
 /// Returns the state of `-llmq-data-recovery`
 bool QuorumDataRecoveryEnabled();
