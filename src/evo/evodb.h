@@ -93,7 +93,8 @@ public:
 
     [[nodiscard]] size_t GetMemoryUsage() const
     {
-        return rootDBTransaction.GetMemoryUsage();
+        // TODO investigate this more, this fix is likely indicitive of some underlying issue.
+        return rootDBTransaction.GetMemoryUsage() * 20; // Underlying GetMemoryUsage is off by a factor of ~20???
     }
 
     bool CommitRootTransaction() LOCKS_EXCLUDED(cs);
