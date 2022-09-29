@@ -24,6 +24,7 @@
 
 #include <evo/specialtx.h>
 #include <evo/cbtx.h>
+#include <evo/creditpool.h>
 #include <evo/simplifiedmns.h>
 #include <governance/governance.h>
 #include <llmq/blockprocessor.h>
@@ -108,6 +109,22 @@ void BlockAssembler::resetBlock()
     nFees = 0;
 }
 
+static CAmount GetCbForBlock(const CBlockIndex* block_index, const Consensus::Params& consensusParams) {
+    assert(block_index);
+    CBlock block;
+    if (!ReadBlockFromDisk(block, block_index, consensusParams)) {
+        throw std::runtime_error("failed-getcbforblock-read");
+    }
+    if (block.vtx.size() < 1 || block.vtx[0]->vExtraPayload.empty())  {
+        return 0;
+    }
+    CCbTx cbTx;
+    if (!GetTxPayload(block.vtx[0]->vExtraPayload, cbTx)) {
+        throw std::runtime_error("failed-getcbforblock-cbtx-payload");
+    }
+    return cbTx.assetLockedAmount;
+}
+
 std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(CChainState& chainstate, const CScript& scriptPubKeyIn)
 {
     int64_t nTimeStart = GetTimeMicros();
@@ -133,6 +150,7 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(CChainState& chai
 
     bool fDIP0003Active_context = nHeight >= chainparams.GetConsensus().DIP0003Height;
     bool fDIP0008Active_context = nHeight >= chainparams.GetConsensus().DIP0008Height;
+    bool fV20Active_context = llmq::utils::IsV20Active(pindexPrev);
 
     pblock->nVersion = ComputeBlockVersion(pindexPrev, chainparams.GetConsensus(), chainparams.BIP9CheckMasternodesUpgraded());
     // -regtest only: allow overriding block.nVersion with
@@ -166,7 +184,12 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(CChainState& chai
 
     int nPackagesSelected = 0;
     int nDescendantsUpdated = 0;
-    addPackageTxs(nPackagesSelected, nDescendantsUpdated);
+
+    std::optional<CCreditPoolManager> creditPoolManager;
+    if (fV20Active_context) {
+        creditPoolManager.emplace(pindexPrev, GetCbForBlock(pindexPrev, chainparams.GetConsensus()));
+    }
+    addPackageTxs(nPackagesSelected, nDescendantsUpdated, creditPoolManager);
 
     int64_t nTime1 = GetTimeMicros();
 
@@ -197,7 +220,10 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(CChainState& chai
 
         CCbTx cbTx;
 
-        if (fDIP0008Active_context) {
+        if (fV20Active_context) {
+            cbTx.nVersion = 3;
+            cbTx.assetLockedAmount = creditPoolManager->getTotalLocked();
+        } else if (fDIP0008Active_context) {
             cbTx.nVersion = 2;
         } else {
             cbTx.nVersion = 1;
@@ -368,7 +394,7 @@ void BlockAssembler::SortForBlock(const CTxMemPool::setEntries& package, std::ve
 // Each time through the loop, we compare the best transaction in
 // mapModifiedTxs with the next transaction in the mempool to decide what
 // transaction package to work on next.
-void BlockAssembler::addPackageTxs(int &nPackagesSelected, int &nDescendantsUpdated)
+void BlockAssembler::addPackageTxs(int &nPackagesSelected, int &nDescendantsUpdated, std::optional<CCreditPoolManager>& creditPoolManager)
 {
     AssertLockHeld(m_mempool.cs);
 
@@ -422,6 +448,23 @@ void BlockAssembler::addPackageTxs(int &nPackagesSelected, int &nDescendantsUpda
                 // Either no entry in mapModifiedTx, or it's worse than mapTx.
                 // Increment mi for the next loop iteration.
                 ++mi;
+            }
+        }
+
+        if (creditPoolManager) {
+            // If one transaction is skipped due to limits, it is not a reason to interrupt
+            // whole process of adding transactions.
+            // `state` is local here because used to log info about this specific tx
+            CValidationState state;
+
+            if (!creditPoolManager->processTransaction(iter->GetTx(), state)) {
+                if (fUsingModified) {
+                    mapModifiedTx.get<ancestor_score>().erase(modit);
+                    failedTx.insert(iter);
+                }
+                LogPrintf("%s: asset locks tx skipped due %s txid %s\n",
+                          __func__, FormatStateMessage(state), iter->GetTx().GetHash().ToString());
+                continue;
             }
         }
 

@@ -14,6 +14,7 @@
 #include <chain.h>
 #include <chainparams.h>
 #include <consensus/merkle.h>
+#include <validation.h>
 
 bool CheckCbTx(const CTransaction& tx, const CBlockIndex* pindexPrev, CValidationState& state)
 {
@@ -42,6 +43,10 @@ bool CheckCbTx(const CTransaction& tx, const CBlockIndex* pindexPrev, CValidatio
         bool fDIP0008Active = pindexPrev->nHeight >= Params().GetConsensus().DIP0008Height;
         if (fDIP0008Active && cbTx.nVersion < 2) {
             return state.Invalid(ValidationInvalidReason::CONSENSUS, false, REJECT_INVALID, "bad-cbtx-version");
+        }
+        bool fV20Active = llmq::utils::IsV20Active(::ChainActive().Tip());
+        if (fV20Active && cbTx.nVersion < 3) {
+            return state.Invalid(ValidationInvalidReason::CONSENSUS, false, REJECT_INVALID, "bad-cbtx-version-v20");
         }
     }
 
@@ -121,8 +126,8 @@ bool CalcCbTxMerkleRootMNList(const CBlock& block, const CBlockIndex* pindexPrev
         int64_t nTime2 = GetTimeMicros(); nTimeDMN += nTime2 - nTime1;
         LogPrint(BCLog::BENCHMARK, "            - BuildNewListFromBlock: %.2fms [%.2fs]\n", 0.001 * (nTime2 - nTime1), nTimeDMN * 0.000001);
 
-        bool v19active = llmq::utils::IsV19Active(pindexPrev);
-        CSimplifiedMNList sml(tmpMNList, v19active);
+        bool v20active = llmq::utils::IsV20Active(pindexPrev);
+        CSimplifiedMNList sml(tmpMNList, v20active);
 
         int64_t nTime3 = GetTimeMicros(); nTimeSMNL += nTime3 - nTime2;
         LogPrint(BCLog::BENCHMARK, "            - CSimplifiedMNList: %.2fms [%.2fs]\n", 0.001 * (nTime3 - nTime2), nTimeSMNL * 0.000001);
@@ -316,6 +321,7 @@ bool CalcCbTxMerkleRootQuorums(const CBlock& block, const CBlockIndex* pindexPre
 
 std::string CCbTx::ToString() const
 {
-    return strprintf("CCbTx(nVersion=%d, nHeight=%d, merkleRootMNList=%s, merkleRootQuorums=%s)",
-        nVersion, nHeight, merkleRootMNList.ToString(), merkleRootQuorums.ToString());
+    return strprintf("CCbTx(nVersion=%d, nHeight=%d, merkleRootMNList=%s, merkleRootQuorums=%s, assetLockedAmount=%d.%08d)",
+        nVersion, nHeight, merkleRootMNList.ToString(), merkleRootQuorums.ToString(),
+        assetLockedAmount / COIN, assetLockedAmount % COIN);
 }
