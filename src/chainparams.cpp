@@ -486,7 +486,7 @@ public:
 
         // Deployment of basic BLS scheme
         consensus.vDeployments[Consensus::DEPLOYMENT_BASIC_BLS_SCHEME].bit = 8;
-        consensus.vDeployments[Consensus::DEPLOYMENT_BASIC_BLS_SCHEME].nStartTime = 0;
+        consensus.vDeployments[Consensus::DEPLOYMENT_BASIC_BLS_SCHEME].nStartTime = 1664582400; // Oct 1, 2022
         consensus.vDeployments[Consensus::DEPLOYMENT_BASIC_BLS_SCHEME].nTimeout = 999999999999ULL;
         consensus.vDeployments[Consensus::DEPLOYMENT_BASIC_BLS_SCHEME].nWindowSize = 400;
         consensus.vDeployments[Consensus::DEPLOYMENT_BASIC_BLS_SCHEME].nThresholdStart = 240; // 80% of 300
