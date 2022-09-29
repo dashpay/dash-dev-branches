@@ -32,25 +32,24 @@ bool CheckCbTx(const CTransaction& tx, const CBlockIndex* pindexPrev, TxValidati
         return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-cbtx-payload");
     }
 
-    if (cbTx.nVersion == 0 || cbTx.nVersion > CCbTx::CB_CL_SIG_VERSION) {
+    if (cbTx.nVersion == 0 || cbTx.nVersion > CCbTx::CB_CURRENT_VERSION_3) {
         return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-cbtx-version");
     }
 
-    if (pindexPrev) {
-        bool isV20 = llmq::utils::IsV20Active(pindexPrev);
-        bool isCbV20 = cbTx.nVersion == CCbTx::CB_CL_SIG_VERSION;
-        if (isV20 != isCbV20) return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-cbtx-version");
+    if (!pindexPrev) return true;
+
+    // All check below requires pindexPrev not nullptr
+    bool fDIP0008Active = pindexPrev->nHeight >= Params().GetConsensus().DIP0008Height;
+    if (fDIP0008Active && cbTx.nVersion < 2) {
+        return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-cbtx-version");
     }
 
-    if (pindexPrev && pindexPrev->nHeight + 1 != cbTx.nHeight) {
+    bool isV20 = llmq::utils::IsV20Active(pindexPrev);
+    bool isCbV20 = cbTx.nVersion == CCbTx::CB_CURRENT_VERSION_3;
+    if (isV20 != isCbV20) return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-cbtx-version-20");
+
+    if (pindexPrev->nHeight + 1 != cbTx.nHeight) {
         return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-cbtx-height");
-    }
-
-    if (pindexPrev) {
-        bool fDIP0008Active = pindexPrev->nHeight >= Params().GetConsensus().DIP0008Height;
-        if (fDIP0008Active && cbTx.nVersion < 2) {
-            return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-cbtx-version");
-        }
     }
 
     return true;
@@ -333,7 +332,7 @@ bool CheckCbTxBestChainlock(const CBlock& block, const CBlockIndex* pindexPrev, 
         return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-cbtx-payload");
     }
 
-    if (cbTx.nVersion >= CCbTx::CB_CL_SIG_VERSION) {
+    if (cbTx.nVersion >= CCbTx::CB_CURRENT_VERSION_3) {
         if (cbTx.bestCLSignature.IsValid()) {
             int bestChainLockedHeight = pindexPrev->nHeight - static_cast<int>(cbTx.bestCLHeightDiff) - 1;
             uint256 bestChainLockedHash = ::ChainActive()[bestChainLockedHeight]->GetBlockHash();
@@ -364,6 +363,7 @@ bool EmplaceBestChainlock(const llmq::CChainLocksHandler& chainlock_handler, con
 
 std::string CCbTx::ToString() const
 {
-    return strprintf("CCbTx(nVersion=%d, nHeight=%d, merkleRootMNList=%s, merkleRootQuorums=%s, bestCLHeightDiff=%d, bestCLSig=%s)",
-        nVersion, nHeight, merkleRootMNList.ToString(), merkleRootQuorums.ToString(), bestCLHeightDiff, bestCLSignature.ToString());
+    return strprintf("CCbTx(nVersion=%d, nHeight=%d, merkleRootMNList=%s, merkleRootQuorums=%s, bestCLHeightDiff=%d, bestCLSig=%s, assetLockedAmount=%d.%08d)",
+        nVersion, nHeight, merkleRootMNList.ToString(), merkleRootQuorums.ToString(), bestCLHeightDiff, bestCLSignature.ToString(),
+        assetLockedAmount / COIN, assetLockedAmount % COIN);
 }

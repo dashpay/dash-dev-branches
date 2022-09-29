@@ -10,9 +10,11 @@
 #include <evo/deterministicmns.h>
 #include <evo/mnhftx.h>
 #include <evo/providertx.h>
+#include <evo/assetlocktx.h>
 #include <hash.h>
 #include <llmq/blockprocessor.h>
 #include <llmq/commitment.h>
+#include <llmq/utils.h>
 #include <primitives/block.h>
 #include <validation.h>
 
@@ -43,6 +45,12 @@ bool CheckSpecialTx(const CTransaction& tx, const CBlockIndex* pindexPrev, TxVal
             return llmq::CheckLLMQCommitment(tx, pindexPrev, state);
         case TRANSACTION_MNHF_SIGNAL:
             return VersionBitsState(::ChainActive().Tip(), Params().GetConsensus(), Consensus::DEPLOYMENT_DIP0024, versionbitscache) == ThresholdState::ACTIVE && CheckMNHFTx(tx, pindexPrev, state);
+        case TRANSACTION_ASSET_LOCK:
+        case TRANSACTION_ASSET_UNLOCK:
+            if (!llmq::utils::IsV20Active(pindexPrev)) {
+                return state.Invalid(TxValidationResult::TX_CONSENSUS, "v20-not-active");
+            }
+            return CheckAssetLockUnlockTx(tx, pindexPrev, state);
         }
     } catch (const std::exception& e) {
         LogPrintf("%s -- failed: %s\n", __func__, e.what());
@@ -59,6 +67,9 @@ bool ProcessSpecialTx(const CTransaction& tx, const CBlockIndex* pindex, TxValid
     }
 
     switch (tx.nType) {
+    case TRANSACTION_ASSET_LOCK:
+    case TRANSACTION_ASSET_UNLOCK:
+        return true; // handled per block (during cb)
     case TRANSACTION_PROVIDER_REGISTER:
     case TRANSACTION_PROVIDER_UPDATE_SERVICE:
     case TRANSACTION_PROVIDER_UPDATE_REGISTRAR:
@@ -82,6 +93,9 @@ bool UndoSpecialTx(const CTransaction& tx, const CBlockIndex* pindex)
     }
 
     switch (tx.nType) {
+    case TRANSACTION_ASSET_LOCK:
+    case TRANSACTION_ASSET_UNLOCK:
+        return true; // handled per block (during cb)
     case TRANSACTION_PROVIDER_REGISTER:
     case TRANSACTION_PROVIDER_UPDATE_SERVICE:
     case TRANSACTION_PROVIDER_UPDATE_REGISTRAR:

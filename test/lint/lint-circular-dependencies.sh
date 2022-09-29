@@ -74,6 +74,10 @@ EXPECTED_CIRCULAR_DEPENDENCIES=(
     "evo/deterministicmns -> llmq/utils -> net -> evo/deterministicmns"
     "policy/policy -> policy/settings -> policy/policy"
     "evo/specialtxman -> validation -> evo/specialtxman"
+    "consensus/tx_verify -> evo/assetlocktx -> validation -> consensus/tx_verify"
+    "consensus/tx_verify -> evo/assetlocktx -> llmq/quorums -> net_processing -> txmempool -> consensus/tx_verify"
+    "evo/assetlocktx -> evo/creditpool -> evo/assetlocktx"
+    "evo/assetlocktx -> llmq/quorums -> net_processing -> txmempool -> evo/assetlocktx"
 
     "evo/simplifiedmns -> llmq/blockprocessor -> net_processing -> llmq/snapshot -> evo/simplifiedmns"
     "llmq/blockprocessor -> net_processing -> llmq/context -> llmq/blockprocessor"

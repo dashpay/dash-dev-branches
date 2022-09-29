@@ -24,6 +24,7 @@
 
 #include <evo/specialtx.h>
 #include <evo/cbtx.h>
+#include <evo/creditpool.h>
 #include <evo/simplifiedmns.h>
 #include <governance/governance.h>
 #include <llmq/blockprocessor.h>
@@ -133,6 +134,7 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(CChainState& chai
 
     bool fDIP0003Active_context = nHeight >= chainparams.GetConsensus().DIP0003Height;
     bool fDIP0008Active_context = nHeight >= chainparams.GetConsensus().DIP0008Height;
+    bool fV20Active_context = llmq::utils::IsV20Active(pindexPrev);
 
     pblock->nVersion = ComputeBlockVersion(pindexPrev, chainparams.GetConsensus(), chainparams.BIP9CheckMasternodesUpgraded());
     // -regtest only: allow overriding block.nVersion with
@@ -166,7 +168,12 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(CChainState& chai
 
     int nPackagesSelected = 0;
     int nDescendantsUpdated = 0;
-    addPackageTxs(nPackagesSelected, nDescendantsUpdated);
+
+    std::optional<CCreditPoolManager> creditPoolManager;
+    if (fV20Active_context) {
+        creditPoolManager.emplace(pindexPrev, chainparams.GetConsensus());
+    }
+    addPackageTxs(nPackagesSelected, nDescendantsUpdated, creditPoolManager);
 
     int64_t nTime1 = GetTimeMicros();
 
@@ -197,10 +204,10 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(CChainState& chai
 
         CCbTx cbTx;
 
-        if (llmq::utils::IsV20Active(pindexPrev)) {
-            cbTx.nVersion = CCbTx::CB_CL_SIG_VERSION;
+        if (fV20Active_context) {
+            cbTx.nVersion = CCbTx::CB_CURRENT_VERSION_3;
         } else if (fDIP0008Active_context) {
-            cbTx.nVersion = 2;
+            cbTx.nVersion = CCbTx::CB_V19_VERSION;
         } else {
             cbTx.nVersion = 1;
         }
@@ -215,13 +222,14 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(CChainState& chai
             if (!CalcCbTxMerkleRootQuorums(*pblock, pindexPrev, quorum_block_processor, cbTx.merkleRootQuorums, state)) {
                 throw std::runtime_error(strprintf("%s: CalcCbTxMerkleRootQuorums failed: %s", __func__, FormatStateMessage(state)));
             }
-            if (llmq::utils::IsV20Active(pindexPrev)) {
+            if (fV20Active_context) {
                 if (!EmplaceBestChainlock(m_clhandler, nHeight, cbTx.bestCLHeightDiff, cbTx.bestCLSignature)) {
                     LogPrintf("CreateNewBlock() height[%d] CBTx failed to find best CL.\n", nHeight);
                 }
                 else {
                     LogPrintf("CreateNewBlock() height[%d] CBTx bestCLHeightDiff[%d] CLSig[%s]\n", nHeight, cbTx.bestCLHeightDiff, cbTx.bestCLSignature.ToString());
                 }
+                cbTx.assetLockedAmount = creditPoolManager->getTotalLocked();
             }
         }
 
@@ -378,7 +386,7 @@ void BlockAssembler::SortForBlock(const CTxMemPool::setEntries& package, std::ve
 // Each time through the loop, we compare the best transaction in
 // mapModifiedTxs with the next transaction in the mempool to decide what
 // transaction package to work on next.
-void BlockAssembler::addPackageTxs(int &nPackagesSelected, int &nDescendantsUpdated)
+void BlockAssembler::addPackageTxs(int &nPackagesSelected, int &nDescendantsUpdated, std::optional<CCreditPoolManager>& creditPoolManager)
 {
     AssertLockHeld(m_mempool.cs);
 
@@ -432,6 +440,23 @@ void BlockAssembler::addPackageTxs(int &nPackagesSelected, int &nDescendantsUpda
                 // Either no entry in mapModifiedTx, or it's worse than mapTx.
                 // Increment mi for the next loop iteration.
                 ++mi;
+            }
+        }
+
+        if (creditPoolManager) {
+            // If one transaction is skipped due to limits, it is not a reason to interrupt
+            // whole process of adding transactions.
+            // `state` is local here because used to log info about this specific tx
+            TxValidationState state;
+
+            if (!creditPoolManager->processTransaction(iter->GetTx(), state)) {
+                if (fUsingModified) {
+                    mapModifiedTx.get<ancestor_score>().erase(modit);
+                    failedTx.insert(iter);
+                }
+                LogPrintf("%s: asset locks tx skipped due %s txid %s\n",
+                          __func__, FormatStateMessage(state), iter->GetTx().GetHash().ToString());
+                continue;
             }
         }
 

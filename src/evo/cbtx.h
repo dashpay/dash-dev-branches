@@ -20,13 +20,16 @@ class CQuorumBlockProcessor;
 class CChainLocksHandler;
 }// namespace llmq
 
+// Forward declaration from core_io to get rid of circular dependency
+UniValue ValueFromAmount(const CAmount& amount);
+
 // coinbase transaction
 class CCbTx
 {
 public:
     static constexpr auto SPECIALTX_TYPE = TRANSACTION_COINBASE;
     static constexpr uint16_t CB_V19_VERSION = 2;
-    static constexpr uint16_t CB_CL_SIG_VERSION = 3;
+    static constexpr uint16_t CB_CURRENT_VERSION_3 = 3;
 
     uint16_t nVersion{CB_V19_VERSION};
     int32_t nHeight{0};
@@ -34,6 +37,7 @@ public:
     uint256 merkleRootQuorums;
     uint32_t bestCLHeightDiff;
     CBLSSignature bestCLSignature;
+    CAmount assetLockedAmount{0};
 
     SERIALIZE_METHODS(CCbTx, obj)
     {
@@ -41,11 +45,13 @@ public:
 
         if (obj.nVersion >= 2) {
             READWRITE(obj.merkleRootQuorums);
-            if (obj.nVersion >= CB_CL_SIG_VERSION) {
+            if (obj.nVersion >= CB_CURRENT_VERSION_3) {
                 READWRITE(COMPACTSIZE(obj.bestCLHeightDiff));
                 READWRITE(obj.bestCLSignature);
+                READWRITE(obj.assetLockedAmount);
             }
         }
+
     }
 
     std::string ToString() const;
@@ -59,9 +65,10 @@ public:
         obj.pushKV("merkleRootMNList", merkleRootMNList.ToString());
         if (nVersion >= 2) {
             obj.pushKV("merkleRootQuorums", merkleRootQuorums.ToString());
-            if (nVersion >= CB_CL_SIG_VERSION) {
+            if (nVersion >= CB_CURRENT_VERSION_3) {
                 obj.pushKV("bestCLHeightDiff", static_cast<int>(bestCLHeightDiff));
                 obj.pushKV("bestCLSignature", bestCLSignature.ToString());
+                obj.pushKV("assetLockedAmount", ValueFromAmount(assetLockedAmount));
             }
         }
     }

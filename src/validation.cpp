@@ -377,7 +377,9 @@ static bool ContextualCheckTransaction(const CTransaction& tx, TxValidationState
                 tx.nType != TRANSACTION_PROVIDER_UPDATE_REVOKE &&
                 tx.nType != TRANSACTION_COINBASE &&
                 tx.nType != TRANSACTION_QUORUM_COMMITMENT &&
-                tx.nType != TRANSACTION_MNHF_SIGNAL) {
+                tx.nType != TRANSACTION_MNHF_SIGNAL &&
+                tx.nType != TRANSACTION_ASSET_LOCK &&
+                tx.nType != TRANSACTION_ASSET_UNLOCK) {
                 return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-txns-type");
             }
             if (tx.IsCoinBase() && tx.nType != TRANSACTION_COINBASE)
@@ -2956,6 +2958,7 @@ bool CChainState::ConnectTip(BlockValidationState& state, const CChainParams& ch
     LogPrint(BCLog::BENCHMARK, "  - Writing chainstate: %.2fms [%.2fs (%.2fms/blk)]\n", (nTime5 - nTime4) * MILLI, nTimeChainState * MICRO, nTimeChainState * MILLI / nBlocksTotal);
     // Remove conflicting transactions from the mempool.;
     m_mempool.removeForBlock(blockConnecting.vtx, pindexNew->nHeight);
+    m_mempool.removeExpiredAssetUnlock(pindexNew->nHeight);
     disconnectpool.removeForBlock(blockConnecting.vtx);
     // Update m_chain & related variables.
     m_chain.SetTip(pindexNew);
