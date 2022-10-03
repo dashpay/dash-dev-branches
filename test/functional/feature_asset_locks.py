@@ -186,17 +186,37 @@ class AssetLocksTest(DashTestFramework):
         node.generate(13)
         self.sync_all()
 
-        # tx is mined, let's get blockhash
-        block_hash_1 = node.gettransaction(txid_in_block)['blockhash']
-        self.log.info(block_hash_1)
-
         assert_equal(get_credit_pool_amount(node), locked_1)
 
-        self.log.info("Mining a quorum...")
-        self.mine_quorum()
+        # tx is mined, let's get blockhash
+        self.log.info("Invalidate block with asset lock tx...")
+        block_hash_1 = node.gettransaction(txid_in_block)['blockhash']
+        for inode in self.nodes:
+            inode.invalidateblock(block_hash_1)
+        node.generate(3)
+        self.sync_all()
+        assert_equal(get_credit_pool_amount(node), 0)
+        self.log.info("Resubmit asset lock tx to new chain...")
+        txid_in_block = self.send_tx(asset_lock_tx)
         node.generate(3)
         self.sync_all()
 
+        assert_equal(get_credit_pool_amount(node), locked_1)
+
+        node.generate(3)
+        self.sync_all()
+        assert_equal(get_credit_pool_amount(node), locked_1)
+        self.log.info("Reconsider old blocks...")
+        for inode in self.nodes:
+            inode.reconsiderblock(block_hash_1)
+        assert_equal(get_credit_pool_amount(node), locked_1)
+        self.sync_all()
+
+        self.log.info("Mine a quorum...")
+        self.mine_quorum()
+        node.generate(3)
+        self.sync_all()
+        assert_equal(get_credit_pool_amount(node), locked_1)
 
         self.log.info("Testing asset unlock...")
         asset_unlock_tx = create_assetunlock(node, self.mninfo, 101, COIN, pubkey)
@@ -211,6 +231,23 @@ class AssetLocksTest(DashTestFramework):
         assert_equal(asset_unlock_tx_payload.quorumHash, int(self.mninfo[0].node.quorum("selectquorum", llmq_type_test, 'e6c7a809d79f78ea85b72d5df7e9bd592aecf151e679d6e976b74f053a7f9056')["quorumHash"], 16))
 
         self.send_tx(asset_unlock_tx)
+        node.generate(1)
+        self.sync_all()
+        self.send_tx(asset_unlock_tx,
+            expected_error = "Transaction already in block chain",
+            reason = "double copy")
+
+        self.log.info("Invalidate block with asset unlock tx...")
+        block_asset_unlock = node.getbestblockhash()
+        for inode in self.nodes:
+            inode.invalidateblock(block_asset_unlock)
+        assert_equal(get_credit_pool_amount(node), locked_1)
+        # TODO: strange, fails if generate there new blocks
+        #node.generate(3)
+        #self.sync_all()
+        for inode in self.nodes:
+            inode.reconsiderblock(block_asset_unlock)
+        assert_equal(get_credit_pool_amount(node), locked_1 - COIN)
 
         # mine next quorum, tx should be still accepted
         self.mine_quorum()
