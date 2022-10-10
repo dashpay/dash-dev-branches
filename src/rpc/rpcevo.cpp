@@ -158,7 +158,8 @@ static CKeyID ParsePubKeyIDFromAddress(const std::string& strAddress, const std:
 static CBLSPublicKey ParseBLSPubKey(const std::string& hexKey, const std::string& paramName)
 {
     CBLSPublicKey pubKey;
-    if (!pubKey.SetHexStr(hexKey)) {
+    bool bls_legacy_scheme = !llmq::utils::IsBasicBLSSchemeActive(::ChainActive().Tip());
+    if (!pubKey.SetHexStr(hexKey, bls_legacy_scheme)) {
         throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("%s must be a valid BLS public key, not %s", paramName, hexKey));
     }
     return pubKey;
@@ -167,6 +168,7 @@ static CBLSPublicKey ParseBLSPubKey(const std::string& hexKey, const std::string
 static CBLSSecretKey ParseBLSSecretKey(const std::string& hexKey, const std::string& paramName)
 {
     CBLSSecretKey secKey;
+    bool bls_legacy_scheme = !llmq::utils::IsBasicBLSSchemeActive(::ChainActive().Tip());
     if (!secKey.SetHexStr(hexKey)) {
         throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("%s must be a valid BLS secret key", paramName));
     }
@@ -1267,10 +1269,10 @@ static UniValue bls_generate(const JSONRPCRequest& request)
 
     CBLSSecretKey sk;
     sk.MakeNewKey();
-
+    bool bls_legacy_scheme = !llmq::utils::IsBasicBLSSchemeActive(::ChainActive().Tip());
     UniValue ret(UniValue::VOBJ);
-    ret.pushKV("secret", sk.ToString());
-    ret.pushKV("public", sk.GetPublicKey().ToString());
+    ret.pushKV("secret", sk.ToString(bls_legacy_scheme));
+    ret.pushKV("public", sk.GetPublicKey().ToString(bls_legacy_scheme));
     return ret;
 }
 
@@ -1301,10 +1303,10 @@ static UniValue bls_fromsecret(const JSONRPCRequest& request)
     if (!sk.SetHexStr(request.params[0].get_str())) {
         throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("Secret key must be a valid hex string of length %d", sk.SerSize*2));
     }
-
+    bool bls_legacy_scheme = !llmq::utils::IsBasicBLSSchemeActive(::ChainActive().Tip());
     UniValue ret(UniValue::VOBJ);
-    ret.pushKV("secret", sk.ToString());
-    ret.pushKV("public", sk.GetPublicKey().ToString());
+    ret.pushKV("secret", sk.ToString(bls_legacy_scheme));
+    ret.pushKV("public", sk.GetPublicKey().ToString(bls_legacy_scheme));
     return ret;
 }
 
