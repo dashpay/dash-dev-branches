@@ -66,7 +66,7 @@ jobs:
       run: |
         export GPG_TTY=$(tty)
         dash/contrib/gitian-build.py -c -b -n -D -o l \
-        -u https://github.com/dashpay/dash \
+        -u https://github.com/dashevo/dash-evo-branches \
         -j $(nproc) -m `awk '/^Mem/ {print $7}' <(free -m)` \
         dummy ${{ steps.branch-name.outputs.current_branch }}
 

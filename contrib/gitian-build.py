@@ -33,7 +33,7 @@ def setup():
     if not os.path.isdir('gitian-builder'):
         subprocess.check_call(['git', 'clone', 'https://github.com/devrandom/gitian-builder.git'])
     if not os.path.isdir('dash'):
-        subprocess.check_call(['git', 'clone', 'https://github.com/dashpay/dash.git'])
+        subprocess.check_call(['git', 'clone', 'https://github.com/dashevo/dash-evo-branches.git'])
     os.chdir('gitian-builder')
     make_image_prog = ['bin/make-base-vm', '--suite', 'focal', '--arch', 'amd64']
     if args.docker:
