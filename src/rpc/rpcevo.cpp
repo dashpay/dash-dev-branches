@@ -155,21 +155,23 @@ static CKeyID ParsePubKeyIDFromAddress(const std::string& strAddress, const std:
     return *keyID;
 }
 
-static CBLSPublicKey ParseBLSPubKey(const std::string& hexKey, const std::string& paramName)
+static CBLSPublicKey ParseBLSPubKey(const std::string& hexKey, const std::string& paramName, bool specific_legacy_bls_scheme = false)
 {
     CBLSPublicKey pubKey;
-    bool bls_legacy_scheme = !llmq::utils::IsBasicBLSSchemeActive(::ChainActive().Tip());
-    if (!pubKey.SetHexStr(hexKey, bls_legacy_scheme)) {
+    bool is_bls_legacy_scheme = !llmq::utils::IsBasicBLSSchemeActive(::ChainActive().Tip());
+    bool use_bls_scheme = specific_legacy_bls_scheme || is_bls_legacy_scheme;
+    if (!pubKey.SetHexStr(hexKey, use_bls_scheme)) {
         throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("%s must be a valid BLS public key, not %s", paramName, hexKey));
     }
     return pubKey;
 }
 
-static CBLSSecretKey ParseBLSSecretKey(const std::string& hexKey, const std::string& paramName)
+static CBLSSecretKey ParseBLSSecretKey(const std::string& hexKey, const std::string& paramName, bool specific_legacy_bls_scheme = false)
 {
     CBLSSecretKey secKey;
-    bool bls_legacy_scheme = !llmq::utils::IsBasicBLSSchemeActive(::ChainActive().Tip());
-    if (!secKey.SetHexStr(hexKey)) {
+    bool is_bls_legacy_scheme = !llmq::utils::IsBasicBLSSchemeActive(::ChainActive().Tip());
+    bool use_bls_scheme = specific_legacy_bls_scheme || is_bls_legacy_scheme;
+    if (!secKey.SetHexStr(hexKey, use_bls_scheme)) {
         throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("%s must be a valid BLS secret key", paramName));
     }
     return secKey;
@@ -431,9 +433,7 @@ static void protx_register_submit_help(const JSONRPCRequest& request)
         },
     }.Check(request);
 }
-
-// handles register, register_prepare and register_fund in one method
-static UniValue protx_register(const JSONRPCRequest& request)
+static UniValue protx_register_wrapper(const JSONRPCRequest& request, const bool specific_legacy_bls_scheme)
 {
     bool isExternalRegister = request.strMethod == "protxregister";
     bool isFundRegister = request.strMethod == "protxregister_fund";
@@ -464,7 +464,10 @@ static UniValue protx_register(const JSONRPCRequest& request)
     tx.nType = TRANSACTION_PROVIDER_REGISTER;
 
     CProRegTx ptx;
-    ptx.nVersion = llmq::utils::IsBasicBLSSchemeActive(::ChainActive().Tip()) ? CProRegTx::BASIC_BLS_VERSION : CProRegTx::LEGACY_BLS_VERSION;
+    if (specific_legacy_bls_scheme)
+        ptx.nVersion = CProRegTx::LEGACY_BLS_VERSION;
+    else
+        ptx.nVersion = llmq::utils::IsBasicBLSSchemeActive(::ChainActive().Tip()) ? CProRegTx::BASIC_BLS_VERSION : CProRegTx::LEGACY_BLS_VERSION;
 
     if (isFundRegister) {
         CTxDestination collateralDest = DecodeDestination(request.params[paramIdx].get_str());
@@ -499,7 +502,7 @@ static UniValue protx_register(const JSONRPCRequest& request)
     }
 
     ptx.keyIDOwner = ParsePubKeyIDFromAddress(request.params[paramIdx + 1].get_str(), "owner address");
-    CBLSPublicKey pubKeyOperator = ParseBLSPubKey(request.params[paramIdx + 2].get_str(), "operator BLS address");
+    CBLSPublicKey pubKeyOperator = ParseBLSPubKey(request.params[paramIdx + 2].get_str(), "operator BLS address", specific_legacy_bls_scheme);
     CKeyID keyIDVoting = ptx.keyIDOwner;
 
     if (request.params[paramIdx + 3].get_str() != "") {
@@ -599,6 +602,17 @@ static UniValue protx_register(const JSONRPCRequest& request)
     }
 }
 
+static UniValue protx_register(const JSONRPCRequest& request)
+{
+    return protx_register_wrapper(request, false);
+}
+
+static UniValue protx_register_legacy(const JSONRPCRequest& request)
+{
+    return protx_register_wrapper(request, true);
+}
+
+// handles register, register_prepare and register_fund in one method
 static UniValue protx_register_submit(const JSONRPCRequest& request)
 {
     protx_register_submit_help(request);
@@ -652,8 +666,7 @@ static void protx_update_service_help(const JSONRPCRequest& request)
         },
     }.Check(request);
 }
-
-static UniValue protx_update_service(const JSONRPCRequest& request)
+static UniValue protx_update_service_wrapper(const JSONRPCRequest& request, const bool specific_legacy_bls_scheme)
 {
     protx_update_service_help(request);
 
@@ -664,14 +677,17 @@ static UniValue protx_update_service(const JSONRPCRequest& request)
     EnsureWalletIsUnlocked(pwallet);
 
     CProUpServTx ptx;
-    ptx.nVersion = llmq::utils::IsBasicBLSSchemeActive(::ChainActive().Tip()) ? CProUpServTx::BASIC_BLS_VERSION : CProUpServTx::LEGACY_BLS_VERSION;
+    if (specific_legacy_bls_scheme)
+        ptx.nVersion = CProUpServTx::LEGACY_BLS_VERSION;
+    else
+        ptx.nVersion = llmq::utils::IsBasicBLSSchemeActive(::ChainActive().Tip()) ? CProUpServTx::BASIC_BLS_VERSION : CProUpServTx::LEGACY_BLS_VERSION;
     ptx.proTxHash = ParseHashV(request.params[0], "proTxHash");
 
     if (!Lookup(request.params[1].get_str().c_str(), ptx.addr, Params().GetDefaultPort(), false)) {
         throw std::runtime_error(strprintf("invalid network address %s", request.params[1].get_str()));
     }
 
-    CBLSSecretKey keyOperator = ParseBLSSecretKey(request.params[2].get_str(), "operatorKey");
+    CBLSSecretKey keyOperator = ParseBLSSecretKey(request.params[2].get_str(), "operatorKey", specific_legacy_bls_scheme);
 
     auto dmn = deterministicMNManager->GetListAtChainTip().GetMN(ptx.proTxHash);
     if (!dmn) {
@@ -725,6 +741,15 @@ static UniValue protx_update_service(const JSONRPCRequest& request)
 
     return SignAndSendSpecialTx(request, tx);
 }
+static UniValue protx_update_service(const JSONRPCRequest& request)
+{
+    return protx_update_service_wrapper(request, false);
+}
+
+static UniValue protx_update_service_legacy(const JSONRPCRequest& request)
+{
+    return protx_update_service_wrapper(request, true);
+}
 
 static void protx_update_registrar_help(const JSONRPCRequest& request)
 {
@@ -749,7 +774,7 @@ static void protx_update_registrar_help(const JSONRPCRequest& request)
     }.Check(request);
 }
 
-static UniValue protx_update_registrar(const JSONRPCRequest& request)
+static UniValue protx_update_registrar_wrapper(const JSONRPCRequest& request, const bool specific_legacy_bls_scheme)
 {
     protx_update_registrar_help(request);
 
@@ -760,7 +785,10 @@ static UniValue protx_update_registrar(const JSONRPCRequest& request)
     EnsureWalletIsUnlocked(pwallet);
 
     CProUpRegTx ptx;
-    ptx.nVersion = llmq::utils::IsBasicBLSSchemeActive(::ChainActive().Tip()) ? CProUpRegTx::BASIC_BLS_VERSION : CProUpRegTx::LEGACY_BLS_VERSION;
+    if (specific_legacy_bls_scheme)
+        ptx.nVersion = CProUpRegTx::LEGACY_BLS_VERSION;
+    else
+        ptx.nVersion = llmq::utils::IsBasicBLSSchemeActive(::ChainActive().Tip()) ? CProUpRegTx::BASIC_BLS_VERSION : CProUpRegTx::LEGACY_BLS_VERSION;
     ptx.proTxHash = ParseHashV(request.params[0], "proTxHash");
 
     auto dmn = deterministicMNManager->GetListAtChainTip().GetMN(ptx.proTxHash);
@@ -819,6 +847,16 @@ static UniValue protx_update_registrar(const JSONRPCRequest& request)
     return SignAndSendSpecialTx(request, tx);
 }
 
+static UniValue protx_update_registrar(const JSONRPCRequest& request)
+{
+    return protx_update_registrar_wrapper(request, false);
+}
+
+static UniValue protx_update_registrar_legacy(const JSONRPCRequest& request)
+{
+    return protx_update_registrar_wrapper(request, true);
+}
+
 static void protx_revoke_help(const JSONRPCRequest& request)
 {
     RPCHelpMan{"protx revoke",
@@ -842,7 +880,7 @@ static void protx_revoke_help(const JSONRPCRequest& request)
     }.Check(request);
 }
 
-static UniValue protx_revoke(const JSONRPCRequest& request)
+static UniValue protx_revoke_wrapper(const JSONRPCRequest& request, const bool specific_legacy_bls_scheme)
 {
     protx_revoke_help(request);
 
@@ -853,10 +891,13 @@ static UniValue protx_revoke(const JSONRPCRequest& request)
     EnsureWalletIsUnlocked(pwallet);
 
     CProUpRevTx ptx;
-    ptx.nVersion = llmq::utils::IsBasicBLSSchemeActive(::ChainActive().Tip()) ? CProUpRevTx::BASIC_BLS_VERSION : CProUpRevTx::LEGACY_BLS_VERSION;
+    if (specific_legacy_bls_scheme)
+        ptx.nVersion = CProUpRevTx::LEGACY_BLS_VERSION;
+    else
+        ptx.nVersion = llmq::utils::IsBasicBLSSchemeActive(::ChainActive().Tip()) ? CProUpRevTx::BASIC_BLS_VERSION : CProUpRevTx::LEGACY_BLS_VERSION;
     ptx.proTxHash = ParseHashV(request.params[0], "proTxHash");
 
-    CBLSSecretKey keyOperator = ParseBLSSecretKey(request.params[1].get_str(), "operatorKey");
+    CBLSSecretKey keyOperator = ParseBLSSecretKey(request.params[1].get_str(), "operatorKey", specific_legacy_bls_scheme);
 
     if (!request.params[2].isNull()) {
         int32_t nReason = ParseInt32V(request.params[2], "reason");
@@ -902,6 +943,16 @@ static UniValue protx_revoke(const JSONRPCRequest& request)
     SetTxPayload(tx, ptx);
 
     return SignAndSendSpecialTx(request, tx);
+}
+
+static UniValue protx_revoke(const JSONRPCRequest& request)
+{
+    return protx_revoke_wrapper(request, false);
+}
+
+static UniValue protx_revoke_legacy(const JSONRPCRequest& request)
+{
+    return protx_revoke_wrapper(request, true);
 }
 #endif//ENABLE_WALLET
 
@@ -1225,14 +1276,22 @@ static UniValue protx(const JSONRPCRequest& request)
 #ifdef ENABLE_WALLET
     if (command == "protxregister" || command == "protxregister_fund" || command == "protxregister_prepare") {
         return protx_register(new_request);
+    } else if (command == "protxregister_legacy" || command == "protxregister_fund_legacy" || command == "protxregister_prepare_legacy") {
+        return protx_register_legacy(new_request);
     } else if (command == "protxregister_submit") {
         return protx_register_submit(new_request);
     } else if (command == "protxupdate_service") {
         return protx_update_service(new_request);
+    } else if (command == "protxupdate_service_legacy") {
+        return protx_update_service_legacy(new_request);
     } else if (command == "protxupdate_registrar") {
         return protx_update_registrar(new_request);
+    } else if (command == "protxupdate_registrar_legacy") {
+        return protx_update_registrar_legacy(new_request);
     } else if (command == "protxrevoke") {
         return protx_revoke(new_request);
+    } else if (command == "protxrevoke_legacy") {
+        return protx_revoke_legacy(new_request);
     } else
 #endif
     if (command == "protxlist") {
