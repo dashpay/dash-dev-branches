@@ -15,23 +15,30 @@
 #include <map>
 
 class CBlockIndex;
+namespace Consensus
+{
+    class Params;
+}
 
 class CCreditPoolManager
 {
 private:
     CBlockIndex* pindexPrev;
 
-    CAmount totalLocked;
+    CAmount prevLocked{0};
+    CAmount sessionLimit{0};
+    CAmount sessionLocked{0};
+    CAmount sessionUnlocked{0};
 
     bool lock(const CTransaction& tx, CValidationState& state);
 
     bool unlock(const CTransaction& tx, CValidationState& state);
 
+    static constexpr int LimitBlocksToTrace = 576;
+    static constexpr CAmount LimitAmountLow = 100 * COIN;
+    static constexpr CAmount LimitAmountHigh = 1000 * COIN;
 public:
-    CCreditPoolManager(CBlockIndex* pindexPrev, CAmount totalLocked = 0)
-    : pindexPrev(pindexPrev)
-    , totalLocked(totalLocked)
-    {}
+    CCreditPoolManager(CBlockIndex* pindexPrev, const Consensus::Params& consensusParams);
 
     ~CCreditPoolManager() = default;
 

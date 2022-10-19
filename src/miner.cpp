@@ -109,22 +109,6 @@ void BlockAssembler::resetBlock()
     nFees = 0;
 }
 
-static CAmount GetCbForBlock(const CBlockIndex* block_index, const Consensus::Params& consensusParams) {
-    assert(block_index);
-    CBlock block;
-    if (!ReadBlockFromDisk(block, block_index, consensusParams)) {
-        throw std::runtime_error("failed-getcbforblock-read");
-    }
-    if (block.vtx.size() < 1 || block.vtx[0]->vExtraPayload.empty())  {
-        return 0;
-    }
-    CCbTx cbTx;
-    if (!GetTxPayload(block.vtx[0]->vExtraPayload, cbTx)) {
-        throw std::runtime_error("failed-getcbforblock-cbtx-payload");
-    }
-    return cbTx.assetLockedAmount;
-}
-
 std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(CChainState& chainstate, const CScript& scriptPubKeyIn)
 {
     int64_t nTimeStart = GetTimeMicros();
@@ -187,7 +171,7 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(CChainState& chai
 
     std::optional<CCreditPoolManager> creditPoolManager;
     if (fV20Active_context) {
-        creditPoolManager.emplace(pindexPrev, GetCbForBlock(pindexPrev, chainparams.GetConsensus()));
+        creditPoolManager.emplace(pindexPrev, chainparams.GetConsensus());
     }
     addPackageTxs(nPackagesSelected, nDescendantsUpdated, creditPoolManager);
 

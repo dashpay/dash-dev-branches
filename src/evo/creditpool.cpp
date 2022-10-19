@@ -5,20 +5,117 @@
 #include <evo/creditpool.h>
 
 #include <evo/assetlocktx.h>
+#include <evo/cbtx.h>
 
+#include <saltedhasher.h>
+#include <unordered_lru_cache.h>
+#include <chain.h>
 #include <logging.h>
+#include <util/validation.h>
+#include <validation.h>
 
 #include <exception>
 #include <memory>
 
-static CAmount getLockedAmount(const CTransaction& tx) {
-    for (const CTxOut& txout : tx.vout) {
-        const CScript& script = txout.scriptPubKey;
-        if (script.empty() || script[0] != OP_RETURN) continue;
-
-        return txout.nValue;
+static bool getAmountToUnlock(const CTransaction& tx, CAmount& toUnlock, CValidationState& state) {
+    CAssetUnlockPayload assetUnlockTx;
+    if (!GetTxPayload(tx, assetUnlockTx)) {
+        return state.Invalid(ValidationInvalidReason::CONSENSUS, false, REJECT_INVALID, "failed-creditpool-unlock-payload");
     }
-    throw std::runtime_error("Never should happen: Asset Lock without OP_RETURN");
+
+    toUnlock = assetUnlockTx.getFee();
+    for (const CTxOut& txout : tx.vout) {
+        if (txout.nValue < 0) {
+            return state.Invalid(ValidationInvalidReason::CONSENSUS, false, REJECT_INVALID, "failed-creditpool-unlock-negative-amount");
+        }
+        toUnlock += txout.nValue;
+    }
+    return true;
+}
+
+namespace {
+CCriticalSection cs_cache;
+
+struct CCreditPool {
+    CAmount locked;
+    CAmount latelyUnlocked;
+};
+} // anonymous namespace
+
+static CCreditPool GetCbForBlock(const CBlockIndex* block_index, const Consensus::Params& consensusParams, size_t tailLength) {
+    if (block_index == nullptr || tailLength == 0) return {0, 0};
+
+    // recursively collect tail of blocks
+    CCreditPool prev = GetCbForBlock(block_index->pprev, consensusParams, tailLength - 1);
+
+    uint256 block_hash = block_index->GetBlockHash();
+
+    constexpr size_t CreditPoolCacheSize = 1000;
+    static unordered_lru_cache<uint256, CCreditPool, StaticSaltedHasher> creditPoolCache(CreditPoolCacheSize) GUARDED_BY(cs_cache);
+
+    CCreditPool pool;
+    bool cached = false;
+    {
+        LOCK(cs_cache);
+        cached = creditPoolCache.get(block_hash, pool);
+    }
+    if (!cached) {
+        CBlock block;
+        if (!ReadBlockFromDisk(block, block_index, consensusParams)) {
+            throw std::runtime_error("failed-getcbforblock-read");
+        }
+        if (block.vtx.size() < 1 || block.vtx[0]->vExtraPayload.empty())  {
+            return prev;
+        }
+        CCbTx cbTx;
+        if (!GetTxPayload(block.vtx[0]->vExtraPayload, cbTx)) {
+            throw std::runtime_error("failed-getcbforblock-cbtx-payload");
+        }
+
+        CAmount blockUnlocked{0};
+        for (CTransactionRef tx : block.vtx) {
+            if (tx->nVersion != 3 || tx->nType != TRANSACTION_ASSET_UNLOCK) continue;
+
+            CAmount unlocked{0};
+            CValidationState state;
+            if (!getAmountToUnlock(*tx, unlocked, state)) {
+                throw std::runtime_error(strprintf("%s: GetCbForBlock failed: %s", __func__, FormatStateMessage(state)));
+            }
+            blockUnlocked += unlocked;
+        }
+
+        pool = CCreditPool{cbTx.assetLockedAmount, blockUnlocked};
+
+        LOCK(cs_cache);
+        creditPoolCache.insert(block_hash, pool);
+    }
+
+    return {pool.locked, pool.latelyUnlocked + prev.latelyUnlocked};
+}
+
+CCreditPoolManager::CCreditPoolManager(CBlockIndex* pindexPrev, const Consensus::Params& consensusParams)
+: pindexPrev(pindexPrev)
+{
+    CCreditPool creditPoolCb = GetCbForBlock(pindexPrev, consensusParams, LimitBlocksToTrace);
+
+    this->prevLocked = creditPoolCb.locked;
+    this->sessionLimit = this->prevLocked;
+    CAmount latelyUnlocked = creditPoolCb.latelyUnlocked;
+
+    // # max(100, min(.10 * assetlockpool, 1000))
+    if ((sessionLimit + latelyUnlocked > (prevLocked + latelyUnlocked) / 10) && (sessionLimit + latelyUnlocked > LimitAmountLow)) {
+        sessionLimit = std::max<CAmount>(0, (latelyUnlocked + prevLocked) / 10 - latelyUnlocked);
+        if (sessionLimit > prevLocked) sessionLimit = prevLocked;
+    }
+    if (sessionLimit + latelyUnlocked > LimitAmountHigh) {
+        sessionLimit = LimitAmountHigh - latelyUnlocked;
+    }
+
+    if (prevLocked || latelyUnlocked || sessionLimit) {
+        LogPrintf("CreditPoolManager init on height %d: %d.%08d %d.%08d limited by %d.%08d\n", pindexPrev->nHeight, prevLocked / COIN, prevLocked % COIN,
+               latelyUnlocked / COIN, latelyUnlocked % COIN,
+               sessionLimit / COIN, sessionLimit % COIN);
+    }
 }
 
 bool CCreditPoolManager::lock(const CTransaction& tx, CValidationState& state)
@@ -28,39 +125,30 @@ bool CCreditPoolManager::lock(const CTransaction& tx, CValidationState& state)
         return state.Invalid(ValidationInvalidReason::CONSENSUS, false, REJECT_INVALID, "failed-creditpool-lock-payload");
     }
 
-    totalLocked += getLockedAmount(tx);
-
-    return true;
-}
-
-static bool getAmountToUnlock(const CTransaction& tx, CAmount fee, CAmount& txUnlocked) {
-    txUnlocked = fee;
     for (const CTxOut& txout : tx.vout) {
-        if (txout.nValue < 0) return false;
-        txUnlocked += txout.nValue;
+        const CScript& script = txout.scriptPubKey;
+        if (script.empty() || script[0] != OP_RETURN) continue;
+
+        sessionLocked += txout.nValue;
+        return true;
     }
 
-    return true;
+    return state.Invalid(ValidationInvalidReason::CONSENSUS, false, REJECT_INVALID, "failed-creditpool-lock-invalid");
 }
 
 bool CCreditPoolManager::unlock(const CTransaction& tx, CValidationState& state)
 {
-    CAssetUnlockPayload assetUnlockTx;
-    if (!GetTxPayload(tx, assetUnlockTx)) {
-        return state.Invalid(ValidationInvalidReason::CONSENSUS, false, REJECT_INVALID, "failed-creditpool-unlock-payload");
-    }
-    CAmount toUnlock;
-    if (!getAmountToUnlock(tx, assetUnlockTx.getFee(), toUnlock)) {
-        return state.Invalid(ValidationInvalidReason::CONSENSUS, false, REJECT_INVALID, "failed-creditpool-unlock-amount");
+    CAmount toUnlock{0};
+    if (!getAmountToUnlock(tx, toUnlock, state)) {
+        // state is set up inside getAmountToUnlock
+        return false;
     }
 
-    // For now there's no proper limits of withdrawal
-    CAmount limit = std::min(totalLocked, 10'000 * COIN);
-    if (toUnlock > limit) {
+    if (sessionUnlocked + toUnlock > sessionLimit ) {
         return state.Invalid(ValidationInvalidReason::CONSENSUS, false, REJECT_INVALID, "failed-creditpool-unlock-too-much");
     }
 
-    totalLocked -= toUnlock;
+    sessionUnlocked += toUnlock;
     return true;
 }
 
@@ -90,5 +178,5 @@ bool CCreditPoolManager::processTransaction(const CTransaction& tx, CValidationS
 
 CAmount CCreditPoolManager::getTotalLocked() const
 {
-    return totalLocked;
+    return prevLocked + sessionLocked - sessionUnlocked;
 }
