@@ -168,7 +168,7 @@ bool CGovernanceObject::ProcessVote(const CGovernanceVote& vote, CGovernanceExce
 
     int64_t nNow = GetAdjustedTime();
     int64_t nVoteTimeUpdate = voteInstanceRef.nTime;
-    if (governance.AreRateChecksEnabled()) {
+    if (governance->AreRateChecksEnabled()) {
         int64_t nTimeDelta = nNow - voteInstanceRef.nTime;
         if (nTimeDelta < GOVERNANCE_UPDATE_MIN) {
             std::ostringstream ostr;
@@ -194,7 +194,7 @@ bool CGovernanceObject::ProcessVote(const CGovernanceVote& vote, CGovernanceExce
              << ", vote hash = " << vote.GetHash().ToString();
         LogPrintf("%s\n", ostr.str());
         exception = CGovernanceException(ostr.str(), GOVERNANCE_EXCEPTION_PERMANENT_ERROR, 20);
-        governance.AddInvalidVote(vote);
+        governance->AddInvalidVote(vote);
         return false;
     }
 
@@ -264,7 +264,7 @@ std::set<uint256> CGovernanceObject::RemoveInvalidVotes(const COutPoint& mnOutpo
     }
 
     std::string removedStr;
-    for (auto& h : removedVotes) {
+    for (const auto& h : removedVotes) {
         removedStr += strprintf("  %s\n", h.ToString());
     }
     LogPrintf("CGovernanceObject::%s -- Removed %d invalid votes for %s from MN %s:\n%s", __func__, removedVotes.size(), nParentHash.ToString(), mnOutpoint.ToString(), removedStr); /* Continued */
@@ -672,7 +672,7 @@ bool CGovernanceObject::GetCurrentMNVotes(const COutPoint& mnCollateralOutpoint,
 void CGovernanceObject::Relay(CConnman& connman) const
 {
     // Do not relay until fully synced
-    if (!masternodeSync.IsSynced()) {
+    if (!masternodeSync->IsSynced()) {
         LogPrint(BCLog::GOBJECT, "CGovernanceObject::Relay -- won't relay until fully synced\n");
         return;
     }

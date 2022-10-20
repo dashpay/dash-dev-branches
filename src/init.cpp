@@ -82,12 +82,15 @@
 
 #include <evo/deterministicmns.h>
 #include <llmq/blockprocessor.h>
+#include <llmq/chainlocks.h>
 #include <llmq/init.h>
+#include <llmq/instantsend.h>
 #include <llmq/quorums.h>
 #include <llmq/dkgsessionmgr.h>
 #include <llmq/signing.h>
 #include <llmq/snapshot.h>
 #include <llmq/utils.h>
+#include <llmq/signing_shares.h>
 
 #include <statsd_client.h>
 
@@ -231,6 +234,11 @@ void PrepareShutdown(NodeContext& node)
     StopHTTPServer();
     llmq::StopLLMQSystem();
 
+    ::coinJoinServer.reset();
+#ifdef ENABLE_WALLET
+    ::coinJoinClientQueueManager.reset();
+#endif // ENABLE_WALLET
+
     // fRPCInWarmup should be `false` if we completed the loading sequence
     // before a shutdown request was received
     std::string statusmessage;
@@ -266,12 +274,18 @@ void PrepareShutdown(NodeContext& node)
         CFlatDB<CNetFulfilledRequestManager> flatdb4("netfulfilled.dat", "magicFulfilledCache");
         flatdb4.Dump(netfulfilledman);
         CFlatDB<CSporkManager> flatdb6("sporks.dat", "magicSporkCache");
-        flatdb6.Dump(sporkManager);
+        flatdb6.Dump(*::sporkManager);
         if (!fDisableGovernance) {
             CFlatDB<CGovernanceManager> flatdb3("governance.dat", "magicGovernanceCache");
-            flatdb3.Dump(governance);
+            flatdb3.Dump(*::governance);
         }
     }
+
+    // After related databases and caches have been flushed, destroy pointers
+    // and reset all to nullptr.
+    ::masternodeSync.reset();
+    ::governance.reset();
+    ::sporkManager.reset();
 
     // After the threads that potentially access these pointers have been stopped,
     // destruct and reset all to nullptr.
@@ -355,7 +369,8 @@ void PrepareShutdown(NodeContext& node)
         pdsNotificationInterface = nullptr;
     }
     if (fMasternodeMode) {
-        UnregisterValidationInterface(activeMasternodeManager);
+        UnregisterValidationInterface(activeMasternodeManager.get());
+        activeMasternodeManager.reset();
     }
 
     {
@@ -509,7 +524,7 @@ void SetupServerArgs(NodeContext& node)
     argsman.AddArg("-dbcache=<n>", strprintf("Maximum database cache size <n> MiB (%d to %d, default: %d). In addition, unused mempool memory is shared for this cache (see -maxmempool).", nMinDbCache, nMaxDbCache, nDefaultDbCache), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-debuglogfile=<file>", strprintf("Specify location of debug log file. Relative paths will be prefixed by a net-specific datadir location. (-nodebuglogfile to disable; default: %s)", DEFAULT_DEBUGLOGFILE), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-includeconf=<file>", "Specify additional configuration file, relative to the -datadir path (only useable from configuration file, not command line)", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
-    argsman.AddArg("-loadblock=<file>", "Imports blocks from external blk000??.dat file on startup", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
+    argsman.AddArg("-loadblock=<file>", "Imports blocks from external file on startup", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-maxmempool=<n>", strprintf("Keep the transaction memory pool below <n> megabytes (default: %u)", DEFAULT_MAX_MEMPOOL_SIZE), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-maxorphantxsize=<n>", strprintf("Maximum total size of all orphan transactions in megabytes (default: %u)", DEFAULT_MAX_ORPHAN_TRANSACTIONS_SIZE), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-maxrecsigsage=<n>", strprintf("Number of seconds to keep LLMQ recovery sigs (default: %u)", llmq::DEFAULT_MAX_RECOVERED_SIGS_AGE), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
@@ -900,22 +915,6 @@ static void ThreadImport(ChainstateManager& chainman, std::vector<fs::path> vImp
         LoadGenesisBlock(chainparams);
     }
 
-    // hardcoded $DATADIR/bootstrap.dat
-    fs::path pathBootstrap = GetDataDir() / "bootstrap.dat";
-    if (fs::exists(pathBootstrap)) {
-        FILE *file = fsbridge::fopen(pathBootstrap, "rb");
-        if (file) {
-            fs::path pathBootstrapOld = GetDataDir() / "bootstrap.dat.old";
-            LogPrintf("Importing bootstrap.dat...\n");
-            LoadExternalBlockFile(chainparams, file);
-            if (!RenameOver(pathBootstrap, pathBootstrapOld)) {
-                throw std::runtime_error("Rename failed");
-            }
-        } else {
-            LogPrintf("Warning: Could not open bootstrap file %s\n", pathBootstrap.string());
-        }
-    }
-
     // -loadblock=
     for (const fs::path& path : vImportFiles) {
         FILE *file = fsbridge::fopen(path, "rb");
@@ -1215,7 +1214,7 @@ std::set<BlockFilterType> g_enabled_filter_types;
     std::terminate();
 };
 
-bool AppInitBasicSetup(ArgsManager& args)
+bool AppInitBasicSetup(const ArgsManager& args)
 {
     // ********************************************************* Step 1: setup
 #ifdef _MSC_VER
@@ -1693,30 +1692,6 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
         StartScriptCheckWorkerThreads(script_threads);
     }
 
-    std::vector<std::string> vSporkAddresses;
-    if (args.IsArgSet("-sporkaddr")) {
-        vSporkAddresses = args.GetArgs("-sporkaddr");
-    } else {
-        vSporkAddresses = Params().SporkAddresses();
-    }
-    for (const auto& address: vSporkAddresses) {
-        if (!sporkManager.SetSporkAddress(address)) {
-            return InitError(_("Invalid spork address specified with -sporkaddr"));
-        }
-    }
-
-    int minsporkkeys = args.GetArg("-minsporkkeys", Params().MinSporkKeys());
-    if (!sporkManager.SetMinSporkKeys(minsporkkeys)) {
-        return InitError(_("Invalid minimum number of spork signers specified with -minsporkkeys"));
-    }
-
-
-    if (args.IsArgSet("-sporkkey")) { // spork priv key
-        if (!sporkManager.SetPrivKey(args.GetArg("-sporkkey", ""))) {
-            return InitError(_("Unable to sign spork message, wrong key?"));
-        }
-    }
-
     assert(activeMasternodeInfo.blsKeyOperator == nullptr);
     assert(activeMasternodeInfo.blsPubKeyOperator == nullptr);
     fMasternodeMode = false;
@@ -1805,8 +1780,40 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
     node.chainman = &g_chainman;
     ChainstateManager& chainman = *Assert(node.chainman);
 
-    node.peer_logic.reset(new PeerLogicValidation(node.connman.get(), node.banman.get(), *node.scheduler, chainman, *node.mempool, args.GetBoolArg("-enablebip61", DEFAULT_ENABLE_BIP61)));
+    node.peer_logic.reset(new PeerLogicValidation(
+        node.connman.get(), node.banman.get(), *node.scheduler, chainman, *node.mempool, llmq::quorumBlockProcessor,
+        llmq::quorumDKGSessionManager, llmq::quorumManager, llmq::quorumSigSharesManager, llmq::quorumSigningManager,
+        llmq::chainLocksHandler, llmq::quorumInstantSendManager, args.GetBoolArg("-enablebip61", DEFAULT_ENABLE_BIP61))
+    );
     RegisterValidationInterface(node.peer_logic.get());
+
+    ::governance = std::make_unique<CGovernanceManager>();
+    assert(!::sporkManager);
+    ::sporkManager = std::make_unique<CSporkManager>();
+
+    std::vector<std::string> vSporkAddresses;
+    if (args.IsArgSet("-sporkaddr")) {
+        vSporkAddresses = args.GetArgs("-sporkaddr");
+    } else {
+        vSporkAddresses = Params().SporkAddresses();
+    }
+    for (const auto& address: vSporkAddresses) {
+        if (!::sporkManager->SetSporkAddress(address)) {
+            return InitError(_("Invalid spork address specified with -sporkaddr"));
+        }
+    }
+
+    int minsporkkeys = args.GetArg("-minsporkkeys", Params().MinSporkKeys());
+    if (!::sporkManager->SetMinSporkKeys(minsporkkeys)) {
+        return InitError(_("Invalid minimum number of spork signers specified with -minsporkkeys"));
+    }
+
+
+    if (args.IsArgSet("-sporkkey")) { // spork priv key
+        if (!::sporkManager->SetPrivKey(args.GetArg("-sporkkey", ""))) {
+            return InitError(_("Unable to sign spork message, wrong key?"));
+        }
+    }
 
     // sanitize comments per BIP-0014, format user agent and check total size
     std::vector<std::string> uacomments;
@@ -1852,7 +1859,7 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
     SetReachable(NET_ONION, false);
     if (proxyArg != "" && proxyArg != "0") {
         CService proxyAddr;
-        if (!Lookup(proxyArg.c_str(), proxyAddr, 9050, fNameLookup)) {
+        if (!Lookup(proxyArg, proxyAddr, 9050, fNameLookup)) {
             return InitError(strprintf(_("Invalid -proxy address or hostname: '%s'"), proxyArg));
         }
 
@@ -1876,7 +1883,7 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
             SetReachable(NET_ONION, false);
         } else {
             CService onionProxy;
-            if (!Lookup(onionArg.c_str(), onionProxy, 9050, fNameLookup)) {
+            if (!Lookup(onionArg, onionProxy, 9050, fNameLookup)) {
                 return InitError(strprintf(_("Invalid -onion address or hostname: '%s'"), onionArg));
             }
             proxyType addrOnion = proxyType(onionProxy, proxyRandomize);
@@ -1894,7 +1901,7 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
 
     for (const std::string& strAddr : args.GetArgs("-externalip")) {
         CService addrLocal;
-        if (Lookup(strAddr.c_str(), addrLocal, GetListenPort(), fNameLookup) && addrLocal.IsValid())
+        if (Lookup(strAddr, addrLocal, GetListenPort(), fNameLookup) && addrLocal.IsValid())
             AddLocal(addrLocal, LOCAL_MANUAL);
         else
             return InitError(ResolveErrMsg("externalip", strAddr));
@@ -1933,13 +1940,16 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
     }
 #endif
 
-    pdsNotificationInterface = new CDSNotificationInterface(*node.connman);
+    pdsNotificationInterface = new CDSNotificationInterface(
+        *node.connman, ::masternodeSync, ::deterministicMNManager, ::governance, llmq::chainLocksHandler,
+        llmq::quorumInstantSendManager, llmq::quorumManager, llmq::quorumDKGSessionManager
+    );
     RegisterValidationInterface(pdsNotificationInterface);
 
     if (fMasternodeMode) {
         // Create and register activeMasternodeManager, will init later in ThreadImport
-        activeMasternodeManager = new CActiveMasternodeManager(*node.connman);
-        RegisterValidationInterface(activeMasternodeManager);
+        activeMasternodeManager = std::make_unique<CActiveMasternodeManager>(*node.connman);
+        RegisterValidationInterface(activeMasternodeManager.get());
     }
 
     uint64_t nMaxOutboundLimit = 0; //unlimited unless -maxuploadtarget is set
@@ -1953,7 +1963,7 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
 
     uiInterface.InitMessage(_("Loading sporks cache...").translated);
     CFlatDB<CSporkManager> flatdb6("sporks.dat", "magicSporkCache");
-    if (!flatdb6.Load(sporkManager)) {
+    if (!flatdb6.Load(*::sporkManager)) {
         return InitError(strprintf(_("Failed to load sporks cache from %s"), (GetDataDir() / "sporks.dat").string()));
     }
 
@@ -1982,7 +1992,7 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
     nTotalCache -= nCoinDBCache;
     int64_t nCoinCacheUsage = nTotalCache; // the rest goes to in-memory cache
     int64_t nMempoolSizeMax = args.GetArg("-maxmempool", DEFAULT_MAX_MEMPOOL_SIZE) * 1000000;
-    int64_t nEvoDbCache = 1024 * 1024 * 16; // TODO
+    int64_t nEvoDbCache = 1024 * 1024 * 64; // TODO
     LogPrintf("Cache configuration:\n");
     LogPrintf("* Using %.1f MiB for block index database\n", nBlockTreeDBCache * (1.0 / 1024 / 1024));
     if (args.GetBoolArg("-txindex", DEFAULT_TXINDEX)) {
@@ -2012,7 +2022,7 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
 
             try {
                 LOCK(cs_main);
-                chainman.InitializeChainstate();
+                chainman.InitializeChainstate(llmq::chainLocksHandler, llmq::quorumInstantSendManager, llmq::quorumBlockProcessor);
                 chainman.m_total_coinstip_cache = nCoinCacheUsage;
                 chainman.m_total_coinsdb_cache = nCoinDBCache;
 
@@ -2031,7 +2041,7 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
                 llmq::quorumSnapshotManager.reset();
                 llmq::quorumSnapshotManager.reset(new llmq::CQuorumSnapshotManager(*evoDb));
 
-                llmq::InitLLMQSystem(*evoDb, *node.mempool, *node.connman, false, fReset || fReindexChainState);
+                llmq::InitLLMQSystem(*evoDb, *node.mempool, *node.connman, *::sporkManager, false, fReset || fReindexChainState);
 
                 if (fReset) {
                     pblocktree->WriteReindexing(true);
@@ -2312,6 +2322,12 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
 
     // ********************************************************* Step 10a: Setup CoinJoin
 
+    ::masternodeSync = std::make_unique<CMasternodeSync>(*node.connman);
+    ::coinJoinServer = std::make_unique<CCoinJoinServer>(*node.connman);
+#ifdef ENABLE_WALLET
+    ::coinJoinClientQueueManager = std::make_unique<CCoinJoinClientQueueManager>(*node.connman);
+#endif // ENABLE_WALLET
+
     g_wallet_init_interface.InitCoinJoinSettings();
 
     // ********************************************************* Step 10b: Load cache data
@@ -2340,10 +2356,10 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
     uiInterface.InitMessage(_("Loading governance cache...").translated);
     CFlatDB<CGovernanceManager> flatdb3(strDBName, "magicGovernanceCache");
     if (fLoadCacheFiles && !fDisableGovernance) {
-        if(!flatdb3.Load(governance)) {
+        if(!flatdb3.Load(*::governance)) {
             return InitError(strprintf(_("Failed to load governance cache from %s"), (pathDB / strDBName).string()));
         }
-        governance.InitOnLoad();
+        ::governance->InitOnLoad();
     } else {
         CGovernanceManager governanceTmp;
         if(!flatdb3.Dump(governanceTmp)) {
@@ -2368,16 +2384,16 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
     // ********************************************************* Step 10b: schedule Dash-specific tasks
 
     node.scheduler->scheduleEvery(std::bind(&CNetFulfilledRequestManager::DoMaintenance, std::ref(netfulfilledman)), 60 * 1000);
-    node.scheduler->scheduleEvery(std::bind(&CMasternodeSync::DoMaintenance, std::ref(masternodeSync), std::ref(*node.connman)), 1 * 1000);
+    node.scheduler->scheduleEvery(std::bind(&CMasternodeSync::DoMaintenance, std::ref(*::masternodeSync)), 1 * 1000);
     node.scheduler->scheduleEvery(std::bind(&CMasternodeUtils::DoMaintenance, std::ref(*node.connman)), 60 * 1000);
     node.scheduler->scheduleEvery(std::bind(&CDeterministicMNManager::DoMaintenance, std::ref(*deterministicMNManager)), 10 * 1000);
 
     if (!fDisableGovernance) {
-        node.scheduler->scheduleEvery(std::bind(&CGovernanceManager::DoMaintenance, std::ref(governance), std::ref(*node.connman)), 60 * 5 * 1000);
+        node.scheduler->scheduleEvery(std::bind(&CGovernanceManager::DoMaintenance, std::ref(*::governance), std::ref(*node.connman)), 60 * 5 * 1000);
     }
 
     if (fMasternodeMode) {
-        node.scheduler->scheduleEvery(std::bind(&CCoinJoinServer::DoMaintenance, std::ref(coinJoinServer), std::ref(*node.connman)), 1 * 1000);
+        node.scheduler->scheduleEvery(std::bind(&CCoinJoinServer::DoMaintenance, std::ref(*::coinJoinServer)), 1 * 1000);
         node.scheduler->scheduleEvery(std::bind(&llmq::CDKGSessionManager::CleanupOldContributions, std::ref(*llmq::quorumDKGSessionManager)), 60 * 60 * 1000);
 #ifdef ENABLE_WALLET
     } else if(CCoinJoinClientOptions::IsEnabled()) {
@@ -2506,7 +2522,7 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
 
     for (const std::string& strBind : args.GetArgs("-bind")) {
         CService addrBind;
-        if (!Lookup(strBind.c_str(), addrBind, GetListenPort(), false)) {
+        if (!Lookup(strBind, addrBind, GetListenPort(), false)) {
             return InitError(ResolveErrMsg("bind", strBind));
         }
         connOptions.vBinds.push_back(addrBind);

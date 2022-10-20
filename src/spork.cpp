@@ -16,13 +16,13 @@
 #include <protocol.h>
 #include <script/standard.h>
 #include <timedata.h>
+#include <util/message.h> // for MESSAGE_MAGIC
 #include <util/ranges.h>
-#include <util/validation.h> // for strMessageMagic
 #include <validation.h>
 
 #include <string>
 
-CSporkManager sporkManager;
+std::unique_ptr<CSporkManager> sporkManager;
 
 bool CSporkManager::SporkValueIsActive(SporkId nSporkID, int64_t& nActiveValueRet) const
 {
@@ -422,7 +422,7 @@ bool CSporkMessage::GetSignerKeyID(CKeyID& retKeyidSporkSigner) const
     } else {
         std::string strMessage = std::to_string(nSporkID) + std::to_string(nValue) + std::to_string(nTimeSigned);
         CHashWriter ss(SER_GETHASH, 0);
-        ss << strMessageMagic;
+        ss << MESSAGE_MAGIC;
         ss << strMessage;
         if (!pubkeyFromSig.RecoverCompact(ss.GetHash(), vchSig)) {
             return false;

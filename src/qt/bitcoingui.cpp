@@ -401,7 +401,7 @@ void BitcoinGUI::createActions()
     openInfoAction = new QAction(tr("&Information"), this);
     openInfoAction->setStatusTip(tr("Show diagnostic information"));
     openRPCConsoleAction = new QAction(tr("&Debug console"), this);
-    openRPCConsoleAction->setStatusTip(tr("Open debugging console"));
+    openRPCConsoleAction->setStatusTip(tr("Open debugging and diagnostic console"));
     openGraphAction = new QAction(tr("&Network Monitor"), this);
     openGraphAction->setStatusTip(tr("Show network monitor"));
     openPeersAction = new QAction(tr("&Peers list"), this);
@@ -870,6 +870,11 @@ void BitcoinGUI::setWalletController(WalletController* wallet_controller)
     }
 }
 
+WalletController* BitcoinGUI::getWalletController()
+{
+    return m_wallet_controller;
+}
+
 void BitcoinGUI::addWallet(WalletModel* walletModel)
 {
     if (!walletFrame) return;
@@ -886,6 +891,10 @@ void BitcoinGUI::addWallet(WalletModel* walletModel)
 void BitcoinGUI::removeWallet(WalletModel* walletModel)
 {
     if (!walletFrame) return;
+
+    labelWalletHDStatusIcon->hide();
+    labelWalletEncryptionIcon->hide();
+
     int index = m_wallet_selector->findData(QVariant::fromValue(walletModel));
     m_wallet_selector->removeItem(index);
     if (m_wallet_selector->count() == 0) {
@@ -1339,8 +1348,10 @@ void BitcoinGUI::setNumBlocks(int count, const QDateTime& blockDate, const QStri
     // Disabling macOS App Nap on initial sync, disk, reindex operations and mixing.
     bool disableAppNap = !m_node.masternodeSync().isSynced();
 #ifdef ENABLE_WALLET
-    for (const auto& wallet : m_node.walletClient().getWallets()) {
-        disableAppNap |= wallet->coinJoin().isMixing();
+    if (enableWallet) {
+        for (const auto& wallet : m_node.walletClient().getWallets()) {
+            disableAppNap |= wallet->coinJoin().isMixing();
+        }
     }
 #endif // ENABLE_WALLET
     if (disableAppNap) {
@@ -1452,7 +1463,7 @@ void BitcoinGUI::setAdditionalDataSyncProgress(double nSyncProgress)
     if(!clientModel)
         return;
 
-    // If masternodeSync.Reset() has been called make sure status bar shows the correct information.
+    // If masternodeSync->Reset() has been called make sure status bar shows the correct information.
     if (nSyncProgress == -1) {
         setNumBlocks(m_node.getNumBlocks(), QDateTime::fromTime_t(m_node.getLastBlockTime()), QString::fromStdString(m_node.getLastBlockHash()), m_node.getVerificationProgress(), false);
         if (clientModel->getNumConnections()) {
@@ -1770,6 +1781,7 @@ void BitcoinGUI::setHDStatus(int hdEnabled)
     if (hdEnabled) {
         labelWalletHDStatusIcon->setPixmap(GUIUtil::getIcon("hd_enabled", GUIUtil::ThemedColor::GREEN).pixmap(STATUSBAR_ICONSIZE, STATUSBAR_ICONSIZE));
         labelWalletHDStatusIcon->setToolTip(tr("HD key generation is <b>enabled</b>"));
+        labelWalletHDStatusIcon->show();
     }
     labelWalletHDStatusIcon->setVisible(hdEnabled);
 }

@@ -40,7 +40,10 @@ import os
 
 from test_framework.test_framework import BitcoinTestFramework
 # from test_framework.mininode import P2PTxInvStore
-from test_framework.util import assert_equal, assert_raises_rpc_error, connect_nodes, disconnect_nodes, wait_until
+from test_framework.util import (
+    assert_equal,
+    assert_greater_than_or_equal, assert_raises_rpc_error,
+)
 
 
 class MempoolPersistTest(BitcoinTestFramework):
@@ -52,18 +55,13 @@ class MempoolPersistTest(BitcoinTestFramework):
         self.skip_if_no_wallet()
 
     def run_test(self):
-        chain_height = self.nodes[0].getblockcount()
-        assert_equal(chain_height, 200)
-
-        self.log.debug("Mine a single block to get out of IBD")
-        self.nodes[0].generate(1)
-        self.sync_all()
-
         self.log.debug("Send 5 transactions from node2 (to its own address)")
+        tx_creation_time_lower = self.mocktime
         for i in range(5):
             last_txid = self.nodes[2].sendtoaddress(self.nodes[2].getnewaddress(), Decimal("10"))
         node2_balance = self.nodes[2].getbalance()
         self.sync_all()
+        tx_creation_time_higher = self.mocktime
 
         self.log.debug("Verify that node0 and node1 have 5 transactions in their mempools")
         assert_equal(len(self.nodes[0].getrawmempool()), 5)
@@ -76,10 +74,14 @@ class MempoolPersistTest(BitcoinTestFramework):
         fees = self.nodes[0].getmempoolentry(txid=last_txid)['fees']
         assert_equal(fees['base'] + Decimal('0.00001000'), fees['modified'])
 
+        tx_creation_time = self.nodes[0].getmempoolentry(txid=last_txid)['time']
+        assert_greater_than_or_equal(tx_creation_time, tx_creation_time_lower)
+        assert_greater_than_or_equal(tx_creation_time_higher, tx_creation_time)
+
         # disconnect nodes & make a txn that remains in the unbroadcast set.
-        disconnect_nodes(self.nodes[0], 2)
+        self.disconnect_nodes(0, 2)
         self.nodes[0].sendtoaddress(self.nodes[2].getnewaddress(), Decimal("12"))
-        connect_nodes(self.nodes[0], 2)
+        self.connect_nodes(0, 2)
 
         self.log.debug("Stop-start the nodes. Verify that node0 has the transactions in its mempool and node1 does not. Verify that node2 calculates its balance correctly after loading wallet transactions.")
         self.stop_nodes()
@@ -88,8 +90,8 @@ class MempoolPersistTest(BitcoinTestFramework):
         self.start_node(1, extra_args=["-persistmempool=0"])
         self.start_node(0)
         self.start_node(2)
-        wait_until(lambda: self.nodes[0].getmempoolinfo()["loaded"], timeout=1)
-        wait_until(lambda: self.nodes[2].getmempoolinfo()["loaded"], timeout=1)
+        assert self.nodes[0].getmempoolinfo()["loaded"]  # start_node is blocking on the mempool being loaded
+        assert self.nodes[2].getmempoolinfo()["loaded"]
         assert_equal(len(self.nodes[0].getrawmempool()), 6)
         assert_equal(len(self.nodes[2].getrawmempool()), 5)
         # The others have loaded their mempool. If node_1 loaded anything, we'd probably notice by now:
@@ -99,6 +101,9 @@ class MempoolPersistTest(BitcoinTestFramework):
         fees = self.nodes[0].getmempoolentry(txid=last_txid)['fees']
         assert_equal(fees['base'] + Decimal('0.00001000'), fees['modified'])
 
+        self.log.debug('Verify time is loaded correctly')
+        assert_equal(tx_creation_time, self.nodes[0].getmempoolentry(txid=last_txid)['time'])
+
         # Verify accounting of mempool transactions after restart is correct
         self.nodes[2].syncwithvalidationinterfacequeue()  # Flush mempool to wallet
         assert_equal(node2_balance, self.nodes[2].getbalance())
@@ -107,13 +112,13 @@ class MempoolPersistTest(BitcoinTestFramework):
         self.log.debug("Stop-start node0 with -persistmempool=0. Verify that it doesn't load its mempool.dat file.")
         self.stop_nodes()
         self.start_node(0, extra_args=["-persistmempool=0", "-disablewallet"])
-        wait_until(lambda: self.nodes[0].getmempoolinfo()["loaded"])
+        assert self.nodes[0].getmempoolinfo()["loaded"]
         assert_equal(len(self.nodes[0].getrawmempool()), 0)
 
         self.log.debug("Stop-start node0. Verify that it has the transactions in its mempool.")
         self.stop_nodes()
         self.start_node(0)
-        wait_until(lambda: self.nodes[0].getmempoolinfo()["loaded"])
+        assert self.nodes[0].getmempoolinfo()["loaded"]
         assert_equal(len(self.nodes[0].getrawmempool()), 6)
 
         mempooldat0 = os.path.join(self.nodes[0].datadir, self.chain, 'mempool.dat')
@@ -127,7 +132,7 @@ class MempoolPersistTest(BitcoinTestFramework):
         os.rename(mempooldat0, mempooldat1)
         self.stop_nodes()
         self.start_node(1, extra_args=[])
-        wait_until(lambda: self.nodes[1].getmempoolinfo()["loaded"])
+        assert self.nodes[1].getmempoolinfo()["loaded"]
         assert_equal(len(self.nodes[1].getrawmempool()), 6)
 
         self.log.debug("Prevent dashd from writing mempool.dat to disk. Verify that `savemempool` fails")
@@ -148,7 +153,7 @@ class MempoolPersistTest(BitcoinTestFramework):
         node0.generate(1)
 
         # disconnect nodes to make a txn that remains in the unbroadcast set.
-        disconnect_nodes(node0, 1)
+        self.disconnect_nodes(0, 1)
         node0.sendtoaddress(self.nodes[1].getnewaddress(), Decimal("12"))
 
         # shutdown, then startup with wallet disabled

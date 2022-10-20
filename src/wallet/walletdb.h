@@ -92,7 +92,7 @@ public:
     int nVersion;
     int64_t nCreateTime; // 0 means unknown
     KeyOriginInfo key_origin; // Key origin info with path and fingerprint
-    bool has_key_origin = false; //< Whether the key_origin is useful
+    bool has_key_origin = false; //!< Whether the key_origin is useful
 
     CKeyMetadata()
     {
@@ -238,12 +238,6 @@ using KeyFilterFn = std::function<bool(const std::string&)>;
 
 //! Unserialize a given Key-Value pair and load it into the wallet
 bool ReadKeyValue(CWallet* pwallet, CDataStream& ssKey, CDataStream& ssValue, std::string& strType, std::string& strErr, const KeyFilterFn& filter_fn = nullptr);
-
-/** Return whether a wallet database is currently loaded. */
-bool IsWalletLoaded(const fs::path& wallet_path);
-
-/** Return object for accessing database at specified path. */
-std::unique_ptr<WalletDatabase> CreateWalletDatabase(const fs::path& path);
 
 /** Return object for accessing dummy database with no read/write capabilities. */
 std::unique_ptr<WalletDatabase> CreateDummyWalletDatabase();

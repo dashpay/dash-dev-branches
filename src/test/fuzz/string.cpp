@@ -11,6 +11,7 @@
 #include <rpc/server.h>
 #include <rpc/util.h>
 #include <script/descriptor.h>
+#include <script/script.h>
 #include <serialize.h>
 #include <streams.h>
 #include <test/fuzz/FuzzedDataProvider.h>
@@ -30,7 +31,7 @@
 #include <string>
 #include <vector>
 
-void test_one_input(const std::vector<uint8_t>& buffer)
+FUZZ_TARGET(string)
 {
     FuzzedDataProvider fuzzed_data_provider(buffer.data(), buffer.size());
     const std::string random_string_1 = fuzzed_data_provider.ConsumeRandomLengthString(32);
@@ -45,7 +46,8 @@ void test_one_input(const std::vector<uint8_t>& buffer)
     (void)CopyrightHolders(random_string_1, fuzzed_data_provider.ConsumeIntegral<unsigned int>(), fuzzed_data_provider.ConsumeIntegral<unsigned int>());
     FeeEstimateMode fee_estimate_mode;
     (void)FeeModeFromString(random_string_1, fee_estimate_mode);
-    (void)FormatParagraph(random_string_1, fuzzed_data_provider.ConsumeIntegralInRange<size_t>(0, 1000), fuzzed_data_provider.ConsumeIntegralInRange<size_t>(0, 1000));
+    const auto width{fuzzed_data_provider.ConsumeIntegralInRange<size_t>(1, 1000)};
+    (void)FormatParagraph(random_string_1, width, fuzzed_data_provider.ConsumeIntegralInRange<size_t>(0, width));
     (void)FormatSubVersion(random_string_1, fuzzed_data_provider.ConsumeIntegral<int>(), random_string_vector);
     (void)GetDescriptorChecksum(random_string_1);
     (void)HelpExampleCli(random_string_1, random_string_2);
@@ -84,6 +86,10 @@ void test_one_input(const std::vector<uint8_t>& buffer)
     (void)urlDecode(random_string_1);
     (void)ValidAsCString(random_string_1);
     (void)_(random_string_1.c_str());
+    try {
+        throw scriptnum_error{random_string_1};
+    } catch (const std::runtime_error&) {
+    }
 
     {
         CDataStream data_stream{SER_NETWORK, INIT_PROTO_VERSION};
@@ -109,5 +115,15 @@ void test_one_input(const std::vector<uint8_t>& buffer)
         data_stream >> deserialized_string;
         assert(data_stream.empty());
         assert(deserialized_string == random_string_1);
+    }
+    {
+        int64_t amount_out;
+        (void)ParseFixedPoint(random_string_1, fuzzed_data_provider.ConsumeIntegralInRange<int>(0, 1024), &amount_out);
+    }
+    {
+        (void)Untranslated(random_string_1);
+        const bilingual_str bs1{random_string_1, random_string_2};
+        const bilingual_str bs2{random_string_2, random_string_1};
+        (void)(bs1 + bs2);
     }
 }

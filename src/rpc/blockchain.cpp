@@ -47,8 +47,6 @@
 
 #include <univalue.h>
 
-#include <boost/thread/thread.hpp> // boost::thread::interrupt
-
 #include <mutex>
 #include <condition_variable>
 #include <merkleblock.h>
@@ -453,8 +451,6 @@ static UniValue getdifficulty(const JSONRPCRequest& request)
 
 static std::vector<RPCResult> MempoolEntryDescription() { return {
     RPCResult{RPCResult::Type::NUM, "vsize", "virtual transaction size. This can be different from actual serialized size for high-sigop transactions."},
-    RPCResult{RPCResult::Type::NUM, "size", "(DEPRECATED) same as vsize. Only returned if dashd is started with -deprecatedrpc=size. "
-            "size will be completely removed in v0.20."},
     RPCResult{RPCResult::Type::STR_AMOUNT, "fee", "transaction fee in " + CURRENCY_UNIT + " (DEPRECATED)"},
     RPCResult{RPCResult::Type::STR_AMOUNT, "modifiedfee", "transaction fee with fee deltas used for mining priority (DEPRECATED)"},
     RPCResult{RPCResult::Type::NUM_TIME, "time", "local time transaction entered pool in " + UNIX_EPOCH_TIME},
@@ -491,10 +487,9 @@ static void entryToJSON(const CTxMemPool& pool, UniValue& info, const CTxMemPool
     info.pushKV("fees", fees);
 
     info.pushKV("vsize", (int)e.GetTxSize());
-    if (IsDeprecatedRPCEnabled("size")) info.pushKV("size", (int)e.GetTxSize());
     info.pushKV("fee", ValueFromAmount(e.GetFee()));
     info.pushKV("modifiedfee", ValueFromAmount(e.GetModifiedFee()));
-    info.pushKV("time", e.GetTime());
+    info.pushKV("time", count_seconds(e.GetTime()));
     info.pushKV("height", (int)e.GetHeight());
     info.pushKV("descendantcount", e.GetCountWithDescendants());
     info.pushKV("descendantsize", e.GetSizeWithDescendants());
@@ -1628,7 +1623,8 @@ static UniValue getchaintips(const JSONRPCRequest& request)
     "2.  \"headers-only\"          Not all blocks for this branch are available, but the headers are valid\n"
     "3.  \"valid-headers\"         All blocks are available for this branch, but they were never fully validated\n"
     "4.  \"valid-fork\"            This branch is not part of the active chain, but is fully validated\n"
-    "5.  \"active\"                This is the tip of the active main chain, which is certainly valid"},
+    "5.  \"active\"                This is the tip of the active main chain, which is certainly valid\n"
+    "6.  \"conflicting\"           This block or one of its ancestors is conflicting with ChainLocks."},
                 }}}},
         RPCExamples{
             HelpExampleCli("getchaintips", "")

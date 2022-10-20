@@ -103,6 +103,9 @@ fs::path GetConfigFile(const std::string& confPath);
 #ifdef WIN32
 fs::path GetSpecialFolderPath(int nFolder, bool fCreate = true);
 #endif
+#ifndef WIN32
+std::string ShellEscape(const std::string& arg);
+#endif
 #if HAVE_SYSTEM
 void runCommand(const std::string& strCommand);
 #endif
@@ -160,7 +163,7 @@ struct SectionInfo
 class ArgsManager
 {
 public:
-    enum Flags {
+    enum Flags : uint32_t {
         // Boolean options can accept negation syntax -noOPTION or -noOPTION=1
         ALLOW_BOOL = 0x01,
         ALLOW_INT = 0x02,

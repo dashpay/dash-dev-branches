@@ -33,7 +33,6 @@ class proxyType;
 struct bilingual_str;
 enum class SynchronizationState;
 struct CNodeStateStats;
-enum class WalletCreationStatus;
 struct NodeContext;
 
 namespace interfaces {
@@ -53,7 +52,7 @@ class GOV
 {
 public:
     virtual ~GOV() {}
-    virtual std::vector<CGovernanceObject> getAllNewerThan(int64_t nMoreThanTime) = 0;
+    virtual void getAllNewerThan(std::vector<CGovernanceObject> &objs, int64_t nMoreThanTime) = 0;
 };
 
 //! Interface for the src/llmq part of a dash node (dashd process).

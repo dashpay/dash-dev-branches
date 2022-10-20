@@ -23,9 +23,13 @@ class CConnman;
 class CBlockIndex;
 class CScheduler;
 class CTxMemPool;
+class CSporkManager;
 
 namespace llmq
 {
+class CInstantSendManager;
+class CSigningManager;
+class CSigSharesManager;
 
 class CChainLocksHandler : public CRecoveredSigsListener
 {
@@ -38,6 +42,9 @@ class CChainLocksHandler : public CRecoveredSigsListener
 private:
     CConnman& connman;
     CTxMemPool& mempool;
+    CSporkManager& spork_manager;
+    CSigningManager& sigman;
+    CSigSharesManager& shareman;
     std::unique_ptr<CScheduler> scheduler;
     std::unique_ptr<std::thread> scheduler_thread;
     mutable CCriticalSection cs;
@@ -70,7 +77,7 @@ private:
     int64_t lastCleanupTime GUARDED_BY(cs) {0};
 
 public:
-    explicit CChainLocksHandler(CTxMemPool& _mempool, CConnman& _connman);
+    explicit CChainLocksHandler(CTxMemPool& _mempool, CConnman& _connman, CSporkManager& sporkManager, CSigningManager& _sigman, CSigSharesManager& _shareman);
     ~CChainLocksHandler();
 
     void Start();
@@ -95,7 +102,7 @@ public:
     bool HasChainLock(int nHeight, const uint256& blockHash) const;
     bool HasConflictingChainLock(int nHeight, const uint256& blockHash) const;
 
-    bool IsTxSafeForMining(const uint256& txid) const;
+    bool IsTxSafeForMining(const CInstantSendManager& isman, const uint256& txid) const;
 
 private:
     // these require locks to be held already
@@ -107,9 +114,9 @@ private:
     void Cleanup();
 };
 
-extern CChainLocksHandler* chainLocksHandler;
+extern std::unique_ptr<CChainLocksHandler> chainLocksHandler;
 
-bool AreChainLocksEnabled();
+bool AreChainLocksEnabled(const CSporkManager& sporkManager);
 
 } // namespace llmq
 

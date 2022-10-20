@@ -91,6 +91,8 @@ class WalletDumpTest(BitcoinTestFramework):
         self.start_nodes()
 
     def run_test(self):
+        self.nodes[0].createwallet("dump")
+
         wallet_unenc_dump = os.path.join(self.nodes[0].datadir, "wallet.unencrypted.dump")
         wallet_enc_dump = os.path.join(self.nodes[0].datadir, "wallet.encrypted.dump")
 
@@ -122,7 +124,7 @@ class WalletDumpTest(BitcoinTestFramework):
 
         #encrypt wallet, restart, unlock and dump
         self.nodes[0].encryptwallet('test')
-        self.nodes[0].walletpassphrase('test', 30)
+        self.nodes[0].walletpassphrase('test', 300)
         # Should be a no-op:
         self.nodes[0].keypoolrefill()
         self.nodes[0].dumpwallet(wallet_enc_dump)
@@ -140,8 +142,8 @@ class WalletDumpTest(BitcoinTestFramework):
         assert_raises_rpc_error(-8, "already exists", lambda: self.nodes[0].dumpwallet(wallet_enc_dump))
 
         # Restart node with new wallet, and test importwallet
-        self.stop_node(0)
-        self.start_node(0, ['-wallet=w2'])
+        self.restart_node(0)
+        self.nodes[0].createwallet("w2")
 
         # Make sure the address is not IsMine before import
         result = self.nodes[0].getaddressinfo(multisig_addr)

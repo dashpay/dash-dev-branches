@@ -20,11 +20,11 @@
 #include <script/descriptor.h>
 #include <txmempool.h>
 #include <util/check.h>
+#include <util/message.h> // For MessageSign(), MessageVerify()
 #include <util/ref.h>
 #include <util/strencodings.h>
 #include <util/system.h>
 #include <validation.h>
-#include <util/validation.h>
 
 #include <masternode/sync.h>
 #include <spork.h>
@@ -91,25 +91,24 @@ static UniValue mnsync(const JSONRPCRequest& request)
 
     if(strMode == "status") {
         UniValue objStatus(UniValue::VOBJ);
-        objStatus.pushKV("AssetID", masternodeSync.GetAssetID());
-        objStatus.pushKV("AssetName", masternodeSync.GetAssetName());
-        objStatus.pushKV("AssetStartTime", masternodeSync.GetAssetStartTime());
-        objStatus.pushKV("Attempt", masternodeSync.GetAttempt());
-        objStatus.pushKV("IsBlockchainSynced", masternodeSync.IsBlockchainSynced());
-        objStatus.pushKV("IsSynced", masternodeSync.IsSynced());
+        objStatus.pushKV("AssetID", masternodeSync->GetAssetID());
+        objStatus.pushKV("AssetName", masternodeSync->GetAssetName());
+        objStatus.pushKV("AssetStartTime", masternodeSync->GetAssetStartTime());
+        objStatus.pushKV("Attempt", masternodeSync->GetAttempt());
+        objStatus.pushKV("IsBlockchainSynced", masternodeSync->IsBlockchainSynced());
+        objStatus.pushKV("IsSynced", masternodeSync->IsSynced());
         return objStatus;
     }
 
     if(strMode == "next")
     {
-        NodeContext& node = EnsureNodeContext(request.context);
-        masternodeSync.SwitchToNextAsset(*node.connman);
-        return "sync updated to " + masternodeSync.GetAssetName();
+        masternodeSync->SwitchToNextAsset();
+        return "sync updated to " + masternodeSync->GetAssetName();
     }
 
     if(strMode == "reset")
     {
-        masternodeSync.Reset(true);
+        masternodeSync->Reset(true);
         return "success";
     }
     return "failure";
@@ -149,13 +148,13 @@ static UniValue spork(const JSONRPCRequest& request)
     if (strCommand == "show") {
         UniValue ret(UniValue::VOBJ);
         for (const auto& sporkDef : sporkDefs) {
-            ret.pushKV(std::string(sporkDef.name), sporkManager.GetSporkValue(sporkDef.sporkId));
+            ret.pushKV(std::string(sporkDef.name), sporkManager->GetSporkValue(sporkDef.sporkId));
         }
         return ret;
     } else if(strCommand == "active"){
         UniValue ret(UniValue::VOBJ);
         for (const auto& sporkDef : sporkDefs) {
-            ret.pushKV(std::string(sporkDef.name), sporkManager.IsSporkActive(sporkDef.sporkId));
+            ret.pushKV(std::string(sporkDef.name), sporkManager->IsSporkActive(sporkDef.sporkId));
         }
         return ret;
     }
@@ -195,7 +194,7 @@ static UniValue sporkupdate(const JSONRPCRequest& request)
     int64_t nValue = request.params[1].get_int64();
 
     // broadcast new spork
-    if (sporkManager.UpdateSpork(nSporkID, nValue, *node.connman)) {
+    if (sporkManager->UpdateSpork(nSporkID, nValue, *node.connman)) {
         return "success";
     }
 
@@ -444,31 +443,21 @@ static UniValue verifymessage(const JSONRPCRequest& request)
     std::string strSign     = request.params[1].get_str();
     std::string strMessage  = request.params[2].get_str();
 
-    CTxDestination destination = DecodeDestination(strAddress);
-    if (!IsValidDestination(destination)) {
+    switch (MessageVerify(strAddress, strSign, strMessage)) {
+    case MessageVerificationResult::ERR_INVALID_ADDRESS:
         throw JSONRPCError(RPC_TYPE_ERROR, "Invalid address");
-    }
-
-    const CKeyID *keyID = boost::get<CKeyID>(&destination);
-    if (!keyID) {
+    case MessageVerificationResult::ERR_ADDRESS_NO_KEY:
         throw JSONRPCError(RPC_TYPE_ERROR, "Address does not refer to key");
+    case MessageVerificationResult::ERR_MALFORMED_SIGNATURE:
+        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Malformed base64 encoding");
+    case MessageVerificationResult::ERR_PUBKEY_NOT_RECOVERED:
+    case MessageVerificationResult::ERR_NOT_SIGNED:
+        return false;
+    case MessageVerificationResult::OK:
+        return true;
     }
 
-    bool fInvalid = false;
-    std::vector<unsigned char> vchSig = DecodeBase64(strSign.c_str(), &fInvalid);
-
-    if (fInvalid)
-        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Malformed base64 encoding");
-
-    CHashWriter ss(SER_GETHASH, 0);
-    ss << strMessageMagic;
-    ss << strMessage;
-
-    CPubKey pubkey;
-    if (!pubkey.RecoverCompact(ss.GetHash(), vchSig))
-        return false;
-
-    return (pubkey.GetID() == *keyID);
+    return false;
 }
 
 static UniValue signmessagewithprivkey(const JSONRPCRequest& request)
@@ -500,15 +489,13 @@ static UniValue signmessagewithprivkey(const JSONRPCRequest& request)
         throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid private key");
     }
 
-    CHashWriter ss(SER_GETHASH, 0);
-    ss << strMessageMagic;
-    ss << strMessage;
+    std::string signature;
 
-    std::vector<unsigned char> vchSig;
-    if (!key.SignCompact(ss.GetHash(), vchSig))
+    if (!MessageSign(key, strMessage, signature)) {
         throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Sign failed");
+    }
 
-    return EncodeBase64(vchSig);
+    return signature;
 }
 
 static UniValue setmocktime(const JSONRPCRequest& request)
@@ -714,7 +701,7 @@ static UniValue getaddressmempool(const JSONRPCRequest& request)
         delta.pushKV("txid", it->first.txhash.GetHex());
         delta.pushKV("index", (int)it->first.index);
         delta.pushKV("satoshis", it->second.amount);
-        delta.pushKV("timestamp", it->second.time);
+        delta.pushKV("timestamp", count_seconds(it->second.time));
         if (it->second.amount < 0) {
             delta.pushKV("prevtxid", it->second.prevhash.GetHex());
             delta.pushKV("prevout", (int)it->second.prevout);

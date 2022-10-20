@@ -18,8 +18,14 @@
 #include <unordered_map>
 #include <unordered_set>
 
+class CSporkManager;
+
 namespace llmq
 {
+class CChainLocksHandler;
+class CQuorumManager;
+class CSigningManager;
+class CSigSharesManager;
 
 struct CInstantSendLock
 {
@@ -196,6 +202,11 @@ private:
     CInstantSendDb db;
     CConnman& connman;
     CTxMemPool& mempool;
+    CSporkManager& spork_manager;
+    CQuorumManager& qman;
+    CSigningManager& sigman;
+    CSigSharesManager& shareman;
+    CChainLocksHandler& clhandler;
 
     std::atomic<bool> fUpgradedDB{false};
 
@@ -243,7 +254,13 @@ private:
     std::unordered_set<uint256, StaticSaltedHasher> pendingRetryTxs GUARDED_BY(cs_pendingRetry);
 
 public:
-    explicit CInstantSendManager(CTxMemPool& _mempool, CConnman& _connman, bool unitTests, bool fWipe) : db(unitTests, fWipe), mempool(_mempool), connman(_connman) { workInterrupt.reset(); }
+    explicit CInstantSendManager(CTxMemPool& _mempool, CConnman& _connman, CSporkManager& sporkManager, CQuorumManager& _qman,
+                                 CSigningManager& _sigman, CSigSharesManager& _shareman, CChainLocksHandler& _clhandler, bool unitTests, bool fWipe) :
+        db(unitTests, fWipe), mempool(_mempool), connman(_connman), spork_manager(sporkManager), qman(_qman), sigman(_sigman), shareman(_shareman),
+        clhandler(_clhandler)
+    {
+        workInterrupt.reset();
+    }
     ~CInstantSendManager() = default;
 
     void Start();
@@ -313,18 +330,18 @@ public:
     void RemoveConflictingLock(const uint256& islockHash, const CInstantSendLock& islock);
 
     size_t GetInstantSendLockCount() const;
+
+    bool IsInstantSendEnabled() const;
+    /**
+     * If true, MN should sign all transactions, if false, MN should not sign
+     * transactions in mempool, but should sign txes included in a block. This
+     * allows ChainLocks to continue even while this spork is disabled.
+     */
+    bool IsInstantSendMempoolSigningEnabled() const;
+    bool RejectConflictingBlocks() const;
 };
 
-extern CInstantSendManager* quorumInstantSendManager;
-
-bool IsInstantSendEnabled();
-/**
- * If true, MN should sign all transactions, if false, MN should not sign
- * transactions in mempool, but should sign txes included in a block. This
- * allows ChainLocks to continue even while this spork is disabled.
- */
-bool IsInstantSendMempoolSigningEnabled();
-bool RejectConflictingBlocks();
+extern std::unique_ptr<CInstantSendManager> quorumInstantSendManager;
 
 } // namespace llmq
 

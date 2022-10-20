@@ -6,11 +6,16 @@
 
 #include <chainparams.h>
 #include <consensus/merkle.h>
+#include <governance/governance.h>
 #include <key_io.h>
+#include <llmq/blockprocessor.h>
+#include <llmq/chainlocks.h>
+#include <llmq/instantsend.h>
 #include <miner.h>
 #include <node/context.h>
 #include <pow.h>
 #include <script/standard.h>
+#include <spork.h>
 #include <validation.h>
 #include <util/check.h>
 #ifdef ENABLE_WALLET
@@ -23,16 +28,11 @@ const std::string ADDRESS_BCRT1_UNSPENDABLE = "bcrt1qqqqqqqqqqqqqqqqqqqqqqqqqqqq
 #ifdef ENABLE_WALLET
 std::string getnewaddress(CWallet& w)
 {
-    auto spk_man = w.GetLegacyScriptPubKeyMan();
-    assert(spk_man != nullptr);
+    CTxDestination dest;
+    std::string error;
+    if (!w.GetNewDestination("", dest, error)) assert(false);
 
-    CPubKey new_key;
-    if (!spk_man->GetKeyFromPool(new_key, false)) assert(false);
-
-    CKeyID keyID = new_key.GetID();
-    w.SetAddressBook(keyID, /* label */ "", "receive");
-
-    return EncodeDestination(keyID);
+    return EncodeDestination(dest);
 }
 
 void importaddress(CWallet& wallet, const std::string& address)
@@ -79,7 +79,7 @@ std::shared_ptr<CBlock> PrepareBlock(const NodeContext& node, const CScript& coi
 {
     assert(node.mempool);
     auto block = std::make_shared<CBlock>(
-        BlockAssembler{*node.mempool, Params()}
+        BlockAssembler{*sporkManager, *governance, *llmq::quorumBlockProcessor, *llmq::chainLocksHandler, *llmq::quorumInstantSendManager, *node.mempool, Params()}
             .CreateNewBlock(coinbase_scriptPubKey)
             ->block);
 

@@ -227,9 +227,10 @@ def str_to_b64str(string):
 def satoshi_round(amount):
     return Decimal(amount).quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)
 
-def wait_until(predicate, *, attempts=float('inf'), timeout=float('inf'), sleep=0.05, lock=None, do_assert=True, allow_exception=False):
+def wait_until(predicate, *, attempts=float('inf'), timeout=float('inf'), sleep=0.5, timeout_factor=1.0, lock=None, do_assert=True, allow_exception=False):
     if attempts == float('inf') and timeout == float('inf'):
         timeout = 60
+    timeout = timeout * timeout_factor
     attempt = 0
     timeout *= Options.timeout_scale
     time_end = time.time() + timeout
@@ -292,7 +293,7 @@ def get_rpc_proxy(url, node_number, *, timeout=None, coveragedir=None):
     """
     proxy_kwargs = {}
     if timeout is not None:
-        proxy_kwargs['timeout'] = timeout
+        proxy_kwargs['timeout'] = int(timeout)
 
     proxy = AuthServiceProxy(url, **proxy_kwargs)
     proxy.url = url  # store URL on proxy for info
@@ -357,6 +358,13 @@ def initialize_datadir(dirname, n, chain):
         os.makedirs(os.path.join(datadir, 'stderr'), exist_ok=True)
         os.makedirs(os.path.join(datadir, 'stdout'), exist_ok=True)
     return datadir
+
+def adjust_bitcoin_conf_for_pre_17(conf_file):
+    with open(conf_file,'r', encoding='utf8') as conf:
+        conf_data = conf.read()
+    with open(conf_file, 'w', encoding='utf8') as conf:
+        conf_data_changed = conf_data.replace('[regtest]', '')
+        conf.write(conf_data_changed)
 
 def get_datadir_path(dirname, n):
     return os.path.join(dirname, "node" + str(n))
@@ -435,81 +443,6 @@ def set_node_times(nodes, t):
         node.mocktime = t
         node.setmocktime(t)
 
-def disconnect_nodes(from_connection, node_num):
-    for peer_id in [peer['id'] for peer in from_connection.getpeerinfo() if "testnode%d" % node_num in peer['subver']]:
-        try:
-            from_connection.disconnectnode(nodeid=peer_id)
-        except JSONRPCException as e:
-            # If this node is disconnected between calculating the peer id
-            # and issuing the disconnect, don't worry about it.
-            # This avoids a race condition if we're mass-disconnecting peers.
-            if e.error['code'] != -29: # RPC_CLIENT_NODE_NOT_CONNECTED
-                raise
-
-    # wait to disconnect
-    wait_until(lambda: [peer['id'] for peer in from_connection.getpeerinfo() if "testnode%d" % node_num in peer['subver']] == [], timeout=5)
-
-def connect_nodes(from_connection, node_num):
-    ip_port = "127.0.0.1:" + str(p2p_port(node_num))
-    from_connection.addnode(ip_port, "onetry")
-    # poll until version handshake complete to avoid race conditions
-    # with transaction relaying
-    # See comments in net_processing:
-    # * Must have a version message before anything else
-    # * Must have a verack message before anything else
-    wait_until(lambda: all(peer['version'] != 0 for peer in from_connection.getpeerinfo()))
-    wait_until(lambda: all(peer['bytesrecv_per_msg'].pop('verack', 0) == 24 for peer in from_connection.getpeerinfo()))
-
-def isolate_node(node, timeout=5):
-    node.setnetworkactive(False)
-    st = time.time()
-    while time.time() < st + timeout:
-        if node.getconnectioncount() == 0:
-            return
-        time.sleep(0.5)
-    raise AssertionError("disconnect_node timed out")
-
-def reconnect_isolated_node(node, node_num):
-    node.setnetworkactive(True)
-    connect_nodes(node, node_num)
-
-def sync_blocks(rpc_connections, *, wait=1, timeout=60):
-    """
-    Wait until everybody has the same tip.
-
-    sync_blocks needs to be called with an rpc_connections set that has least
-    one node already synced to the latest, stable tip, otherwise there's a
-    chance it might return before all nodes are stably synced.
-    """
-    timeout *= Options.timeout_scale
-
-    stop_time = time.time() + timeout
-    while time.time() <= stop_time:
-        best_hash = [x.getbestblockhash() for x in rpc_connections]
-        if best_hash.count(best_hash[0]) == len(rpc_connections):
-            return
-        time.sleep(wait)
-    raise AssertionError("Block sync timed out:{}".format("".join("\n  {!r}".format(b) for b in best_hash)))
-
-def sync_mempools(rpc_connections, *, wait=1, timeout=60, flush_scheduler=True, wait_func=None):
-    """
-    Wait until everybody has the same transactions in their memory
-    pools
-    """
-    timeout *= Options.timeout_scale
-    stop_time = time.time() + timeout
-    while time.time() <= stop_time:
-        pool = [set(r.getrawmempool()) for r in rpc_connections]
-        if pool.count(pool[0]) == len(rpc_connections):
-            if flush_scheduler:
-                for r in rpc_connections:
-                    r.syncwithvalidationinterfacequeue()
-            return
-        if wait_func is not None:
-            wait_func()
-        time.sleep(wait)
-    raise AssertionError("Mempool sync timed out:{}".format("".join("\n  {!r}".format(m) for m in pool)))
-
 def force_finish_mnsync(node):
     """
     Masternodes won't accept incoming connections while IsSynced is false.
@@ -522,6 +455,7 @@ def force_finish_mnsync(node):
 
 # Transaction/Block functions
 #############################
+
 
 def find_output(node, txid, amount, *, blockhash=None):
     """

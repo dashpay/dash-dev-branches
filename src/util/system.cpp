@@ -68,6 +68,7 @@
 #include <malloc.h>
 #endif
 
+#include <boost/algorithm/string/replace.hpp>
 #include <thread>
 #include <univalue.h>
 
@@ -356,21 +357,18 @@ bool ArgsManager::ParseParameters(int argc, const char* const argv[], std::strin
         std::string section;
         util::SettingsValue value = InterpretOption(section, key, val);
         Optional<unsigned int> flags = GetArgFlags('-' + key);
-        if (flags) {
-            if (!CheckValid(key, value, *flags, error)) {
-                return false;
-            }
-            // Weird behavior preserved for backwards compatibility: command
-            // line options with section prefixes are allowed but ignored. It
-            // would be better if these options triggered the Invalid parameter
-            // error below.
-            if (section.empty()) {
-                m_settings.command_line_options[key].push_back(value);
-            }
-        } else {
-            error = strprintf("Invalid parameter -%s", key);
+
+        // Unknown command line options and command line options with dot
+        // characters (which are returned from InterpretOption with nonempty
+        // section strings) are not valid.
+        if (!flags || !section.empty()) {
+            error = strprintf("Invalid parameter %s", argv[i]);
             return false;
         }
+
+        if (!CheckValid(key, value, *flags, error)) return false;
+
+        m_settings.command_line_options[key].push_back(value);
     }
 
     // we do not allow -includeconf from command line, so we clear it here
@@ -467,6 +465,14 @@ bool ArgsManager::ReadSettingsFile(std::vector<std::string>* errors)
     if (!util::ReadSettings(path, m_settings.rw_settings, read_errors)) {
         SaveErrors(read_errors, errors);
         return false;
+    }
+    for (const auto& setting : m_settings.rw_settings) {
+        std::string section;
+        std::string key = setting.first;
+        (void)InterpretOption(section, key, /* value */ {}); // Split setting key into section and argname
+        if (!GetArgFlags('-' + key)) {
+            LogPrintf("Ignoring unknown rw_settings value %s\n", setting.first);
+        }
     }
     return true;
 }
@@ -1203,6 +1209,15 @@ fs::path GetSpecialFolderPath(int nFolder, bool fCreate)
 }
 #endif
 
+#ifndef WIN32
+std::string ShellEscape(const std::string& arg)
+{
+    std::string escaped = arg;
+    boost::replace_all(escaped, "'", "'\"'\"'");
+    return "'" + escaped + "'";
+}
+#endif
+
 #if HAVE_SYSTEM
 void runCommand(const std::string& strCommand)
 {
@@ -1344,8 +1359,9 @@ void ScheduleBatchPriority()
 {
 #ifdef SCHED_BATCH
     const static sched_param param{};
-    if (pthread_setschedparam(pthread_self(), SCHED_BATCH, &param) != 0) {
-        LogPrintf("Failed to pthread_setschedparam: %s\n", strerror(errno));
+    const int rc = pthread_setschedparam(pthread_self(), SCHED_BATCH, &param);
+    if (rc != 0) {
+        LogPrintf("Failed to pthread_setschedparam: %s\n", strerror(rc));
     }
 #endif
 }

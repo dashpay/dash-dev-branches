@@ -11,8 +11,6 @@ from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import (
     assert_equal,
     assert_raises_rpc_error,
-    connect_nodes,
-    sync_blocks,
 )
 
 
@@ -64,13 +62,23 @@ class WalletTest(BitcoinTestFramework):
         assert_equal(len(self.nodes[0].listunspent()), 0)
         assert_equal(len(self.nodes[1].listunspent()), 0)
 
-        self.log.info("Mining blocks ...")
+        self.log.info("Check that only node 0 is watching an address")
+        assert 'watchonly' in self.nodes[0].getbalances()
+        assert 'watchonly' not in self.nodes[1].getbalances()
 
+        self.log.info("Mining blocks ...")
         self.nodes[0].generate(1)
         self.sync_all()
         self.nodes[1].generate(1)
         self.nodes[1].generatetoaddress(101, ADDRESS_WATCHONLY)
         self.sync_all()
+
+        assert_equal(self.nodes[0].getbalances()['mine']['trusted'], 500)
+        assert_equal(self.nodes[0].getwalletinfo()['balance'], 500)
+        assert_equal(self.nodes[1].getbalances()['mine']['trusted'], 500)
+
+        assert_equal(self.nodes[0].getbalances()['watchonly']['immature'], 50000)
+        assert 'watchonly' not in self.nodes[1].getbalances()
 
         assert_equal(self.nodes[0].getbalance(), 500)
         assert_equal(self.nodes[1].getbalance(), 500)
@@ -115,8 +123,11 @@ class WalletTest(BitcoinTestFramework):
             assert_equal(self.nodes[1].getbalance(minconf=1), Decimal('0'))
             # getunconfirmedbalance
             assert_equal(self.nodes[0].getunconfirmedbalance(), Decimal('960'))  # output of node 1's spend
+            assert_equal(self.nodes[0].getbalances()['mine']['untrusted_pending'], Decimal('960'))
             assert_equal(self.nodes[0].getwalletinfo()["unconfirmed_balance"], Decimal('960'))
+
             assert_equal(self.nodes[1].getunconfirmedbalance(), Decimal('0'))  # Doesn't include output of node 0's send since it was spent
+            assert_equal(self.nodes[1].getbalances()['mine']['untrusted_pending'], Decimal('0'))
             assert_equal(self.nodes[1].getwalletinfo()["unconfirmed_balance"], Decimal('0'))
 
         test_balances(fee_node_1=Decimal('0.01'))
@@ -154,10 +165,10 @@ class WalletTest(BitcoinTestFramework):
         # dynamically loading the wallet.
         before = self.nodes[1].getunconfirmedbalance()
         dst = self.nodes[1].getnewaddress()
-        self.nodes[1].unloadwallet('')
+        self.nodes[1].unloadwallet(self.default_wallet_name)
         self.nodes[0].sendtoaddress(dst, 0.1)
         self.sync_all()
-        self.nodes[1].loadwallet('')
+        self.nodes[1].loadwallet(self.default_wallet_name)
         after = self.nodes[1].getunconfirmedbalance()
         assert_equal(before + Decimal('0.1'), after)
 
@@ -201,9 +212,9 @@ class WalletTest(BitcoinTestFramework):
 
         # Now confirm tx_orig
         self.restart_node(1, ['-persistmempool=0', '-checklevel=0'])
-        connect_nodes(self.nodes[0], 1)
-        connect_nodes(self.nodes[1], 0)
-        sync_blocks(self.nodes)
+        self.connect_nodes(0, 1)
+        self.connect_nodes(1, 0)
+        self.sync_blocks()
         self.nodes[1].sendrawtransaction(tx_orig)
         self.nodes[1].generatetoaddress(1, ADDRESS_WATCHONLY)
         self.sync_all()

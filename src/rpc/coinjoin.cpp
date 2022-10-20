@@ -63,7 +63,7 @@ static UniValue coinjoin(const JSONRPCRequest& request)
             throw JSONRPCError(RPC_INTERNAL_ERROR, "Mixing has been started already.");
         }
 
-        NodeContext& node = EnsureNodeContext(request.context);
+        const NodeContext& node = EnsureNodeContext(request.context);
         bool result = it->second->DoAutomaticDenominating(*node.connman);
         return "Mixing " + (result ? "started successfully" : ("start failed: " + it->second->GetStatuses().original + ", will retry"));
     }
@@ -144,7 +144,7 @@ static UniValue getcoinjoininfo(const JSONRPCRequest& request)
     UniValue obj(UniValue::VOBJ);
 
     if (fMasternodeMode) {
-        coinJoinServer.GetJsonInfo(obj);
+        coinJoinServer->GetJsonInfo(obj);
         return obj;
     }
 
@@ -153,7 +153,7 @@ static UniValue getcoinjoininfo(const JSONRPCRequest& request)
 
     CCoinJoinClientOptions::GetJsonInfo(obj);
 
-    obj.pushKV("queue_size", coinJoinClientQueueManager.GetQueueSize());
+    obj.pushKV("queue_size", coinJoinClientQueueManager->GetQueueSize());
 
     std::shared_ptr<CWallet> const wallet = GetWalletForJSONRPCRequest(request);
     CWallet* const pwallet = wallet.get();

@@ -75,7 +75,7 @@ WalletTx MakeWalletTx(CWallet& wallet, const CWalletTx& wtx)
 }
 
 //! Construct wallet tx status struct.
-WalletTxStatus MakeWalletTxStatus(CWallet& wallet, const CWalletTx& wtx)
+WalletTxStatus MakeWalletTxStatus(const CWallet& wallet, const CWalletTx& wtx)
 {
     WalletTxStatus result;
     result.block_height = wallet.chain().getBlockHeight(wtx.m_confirm.hashBlock).value_or(std::numeric_limits<int>::max());
@@ -94,7 +94,7 @@ WalletTxStatus MakeWalletTxStatus(CWallet& wallet, const CWalletTx& wtx)
 }
 
 //! Construct wallet TxOut struct.
-WalletTxOut MakeWalletTxOut(CWallet& wallet,
+WalletTxOut MakeWalletTxOut(const CWallet& wallet,
     const CWalletTx& wtx,
     int n,
     int depth) EXCLUSIVE_LOCKS_REQUIRED(wallet.cs_wallet)
@@ -181,13 +181,14 @@ public:
     }
     int64_t getKeysLeftSinceAutoBackup() override { return m_wallet->nKeysLeftSinceAutoBackup; }
     std::string getWalletName() override { return m_wallet->GetName(); }
-    bool getKeyFromPool(bool internal, CPubKey& pub_key) override
+    bool getNewDestination(const std::string label, CTxDestination& dest) override
     {
         auto spk_man = m_wallet->GetLegacyScriptPubKeyMan();
         if (!spk_man) {
             return false;
         }
-        return spk_man->GetKeyFromPool(pub_key, internal);
+        std::string error;
+        return m_wallet->GetNewDestination(label, dest, error);
     }
     bool getPubKey(const CKeyID& address, CPubKey& pub_key) override {
         auto spk_man = m_wallet->GetLegacyScriptPubKeyMan();
@@ -300,7 +301,7 @@ public:
         bilingual_str& fail_reason) override
     {
         LOCK(m_wallet->cs_wallet);
-        CReserveKey m_key(m_wallet.get());
+        ReserveDestination m_dest(m_wallet.get());
         CTransactionRef tx;
         if (!m_wallet->CreateTransaction(recipients, tx, fee, change_pos,
                 fail_reason, coin_control, sign)) {
@@ -313,7 +314,7 @@ public:
         WalletOrderForm order_form) override
     {
         LOCK2(m_wallet->cs_wallet, cs_main);
-        CReserveKey m_key(m_wallet.get());
+        ReserveDestination m_dest(m_wallet.get());
         m_wallet->CommitTransaction(std::move(tx), std::move(value_map), std::move(order_form));
     }
     bool transactionCanBeAbandoned(const uint256& txid) override { return m_wallet->TransactionCanBeAbandoned(txid); }
@@ -581,8 +582,7 @@ public:
 class WalletClientImpl : public WalletClient
 {
 public:
-    WalletClientImpl(Chain& chain, ArgsManager& args, std::vector<std::string> wallet_filenames)
-        : m_wallet_filenames(std::move(wallet_filenames))
+    WalletClientImpl(Chain& chain, ArgsManager& args)
     {
         m_context.chain = &chain;
         m_context.args = &args;
@@ -599,23 +599,30 @@ public:
             m_rpc_handlers.emplace_back(m_context.chain->handleRpc(m_rpc_commands.back()));
         }
     }
-    bool verify() override { return VerifyWallets(*m_context.chain, m_wallet_filenames); }
-    bool load() override { return LoadWallets(*m_context.chain, m_wallet_filenames); }
+    bool verify() override { return VerifyWallets(*m_context.chain); }
+    bool load() override { return LoadWallets(*m_context.chain); }
     void start(CScheduler& scheduler) override { return StartWallets(scheduler, *Assert(m_context.args)); }
     void flush() override { return FlushWallets(); }
     void stop() override { return StopWallets(); }
     void setMockTime(int64_t time) override { return SetMockTime(time); }
 
     //! WalletClient methods
-    std::unique_ptr<Wallet> createWallet(const std::string& name, const SecureString& passphrase, uint64_t wallet_creation_flags, WalletCreationStatus& status, bilingual_str& error, std::vector<bilingual_str>& warnings) override
+    std::unique_ptr<Wallet> createWallet(const std::string& name, const SecureString& passphrase, uint64_t wallet_creation_flags, bilingual_str& error, std::vector<bilingual_str>& warnings) override
     {
         std::shared_ptr<CWallet> wallet;
-        status = CreateWallet(*m_context.chain, passphrase, wallet_creation_flags, name, true /* load_on_start */, error, warnings, wallet);
-        return MakeWallet(std::move(wallet));
+        DatabaseOptions options;
+        DatabaseStatus status;
+        options.require_create = true;
+        options.create_flags = wallet_creation_flags;
+        options.create_passphrase = passphrase;
+        return MakeWallet(CreateWallet(*m_context.chain, name, true /* load_on_start */, options, status, error, warnings));
     }
     std::unique_ptr<Wallet> loadWallet(const std::string& name, bilingual_str& error, std::vector<bilingual_str>& warnings) override
     {
-        return MakeWallet(LoadWallet(*m_context.chain, WalletLocation(name), true /* load_on_start */, error, warnings));
+        DatabaseOptions options;
+        DatabaseStatus status;
+        options.require_existing = true;
+        return MakeWallet(LoadWallet(*m_context.chain, name, true /* load_on_start */, options, status, error, warnings));
     }
     std::string getWalletDir() override
     {
@@ -652,9 +659,9 @@ public:
 
 std::unique_ptr<Wallet> MakeWallet(const std::shared_ptr<CWallet>& wallet) { return wallet ? MakeUnique<WalletImpl>(wallet) : nullptr; }
 
-std::unique_ptr<WalletClient> MakeWalletClient(Chain& chain, ArgsManager& args, std::vector<std::string> wallet_filenames)
+std::unique_ptr<WalletClient> MakeWalletClient(Chain& chain, ArgsManager& args)
 {
-    return MakeUnique<WalletClientImpl>(chain, args, std::move(wallet_filenames));
+    return MakeUnique<WalletClientImpl>(chain, args);
 }
 
 } // namespace interfaces

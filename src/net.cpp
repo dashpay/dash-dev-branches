@@ -12,7 +12,6 @@
 #include <netmessagemaker.h>
 
 #include <banman.h>
-#include <chainparams.h>
 #include <clientversion.h>
 #include <consensus/consensus.h>
 #include <crypto/sha256.h>
@@ -36,6 +35,10 @@
 #include <string.h>
 #else
 #include <fcntl.h>
+#endif
+
+#if HAVE_DECL_GETIFADDRS && HAVE_DECL_FREEIFADDRS
+#include <ifaddrs.h>
 #endif
 
 #ifdef USE_POLL
@@ -446,7 +449,7 @@ CNode* CConnman::ConnectNode(CAddress addrConnect, const char *pszDest, bool fCo
             if (hSocket == INVALID_SOCKET) {
                 return nullptr;
             }
-            connected = ConnectThroughProxy(proxy, addrConnect.ToStringIP(), addrConnect.GetPort(), hSocket, nConnectTimeout, &proxyConnectionFailed);
+            connected = ConnectThroughProxy(proxy, addrConnect.ToStringIP(), addrConnect.GetPort(), hSocket, nConnectTimeout, proxyConnectionFailed);
         } else {
             // no proxy needed (none set for target network)
             hSocket = CreateSocket(addrConnect);
@@ -468,7 +471,8 @@ CNode* CConnman::ConnectNode(CAddress addrConnect, const char *pszDest, bool fCo
         std::string host;
         int port = default_port;
         SplitHostPort(std::string(pszDest), port, host);
-        connected = ConnectThroughProxy(proxy, host, port, hSocket, nConnectTimeout, nullptr);
+        bool proxyConnectionFailed;
+        connected = ConnectThroughProxy(proxy, host, port, hSocket, nConnectTimeout, proxyConnectionFailed);
     }
     if (!connected) {
         CloseSocket(hSocket);
@@ -627,6 +631,16 @@ void CNode::copyStats(CNodeStats &stats, const std::vector<bool> &m_asmap)
 }
 #undef X
 
+/**
+ * Receive bytes from the buffer and deserialize them into messages.
+ *
+ * @param[in]   pch         A pointer to the raw data
+ * @param[in]   nBytes      Size of the data
+ * @param[out]  complete    Set True if at least one message has been
+ *                          deserialized and is ready to be processed
+ * @return  True if the peer should stay connected,
+ *          False if the peer should be disconnected from.
+ */
 bool CNode::ReceiveMsgBytes(const char *pch, unsigned int nBytes, bool& complete)
 {
     complete = false;
@@ -637,26 +651,36 @@ bool CNode::ReceiveMsgBytes(const char *pch, unsigned int nBytes, bool& complete
     while (nBytes > 0) {
         // absorb network data
         int handled = m_deserializer->Read(pch, nBytes);
-        if (handled < 0) return false;
+        if (handled < 0) {
+            // Serious header problem, disconnect from the peer.
+            return false;
+        }
 
         pch += handled;
         nBytes -= handled;
 
         if (m_deserializer->Complete()) {
             // decompose a transport agnostic CNetMessage from the deserializer
-            CNetMessage msg = m_deserializer->GetMessage(Params().MessageStart(), nTimeMicros);
+            uint32_t out_err_raw_size{0};
+            Optional<CNetMessage> result{m_deserializer->GetMessage(nTimeMicros, out_err_raw_size)};
+            if (!result) {
+                // Message deserialization failed.  Drop the message but don't disconnect the peer.
+                // store the size of the corrupt message
+                mapRecvBytesPerMsgCmd.find(NET_MESSAGE_COMMAND_OTHER)->second += out_err_raw_size;
+                continue;
+            }
 
             //store received bytes per message command
             //to prevent a memory DOS, only allow valid commands
-            mapMsgCmdSize::iterator i = mapRecvBytesPerMsgCmd.find(msg.m_command);
+            mapMsgCmdSize::iterator i = mapRecvBytesPerMsgCmd.find(result->m_command);
             if (i == mapRecvBytesPerMsgCmd.end())
                 i = mapRecvBytesPerMsgCmd.find(NET_MESSAGE_COMMAND_OTHER);
             assert(i != mapRecvBytesPerMsgCmd.end());
-            i->second += msg.m_raw_message_size;
-            statsClient.count("bandwidth.message." + std::string(msg.m_command) + ".bytesReceived", msg.m_raw_message_size, 1.0f);
+            i->second += result->m_raw_message_size;
+            statsClient.count("bandwidth.message." + std::string(result->m_command) + ".bytesReceived", result->m_raw_message_size, 1.0f);
 
             // push the message to the process queue,
-            vRecvMsg.push_back(std::move(msg));
+            vRecvMsg.push_back(std::move(*result));
 
             complete = true;
         }
@@ -709,11 +733,19 @@ int V1TransportDeserializer::readHeader(const char *pch, unsigned int nBytes)
         hdrbuf >> hdr;
     }
     catch (const std::exception&) {
+        LogPrint(BCLog::NET, "HEADER ERROR - UNABLE TO DESERIALIZE, peer=%d\n", m_node_id);
+        return -1;
+    }
+
+    // Check start string, network magic
+    if (memcmp(hdr.pchMessageStart, m_chain_params.MessageStart(), CMessageHeader::MESSAGE_START_SIZE) != 0) {
+        LogPrint(BCLog::NET, "HEADER ERROR - MESSAGESTART (%s, %u bytes), received %s, peer=%d\n", hdr.GetCommand(), hdr.nMessageSize, HexStr(hdr.pchMessageStart), m_node_id);
         return -1;
     }
 
     // reject messages larger than MAX_SIZE or MAX_PROTOCOL_MESSAGE_LENGTH
     if (hdr.nMessageSize > MAX_SIZE || hdr.nMessageSize > MAX_PROTOCOL_MESSAGE_LENGTH) {
+        LogPrint(BCLog::NET, "HEADER ERROR - SIZE (%s, %u bytes), peer=%d\n", hdr.GetCommand(), hdr.nMessageSize, m_node_id);
         return -1;
     }
 
@@ -748,35 +780,39 @@ const uint256& V1TransportDeserializer::GetMessageHash() const
     return data_hash;
 }
 
-CNetMessage V1TransportDeserializer::GetMessage(const CMessageHeader::MessageStartChars& message_start, int64_t time) {
+Optional<CNetMessage> V1TransportDeserializer::GetMessage(int64_t time, uint32_t& out_err_raw_size)
+{
     // decompose a single CNetMessage from the TransportDeserializer
-    CNetMessage msg(std::move(vRecv));
+    Optional<CNetMessage> msg(std::move(vRecv));
 
-    // store state about valid header, netmagic and checksum
-    msg.m_valid_header = hdr.IsValid(message_start);
-    msg.m_valid_netmagic = (memcmp(hdr.pchMessageStart, message_start, CMessageHeader::MESSAGE_START_SIZE) == 0);
+    // store command string, time, and sizes
+    msg->m_command = hdr.GetCommand();
+    msg->m_time = time;
+    msg->m_message_size = hdr.nMessageSize;
+    msg->m_raw_message_size = hdr.nMessageSize + CMessageHeader::HEADER_SIZE;
+
     uint256 hash = GetMessageHash();
-
-    // store command string, payload size
-    msg.m_command = hdr.GetCommand();
-    msg.m_message_size = hdr.nMessageSize;
-    msg.m_raw_message_size = hdr.nMessageSize + CMessageHeader::HEADER_SIZE;
 
     // We just received a message off the wire, harvest entropy from the time (and the message checksum)
     RandAddEvent(ReadLE32(hash.begin()));
 
-    msg.m_valid_checksum = (memcmp(hash.begin(), hdr.pchChecksum, CMessageHeader::CHECKSUM_SIZE) == 0);
-    if (!msg.m_valid_checksum) {
-        LogPrint(BCLog::NET, "CHECKSUM ERROR (%s, %u bytes), expected %s was %s\n",
-                 SanitizeString(msg.m_command), msg.m_message_size,
+    // Check checksum and header command string
+    if (memcmp(hash.begin(), hdr.pchChecksum, CMessageHeader::CHECKSUM_SIZE) != 0) {
+        LogPrint(BCLog::NET, "CHECKSUM ERROR (%s, %u bytes), expected %s was %s, peer=%d\n",
+                 SanitizeString(msg->m_command), msg->m_message_size,
                  HexStr(Span<uint8_t>(hash.begin(), hash.begin()+CMessageHeader::CHECKSUM_SIZE)),
-                 HexStr(Span<uint8_t>(hdr.pchChecksum, hdr.pchChecksum+CMessageHeader::CHECKSUM_SIZE)));
+                 HexStr(Span<uint8_t>(hdr.pchChecksum, hdr.pchChecksum+CMessageHeader::CHECKSUM_SIZE)),
+                 m_node_id);
+        out_err_raw_size = msg->m_raw_message_size;
+        msg = nullopt;
+    } else if (!hdr.IsCommandValid()) {
+        LogPrint(BCLog::NET, "HEADER ERROR - COMMAND (%s, %u bytes), peer=%d\n",
+                 hdr.GetCommand(), msg->m_message_size, m_node_id);
+        out_err_raw_size = msg->m_raw_message_size;
+        msg = nullopt;
     }
 
-    // store receive time
-    msg.m_time = time;
-
-    // reset the network deserializer (prepare for the next message)
+    // Always reset the network deserializer (prepare for the next message)
     Reset();
     return msg;
 }
@@ -1130,7 +1166,7 @@ void CConnman::AcceptConnection(const ListenSocket& hListenSocket) {
     }
 
     // don't accept incoming connections until blockchain is synced
-    if(fMasternodeMode && !masternodeSync.IsBlockchainSynced()) {
+    if(fMasternodeMode && !masternodeSync->IsBlockchainSynced()) {
         LogPrint(BCLog::NET, "AcceptConnection -- blockchain is not synced yet, skipping inbound connection attempt\n");
         CloseSocket(hSocket);
         return;
@@ -1287,7 +1323,7 @@ void CConnman::NotifyNumConnectionsChanged()
     // If we had zero connections before and new connections now or if we just dropped
     // to zero connections reset the sync process if its outdated.
     if ((vNodesSize > 0 && nPrevNodeCount == 0) || (vNodesSize == 0 && nPrevNodeCount > 0)) {
-        masternodeSync.Reset();
+        masternodeSync->Reset();
     }
 
     if(vNodesSize != nPrevNodeCount) {
@@ -1994,7 +2030,7 @@ void CConnman::ThreadDNSAddressSeed()
                 continue;
             }
             unsigned int nMaxIPs = 256; // Limits number of IPs learned from a DNS seed
-            if (LookupHost(host.c_str(), vIPs, nMaxIPs, true)) {
+            if (LookupHost(host, vIPs, nMaxIPs, true)) {
                 for (const CNetAddr& ip : vIPs) {
                     int nOneDay = 24*3600;
                     CAddress addr = CAddress(CService(ip, Params().GetDefaultPort()), requiredServiceBits);
@@ -2326,7 +2362,7 @@ std::vector<AddedNodeInfo> CConnman::GetAddedNodeInfo()
     }
 
     for (const std::string& strAddNode : lAddresses) {
-        CService service(LookupNumeric(strAddNode.c_str(), Params().GetDefaultPort()));
+        CService service(LookupNumeric(strAddNode, Params().GetDefaultPort()));
         AddedNodeInfo addedNode{strAddNode, CService(), false, false};
         if (service.IsValid()) {
             // strAddNode is an IP:port
@@ -2390,20 +2426,20 @@ void CConnman::ThreadOpenMasternodeConnections()
     bool didConnect = false;
     while (!interruptNet)
     {
-        int sleepTime = 1000;
+        auto sleepTime = std::chrono::milliseconds(1000);
         if (didConnect) {
-            sleepTime = 100;
+            sleepTime = std::chrono::milliseconds(100);
         }
-        if (!interruptNet.sleep_for(std::chrono::milliseconds(sleepTime)))
+        if (!interruptNet.sleep_for(sleepTime))
             return;
 
         didConnect = false;
 
-        if (!fNetworkActive || !masternodeSync.IsBlockchainSynced())
+        if (!fNetworkActive || !masternodeSync->IsBlockchainSynced())
             continue;
 
         std::set<CService> connectedNodes;
-        std::map<uint256, bool> connectedProRegTxHashes;
+        std::map<uint256 /*proTxHash*/, bool /*fInbound*/> connectedProRegTxHashes;
         ForEachNode([&](const CNode* pnode) {
             auto verifiedProRegTxHash = pnode->GetVerifiedProRegTxHash();
             connectedNodes.emplace(pnode->addr);
@@ -2422,30 +2458,19 @@ void CConnman::ThreadOpenMasternodeConnections()
 
         // NOTE: Process only one pending masternode at a time
 
-        CDeterministicMNCPtr connectToDmn;
         MasternodeProbeConn isProbe = MasternodeProbeConn::IsNotConnection;
-        { // don't hold lock while calling OpenMasternodeConnection as cs_main is locked deep inside
-            LOCK2(cs_vNodes, cs_vPendingMasternodes);
 
-            if (!vPendingMasternodes.empty()) {
-                auto dmn = mnList.GetValidMN(vPendingMasternodes.front());
-                vPendingMasternodes.erase(vPendingMasternodes.begin());
-                if (dmn && !connectedNodes.count(dmn->pdmnState->addr) && !IsMasternodeOrDisconnectRequested(dmn->pdmnState->addr)) {
-                    connectToDmn = dmn;
-                    LogPrint(BCLog::NET_NETCONN, "CConnman::%s -- opening pending masternode connection to %s, service=%s\n", __func__, dmn->proTxHash.ToString(), dmn->pdmnState->addr.ToString(false));
-                }
-            }
-
-            if (!connectToDmn) {
-                std::vector<CDeterministicMNCPtr> pending;
-                for (const auto& group : masternodeQuorumNodes) {
-                    for (const auto& proRegTxHash : group.second) {
-                        auto dmn = mnList.GetMN(proRegTxHash);
-                        if (!dmn) {
-                            continue;
-                        }
-                        const auto& addr2 = dmn->pdmnState->addr;
-                        if (connectedNodes.count(addr2) && !connectedProRegTxHashes.count(proRegTxHash)) {
+        const auto getPendingQuorumNodes = [&]() {
+            LockAssertion lock(cs_vPendingMasternodes);
+            std::vector<CDeterministicMNCPtr> ret;
+            for (const auto& group : masternodeQuorumNodes) {
+                for (const auto& proRegTxHash : group.second) {
+                    auto dmn = mnList.GetMN(proRegTxHash);
+                    if (!dmn) {
+                        continue;
+                    }
+                    const auto& addr2 = dmn->pdmnState->addr;
+                    if (connectedNodes.count(addr2) && !connectedProRegTxHashes.count(proRegTxHash)) {
                             // we probably connected to it before it became a masternode
                             // or maybe we are still waiting for mnauth
                             (void)ForNode(addr2, [&](CNode* pnode) {
@@ -2467,54 +2492,78 @@ void CConnman::ThreadOpenMasternodeConnections()
                             if (nANow - lastAttempt < chainParams.LLMQConnectionRetryTimeout()) {
                                 continue;
                             }
-                            pending.emplace_back(dmn);
+                            ret.emplace_back(dmn);
                         }
                     }
                 }
+            return ret;
+        };
 
-                if (!pending.empty()) {
-                    connectToDmn = pending[GetRandInt(pending.size())];
-                    LogPrint(BCLog::NET_NETCONN, "CConnman::%s -- opening quorum connection to %s, service=%s\n", __func__, connectToDmn->proTxHash.ToString(), connectToDmn->pdmnState->addr.ToString(false));
+        const auto getPendingProbes = [&]() {
+            LockAssertion lock(cs_vPendingMasternodes);
+            std::vector<CDeterministicMNCPtr> ret;
+            for (auto it = masternodePendingProbes.begin(); it != masternodePendingProbes.end(); ) {
+                auto dmn = mnList.GetMN(*it);
+                if (!dmn) {
+                    it = masternodePendingProbes.erase(it);
+                    continue;
+                }
+                bool connectedAndOutbound = connectedProRegTxHashes.count(dmn->proTxHash) && !connectedProRegTxHashes[dmn->proTxHash];
+                if (connectedAndOutbound) {
+                    // we already have an outbound connection to this MN so there is no theed to probe it again
+                    mmetaman.GetMetaInfo(dmn->proTxHash)->SetLastOutboundSuccess(nANow);
+                    it = masternodePendingProbes.erase(it);
+                    continue;
+                }
+
+                ++it;
+
+                int64_t lastAttempt = mmetaman.GetMetaInfo(dmn->proTxHash)->GetLastOutboundAttempt();
+                // back off trying connecting to an address if we already tried recently
+                if (nANow - lastAttempt < chainParams.LLMQConnectionRetryTimeout()) {
+                    continue;
+                }
+                ret.emplace_back(dmn);
+            }
+            return ret;
+        };
+
+        auto getConnectToDmn = [&]() -> CDeterministicMNCPtr {
+            // don't hold lock while calling OpenMasternodeConnection as cs_main is locked deep inside
+            LOCK2(cs_vNodes, cs_vPendingMasternodes);
+
+            if (!vPendingMasternodes.empty()) {
+                auto dmn = mnList.GetValidMN(vPendingMasternodes.front());
+                vPendingMasternodes.erase(vPendingMasternodes.begin());
+                if (dmn && !connectedNodes.count(dmn->pdmnState->addr) && !IsMasternodeOrDisconnectRequested(dmn->pdmnState->addr)) {
+                    LogPrint(BCLog::NET_NETCONN, "CConnman::%s -- opening pending masternode connection to %s, service=%s\n", _func_, dmn->proTxHash.ToString(), dmn->pdmnState->addr.ToString(false));
+                    return dmn;
                 }
             }
 
-            if (!connectToDmn) {
-                std::vector<CDeterministicMNCPtr> pending;
-                for (auto it = masternodePendingProbes.begin(); it != masternodePendingProbes.end(); ) {
-                    auto dmn = mnList.GetMN(*it);
-                    if (!dmn) {
-                        it = masternodePendingProbes.erase(it);
-                        continue;
-                    }
-                    bool connectedAndOutbound = connectedProRegTxHashes.count(dmn->proTxHash) && !connectedProRegTxHashes[dmn->proTxHash];
-                    if (connectedAndOutbound) {
-                        // we already have an outbound connection to this MN so there is no theed to probe it again
-                        mmetaman.GetMetaInfo(dmn->proTxHash)->SetLastOutboundSuccess(nANow);
-                        it = masternodePendingProbes.erase(it);
-                        continue;
-                    }
-
-                    ++it;
-
-                    int64_t lastAttempt = mmetaman.GetMetaInfo(dmn->proTxHash)->GetLastOutboundAttempt();
-                    // back off trying connecting to an address if we already tried recently
-                    if (nANow - lastAttempt < chainParams.LLMQConnectionRetryTimeout()) {
-                        continue;
-                    }
-                    pending.emplace_back(dmn);
-                }
-
-                if (!pending.empty()) {
-                    connectToDmn = pending[GetRandInt(pending.size())];
-                    masternodePendingProbes.erase(connectToDmn->proTxHash);
-                    isProbe = MasternodeProbeConn::IsConnection;
-
-                    LogPrint(BCLog::NET_NETCONN, "CConnman::%s -- probing masternode %s, service=%s\n", __func__, connectToDmn->proTxHash.ToString(), connectToDmn->pdmnState->addr.ToString(false));
-                }
+            if (const auto pending = getPendingQuorumNodes(); !pending.empty()) {
+                // not-null
+                auto dmn = pending[GetRand(pending.size())];
+                LogPrint(BCLog::NET_NETCONN, "CConnman::%s -- opening quorum connection to %s, service=%s\n",
+                         _func_, dmn->proTxHash.ToString(), dmn->pdmnState->addr.ToString(false));
+                return dmn;
             }
-        }
 
-        if (!connectToDmn) {
+            if (const auto pending = getPendingProbes(); !pending.empty()) {
+                // not-null
+                auto dmn = pending[GetRand(pending.size())];
+                masternodePendingProbes.erase(dmn->proTxHash);
+                isProbe = MasternodeProbeConn::IsConnection;
+
+                LogPrint(BCLog::NET_NETCONN, "CConnman::%s -- probing masternode %s, service=%s\n", _func_, dmn->proTxHash.ToString(), dmn->pdmnState->addr.ToString(false));
+                return dmn;
+            }
+            return nullptr;
+        };
+
+        CDeterministicMNCPtr connectToDmn = getConnectToDmn();
+
+        if (connectToDmn == nullptr) {
             continue;
         }
 
@@ -2837,7 +2886,7 @@ void CConnman::SetNetworkActive(bool active)
 
     // Always call the Reset() if the network gets enabled/disabled to make sure the sync process
     // gets a reset if its outdated..
-    masternodeSync.Reset();
+    masternodeSync->Reset();
 
     uiInterface.NotifyNetworkActiveChanged(fNetworkActive);
 }
@@ -3706,7 +3755,7 @@ CNode::CNode(NodeId idIn, ServiceFlags nLocalServicesIn, int nMyStartingHeightIn
         LogPrint(BCLog::NET, "Added connection peer=%d\n", id);
     }
 
-    m_deserializer = MakeUnique<V1TransportDeserializer>(V1TransportDeserializer(Params().MessageStart(), SER_NETWORK, INIT_PROTO_VERSION));
+    m_deserializer = MakeUnique<V1TransportDeserializer>(V1TransportDeserializer(Params(), GetId(), SER_NETWORK, INIT_PROTO_VERSION));
     m_serializer = MakeUnique<V1TransportSerializer>(V1TransportSerializer());
 }
 

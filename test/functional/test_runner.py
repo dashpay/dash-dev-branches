@@ -129,6 +129,7 @@ BASE_SCRIPTS = [
     'feature_reindex.py',
     'feature_abortnode.py',
     # vv Tests less than 30s vv
+    'rpc_quorum.py',
     'wallet_keypool_topup.py',
     'interface_zmq_dash.py',
     'interface_zmq.py',
@@ -148,6 +149,8 @@ BASE_SCRIPTS = [
     'wallet_createwallet.py',
     'wallet_createwallet.py --usecli',
     'wallet_reorgsrestore.py',
+    'wallet_watchonly.py',
+    'wallet_watchonly.py --usecli',
     'interface_http.py',
     'interface_rpc.py',
     'rpc_psbt.py',
@@ -199,6 +202,7 @@ BASE_SCRIPTS = [
     'mempool_expiry.py',
     'wallet_import_rescan.py',
     'wallet_import_with_label.py',
+    'wallet_upgradewallet.py',
     'rpc_bind.py --ipv4',
     'rpc_bind.py --ipv6',
     'rpc_bind.py --nonloopback',
@@ -394,7 +398,8 @@ def main():
 def run_tests(*, test_list, src_dir, build_dir, tmpdir, jobs=1, enable_coverage=False, args=None, combined_logs_len=0,failfast=False, runs_ci=False):
     args = args or []
 
-    # Warn if dashd is already running (unix only)
+    # Warn if dashd is already running
+    # pidof might fail or return an empty string if bitcoind is not running
     try:
         pidof_output = subprocess.check_output(["pidof", "dashd"])
         if not (pidof_output is None or pidof_output == b''):

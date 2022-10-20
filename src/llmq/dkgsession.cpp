@@ -24,36 +24,21 @@
 
 namespace llmq
 {
+static std::array<std::atomic<double>, int(DKGError::type::_COUNT)> simDkgErrorMap{};
 
-// Supported error types:
-// - contribution-omit
-// - contribution-lie
-// - complain-lie
-// - justify-lie
-// - justify-omit
-// - commit-omit
-// - commit-lie
-
-static CCriticalSection cs_simDkgError;
-static std::map<std::string, double> simDkgErrorMap;
-
-void SetSimulatedDKGErrorRate(const std::string& type, double rate)
+void SetSimulatedDKGErrorRate(DKGError::type type, double rate)
 {
-    LOCK(cs_simDkgError);
-    simDkgErrorMap[type] = rate;
+    if (int(type) >= DKGError::type::_COUNT) return;
+    simDkgErrorMap[int(type)] = rate;
 }
 
-static double GetSimulatedErrorRate(const std::string& type)
+double GetSimulatedErrorRate(DKGError::type type)
 {
-    LOCK(cs_simDkgError);
-    auto it = simDkgErrorMap.find(type);
-    if (it != simDkgErrorMap.end()) {
-        return it->second;
-    }
-    return 0;
+    if (int(type) >= DKGError::type::_COUNT) return 0;
+    return simDkgErrorMap[int(type)];
 }
 
-bool CDKGSession::ShouldSimulateError(const std::string& type) const
+bool CDKGSession::ShouldSimulateError(DKGError::type type) const
 {
     if (params.type != Consensus::LLMQType::LLMQ_TEST) {
         return false;
@@ -116,7 +101,7 @@ bool CDKGSession::Init(const CBlockIndex* _pQuorumBaseBlockIndex, const std::vec
     }
 
     if (!myProTxHash.IsNull()) {
-        quorumDKGDebugManager->InitLocalSessionStatus(params, quorumIndex, m_quorum_base_block_index->GetBlockHash(), m_quorum_base_block_index->nHeight);
+        dkgDebugManager.InitLocalSessionStatus(params, quorumIndex, m_quorum_base_block_index->GetBlockHash(), m_quorum_base_block_index->nHeight);
         relayMembers = utils::GetQuorumRelayMembers(params, m_quorum_base_block_index, myProTxHash, true);
         std::stringstream ss;
         for (const auto& r : relayMembers) {
@@ -162,7 +147,7 @@ void CDKGSession::SendContributions(CDKGPendingMessages& pendingMessages)
 
     logger.Batch("sending contributions");
 
-    if (ShouldSimulateError("contribution-omit")) {
+    if (ShouldSimulateError(DKGError::type::CONTRIBUTION_OMIT)) {
         logger.Batch("omitting");
         return;
     }
@@ -181,7 +166,7 @@ void CDKGSession::SendContributions(CDKGPendingMessages& pendingMessages)
         const auto& m = members[i];
         CBLSSecretKey skContrib = m_sk_contributions[i];
 
-        if (i != myIdx && ShouldSimulateError("contribution-lie")) {
+        if (i != myIdx && ShouldSimulateError(DKGError::type::CONTRIBUTION_LIE)) {
             logger.Batch("lying for %s", m->dmn->proTxHash.ToString());
             skContrib.MakeNewKey();
         }
@@ -198,7 +183,7 @@ void CDKGSession::SendContributions(CDKGPendingMessages& pendingMessages)
 
     logger.Flush();
 
-    quorumDKGDebugManager->UpdateLocalSessionStatus(params.type, quorumIndex, [&](CDKGDebugSessionStatus& status) {
+    dkgDebugManager.UpdateLocalSessionStatus(params.type, quorumIndex, [&](CDKGDebugSessionStatus& status) {
         status.sentContributions = true;
         return true;
     });
@@ -281,7 +266,7 @@ void CDKGSession::ReceiveMessage(const CDKGContribution& qc, bool& retBan)
     CInv inv(MSG_QUORUM_CONTRIB, hash);
     RelayInvToParticipants(inv);
 
-    quorumDKGDebugManager->UpdateLocalMemberStatus(params.type, quorumIndex, member->idx, [&](CDKGDebugMemberStatus& status) {
+    dkgDebugManager.UpdateLocalMemberStatus(params.type, quorumIndex, member->idx, [&](CDKGDebugMemberStatus& status) {
         status.receivedContribution = true;
         return true;
     });
@@ -314,14 +299,14 @@ void CDKGSession::ReceiveMessage(const CDKGContribution& qc, bool& retBan)
     if (!qc.contributions->Decrypt(*myIdx, WITH_LOCK(activeMasternodeInfoCs, return *activeMasternodeInfo.blsKeyOperator), skContribution, PROTOCOL_VERSION)) {
         logger.Batch("contribution from %s could not be decrypted", member->dmn->proTxHash.ToString());
         complain = true;
-    } else if (member->idx != myIdx && ShouldSimulateError("complain-lie")) {
+    } else if (member->idx != myIdx && ShouldSimulateError(DKGError::type::COMPLAIN_LIE)) {
         logger.Batch("lying/complaining for %s", member->dmn->proTxHash.ToString());
         complain = true;
     }
 
     if (complain) {
         member->weComplain = true;
-        quorumDKGDebugManager->UpdateLocalMemberStatus(params.type, quorumIndex, member->idx, [&](CDKGDebugMemberStatus& status) {
+        dkgDebugManager.UpdateLocalMemberStatus(params.type, quorumIndex, member->idx, [&](CDKGDebugMemberStatus& status) {
             status.weComplain = true;
             return true;
         });
@@ -389,7 +374,7 @@ void CDKGSession::VerifyPendingContributions()
             const auto& m = members[memberIndexes[i]];
             logger.Batch("invalid contribution from %s. will complain later", m->dmn->proTxHash.ToString());
             m->weComplain = true;
-            quorumDKGDebugManager->UpdateLocalMemberStatus(params.type, quorumIndex, m->idx, [&](CDKGDebugMemberStatus& status) {
+            dkgDebugManager.UpdateLocalMemberStatus(params.type, quorumIndex, m->idx, [&](CDKGDebugMemberStatus& status) {
                 status.weComplain = true;
                 return true;
             });
@@ -514,7 +499,7 @@ void CDKGSession::SendComplaint(CDKGPendingMessages& pendingMessages)
 
     logger.Flush();
 
-    quorumDKGDebugManager->UpdateLocalSessionStatus(params.type, quorumIndex, [&](CDKGDebugSessionStatus& status) {
+    dkgDebugManager.UpdateLocalSessionStatus(params.type, quorumIndex, [&](CDKGDebugSessionStatus& status) {
         status.sentComplaint = true;
         return true;
     });
@@ -587,7 +572,7 @@ void CDKGSession::ReceiveMessage(const CDKGComplaint& qc, bool& retBan)
     CInv inv(MSG_QUORUM_COMPLAINT, hash);
     RelayInvToParticipants(inv);
 
-    quorumDKGDebugManager->UpdateLocalMemberStatus(params.type, quorumIndex, member->idx, [&](CDKGDebugMemberStatus& status) {
+    dkgDebugManager.UpdateLocalMemberStatus(params.type, quorumIndex, member->idx, [&](CDKGDebugMemberStatus& status) {
         status.receivedComplaint = true;
         return true;
     });
@@ -613,7 +598,7 @@ void CDKGSession::ReceiveMessage(const CDKGComplaint& qc, bool& retBan)
         if (qc.complainForMembers[i]) {
             m->complaintsFromOthers.emplace(qc.proTxHash);
             m->someoneComplain = true;
-            quorumDKGDebugManager->UpdateLocalMemberStatus(params.type, quorumIndex, m->idx, [&](CDKGDebugMemberStatus& status) {
+            dkgDebugManager.UpdateLocalMemberStatus(params.type, quorumIndex, m->idx, [&](CDKGDebugMemberStatus& status) {
                 return status.complaintsFromMembers.emplace(member->idx).second;
             });
             if (AreWeMember() && i == myIdx) {
@@ -691,7 +676,7 @@ void CDKGSession::SendJustification(CDKGPendingMessages& pendingMessages, const 
 
         CBLSSecretKey skContribution = m_sk_contributions[i];
 
-        if (i != myIdx && ShouldSimulateError("justify-lie")) {
+        if (i != myIdx && ShouldSimulateError(DKGError::type::JUSTIFY_LIE)) {
             logger.Batch("lying for %s", m->dmn->proTxHash.ToString());
             skContribution.MakeNewKey();
         }
@@ -699,7 +684,7 @@ void CDKGSession::SendJustification(CDKGPendingMessages& pendingMessages, const 
         qj.contributions.emplace_back(i, skContribution);
     }
 
-    if (ShouldSimulateError("justify-omit")) {
+    if (ShouldSimulateError(DKGError::type::JUSTIFY_OMIT)) {
         logger.Batch("omitting");
         return;
     }
@@ -708,7 +693,7 @@ void CDKGSession::SendJustification(CDKGPendingMessages& pendingMessages, const 
 
     logger.Flush();
 
-    quorumDKGDebugManager->UpdateLocalSessionStatus(params.type, quorumIndex, [&](CDKGDebugSessionStatus& status) {
+    dkgDebugManager.UpdateLocalSessionStatus(params.type, quorumIndex, [&](CDKGDebugSessionStatus& status) {
         status.sentJustification = true;
         return true;
     });
@@ -798,7 +783,7 @@ void CDKGSession::ReceiveMessage(const CDKGJustification& qj, bool& retBan)
     CInv inv(MSG_QUORUM_JUSTIFICATION, hash);
     RelayInvToParticipants(inv);
 
-    quorumDKGDebugManager->UpdateLocalMemberStatus(params.type, quorumIndex, member->idx, [&](CDKGDebugMemberStatus& status) {
+    dkgDebugManager.UpdateLocalMemberStatus(params.type, quorumIndex, member->idx, [&](CDKGDebugMemberStatus& status) {
         status.receivedJustification = true;
         return true;
     });
@@ -941,7 +926,7 @@ void CDKGSession::SendCommitment(CDKGPendingMessages& pendingMessages)
         return;
     }
 
-    if (ShouldSimulateError("commit-omit")) {
+    if (ShouldSimulateError(DKGError::type::COMMIT_OMIT)) {
         logger.Batch("omitting");
         return;
     }
@@ -979,7 +964,7 @@ void CDKGSession::SendCommitment(CDKGPendingMessages& pendingMessages)
     qc.quorumVvecHash = ::SerializeHash(*vvec);
 
     int lieType = -1;
-    if (ShouldSimulateError("commit-lie")) {
+    if (ShouldSimulateError(DKGError::type::COMMIT_LIE)) {
         lieType = GetRandInt(5);
         logger.Batch("lying on commitment. lieType=%d", lieType);
     }
@@ -1020,7 +1005,7 @@ void CDKGSession::SendCommitment(CDKGPendingMessages& pendingMessages)
 
     logger.Flush();
 
-    quorumDKGDebugManager->UpdateLocalSessionStatus(params.type, quorumIndex, [&](CDKGDebugSessionStatus& status) {
+    dkgDebugManager.UpdateLocalSessionStatus(params.type, quorumIndex, [&](CDKGDebugSessionStatus& status) {
         status.sentPrematureCommitment = true;
         return true;
     });
@@ -1157,7 +1142,7 @@ void CDKGSession::ReceiveMessage(const CDKGPrematureCommitment& qc, bool& retBan
     CInv inv(MSG_QUORUM_PREMATURE_COMMITMENT, hash);
     RelayInvToParticipants(inv);
 
-    quorumDKGDebugManager->UpdateLocalMemberStatus(params.type, quorumIndex, member->idx, [&](CDKGDebugMemberStatus& status) {
+    dkgDebugManager.UpdateLocalMemberStatus(params.type, quorumIndex, member->idx, [&](CDKGDebugMemberStatus& status) {
         status.receivedPrematureCommitment = true;
         return true;
     });
@@ -1295,7 +1280,7 @@ void CDKGSession::MarkBadMember(size_t idx)
     if (member->bad) {
         return;
     }
-    quorumDKGDebugManager->UpdateLocalMemberStatus(params.type, quorumIndex, idx, [&](CDKGDebugMemberStatus& status) {
+    dkgDebugManager.UpdateLocalMemberStatus(params.type, quorumIndex, idx, [&](CDKGDebugMemberStatus& status) {
         status.bad = true;
         return true;
     });

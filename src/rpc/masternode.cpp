@@ -7,6 +7,7 @@
 #include <governance/classes.h>
 #include <index/txindex.h>
 #include <node/context.h>
+#include <governance/governance.h>
 #include <masternode/node.h>
 #include <masternode/payments.h>
 #include <net.h>
@@ -15,6 +16,7 @@
 #include <rpc/server.h>
 #include <rpc/util.h>
 #include <univalue.h>
+#include <spork.h>
 #include <validation.h>
 #include <wallet/coincontrol.h>
 #include <wallet/rpcwallet.h>
@@ -75,7 +77,7 @@ static UniValue masternode_connect(const JSONRPCRequest& request)
     std::string strAddress = request.params[0].get_str();
 
     CService addr;
-    if (!Lookup(strAddress.c_str(), addr, 0, false))
+    if (!Lookup(strAddress, addr, 0, false))
         throw JSONRPCError(RPC_INTERNAL_ERROR, strprintf("Incorrect masternode address %s", strAddress));
 
     // TODO: Pass CConnman instance somehow and don't use global variable.
@@ -179,7 +181,11 @@ static void masternode_outputs_help(const JSONRPCRequest& request)
     RPCHelpMan{"masternode outputs",
         "Print masternode compatible outputs\n",
         {},
-        RPCResults{},
+        RPCResult {
+            RPCResult::Type::ARR, "", "A list of outpoints that can be/are used as masternode collaterals",
+            {
+                {RPCResult::Type::STR, "", "A (potential) masternode collateral"},
+            }},
         RPCExamples{""}
     }.Check(request);
 }
@@ -200,12 +206,12 @@ static UniValue masternode_outputs(const JSONRPCRequest& request)
         LOCK(pwallet->cs_wallet);
         pwallet->AvailableCoins(vPossibleCoins, true, &coin_control);
     }
-    UniValue obj(UniValue::VOBJ);
+    UniValue outputsArr(UniValue::VARR);
     for (const auto& out : vPossibleCoins) {
-        obj.pushKV(out.tx->GetHash().ToString(), strprintf("%d", out.i));
+        outputsArr.push_back(out.GetInputCoin().outpoint.ToStringShort());
     }
 
-    return obj;
+    return outputsArr;
 }
 
 #endif // ENABLE_WALLET
@@ -268,9 +274,9 @@ static std::string GetRequiredPaymentsString(int nBlockHeight, const CDeterminis
             strPayments += ", " + EncodeDestination(dest);
         }
     }
-    if (CSuperblockManager::IsSuperblockTriggered(nBlockHeight)) {
+    if (CSuperblockManager::IsSuperblockTriggered(*governance, nBlockHeight)) {
         std::vector<CTxOut> voutSuperblock;
-        if (!CSuperblockManager::GetSuperblockPayments(nBlockHeight, voutSuperblock)) {
+        if (!CSuperblockManager::GetSuperblockPayments(*governance, nBlockHeight, voutSuperblock)) {
             return strPayments + ", error";
         }
         std::string strSBPayees = "Unknown";
@@ -433,7 +439,7 @@ static UniValue masternode_payments(const JSONRPCRequest& request)
         std::vector<CTxOut> voutMasternodePayments, voutDummy;
         CMutableTransaction dummyTx;
         CAmount blockReward = nBlockFees + GetBlockSubsidy(pindex->pprev->nBits, pindex->pprev->nHeight, Params().GetConsensus());
-        FillBlockPayments(dummyTx, pindex->nHeight, blockReward, voutMasternodePayments, voutDummy);
+        FillBlockPayments(*sporkManager, *governance, dummyTx, pindex->nHeight, blockReward, voutMasternodePayments, voutDummy);
 
         UniValue blockObj(UniValue::VOBJ);
         CAmount payedPerBlock{0};

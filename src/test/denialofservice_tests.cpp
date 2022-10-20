@@ -4,10 +4,19 @@
 
 // Unit tests for denial-of-service detection/prevention code
 
+#include <arith_uint256.h>
 #include <banman.h>
 #include <chainparams.h>
+#include <llmq/blockprocessor.h>
+#include <llmq/chainlocks.h>
+#include <llmq/dkgsessionmgr.h>
+#include <llmq/instantsend.h>
+#include <llmq/quorums.h>
+#include <llmq/signing_shares.h>
+#include <llmq/signing.h>
 #include <net.h>
 #include <net_processing.h>
+#include <pubkey.h>
 #include <script/sign.h>
 #include <script/signingprovider.h>
 #include <script/standard.h>
@@ -78,7 +87,11 @@ BOOST_FIXTURE_TEST_SUITE(denialofservice_tests, TestingSetup)
 BOOST_AUTO_TEST_CASE(outbound_slow_chain_eviction)
 {
     auto connman = MakeUnique<CConnman>(0x1337, 0x1337);
-    auto peerLogic = MakeUnique<PeerLogicValidation>(connman.get(), nullptr, *m_node.scheduler, *m_node.chainman, *m_node.mempool, false);
+    auto peerLogic = MakeUnique<PeerLogicValidation>(
+        connman.get(), nullptr, *m_node.scheduler, *m_node.chainman, *m_node.mempool, llmq::quorumBlockProcessor,
+        llmq::quorumDKGSessionManager, llmq::quorumManager, llmq::quorumSigSharesManager, llmq::quorumSigningManager,
+        llmq::chainLocksHandler, llmq::quorumInstantSendManager, false
+    );
 
     // Mock an outbound peer
     CAddress addr1(ip(0xa0b0c001), NODE_NONE);
@@ -149,7 +162,11 @@ static void AddRandomOutboundPeer(std::vector<CNode *> &vNodes, PeerLogicValidat
 BOOST_AUTO_TEST_CASE(stale_tip_peer_management)
 {
     auto connman = MakeUnique<CConnmanTest>(0x1337, 0x1337);
-    auto peerLogic = MakeUnique<PeerLogicValidation>(connman.get(), nullptr, *m_node.scheduler, *m_node.chainman, *m_node.mempool, false);
+    auto peerLogic = MakeUnique<PeerLogicValidation>(
+        connman.get(), nullptr, *m_node.scheduler, *m_node.chainman, *m_node.mempool, llmq::quorumBlockProcessor,
+        llmq::quorumDKGSessionManager, llmq::quorumManager, llmq::quorumSigSharesManager, llmq::quorumSigningManager,
+        llmq::chainLocksHandler, llmq::quorumInstantSendManager, false
+    );
 
     const Consensus::Params& consensusParams = Params().GetConsensus();
     constexpr int max_outbound_full_relay = MAX_OUTBOUND_FULL_RELAY_CONNECTIONS;
@@ -222,7 +239,11 @@ BOOST_AUTO_TEST_CASE(DoS_banning)
 {
     auto banman = MakeUnique<BanMan>(GetDataDir() / "banlist.dat", nullptr, DEFAULT_MISBEHAVING_BANTIME);
     auto connman = MakeUnique<CConnman>(0x1337, 0x1337);
-    auto peerLogic = MakeUnique<PeerLogicValidation>(connman.get(), banman.get(), *m_node.scheduler, *m_node.chainman, *m_node.mempool, false);
+    auto peerLogic = MakeUnique<PeerLogicValidation>(
+        connman.get(), banman.get(), *m_node.scheduler, *m_node.chainman, *m_node.mempool, llmq::quorumBlockProcessor,
+        llmq::quorumDKGSessionManager, llmq::quorumManager, llmq::quorumSigSharesManager, llmq::quorumSigningManager,
+        llmq::chainLocksHandler, llmq::quorumInstantSendManager, false
+    );
 
     banman->ClearBanned();
     CAddress addr1(ip(0xa0b0c001), NODE_NONE);
@@ -277,7 +298,11 @@ BOOST_AUTO_TEST_CASE(DoS_banscore)
 {
     auto banman = MakeUnique<BanMan>(GetDataDir() / "banlist.dat", nullptr, DEFAULT_MISBEHAVING_BANTIME);
     auto connman = MakeUnique<CConnman>(0x1337, 0x1337);
-    auto peerLogic = MakeUnique<PeerLogicValidation>(connman.get(), banman.get(), *m_node.scheduler, *m_node.chainman, *m_node.mempool, false);
+    auto peerLogic = MakeUnique<PeerLogicValidation>(
+        connman.get(), banman.get(), *m_node.scheduler, *m_node.chainman, *m_node.mempool, llmq::quorumBlockProcessor,
+        llmq::quorumDKGSessionManager, llmq::quorumManager, llmq::quorumSigSharesManager, llmq::quorumSigningManager,
+        llmq::chainLocksHandler, llmq::quorumInstantSendManager, false
+    );
 
     banman->ClearBanned();
     gArgs.ForceSetArg("-banscore", "111"); // because 11 is my favorite number
@@ -324,7 +349,11 @@ BOOST_AUTO_TEST_CASE(DoS_bantime)
 {
     auto banman = MakeUnique<BanMan>(GetDataDir() / "banlist.dat", nullptr, DEFAULT_MISBEHAVING_BANTIME);
     auto connman = MakeUnique<CConnman>(0x1337, 0x1337);
-    auto peerLogic = MakeUnique<PeerLogicValidation>(connman.get(), banman.get(), *m_node.scheduler, *m_node.chainman, *m_node.mempool, false);
+    auto peerLogic = MakeUnique<PeerLogicValidation>(
+        connman.get(), banman.get(), *m_node.scheduler, *m_node.chainman, *m_node.mempool, llmq::quorumBlockProcessor,
+        llmq::quorumDKGSessionManager, llmq::quorumManager, llmq::quorumSigSharesManager, llmq::quorumSigningManager,
+        llmq::chainLocksHandler, llmq::quorumInstantSendManager, false
+    );
 
     banman->ClearBanned();
     int64_t nStartTime = GetTime();
@@ -361,10 +390,26 @@ static CTransactionRef RandomOrphan()
     return it->second.tx;
 }
 
+static void MakeNewKeyWithFastRandomContext(CKey& key)
+{
+    std::vector<unsigned char> keydata;
+    keydata = g_insecure_rand_ctx.randbytes(32);
+    key.Set(keydata.data(), keydata.data() + keydata.size(), /*fCompressedIn*/ true);
+    assert(key.IsValid());
+}
+
 BOOST_AUTO_TEST_CASE(DoS_mapOrphans)
 {
+    // This test had non-deterministic coverage due to
+    // randomly selected seeds.
+    // This seed is chosen so that all branches of the function
+    // ecdsa_signature_parse_der_lax are executed during this test.
+    // Specifically branches that run only when an ECDSA
+    // signature's R and S values have leading zeros.
+    g_insecure_rand_ctx = FastRandomContext(ArithToUint256(arith_uint256(33)));
+
     CKey key;
-    key.MakeNewKey(true);
+    MakeNewKeyWithFastRandomContext(key);
     FillableSigningProvider keystore;
     BOOST_CHECK(keystore.AddKey(key));
 

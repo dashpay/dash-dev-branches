@@ -8,8 +8,6 @@ from decimal import Decimal
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import (
     assert_equal,
-    connect_nodes,
-    disconnect_nodes,
     find_output,
 )
 
@@ -28,12 +26,19 @@ class TxnMallTest(BitcoinTestFramework):
     def setup_network(self):
         # Start with split network:
         super().setup_network()
-        disconnect_nodes(self.nodes[1], 2)
-        disconnect_nodes(self.nodes[2], 1)
+        self.disconnect_nodes(1, 2)
 
     def run_test(self):
         # All nodes should start with 12,500 DASH:
         starting_balance = 12500
+
+        # All nodes should be out of IBD.
+        # If the nodes are not all out of IBD, that can interfere with
+        # blockchain sync later in the test when nodes are connected, due to
+        # timing issues.
+        for n in self.nodes:
+            assert n.getblockchaininfo()["initialblockdownload"] == False
+
         for i in range(4):
             assert_equal(self.nodes[i].getbalance(), starting_balance)
             self.nodes[i].getnewaddress("")  # bug workaround, coins generated assigned to first getnewaddress!
@@ -109,7 +114,7 @@ class TxnMallTest(BitcoinTestFramework):
         self.nodes[2].generate(1)
 
         # Reconnect the split network, and sync chain:
-        connect_nodes(self.nodes[1], 2)
+        self.connect_nodes(1, 2)
         self.nodes[2].generate(1)  # Mine another block to make sure we sync
         self.sync_blocks()
         assert_equal(self.nodes[0].gettransaction(doublespend_txid)["confirmations"], 2)

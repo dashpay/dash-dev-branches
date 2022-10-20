@@ -13,11 +13,7 @@ EXPECTED_CIRCULAR_DEPENDENCIES=(
     "index/txindex -> validation -> index/txindex"
     "policy/fees -> txmempool -> policy/fees"
     "qt/addresstablemodel -> qt/walletmodel -> qt/addresstablemodel"
-    "qt/bantablemodel -> qt/clientmodel -> qt/bantablemodel"
-    "qt/bitcoingui -> qt/utilitydialog -> qt/bitcoingui"
     "qt/bitcoingui -> qt/walletframe -> qt/bitcoingui"
-    "qt/bitcoingui -> qt/walletview -> qt/bitcoingui"
-    "qt/clientmodel -> qt/peertablemodel -> qt/clientmodel"
     "qt/paymentserver -> qt/walletmodel -> qt/paymentserver"
     "qt/recentrequeststablemodel -> qt/walletmodel -> qt/recentrequeststablemodel"
     "qt/transactiontablemodel -> qt/walletmodel -> qt/transactiontablemodel"
@@ -89,6 +85,8 @@ EXPECTED_CIRCULAR_DEPENDENCIES=(
     "llmq/dkgsession -> llmq/dkgsessionmgr -> llmq/quorums -> llmq/dkgsession"
     "llmq/dkgsessionmgr -> llmq/quorums -> llmq/dkgsessionmgr"
     "llmq/snapshot -> llmq/utils -> llmq/snapshot"
+    "spork -> validation -> spork"
+    "governance/governance -> validation -> governance/governance"
 )
 
 EXIT_CODE=0

@@ -15,7 +15,7 @@ from collections import defaultdict
 
 # Avoid wildcard * imports
 from test_framework.blocktools import (create_block, create_coinbase)
-from test_framework.messages import CInv
+from test_framework.messages import CInv, MSG_BLOCK
 from test_framework.mininode import (
     P2PInterface,
     mininode_lock,
@@ -25,7 +25,6 @@ from test_framework.mininode import (
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import (
     assert_equal,
-    connect_nodes,
     wait_until,
 )
 
@@ -116,7 +115,7 @@ class ExampleTest(BitcoinTestFramework):
         # In this test, we're not connecting node2 to node0 or node1. Calls to
         # sync_all() should not include node2, since we're not expecting it to
         # sync.
-        connect_nodes(self.nodes[0], 1)
+        self.connect_nodes(0, 1)
         self.sync_all(self.nodes[0:2])
 
     # Use setup_nodes() to customize the node start behaviour (for example if
@@ -184,7 +183,7 @@ class ExampleTest(BitcoinTestFramework):
         self.nodes[1].waitforblockheight(11)
 
         self.log.info("Connect node2 and node1")
-        connect_nodes(self.nodes[1], 2)
+        self.connect_nodes(1, 2)
 
         self.log.info("Wait for node2 to receive all the blocks from node1")
         self.sync_all()
@@ -198,7 +197,7 @@ class ExampleTest(BitcoinTestFramework):
 
         getdata_request = msg_getdata()
         for block in blocks:
-            getdata_request.inv.append(CInv(2, block))
+            getdata_request.inv.append(CInv(MSG_BLOCK, block))
         self.nodes[2].p2p.send_message(getdata_request)
 
         # wait_until() will loop until a predicate condition is met. Use it to test properties of the

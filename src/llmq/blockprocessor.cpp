@@ -27,7 +27,7 @@
 namespace llmq
 {
 
-CQuorumBlockProcessor* quorumBlockProcessor;
+std::unique_ptr<CQuorumBlockProcessor> quorumBlockProcessor;
 
 static const std::string DB_MINED_COMMITMENT = "q_mc";
 static const std::string DB_MINED_COMMITMENT_BY_INVERSED_HEIGHT = "q_mcih";
@@ -502,6 +502,7 @@ CFinalCommitmentPtr CQuorumBlockProcessor::GetMinedCommitment(Consensus::LLMQTyp
 // The returned quorums are in reversed order, so the most recent one is at index 0
 std::vector<const CBlockIndex*> CQuorumBlockProcessor::GetMinedCommitmentsUntilBlock(Consensus::LLMQType llmqType, const CBlockIndex* pindex, size_t maxCount) const
 {
+    AssertLockNotHeld(evoDb.cs);
     LOCK(evoDb.cs);
 
     auto dbIt = evoDb.GetCurTransaction().NewIteratorUniquePtr();
@@ -545,6 +546,7 @@ std::vector<const CBlockIndex*> CQuorumBlockProcessor::GetMinedCommitmentsUntilB
 
 std::optional<const CBlockIndex*> CQuorumBlockProcessor::GetLastMinedCommitmentsByQuorumIndexUntilBlock(Consensus::LLMQType llmqType, const CBlockIndex* pindex, int quorumIndex, size_t cycle) const
 {
+    AssertLockNotHeld(evoDb.cs);
     LOCK(evoDb.cs);
 
     auto dbIt = evoDb.GetCurTransaction().NewIteratorUniquePtr();
