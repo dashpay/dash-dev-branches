@@ -1014,6 +1014,8 @@ void CTxMemPool::removeForBlock(const std::vector<CTransactionRef>& vtx, unsigne
 void CTxMemPool::removeExpiredAssetUnlock(unsigned int nBlockHeight)
 {
     AssertLockHeld(cs);
+    // items to removed should be firstly collected to independed list,
+    // because removing items by `removeRecursive` changes the mapAssetUnlockExpiry
     std::vector<CTransactionRef> entries;
     for (const auto& item: mapAssetUnlockExpiry) {
         if (item.second < nBlockHeight) {
