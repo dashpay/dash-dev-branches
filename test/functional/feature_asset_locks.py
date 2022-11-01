@@ -8,6 +8,10 @@ import hashlib
 from decimal import Decimal
 from io import BytesIO
 
+from test_framework.blocktools import (
+    create_block,
+    create_coinbase,
+)
 from test_framework.authproxy import JSONRPCException
 from test_framework.key import ECKey
 from test_framework.messages import (
@@ -188,6 +192,9 @@ class AssetLocksTest(DashTestFramework):
         coins = node.listunspent()
         coin = coins.pop()
         locked_1 = 10 * COIN + 141421
+        locked_2 = 10 * COIN + 314159
+        while COIN * coin['amount'] < locked_2:
+            coin = coins.pop()
         asset_lock_tx = create_assetlock(node, coin, locked_1, pubkey)
 
         self.check_mempool_result(tx=asset_lock_tx, result_expected={'allowed': True})
@@ -216,15 +223,17 @@ class AssetLocksTest(DashTestFramework):
         self.sync_all()
         assert_equal(get_credit_pool_amount(node), 0)
         self.log.info("Resubmit asset lock tx to new chain...")
-        txid_in_block = self.send_tx(asset_lock_tx)
-        node.generate(3)
+        # NEW tx appears
+        asset_lock_tx_2 = create_assetlock(node, coin, locked_2, pubkey)
+        txid_in_block = self.send_tx(asset_lock_tx_2)
+        node.generate(1)
         self.sync_all()
 
-        assert_equal(get_credit_pool_amount(node), locked_1)
+        assert_equal(get_credit_pool_amount(node), locked_2)
 
         node.generate(3)
         self.sync_all()
-        assert_equal(get_credit_pool_amount(node), locked_1)
+        assert_equal(get_credit_pool_amount(node), locked_2)
         self.log.info("Reconsider old blocks...")
         for inode in self.nodes:
             inode.reconsiderblock(block_hash_1)
@@ -261,17 +270,7 @@ class AssetLocksTest(DashTestFramework):
             expected_error = "Transaction already in block chain",
             reason = "double copy")
 
-        self.log.info("Invalidate block with asset unlock tx...")
         block_asset_unlock = node.getbestblockhash()
-        for inode in self.nodes:
-            inode.invalidateblock(block_asset_unlock)
-        assert_equal(get_credit_pool_amount(node), locked_1)
-        # TODO: strange, fails if generate there new blocks
-        #node.generate(3)
-        #self.sync_all()
-        for inode in self.nodes:
-            inode.reconsiderblock(block_asset_unlock)
-        assert_equal(get_credit_pool_amount(node), locked_1 - COIN)
 
         # mine next quorum, tx should be still accepted
         self.mine_quorum()
@@ -298,7 +297,40 @@ class AssetLocksTest(DashTestFramework):
         self.check_mempool_result(tx=asset_unlock_tx_too_late,
                 result_expected={'allowed': False, 'reject-reason' : '16: bad-assetunlock-not-active-quorum'})
 
-        node.generate(13)
+        block_to_reconsider = node.getbestblockhash()
+        self.log.info("Test block invalidation with asset unlock tx...")
+        for inode in self.nodes:
+            inode.invalidateblock(block_asset_unlock)
+        assert_equal(get_credit_pool_amount(node), locked_1)
+        # generate some new blocks
+        self.slowly_generate_batch(50)
+        assert_equal(get_credit_pool_amount(node), locked_1)
+        for inode in self.nodes:
+            inode.reconsiderblock(block_to_reconsider)
+        assert_equal(get_credit_pool_amount(node), locked_1 - 2 * COIN)
+
+        # Forcibly mine asset_unlock_tx_too_late and ensure block is invalid
+        hh = node.getbestblockhash()
+        best_block = node.getblock(hh)
+        tip = int(node.getbestblockhash(), 16)
+        height = best_block["height"] + 1
+        block_time = best_block["time"] + 1
+
+
+        cbb = create_coinbase(height, dip4_activated=True, v20_activated=True)
+        block = create_block(tip, cbb, block_time, version=3)
+        block.vtx.append(asset_unlock_tx_too_late)
+        block.hashMerkleRoot = block.calc_merkle_root()
+        block.solve()
+        result = node.submitblock(block.serialize().hex())
+        # Expect an error here
+        expected_error = "bad-assetunlock-not-active-quorum"
+        if result != expected_error:
+            raise AssertionError('mining the block should have failed with error %s, but submitblock returned %s' % (expected_error, result))
+
+        # ----
+
+        node.generate(1)
         self.sync_all()
 
         assert_equal(get_credit_pool_amount(node), locked_1 -  2 * COIN)
