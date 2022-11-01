@@ -131,6 +131,9 @@ public:
     uint32_t getRequestedHeight() const;
     const uint256& getQuorumHash() const;
     const CBLSSignature& getQuorumSig() const;
+
+    // used by mempool to know when possible to drop a transaction as expired
+    int getHeightToExpiry() const;
 };
 
 maybe_error CheckAssetLockTx(const CTransaction& tx);

@@ -379,7 +379,6 @@ class AssetLocksTest(DashTestFramework):
         self.log.info("generate many blocks to be sure that mempool is empty afterwards...")
         self.slowly_generate_batch(60)
         assert_equal(new_total, get_credit_pool_amount(node))
-        # TODO FIX IT, should be 0 if mempool is cleared properly!
-        assert_equal(node.getmempoolinfo()['size'], 2)
+        assert_equal(node.getmempoolinfo()['size'], 0)
 if __name__ == '__main__':
     AssetLocksTest().main()
