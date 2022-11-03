@@ -169,11 +169,13 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(CChainState& chai
     int nPackagesSelected = 0;
     int nDescendantsUpdated = 0;
 
-    std::optional<CCreditPoolManager> creditPoolManager;
+    std::optional<CCreditPoolDiff> creditPoolDiff;
     if (fV20Active_context) {
-        creditPoolManager.emplace(pindexPrev, chainparams.GetConsensus());
+        const CCreditPool creditPool = creditPoolManager->getCreditPool(pindexPrev, chainparams.GetConsensus());
+        LogPrintf("%s: CCreditPool is %s\n", __func__, creditPool.ToString());
+        creditPoolDiff.emplace(creditPool, pindexPrev, chainparams.GetConsensus());
     }
-    addPackageTxs(nPackagesSelected, nDescendantsUpdated, creditPoolManager);
+    addPackageTxs(nPackagesSelected, nDescendantsUpdated, creditPoolDiff);
 
     int64_t nTime1 = GetTimeMicros();
 
@@ -206,7 +208,7 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(CChainState& chai
 
         if (fV20Active_context) {
             cbTx.nVersion = 3;
-            cbTx.assetLockedAmount = creditPoolManager->getTotalLocked();
+            cbTx.assetLockedAmount = creditPoolDiff->getTotalLocked();
         } else if (fDIP0008Active_context) {
             cbTx.nVersion = 2;
         } else {
@@ -378,7 +380,7 @@ void BlockAssembler::SortForBlock(const CTxMemPool::setEntries& package, std::ve
 // Each time through the loop, we compare the best transaction in
 // mapModifiedTxs with the next transaction in the mempool to decide what
 // transaction package to work on next.
-void BlockAssembler::addPackageTxs(int &nPackagesSelected, int &nDescendantsUpdated, std::optional<CCreditPoolManager>& creditPoolManager)
+void BlockAssembler::addPackageTxs(int &nPackagesSelected, int &nDescendantsUpdated, std::optional<CCreditPoolDiff>& creditPoolDiff)
 {
     AssertLockHeld(m_mempool.cs);
 
@@ -435,13 +437,13 @@ void BlockAssembler::addPackageTxs(int &nPackagesSelected, int &nDescendantsUpda
             }
         }
 
-        if (creditPoolManager) {
+        if (creditPoolDiff) {
             // If one transaction is skipped due to limits, it is not a reason to interrupt
             // whole process of adding transactions.
             // `state` is local here because used to log info about this specific tx
             CValidationState state;
 
-            if (!creditPoolManager->processTransaction(iter->GetTx(), state)) {
+            if (!creditPoolDiff->processTransaction(iter->GetTx(), state)) {
                 if (fUsingModified) {
                     mapModifiedTx.get<ancestor_score>().erase(modit);
                     failedTx.insert(iter);
