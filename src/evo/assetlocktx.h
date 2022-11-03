@@ -15,6 +15,7 @@
 #include <univalue.h>
 
 class CBlockIndex;
+struct CCreditPool;
 
 class CAssetLockPayload
 {
@@ -137,7 +138,7 @@ public:
 };
 
 bool CheckAssetLockTx(const CTransaction& tx, TxValidationState& state);
-bool CheckAssetUnlockTx(const CTransaction& tx, const CBlockIndex* pindexPrev, TxValidationState& state);
-bool CheckAssetLockUnlockTx(const CTransaction& tx, const CBlockIndex* pindexPrev, TxValidationState& state);
+bool CheckAssetUnlockTx(const CTransaction& tx, const CBlockIndex* pindexPrev, const CCreditPool& creditPool, TxValidationState& state);
+bool CheckAssetLockUnlockTx(const CTransaction& tx, const CBlockIndex* pindexPrev, const CCreditPool& creditPool, TxValidationState& state);
 
 #endif // BITCOIN_EVO_ASSETLOCKTX_H

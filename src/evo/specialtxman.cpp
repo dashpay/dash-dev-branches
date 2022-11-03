@@ -7,6 +7,7 @@
 #include <chainparams.h>
 #include <consensus/validation.h>
 #include <evo/cbtx.h>
+#include <evo/creditpool.h>
 #include <evo/deterministicmns.h>
 #include <evo/mnhftx.h>
 #include <evo/providertx.h>
@@ -18,7 +19,7 @@
 #include <primitives/block.h>
 #include <validation.h>
 
-bool CheckSpecialTx(const CTransaction& tx, const CBlockIndex* pindexPrev, TxValidationState& state, const CCoinsViewCache& view, bool check_sigs)
+bool CheckSpecialTx(const CTransaction& tx, const CBlockIndex* pindexPrev, const CCoinsViewCache& view, const CCreditPool& creditPool, bool check_sigs, TxValidationState& state)
 {
     AssertLockHeld(cs_main);
 
@@ -50,7 +51,7 @@ bool CheckSpecialTx(const CTransaction& tx, const CBlockIndex* pindexPrev, TxVal
             if (!llmq::utils::IsV20Active(pindexPrev)) {
                 return state.Invalid(TxValidationResult::TX_CONSENSUS, "v20-not-active");
             }
-            return CheckAssetLockUnlockTx(tx, pindexPrev, state);
+            return CheckAssetLockUnlockTx(tx, pindexPrev, creditPool, state);
         }
     } catch (const std::exception& e) {
         LogPrintf("%s -- failed: %s\n", __func__, e.what());
@@ -113,7 +114,8 @@ bool UndoSpecialTx(const CTransaction& tx, const CBlockIndex* pindex)
 }
 
 bool ProcessSpecialTxsInBlock(const CBlock& block, const CBlockIndex* pindex, llmq::CQuorumBlockProcessor& quorum_block_processor, const llmq::CChainLocksHandler& chainlock_handler,
-                              BlockValidationState& state, const CCoinsViewCache& view, bool fJustCheck, bool fCheckCbTxMerleRoots)
+                              const Consensus::Params& consensusParams, const CCoinsViewCache& view, bool fJustCheck, bool fCheckCbTxMerleRoots,
+                              BlockValidationState& state)
 {
     AssertLockHeld(cs_main);
 
@@ -125,11 +127,18 @@ bool ProcessSpecialTxsInBlock(const CBlock& block, const CBlockIndex* pindex, ll
 
         int64_t nTime1 = GetTimeMicros();
 
+        const CCreditPool creditPool = creditPoolManager->getCreditPool(pindex->pprev, consensusParams);
+        std::optional<CCreditPoolDiff> creditPoolDiff;
+        if (bool fV20Active_context = llmq::utils::IsV20Active(pindex->pprev); fV20Active_context) {
+            LogPrintf("%s: CCreditPool is %s\n", __func__, creditPool.ToString());
+            creditPoolDiff.emplace(creditPool, pindex->pprev, consensusParams);
+        }
+
         for (const auto& ptr_tx : block.vtx) {
             TxValidationState tx_state;
             // At this moment CheckSpecialTx() and ProcessSpecialTx() may fail by 2 possible ways:
             // consensus failures and "TX_BAD_SPECIAL"
-            if (!CheckSpecialTx(*ptr_tx, pindex->pprev, tx_state, view, fCheckCbTxMerleRoots)) {
+            if (!CheckSpecialTx(*ptr_tx, pindex->pprev, view, creditPool, fCheckCbTxMerleRoots, tx_state)) {
                 assert(tx_state.GetResult() == TxValidationResult::TX_CONSENSUS || tx_state.GetResult() == TxValidationResult::TX_BAD_SPECIAL);
                 return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, tx_state.GetRejectReason(),
                                  strprintf("Special Transaction check failed (tx hash %s) %s", ptr_tx->GetHash().ToString(), tx_state.GetDebugMessage()));
@@ -138,6 +147,13 @@ bool ProcessSpecialTxsInBlock(const CBlock& block, const CBlockIndex* pindex, ll
                 assert(tx_state.GetResult() == TxValidationResult::TX_CONSENSUS || tx_state.GetResult() == TxValidationResult::TX_BAD_SPECIAL);
                 return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, tx_state.GetRejectReason(),
                                  strprintf("Process Special Transaction failed (tx hash %s) %s", ptr_tx->GetHash().ToString(), tx_state.GetDebugMessage()));
+            }
+            if (creditPoolDiff && !creditPoolDiff->processTransaction(*ptr_tx, tx_state)) {
+                assert(tx_state.GetResult() == TxValidationResult::TX_CONSENSUS || tx_state.GetResult() == TxValidationResult::TX_BAD_SPECIAL);
+                return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, tx_state.GetRejectReason(),
+                                 strprintf("Process Special Transaction failed at Credit Pool (tx hash %s) %s", ptr_tx->GetHash().ToString(), tx_state.GetDebugMessage()));
+
+                return false;
             }
         }
 

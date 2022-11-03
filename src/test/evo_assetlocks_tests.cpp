@@ -287,7 +287,8 @@ BOOST_FIXTURE_TEST_CASE(evo_assetunlock, TestChain100Setup)
     BOOST_CHECK(tx_state.IsValid());
 
     const CBlockIndex *block_index = ::ChainActive().Tip();
-    BOOST_CHECK(!CheckAssetUnlockTx(CTransaction(tx), block_index, tx_state));
+    CCreditPool pool;
+    BOOST_CHECK(!CheckAssetUnlockTx(CTransaction(tx), block_index, pool, tx_state));
     BOOST_CHECK(tx_state.GetRejectReason() == "bad-assetunlock-quorum-hash");
 
     {
@@ -305,7 +306,7 @@ BOOST_FIXTURE_TEST_CASE(evo_assetunlock, TestChain100Setup)
         std::string reason;
         BOOST_CHECK(IsStandardTx(CTransaction(tx), reason));
 
-        BOOST_CHECK(!CheckAssetUnlockTx(CTransaction(txNonemptyInput), block_index, tx_state));
+        BOOST_CHECK(!CheckAssetUnlockTx(CTransaction(txNonemptyInput), block_index, pool, tx_state));
         BOOST_CHECK(tx_state.GetRejectReason() == "bad-assetunlocktx-have-input");
     }
 
@@ -322,7 +323,7 @@ BOOST_FIXTURE_TEST_CASE(evo_assetunlock, TestChain100Setup)
         // Wrong type "Asset Lock TX" instead "Asset Unlock TX"
         CMutableTransaction txWrongType = tx;
         txWrongType.nType = TRANSACTION_ASSET_LOCK;
-        BOOST_CHECK(!CheckAssetUnlockTx(CTransaction(txWrongType), block_index, tx_state));
+        BOOST_CHECK(!CheckAssetUnlockTx(CTransaction(txWrongType), block_index, pool, tx_state));
         BOOST_CHECK(tx_state.GetRejectReason() == "bad-assetunlocktx-type");
     }
 
@@ -343,14 +344,14 @@ BOOST_FIXTURE_TEST_CASE(evo_assetunlock, TestChain100Setup)
             out.scriptPubKey = GetScriptForDestination(PKHash(key.GetPubKey()));
         }
 
-        BOOST_CHECK(!CheckAssetUnlockTx(CTransaction(txManyOutputs), block_index, tx_state));
+        BOOST_CHECK(!CheckAssetUnlockTx(CTransaction(txManyOutputs), block_index, pool, tx_state));
         BOOST_CHECK(tx_state.GetRejectReason() == "bad-assetunlock-quorum-hash");
 
         // Should not be more than 32 withdrawal in one transaction
         txManyOutputs.vout.resize(outputsLimit + 1);
         txManyOutputs.vout.back().nValue = CENT;
         txManyOutputs.vout.back().scriptPubKey = GetScriptForDestination(PKHash(key.GetPubKey()));
-        BOOST_CHECK(!CheckAssetUnlockTx(CTransaction(txManyOutputs), block_index, tx_state));
+        BOOST_CHECK(!CheckAssetUnlockTx(CTransaction(txManyOutputs), block_index, pool, tx_state));
         BOOST_CHECK(tx_state.GetRejectReason() == "bad-assetunlocktx-too-many-outs");
     }
 
