@@ -5,6 +5,7 @@
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 import hashlib
+import copy
 from decimal import Decimal
 from io import BytesIO
 
@@ -273,6 +274,8 @@ class AssetLocksTest(DashTestFramework):
         too_late_height = node.getblock(node.getbestblockhash())["height"] + 48
 
         self.check_mempool_result(tx=asset_unlock_tx, result_expected={'allowed': True})
+        self.check_mempool_result(tx=asset_unlock_tx_duplicate_index,
+                result_expected={'allowed': False, 'reject-reason' : '16: bad-assetunlock-not-verified'})
 
         # validate that we calculate payload hash correctly: ask quorum forcely by message hash
         asset_unlock_tx_payload = CAssetUnlockTx()
@@ -280,13 +283,24 @@ class AssetLocksTest(DashTestFramework):
 
         assert_equal(asset_unlock_tx_payload.quorumHash, int(self.mninfo[0].node.quorum("selectquorum", llmq_type_test, 'e6c7a809d79f78ea85b72d5df7e9bd592aecf151e679d6e976b74f053a7f9056')["quorumHash"], 16))
 
+        assert_equal(get_credit_pool_amount(node), locked_1)
         self.send_tx(asset_unlock_tx)
+        assert_equal(get_credit_pool_amount(node), locked_1)
         node.generate(1)
         self.sync_all()
+        assert_equal(get_credit_pool_amount(node), locked_1 - COIN)
+
         self.send_tx(asset_unlock_tx,
             expected_error = "Transaction already in block chain",
             reason = "double copy")
 
+        self.check_mempool_result(tx=asset_unlock_tx_duplicate_index,
+                result_expected={'allowed': False, 'reject-reason' : '16: bad-assetunlock-duplicated-index'})
+        self.send_tx(asset_unlock_tx_duplicate_index,
+            expected_error = "bad-assetunlock-duplicated-index",
+            reason = "double index")
+
+        assert_equal(get_credit_pool_amount(node), locked_1 - COIN)
         block_asset_unlock = node.getbestblockhash()
 
         # mine next quorum, tx should be still accepted
@@ -404,8 +418,10 @@ class AssetLocksTest(DashTestFramework):
             self.send_tx(asset_unlock_tx)
             if index == 401:
                 node.generate(1)
+
         node.generate(1)
         self.sync_all()
+
         new_total = get_credit_pool_amount(node)
         amount_actually_withdrawn = total - new_total
         block = node.getblock(node.getbestblockhash())
@@ -454,5 +470,6 @@ class AssetLocksTest(DashTestFramework):
         self.slowly_generate_batch(60)
         assert_equal(new_total, get_credit_pool_amount(node))
         assert_equal(node.getmempoolinfo()['size'], 0)
+
 if __name__ == '__main__':
     AssetLocksTest().main()
