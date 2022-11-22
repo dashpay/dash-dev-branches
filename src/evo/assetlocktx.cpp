@@ -4,6 +4,7 @@
 
 #include <evo/assetlocktx.h>
 #include <evo/specialtx.h>
+#include <evo/creditpool.h>
 
 #include <consensus/params.h>
 
