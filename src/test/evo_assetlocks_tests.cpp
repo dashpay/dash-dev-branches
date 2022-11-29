@@ -5,6 +5,7 @@
 #include <test/util/setup_common.h>
 
 #include <evo/assetlocktx.h>
+#include <evo/creditpool.h> // to test CSkipSet
 #include <policy/settings.h>
 #include <script/signingprovider.h>
 #include <consensus/tx_check.h>
@@ -14,6 +15,8 @@
 
 #include <boost/test/unit_test.hpp>
 
+#include <random>
+#include <unordered_set>
 
 //
 // Helper: create two dummy transactions, each with
@@ -356,5 +359,31 @@ BOOST_FIXTURE_TEST_CASE(evo_assetunlock, TestChain100Setup)
     }
 
 }
+
+BOOST_FIXTURE_TEST_CASE(evo_skipset, TestChain100Setup)
+{
+    std::mt19937 gen;
+    for (size_t test = 0; test < 17; ++test) {
+        std::uniform_int_distribution<uint64_t> dist_value(0, (1 << test));
+        size_t skip_size = test ? (1 << (test - 1)) : 1;
+        CSkipSet set_1{skip_size};
+        std::unordered_set<uint64_t> set_2;
+        for (size_t iter = 0; iter < (1 << test) * 2; ++iter) {
+            uint64_t value = dist_value(gen);
+            BOOST_CHECK(set_1.contains(value) == !!set_2.count(value));
+            if (!set_1.contains(value) && set_1.canBeAdded(value)) {
+                BOOST_CHECK(!set_1.contains(value));
+                BOOST_CHECK(set_1.add(value));
+                set_2.insert(value);
+            }
+            BOOST_CHECK(set_1.contains(value) == !!set_2.count(value));
+            BOOST_CHECK(set_1.size() == set_2.size());
+        }
+        if (test > 4) {
+            BOOST_CHECK(set_1.size() > ((1 << test) / 4));
+        }
+    }
+}
+
 
 BOOST_AUTO_TEST_SUITE_END()
