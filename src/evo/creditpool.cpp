@@ -39,22 +39,30 @@ static bool getAmountToUnlock(const CTransaction& tx, CAmount& toUnlock, uint64_
     return true;
 }
 
-void CSkipSet::add(uint64_t value) {
+bool CSkipSet::add(uint64_t value) {
     assert(!contains(value));
 
     if (auto it = skipped.find(value); it != skipped.end()) {
         skipped.erase(it);
     } else {
-        assert(right <= value);
-        for (uint64_t index = right; index < value; ++index) {
-            assert(skipped.insert(index).second);
+        assert(current_max <= value);
+
+        if (capacity() + value - current_max > capacity_limit) {
+            LogPrintf("CSkipSet::add failed due to capacity exceeded: requested %lld to %lld while limit is %lld\n",
+                    value - current_max, capacity(), capacity_limit);
+            return false;
         }
-        right = value + 1;
+        for (uint64_t index = current_max; index < value; ++index) {
+            bool insert_ret = skipped.insert(index).second;
+            assert(insert_ret);
+        }
+        current_max = value + 1;
     }
+    return true;
 }
 
 bool CSkipSet::contains(uint64_t value) const {
-    if (right <= value) return false;
+    if (current_max <= value) return false;
     return skipped.find(value) == skipped.end();
 }
 
@@ -120,7 +128,9 @@ static bool getStagingDataFromBlock(const CBlockIndex *block_index, const Consen
             throw std::runtime_error(strprintf("%s: getCreditPool failed: %s", __func__, FormatStateMessage(state)));
         }
         blockUnlocked += unlocked;
-        indexes.add(index);
+        if (!indexes.add(index)) {
+            throw std::runtime_error("failed-getcbforblock-index-exceed");
+        }
     }
     return true;
 }
@@ -227,7 +237,10 @@ bool CCreditPoolDiff::unlock(const CTransaction& tx, CValidationState& state)
     if (pool.indexes.contains(index)) {
         return state.Invalid(ValidationInvalidReason::CONSENSUS, false, REJECT_INVALID, "failed-creditpool-duplicated-index");
     }
-    pool.indexes.add(index);
+    if (!pool.indexes.add(index)) {
+        return state.Invalid(ValidationInvalidReason::CONSENSUS, false, REJECT_INVALID, "failed-getcbforblock-index-exceed");
+    }
+
     if (sessionUnlocked + toUnlock > pool.currentLimit) {
         return state.Invalid(ValidationInvalidReason::CONSENSUS, false, REJECT_INVALID, "failed-creditpool-unlock-too-much");
     }
