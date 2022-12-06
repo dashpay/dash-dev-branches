@@ -2653,7 +2653,7 @@ bool CWallet::TopUpKeyPool(unsigned int kpSize)
 util::Result<CTxDestination> CWallet::GetNewDestination(const std::string label)
 {
     LOCK(cs_wallet);
-    auto spk_man = GetScriptPubKeyMan(false /* internal */);
+    auto spk_man = GetScriptPubKeyMan(/*internal=*/false);
     if (!spk_man) {
         return util::Error{_("Error: No addresses available.")};
     }
