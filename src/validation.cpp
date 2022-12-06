@@ -23,6 +23,7 @@
 #include <cuckoocache.h>
 #include <flatfile.h>
 #include <hash.h>
+#include <kernel/mempool_entry.h>
 #include <logging.h>
 #include <logging/timer.h>
 #include <node/blockstorage.h>
@@ -39,7 +40,6 @@
 #include <tinyformat.h>
 #include <txdb.h>
 #include <txmempool.h>
-#include <txmempool_entry.h>
 #include <uint256.h>
 #include <undo.h>
 #include <util/check.h>

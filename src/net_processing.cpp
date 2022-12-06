@@ -15,6 +15,7 @@
 #include <hash.h>
 #include <index/blockfilterindex.h>
 #include <index/txindex.h>
+#include <kernel/mempool_entry.h>
 #include <merkleblock.h>
 #include <net_types.h>
 #include <netbase.h>
@@ -33,7 +34,6 @@
 #include <timedata.h>
 #include <tinyformat.h>
 #include <txmempool.h>
-#include <txmempool_entry.h>
 #include <txorphanage.h>
 #include <txrequest.h>
 #include <unordered_lru_cache.h>

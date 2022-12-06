@@ -10,6 +10,7 @@
 #include <chainparams.h>
 #include <core_io.h>
 #include <instantsend/instantsend.h>
+#include <kernel/mempool_entry.h>
 #include <node/mempool_persist_args.h>
 #include <policy/settings.h>
 #include <primitives/transaction.h>
@@ -17,7 +18,6 @@
 #include <rpc/server_util.h>
 #include <rpc/util.h>
 #include <txmempool.h>
-#include <txmempool_entry.h>
 #include <univalue.h>
 #include <util/fs.h>
 #include <util/helpers.h>

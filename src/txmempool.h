@@ -23,6 +23,7 @@
 #include <index/addressindex_types.h>
 #include <index/spentindex_types.h>
 #include <indirectmap.h>
+#include <kernel/mempool_entry.h>
 #include <netaddress.h>
 #include <policy/feerate.h>
 #include <policy/packages.h>
@@ -30,7 +31,6 @@
 #include <pubkey.h>
 #include <random.h>
 #include <sync.h>
-#include <txmempool_entry.h>
 #include <util/epochguard.h>
 #include <util/hasher.h>
 

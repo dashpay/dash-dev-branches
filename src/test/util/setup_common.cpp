@@ -22,6 +22,7 @@
 #include <init.h>
 #include <init/common.h>
 #include <interfaces/chain.h>
+#include <kernel/mempool_entry.h>
 #include <net.h>
 #include <net_processing.h>
 #include <noui.h>
@@ -49,7 +50,6 @@
 #include <timedata.h>
 #include <txdb.h>
 #include <txmempool.h>
-#include <txmempool_entry.h>
 #include <util/check.h>
 #include <util/strencodings.h>
 #include <util/string.h>
