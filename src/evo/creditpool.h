@@ -40,6 +40,8 @@ public:
 
     [[nodiscard]] bool add(uint64_t value);
 
+    bool canBeAdded(uint64_t value) const;
+
     bool contains(uint64_t value) const;
 
     size_t size() const {
@@ -136,6 +138,7 @@ public:
 
     ~CCreditPoolManager() = default;
 
+    // getCreditPool throws an exception if something went wrong
     CCreditPool getCreditPool(const CBlockIndex* block, const Consensus::Params& consensusParams);
 
 private:

@@ -22,7 +22,7 @@ static const std::string DB_CREDITPOOL_SNAPSHOT = "cpm_S";
 
 std::unique_ptr<CCreditPoolManager> creditPoolManager;
 
-static bool getAmountToUnlock(const CTransaction& tx, CAmount& toUnlock, uint64_t& index, CValidationState& state) {
+static bool getDataFromUnlockTx(const CTransaction& tx, CAmount& toUnlock, uint64_t& index, CValidationState& state) {
     CAssetUnlockPayload assetUnlockTx;
     if (!GetTxPayload(tx, assetUnlockTx)) {
         return state.Invalid(ValidationInvalidReason::CONSENSUS, false, REJECT_INVALID, "failed-creditpool-unlock-payload");
@@ -37,6 +37,22 @@ static bool getAmountToUnlock(const CTransaction& tx, CAmount& toUnlock, uint64_
         toUnlock += txout.nValue;
     }
     return true;
+}
+
+// throws exception if anything went wrong
+static void getDataFromUnlockTxes(const std::vector<CTransactionRef>& vtx, CAmount& totalUnlocked, std::unordered_set<uint64_t>& indexes) {
+    for (CTransactionRef tx : vtx) {
+        if (tx->nVersion != 3 || tx->nType != TRANSACTION_ASSET_UNLOCK) continue;
+
+        CAmount unlocked{0};
+        CValidationState state;
+        uint64_t index{0};
+        if (!getDataFromUnlockTx(*tx, unlocked, index, state)) {
+            throw std::runtime_error(strprintf("%s: getCreditPool failed: %s", __func__, FormatStateMessage(state)));
+        }
+        totalUnlocked += unlocked;
+        indexes.insert(index);
+    }
 }
 
 bool CSkipSet::add(uint64_t value) {
@@ -58,6 +74,18 @@ bool CSkipSet::add(uint64_t value) {
         }
         current_max = value + 1;
     }
+    return true;
+}
+
+bool CSkipSet::canBeAdded(uint64_t value) const {
+    if (contains(value)) return false;
+
+    if (skipped.find(value) != skipped.end()) return true;
+
+    if (capacity() + value - current_max > capacity_limit) {
+        return false;
+    }
+
     return true;
 }
 
@@ -89,7 +117,7 @@ std::optional<CCreditPool> CCreditPoolManager::getFromCache(const uint256& block
     return std::nullopt;
 }
 
-void CCreditPoolManager::addToCache(const uint256& block_hash, int height, CCreditPool pool) {
+void CCreditPoolManager::addToCache(const uint256& block_hash, int height, const CCreditPool &pool) {
     {
         LOCK(cs_cache);
         creditPoolCache.insert(block_hash, pool);
@@ -99,40 +127,20 @@ void CCreditPoolManager::addToCache(const uint256& block_hash, int height, CCred
     }
 }
 
-static bool getStagingDataFromBlock(const CBlockIndex *block_index, const Consensus::Params& consensusParams, CAmount &locked, CAmount &blockUnlocked, CSkipSet &indexes) {
+static std::optional<CBlock> getBlockForCreditPool(const CBlockIndex *block_index, const Consensus::Params& consensusParams) {
     CBlock block;
     if (!ReadBlockFromDisk(block, block_index, consensusParams)) {
         throw std::runtime_error("failed-getcbforblock-read");
     }
     // Should not fail if V19 (DIP0027) are active but happens for Unit Tests
     if (block.vtx[0]->nVersion != 3) {
-        return false;
+        return std::nullopt;
     }
     assert(!block.vtx.empty());
     assert(block.vtx[0]->nVersion == 3);
     assert(!block.vtx[0]->vExtraPayload.empty());
 
-    CCbTx cbTx;
-    if (!GetTxPayload(block.vtx[0]->vExtraPayload, cbTx)) {
-        throw std::runtime_error("failed-getcbforblock-cbtx-payload");
-    }
-    locked = cbTx.assetLockedAmount;
-
-    for (CTransactionRef tx : block.vtx) {
-        if (tx->nVersion != 3 || tx->nType != TRANSACTION_ASSET_UNLOCK) continue;
-
-        CAmount unlocked{0};
-        CValidationState state;
-        uint64_t index;
-        if (!getAmountToUnlock(*tx, unlocked, index, state)) {
-            throw std::runtime_error(strprintf("%s: getCreditPool failed: %s", __func__, FormatStateMessage(state)));
-        }
-        blockUnlocked += unlocked;
-        if (!indexes.add(index)) {
-            throw std::runtime_error("failed-getcbforblock-index-exceed");
-        }
-    }
-    return true;
+    return block;
 }
 
 CCreditPool CCreditPoolManager::getCreditPool(const CBlockIndex* block_index, const Consensus::Params& consensusParams)
@@ -148,27 +156,45 @@ CCreditPool CCreditPoolManager::getCreditPool(const CBlockIndex* block_index, co
         auto pool = getFromCache(block_hash, block_height);
         if (pool) { return pool.value(); }
     }
+
     CCreditPool prev = getCreditPool(block_index->pprev, consensusParams);
 
-    CAmount blockUnlocked{0};
-    CAmount locked{0};
-    CSkipSet indexes{prev.indexes};
-    if (!getStagingDataFromBlock(block_index, consensusParams, locked, blockUnlocked, indexes)) {
+    std::optional<CBlock> block = getBlockForCreditPool(block_index, consensusParams);
+    if (!block) {
+        assert(prev.locked == 0);
+        assert(prev.indexes.size() == 0);
+
         CCreditPool emptyPool;
         addToCache(block_hash, block_height, emptyPool);
         return emptyPool;
     }
+    CAmount locked{0};
+    {
+        CCbTx cbTx;
+        if (!GetTxPayload(block->vtx[0]->vExtraPayload, cbTx)) {
+            throw std::runtime_error(strprintf("%s: failed-getcreditpool-cbtx-payload", __func__));
+        }
+        locked = cbTx.assetLockedAmount;
+    }
+    CAmount blockUnlocked{0};
+    std::unordered_set<uint64_t> new_indexes;
+    getDataFromUnlockTxes(block->vtx, blockUnlocked, new_indexes);
+    CSkipSet indexes{prev.indexes};
+    if (std::any_of(new_indexes.begin(), new_indexes.end(), [&](const uint64_t index) { return !indexes.add(index); })) {
+        throw std::runtime_error(strprintf("%s: failed-getcreditpool-index-exceed", __func__));
+    }
 
-    const CBlockIndex* distant_block = block_index;
+    const CBlockIndex* distant_block_index = block_index;
     for (size_t i = 0; i < CCreditPoolManager::LimitBlocksToTrace; ++i) {
-        distant_block = distant_block->pprev;
-        if (distant_block == nullptr) break;
+        distant_block_index = distant_block_index->pprev;
+        if (distant_block_index == nullptr) break;
     }
     CAmount distantUnlocked{0};
-    if (distant_block) {
-        CAmount distantLocked{0};
-        CSkipSet distantIndexes;
-        if (!getStagingDataFromBlock(distant_block, consensusParams, distantLocked, distantUnlocked, distantIndexes)) distantUnlocked = 0;
+    if (distant_block_index) {
+        if (std::optional<CBlock> distant_block = getBlockForCreditPool(distant_block_index, consensusParams); distant_block) {
+            std::unordered_set<uint64_t> indexes_tmp;
+            getDataFromUnlockTxes(distant_block->vtx, distantUnlocked, indexes_tmp);
+        }
     }
 
     // # max(100, min(.10 * assetlockpool, 1000))
@@ -227,24 +253,26 @@ bool CCreditPoolDiff::lock(const CTransaction& tx, CValidationState& state)
 
 bool CCreditPoolDiff::unlock(const CTransaction& tx, CValidationState& state)
 {
-    uint64_t index;
+    uint64_t index{0};
     CAmount toUnlock{0};
-    if (!getAmountToUnlock(tx, toUnlock, index, state)) {
-        // state is set up inside getAmountToUnlock
+    if (!getDataFromUnlockTx(tx, toUnlock, index, state)) {
+        // state is set up inside getDataFromUnlockTx
         return false;
-    }
-
-    if (pool.indexes.contains(index)) {
-        return state.Invalid(ValidationInvalidReason::CONSENSUS, false, REJECT_INVALID, "failed-creditpool-duplicated-index");
-    }
-    if (!pool.indexes.add(index)) {
-        return state.Invalid(ValidationInvalidReason::CONSENSUS, false, REJECT_INVALID, "failed-getcbforblock-index-exceed");
     }
 
     if (sessionUnlocked + toUnlock > pool.currentLimit) {
         return state.Invalid(ValidationInvalidReason::CONSENSUS, false, REJECT_INVALID, "failed-creditpool-unlock-too-much");
     }
 
+    if (pool.indexes.contains(index) || newIndexes.count(index)) {
+        return state.Invalid(ValidationInvalidReason::CONSENSUS, false, REJECT_INVALID, "failed-creditpool-duplicated-index");
+    }
+
+    if (!pool.indexes.canBeAdded(index)) {
+        return state.Invalid(ValidationInvalidReason::CONSENSUS, false, REJECT_INVALID, "failed-getcbforblock-index-exceed");
+    }
+
+    newIndexes.insert(index);
     sessionUnlocked += toUnlock;
     return true;
 }
@@ -253,7 +281,7 @@ bool CCreditPoolDiff::processTransaction(const CTransaction& tx, CValidationStat
     if (tx.nVersion != 3) return true;
     if (tx.nType != TRANSACTION_ASSET_LOCK && tx.nType != TRANSACTION_ASSET_UNLOCK) return true;
 
-    if (auto maybeError = CheckAssetLockUnlockTx(tx, pindex); maybeError.did_err) {
+    if (auto maybeError = CheckAssetLockUnlockTx(tx, pindex, this->pool); maybeError.did_err) {
         return state.Invalid(maybeError.reason, false, REJECT_INVALID, std::string(maybeError.error_str));
     }
 
