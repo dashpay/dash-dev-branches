@@ -45,6 +45,8 @@ struct CoinsResult {
     /** The following methods are provided so that CoinsResult can mimic a vector,
      * i.e., methods can work with individual OutputType vectors or on the entire object */
     size_t Size() const;
+    /** Return how many different output types this struct stores */
+    size_t TypesCount() const { return coins.size(); }
     void Clear();
     void Erase(std::set<COutPoint>& preset_coins);
     void Shuffle(FastRandomContext& rng_fast);
