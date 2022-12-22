@@ -39,8 +39,17 @@ static bool getDataFromUnlockTx(const CTransaction& tx, CAmount& toUnlock, uint6
     return true;
 }
 
-// throws exception if anything went wrong
-static void getDataFromUnlockTxes(const std::vector<CTransactionRef>& vtx, CAmount& totalUnlocked, std::unordered_set<uint64_t>& indexes) {
+namespace {
+    struct UnlockDataPerBlock  {
+        CAmount unlocked{0};
+        std::unordered_set<uint64_t> indexes;
+    };
+} // anonymous namespace
+
+// it throws exception if anything went wrong
+static UnlockDataPerBlock getDataFromUnlockTxes(const std::vector<CTransactionRef>& vtx) {
+    UnlockDataPerBlock blockData;
+
     for (CTransactionRef tx : vtx) {
         if (tx->nVersion != 3 || tx->nType != TRANSACTION_ASSET_UNLOCK) continue;
 
@@ -50,9 +59,10 @@ static void getDataFromUnlockTxes(const std::vector<CTransactionRef>& vtx, CAmou
         if (!getDataFromUnlockTx(*tx, unlocked, index, state)) {
             throw std::runtime_error(strprintf("%s: getCreditPool failed: %s", __func__, FormatStateMessage(state)));
         }
-        totalUnlocked += unlocked;
-        indexes.insert(index);
+        blockData.unlocked += unlocked;
+        blockData.indexes.insert(index);
     }
+    return blockData;
 }
 
 bool CSkipSet::add(uint64_t value) {
@@ -161,6 +171,8 @@ CCreditPool CCreditPoolManager::getCreditPool(const CBlockIndex* block_index, co
 
     std::optional<CBlock> block = getBlockForCreditPool(block_index, consensusParams);
     if (!block) {
+        // If reading of previous block is not read successfully, but
+        // prev contains credit pool related data, something strange happened
         assert(prev.locked == 0);
         assert(prev.indexes.size() == 0);
 
@@ -176,11 +188,14 @@ CCreditPool CCreditPoolManager::getCreditPool(const CBlockIndex* block_index, co
         }
         locked = cbTx.assetLockedAmount;
     }
-    CAmount blockUnlocked{0};
-    std::unordered_set<uint64_t> new_indexes;
-    getDataFromUnlockTxes(block->vtx, blockUnlocked, new_indexes);
+
+    // We use here sliding window with LimitBlocksToTrace to determine
+    // current limits for asset unlock transactions.
+    // Indexes should not be duplicated since genesis block, but the Unlock Amount
+    // of withdrawal transaction is limited only by this window
+    UnlockDataPerBlock blockData = getDataFromUnlockTxes(block->vtx);
     CSkipSet indexes{prev.indexes};
-    if (std::any_of(new_indexes.begin(), new_indexes.end(), [&](const uint64_t index) { return !indexes.add(index); })) {
+    if (std::any_of(blockData.indexes.begin(), blockData.indexes.end(), [&](const uint64_t index) { return !indexes.add(index); })) {
         throw std::runtime_error(strprintf("%s: failed-getcreditpool-index-exceed", __func__));
     }
 
@@ -192,14 +207,13 @@ CCreditPool CCreditPoolManager::getCreditPool(const CBlockIndex* block_index, co
     CAmount distantUnlocked{0};
     if (distant_block_index) {
         if (std::optional<CBlock> distant_block = getBlockForCreditPool(distant_block_index, consensusParams); distant_block) {
-            std::unordered_set<uint64_t> indexes_tmp;
-            getDataFromUnlockTxes(distant_block->vtx, distantUnlocked, indexes_tmp);
+            distantUnlocked = getDataFromUnlockTxes(distant_block->vtx).unlocked;
         }
     }
 
-    // # max(100, min(.10 * assetlockpool, 1000))
+    // Unlock limits are # max(100, min(.10 * assetlockpool, 1000)) inside window
     CAmount currentLimit = locked;
-    CAmount latelyUnlocked = prev.latelyUnlocked + blockUnlocked - distantUnlocked;
+    CAmount latelyUnlocked = prev.latelyUnlocked + blockData.unlocked - distantUnlocked;
     if (currentLimit + latelyUnlocked > LimitAmountLow) {
         currentLimit = std::max(LimitAmountLow, locked / 10) - latelyUnlocked;
         if (currentLimit < 0) currentLimit = 0;
@@ -225,8 +239,8 @@ CCreditPoolManager::CCreditPoolManager(CEvoDB& _evoDb)
 {
 }
 
-CCreditPoolDiff::CCreditPoolDiff(const CCreditPool& starter, const CBlockIndex *pindex, const Consensus::Params& consensusParams) :
-    pool(starter),
+CCreditPoolDiff::CCreditPoolDiff(CCreditPool starter, const CBlockIndex *pindex, const Consensus::Params& consensusParams) :
+    pool(std::move(starter)),
     pindex(pindex)
 {
     assert(pindex);

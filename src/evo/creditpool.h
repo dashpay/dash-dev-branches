@@ -100,7 +100,7 @@ private:
 
     const CBlockIndex *pindex{nullptr};
 public:
-    explicit CCreditPoolDiff(const CCreditPool& starter, const CBlockIndex *pindex, const Consensus::Params& consensusParams);
+    explicit CCreditPoolDiff(CCreditPool starter, const CBlockIndex *pindex, const Consensus::Params& consensusParams);
 
     /**
      * This function should be called for each Asset Lock/Unlock tx
@@ -138,7 +138,11 @@ public:
 
     ~CCreditPoolManager() = default;
 
-    // getCreditPool throws an exception if something went wrong
+    /**
+      * @return CCreditPool with data or with empty depends on activation V19 at that block
+      * In case if block is invalid the function getCreditPool throws an exception
+      * it can happen if there limits of withdrawal (unlock) exceed
+      */
     CCreditPool getCreditPool(const CBlockIndex* block, const Consensus::Params& consensusParams);
 
 private:
