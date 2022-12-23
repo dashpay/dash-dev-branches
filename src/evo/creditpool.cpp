@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <exception>
 #include <memory>
+#include <stack>
 
 static const std::string DB_CREDITPOOL_SNAPSHOT = "cpm_S";
 
@@ -57,7 +58,7 @@ static UnlockDataPerBlock getDataFromUnlockTxes(const std::vector<CTransactionRe
         CValidationState state;
         uint64_t index{0};
         if (!getDataFromUnlockTx(*tx, unlocked, index, state)) {
-            throw std::runtime_error(strprintf("%s: getCreditPool failed: %s", __func__, FormatStateMessage(state)));
+            throw std::runtime_error(strprintf("%s: CCreditPoolManager::getCreditPool failed: %s", __func__, FormatStateMessage(state)));
         }
         blockData.unlocked += unlocked;
         blockData.indexes.insert(index);
@@ -109,7 +110,13 @@ std::string CCreditPool::ToString() const {
             locked, currentLimit, indexes.size());
 }
 
-std::optional<CCreditPool> CCreditPoolManager::getFromCache(const uint256& block_hash, int height) {
+std::optional<CCreditPool> CCreditPoolManager::getFromCache(const CBlockIndex* const block_index) {
+    if (bool isDIP0027AssetLocksActive = llmq::utils::IsV19Active(block_index);
+            !isDIP0027AssetLocksActive) {
+        return CCreditPool{};
+    }
+
+    uint256 block_hash = block_index->GetBlockHash();
     CCreditPool pool;
     {
         LOCK(cs_cache);
@@ -117,7 +124,7 @@ std::optional<CCreditPool> CCreditPoolManager::getFromCache(const uint256& block
             return pool;
         }
     }
-    if (height % DISK_SNAPSHOT_PERIOD == 0) {
+    if (block_index->nHeight % DISK_SNAPSHOT_PERIOD == 0) {
         if (evoDb.Read(std::make_pair(DB_CREDITPOOL_SNAPSHOT, block_hash), pool)) {
             LOCK(cs_cache);
             creditPoolCache.insert(block_hash, pool);
@@ -153,22 +160,8 @@ static std::optional<CBlock> getBlockForCreditPool(const CBlockIndex *block_inde
     return block;
 }
 
-CCreditPool CCreditPoolManager::getCreditPool(const CBlockIndex* block_index, const Consensus::Params& consensusParams)
+CCreditPool CCreditPoolManager::constructCreditPool(const CBlockIndex* block_index, CCreditPool prev, const Consensus::Params& consensusParams)
 {
-    bool isDIP0027AssetLocksActive = llmq::utils::IsV19Active(block_index);
-    if (!isDIP0027AssetLocksActive) {
-        return {};
-    }
-
-    uint256 block_hash = block_index->GetBlockHash();
-    int block_height = block_index->nHeight;
-    {
-        auto pool = getFromCache(block_hash, block_height);
-        if (pool) { return pool.value(); }
-    }
-
-    CCreditPool prev = getCreditPool(block_index->pprev, consensusParams);
-
     std::optional<CBlock> block = getBlockForCreditPool(block_index, consensusParams);
     if (!block) {
         // If reading of previous block is not read successfully, but
@@ -177,7 +170,7 @@ CCreditPool CCreditPoolManager::getCreditPool(const CBlockIndex* block_index, co
         assert(prev.indexes.size() == 0);
 
         CCreditPool emptyPool;
-        addToCache(block_hash, block_height, emptyPool);
+        addToCache(block_index->GetBlockHash(), block_index->nHeight, emptyPool);
         return emptyPool;
     }
     CAmount locked{0};
@@ -194,7 +187,7 @@ CCreditPool CCreditPoolManager::getCreditPool(const CBlockIndex* block_index, co
     // Indexes should not be duplicated since genesis block, but the Unlock Amount
     // of withdrawal transaction is limited only by this window
     UnlockDataPerBlock blockData = getDataFromUnlockTxes(block->vtx);
-    CSkipSet indexes{prev.indexes};
+    CSkipSet indexes{std::move(prev.indexes)};
     if (std::any_of(blockData.indexes.begin(), blockData.indexes.end(), [&](const uint64_t index) { return !indexes.add(index); })) {
         throw std::runtime_error(strprintf("%s: failed-getcreditpool-index-exceed", __func__));
     }
@@ -223,16 +216,32 @@ CCreditPool CCreditPoolManager::getCreditPool(const CBlockIndex* block_index, co
     assert(currentLimit >= 0);
 
     if (currentLimit || latelyUnlocked || locked) {
-        LogPrintf("getCreditPool asset unlock limits on height: %d locked: %d.%08d limit: %d.%08d previous: %d.%08d\n", block_index->nHeight, locked / COIN, locked % COIN,
+        LogPrintf("CCreditPoolManager: asset unlock limits on height: %d locked: %d.%08d limit: %d.%08d previous: %d.%08d\n", block_index->nHeight, locked / COIN, locked % COIN,
                currentLimit / COIN, currentLimit % COIN,
                latelyUnlocked / COIN, latelyUnlocked % COIN);
     }
 
     CCreditPool pool{locked, currentLimit, latelyUnlocked, indexes};
-    addToCache(block_hash, block_height, pool);
+    addToCache(block_index->GetBlockHash(), block_index->nHeight, pool);
     return pool;
+
 }
 
+CCreditPool CCreditPoolManager::getCreditPool(const CBlockIndex* block_index, const Consensus::Params& consensusParams)
+{
+    std::stack<const CBlockIndex *> to_calculate;
+
+    std::optional<CCreditPool> poolTmp;
+    while (!(poolTmp = getFromCache(block_index)).has_value()) {
+        to_calculate.push(block_index);
+        block_index = block_index->pprev;
+    }
+    while (!to_calculate.empty()) {
+        poolTmp = constructCreditPool(to_calculate.top(), *poolTmp, consensusParams);
+        to_calculate.pop();
+    }
+    return *poolTmp;
+}
 
 CCreditPoolManager::CCreditPoolManager(CEvoDB& _evoDb)
 : evoDb(_evoDb)
