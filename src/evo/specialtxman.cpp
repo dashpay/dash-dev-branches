@@ -19,7 +19,7 @@
 #include <primitives/block.h>
 #include <validation.h>
 
-bool CheckSpecialTx(const CTransaction& tx, const CBlockIndex* pindexPrev, CValidationState& state, const CCoinsViewCache& view, bool check_sigs)
+bool CheckSpecialTx(const CTransaction& tx, const CBlockIndex* pindexPrev, const CCoinsViewCache& view, const CCreditPool& creditPool, bool check_sigs, CValidationState& state)
 {
     AssertLockHeld(cs_main);
 
@@ -51,7 +51,7 @@ bool CheckSpecialTx(const CTransaction& tx, const CBlockIndex* pindexPrev, CVali
             if (!llmq::utils::IsV20Active(pindexPrev)) {
                 return state.Invalid(ValidationInvalidReason::CONSENSUS, false, REJECT_INVALID, "v20-not-active");
             }
-            if (auto maybeError = CheckAssetLockUnlockTx(tx, pindexPrev, creditPoolManager->getCreditPool(pindexPrev, Params().GetConsensus())); maybeError.did_err) {
+            if (auto maybeError = CheckAssetLockUnlockTx(tx, pindexPrev, creditPool); maybeError.did_err) {
                 return state.Invalid(maybeError.reason, false, REJECT_INVALID, std::string(maybeError.error_str));
             }
             return true;
@@ -130,15 +130,15 @@ bool ProcessSpecialTxsInBlock(const CBlock& block, const CBlockIndex* pindex, ll
 
         int64_t nTime1 = GetTimeMicros();
 
+        const CCreditPool creditPool = creditPoolManager->getCreditPool(pindex->pprev, consensusParams);
         std::optional<CCreditPoolDiff> creditPoolDiff;
         if (bool fV20Active_context = llmq::utils::IsV20Active(pindex->pprev); fV20Active_context) {
-            CCreditPool creditPool = creditPoolManager->getCreditPool(pindex->pprev, consensusParams);
             LogPrintf("%s: CCreditPool is %s\n", __func__, creditPool.ToString());
-            creditPoolDiff.emplace(std::move(creditPool), pindex->pprev, consensusParams);
+            creditPoolDiff.emplace(creditPool, pindex->pprev, consensusParams);
         }
 
         for (const auto& ptr_tx : block.vtx) {
-            if (!CheckSpecialTx(*ptr_tx, pindex->pprev, state, view, fCheckCbTxMerleRoots)) {
+            if (!CheckSpecialTx(*ptr_tx, pindex->pprev, view, creditPool, fCheckCbTxMerleRoots, state)) {
                 // pass the state returned by the function above
                 return false;
             }
