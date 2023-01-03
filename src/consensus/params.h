@@ -124,7 +124,6 @@ struct Params {
     LLMQType llmqTypeDIP0024InstantSend{LLMQType::LLMQ_NONE};
     LLMQType llmqTypePlatform{LLMQType::LLMQ_NONE};
     LLMQType llmqTypeMnhf{LLMQType::LLMQ_NONE};
-    LLMQType llmqTypeAssetLocks{LLMQType::LLMQ_NONE};
 };
 } // namespace Consensus
 

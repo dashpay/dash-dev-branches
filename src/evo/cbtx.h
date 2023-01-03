@@ -17,21 +17,17 @@ namespace llmq {
 class CQuorumBlockProcessor;
 }// namespace llmq
 
-// Forward declaration from core_io to get rid of circular dependency
-UniValue ValueFromAmount(const CAmount& amount);
-
 // coinbase transaction
 class CCbTx
 {
 public:
     static constexpr auto SPECIALTX_TYPE = TRANSACTION_COINBASE;
-    static constexpr uint16_t CURRENT_VERSION = 3;
+    static constexpr uint16_t CURRENT_VERSION = 2;
 
     uint16_t nVersion{CURRENT_VERSION};
     int32_t nHeight{0};
     uint256 merkleRootMNList;
     uint256 merkleRootQuorums;
-    CAmount assetLockedAmount{0};
 
     SERIALIZE_METHODS(CCbTx, obj)
     {
@@ -39,10 +35,6 @@ public:
 
         if (obj.nVersion >= 2) {
             READWRITE(obj.merkleRootQuorums);
-        }
-
-        if (obj.nVersion >= 3) {
-            READWRITE(obj.assetLockedAmount);
         }
     }
 
@@ -57,9 +49,6 @@ public:
         obj.pushKV("merkleRootMNList", merkleRootMNList.ToString());
         if (nVersion >= 2) {
             obj.pushKV("merkleRootQuorums", merkleRootQuorums.ToString());
-        }
-        if (nVersion >= 3)  {
-            obj.pushKV("assetLockedAmount", ValueFromAmount(assetLockedAmount));
         }
     }
 };

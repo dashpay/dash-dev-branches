@@ -1040,9 +1040,9 @@ class CMerkleBlock:
 
 
 class CCbTx:
-    __slots__ = ("version", "height", "merkleRootMNList", "merkleRootQuorums", "lockedAmount")
+    __slots__ = ("version", "height", "merkleRootMNList", "merkleRootQuorums")
 
-    def __init__(self, version=None, height=None, merkleRootMNList=None, merkleRootQuorums=None, lockedAmount=None):
+    def __init__(self, version=None, height=None, merkleRootMNList=None, merkleRootQuorums=None):
         self.set_null()
         if version is not None:
             self.version = version
@@ -1052,14 +1052,11 @@ class CCbTx:
             self.merkleRootMNList = merkleRootMNList
         if merkleRootQuorums is not None:
             self.merkleRootQuorums = merkleRootQuorums
-        if lockedAmount is not None:
-            self.lockedAmount = lockedAmount
 
     def set_null(self):
         self.version = 0
         self.height = 0
         self.merkleRootMNList = None
-        self.lockedAmount = 0
 
     def deserialize(self, f):
         self.version = struct.unpack("<H", f.read(2))[0]
@@ -1067,8 +1064,6 @@ class CCbTx:
         self.merkleRootMNList = deser_uint256(f)
         if self.version >= 2:
             self.merkleRootQuorums = deser_uint256(f)
-        if self.version >= 3:
-            self.lockedAmount = struct.unpack("<q", f.read(8))[0]
 
     def serialize(self):
         r = b""
@@ -1077,91 +1072,7 @@ class CCbTx:
         r += ser_uint256(self.merkleRootMNList)
         if self.version >= 2:
             r += ser_uint256(self.merkleRootQuorums)
-        if self.version >= 3:
-            r += struct.pack("<q", self.lockedAmount)
         return r
-
-
-class CAssetLockTx:
-    __slots__ = ("version", "nType", "creditOutputs")
-
-    def __init__(self, version=None, nType=None, creditOutputs=None):
-        self.set_null()
-        if version is not None:
-            self.version = version
-        if nType is not None:
-            self.nType = nType
-        self.creditOutputs = creditOutputs if creditOutputs is not None else []
-
-    def set_null(self):
-        self.version = 0
-        self.nType = 0
-        self.creditOutputs = None
-
-    def deserialize(self, f):
-        self.version = struct.unpack("<H", f.read(2))[0]
-        self.nType = struct.unpack("<H", f.read(2))[0]
-        self.creditOutputs = deser_vector(f, CTxOut)
-
-    def serialize(self):
-        r = b""
-        r += struct.pack("<H", self.version)
-        r += struct.pack("<H", self.nType)
-        r += ser_vector(self.creditOutputs)
-        return r
-
-    def __repr__(self):
-        return "CAssetLockTx(version={} nType={} creditOutputs={}" \
-            .format(self.version, self.nType, repr(self.creditOutputs))
-
-
-class CAssetUnlockTx:
-    __slots__ = ("version", "index", "fee", "requestedHeight", "quorumHash", "quorumSig")
-
-    def __init__(self, version=None, index=None, fee=None, requestedHeight=None, quorumHash = 0, quorumSig = None):
-        self.set_null()
-        if version is not None:
-            self.version = version
-        if index is not None:
-            self.index = index
-        if fee is not None:
-            self.fee = fee
-        if requestedHeight is not None:
-            self.requestedHeight = requestedHeight
-        if quorumHash is not None:
-            self.quorumHash = quorumHash
-        if quorumSig is not None:
-            self.quorumSig = quorumSig
-
-    def set_null(self):
-        self.version = 0
-        self.index = 0
-        self.fee = None
-        self.requestedHeight = 0
-        self.quorumHash = 0
-        self.quorumSig = b'\x00' * 96
-
-    def deserialize(self, f):
-        self.version = struct.unpack("<H", f.read(2))[0]
-        self.index = struct.unpack("<Q", f.read(8))[0]
-        self.fee = struct.unpack("<I", f.read(4))[0]
-        self.requestedHeight = struct.unpack("<I", f.read(4))[0]
-        self.quorumHash = deser_uint256(f)
-        self.quorumSig = f.read(96)
-
-    def serialize(self):
-        r = b""
-        r += struct.pack("<H", self.version)
-        r += struct.pack("<Q", self.index)
-        r += struct.pack("<I", self.fee)
-        r += struct.pack("<I", self.requestedHeight)
-        r += ser_uint256(self.quorumHash)
-        r += self.quorumSig
-        return r
-
-    def __repr__(self):
-        return "CAssetUnlockTx(version={} index={} fee={} requestedHeight={} quorumHash={:x} quorumSig={}" \
-            .format(self.version, self.index, self.fee, self.requestedHeight, self.quorumHash, self.quorumSig.hex())
 
 
 class CSimplifiedMNListEntry:

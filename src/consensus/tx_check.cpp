@@ -12,20 +12,15 @@
 
 bool CheckTransaction(const CTransaction& tx, CValidationState& state)
 {
-    bool allowEmptyTxIn = false;
-    bool allowEmptyTxOut = false;
+    bool allowEmptyTxInOut = false;
     if (tx.nType == TRANSACTION_QUORUM_COMMITMENT) {
-        allowEmptyTxIn = true;
-        allowEmptyTxOut = true;
-    }
-    if (tx.nType == TRANSACTION_ASSET_UNLOCK) {
-        allowEmptyTxIn = true;
+        allowEmptyTxInOut = true;
     }
 
     // Basic checks that don't depend on any context
-    if (!allowEmptyTxIn && tx.vin.empty())
+    if (!allowEmptyTxInOut && tx.vin.empty())
         return state.Invalid(ValidationInvalidReason::CONSENSUS, false, REJECT_INVALID, "bad-txns-vin-empty");
-    if (!allowEmptyTxOut && tx.vout.empty())
+    if (!allowEmptyTxInOut && tx.vout.empty())
         return state.Invalid(ValidationInvalidReason::CONSENSUS, false, REJECT_INVALID, "bad-txns-vout-empty");
     // Size limits
     if (::GetSerializeSize(tx, PROTOCOL_VERSION) > MAX_LEGACY_BLOCK_SIZE)

@@ -7,7 +7,6 @@
 #include <chainparams.h>
 #include <consensus/validation.h>
 #include <core_io.h>
-#include <evo/creditpool.h>
 #include <evo/deterministicmns.h>
 #include <evo/providertx.h>
 #include <evo/simplifiedmns.h>
@@ -298,10 +297,8 @@ static std::string SignAndSendSpecialTx(const JSONRPCRequest& request, const CMu
     {
     LOCK(cs_main);
 
-    CCreditPool creditPool = creditPoolManager->getCreditPool(::ChainActive().Tip(), Params().GetConsensus());
-
     CValidationState state;
-    if (!CheckSpecialTx(CTransaction(tx), ::ChainActive().Tip(), ::ChainstateActive().CoinsTip(), creditPool, true, state)) {
+    if (!CheckSpecialTx(CTransaction(tx), ::ChainActive().Tip(), state, ::ChainstateActive().CoinsTip(), true)) {
         throw std::runtime_error(FormatStateMessage(state));
     }
     } // cs_main
