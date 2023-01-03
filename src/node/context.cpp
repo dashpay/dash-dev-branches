@@ -5,6 +5,7 @@
 #include <node/context.h>
 
 #include <banman.h>
+#include <evo/creditpool.h>
 #include <interfaces/chain.h>
 #include <llmq/context.h>
 #include <evo/evodb.h>

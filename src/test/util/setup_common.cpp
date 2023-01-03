@@ -54,6 +54,7 @@
 #include <coinjoin/coinjoin.h>
 #include <coinjoin/server.h>
 #include <evo/cbtx.h>
+#include <evo/creditpool.h>
 #include <evo/deterministicmns.h>
 #include <evo/evodb.h>
 #include <evo/specialtx.h>
@@ -136,6 +137,7 @@ BasicTestingSetup::BasicTestingSetup(const std::string& chainName, const std::ve
     connman = std::make_unique<CConnman>(0x1337, 0x1337);
     deterministicMNManager.reset(new CDeterministicMNManager(*m_node.evodb, *connman));
     llmq::quorumSnapshotManager.reset(new llmq::CQuorumSnapshotManager(*m_node.evodb));
+    creditPoolManager = std::make_unique<CCreditPoolManager>(*m_node.evodb);
     static bool noui_connected = false;
     if (!noui_connected) {
         noui_connect();
@@ -149,6 +151,7 @@ BasicTestingSetup::~BasicTestingSetup()
     connman.reset();
     llmq::quorumSnapshotManager.reset();
     deterministicMNManager.reset();
+    creditPoolManager.reset();
     m_node.evodb.reset();
 
     LogInstance().DisconnectTestLogger();
@@ -184,6 +187,7 @@ ChainTestingSetup::ChainTestingSetup(const std::string& chainName, const std::ve
 
     deterministicMNManager.reset(new CDeterministicMNManager(*m_node.evodb, *m_node.connman));
     m_node.llmq_ctx = std::make_unique<LLMQContext>(*m_node.evodb, *m_node.mempool, *m_node.connman, *sporkManager, true, false);
+    m_node.creditPoolManager = std::make_unique<CCreditPoolManager>(*m_node.evodb);
 
     // Start script-checking threads. Set g_parallel_script_checks to true so they are used.
     constexpr int script_check_threads = 2;
@@ -197,6 +201,7 @@ ChainTestingSetup::~ChainTestingSetup()
     deterministicMNManager.reset();
     m_node.llmq_ctx->Interrupt();
     m_node.llmq_ctx->Stop();
+    m_node.creditPoolManager.reset();
     threadGroup.interrupt_all();
     threadGroup.join_all();
     StopScriptCheckWorkerThreads();

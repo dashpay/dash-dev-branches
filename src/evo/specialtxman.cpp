@@ -2,21 +2,24 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include <evo/specialtx.h>
+#include <evo/specialtxman.h>
 
 #include <chainparams.h>
 #include <consensus/validation.h>
 #include <evo/cbtx.h>
+#include <evo/creditpool.h>
 #include <evo/deterministicmns.h>
 #include <evo/mnhftx.h>
 #include <evo/providertx.h>
+#include <evo/assetlocktx.h>
 #include <hash.h>
 #include <llmq/blockprocessor.h>
 #include <llmq/commitment.h>
+#include <llmq/utils.h>
 #include <primitives/block.h>
 #include <validation.h>
 
-bool CheckSpecialTx(const CTransaction& tx, const CBlockIndex* pindexPrev, CValidationState& state, const CCoinsViewCache& view, bool check_sigs)
+bool CheckSpecialTx(const CTransaction& tx, const CBlockIndex* pindexPrev, const CCoinsViewCache& view, const CCreditPool& creditPool, bool check_sigs, CValidationState& state)
 {
     AssertLockHeld(cs_main);
 
@@ -43,6 +46,15 @@ bool CheckSpecialTx(const CTransaction& tx, const CBlockIndex* pindexPrev, CVali
             return llmq::CheckLLMQCommitment(tx, pindexPrev, state);
         case TRANSACTION_MNHF_SIGNAL:
             return VersionBitsTipState(Params().GetConsensus(), Consensus::DEPLOYMENT_DIP0024) == ThresholdState::ACTIVE && CheckMNHFTx(tx, pindexPrev, state);
+        case TRANSACTION_ASSET_LOCK:
+        case TRANSACTION_ASSET_UNLOCK:
+            if (!llmq::utils::IsV19Active(pindexPrev)) {
+                return state.Invalid(ValidationInvalidReason::CONSENSUS, false, REJECT_INVALID, "v19-not-active");
+            }
+            if (auto maybeError = CheckAssetLockUnlockTx(tx, pindexPrev, creditPool); maybeError.did_err) {
+                return state.Invalid(maybeError.reason, false, REJECT_INVALID, std::string(maybeError.error_str));
+            }
+            return true;
         }
     } catch (const std::exception& e) {
         LogPrintf("%s -- failed: %s\n", __func__, e.what());
@@ -59,6 +71,9 @@ bool ProcessSpecialTx(const CTransaction& tx, const CBlockIndex* pindex, CValida
     }
 
     switch (tx.nType) {
+    case TRANSACTION_ASSET_LOCK:
+    case TRANSACTION_ASSET_UNLOCK:
+        return true; // handled per block (during cb)
     case TRANSACTION_PROVIDER_REGISTER:
     case TRANSACTION_PROVIDER_UPDATE_SERVICE:
     case TRANSACTION_PROVIDER_UPDATE_REGISTRAR:
@@ -82,6 +97,9 @@ bool UndoSpecialTx(const CTransaction& tx, const CBlockIndex* pindex)
     }
 
     switch (tx.nType) {
+    case TRANSACTION_ASSET_LOCK:
+    case TRANSACTION_ASSET_UNLOCK:
+        return true; // handled per block (during cb)
     case TRANSACTION_PROVIDER_REGISTER:
     case TRANSACTION_PROVIDER_UPDATE_SERVICE:
     case TRANSACTION_PROVIDER_UPDATE_REGISTRAR:
@@ -99,7 +117,8 @@ bool UndoSpecialTx(const CTransaction& tx, const CBlockIndex* pindex)
 }
 
 bool ProcessSpecialTxsInBlock(const CBlock& block, const CBlockIndex* pindex, llmq::CQuorumBlockProcessor& quorum_block_processor,
-                              CValidationState& state, const CCoinsViewCache& view, bool fJustCheck, bool fCheckCbTxMerleRoots)
+                              const Consensus::Params& consensusParams, const CCoinsViewCache& view, bool fJustCheck, bool fCheckCbTxMerleRoots,
+                              CValidationState& state)
 {
     AssertLockHeld(cs_main);
 
@@ -111,12 +130,23 @@ bool ProcessSpecialTxsInBlock(const CBlock& block, const CBlockIndex* pindex, ll
 
         int64_t nTime1 = GetTimeMicros();
 
+        const CCreditPool creditPool = creditPoolManager->getCreditPool(pindex->pprev, consensusParams);
+        std::optional<CCreditPoolDiff> creditPoolDiff;
+        if (bool fV19Active_context = llmq::utils::IsV19Active(pindex->pprev); fV19Active_context) {
+            LogPrintf("%s: CCreditPool is %s\n", __func__, creditPool.ToString());
+            creditPoolDiff.emplace(creditPool, pindex->pprev, consensusParams);
+        }
+
         for (const auto& ptr_tx : block.vtx) {
-            if (!CheckSpecialTx(*ptr_tx, pindex->pprev, state, view, fCheckCbTxMerleRoots)) {
+            if (!CheckSpecialTx(*ptr_tx, pindex->pprev, view, creditPool, fCheckCbTxMerleRoots, state)) {
                 // pass the state returned by the function above
                 return false;
             }
             if (!ProcessSpecialTx(*ptr_tx, pindex, state)) {
+                // pass the state returned by the function above
+                return false;
+            }
+            if (creditPoolDiff && !creditPoolDiff->processTransaction(*ptr_tx, state)) {
                 // pass the state returned by the function above
                 return false;
             }

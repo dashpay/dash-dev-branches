@@ -8,6 +8,7 @@
 #include <primitives/transaction.h>
 #include <script/interpreter.h>
 #include <consensus/validation.h>
+#include <evo/assetlocktx.h>
 
 // TODO remove the following dependencies
 #include <chain.h>
@@ -160,6 +161,20 @@ unsigned int GetTransactionSigOpCount(const CTransaction& tx, const CCoinsViewCa
 
 bool Consensus::CheckTxInputs(const CTransaction& tx, CValidationState& state, const CCoinsViewCache& inputs, int nSpendHeight, CAmount& txfee)
 {
+
+    if (bool isAssetUnlockTx = (tx.nVersion == 3 && tx.nType ==  TRANSACTION_ASSET_UNLOCK); isAssetUnlockTx) {
+        CAssetUnlockPayload assetUnlockTx;
+        if (!GetTxPayload(tx, assetUnlockTx)) {
+            return state.Invalid(ValidationInvalidReason::TX_BAD_SPECIAL, false, REJECT_INVALID, "bad-assetunlocktx-payload");
+        }
+        CAmount txfee_aux = assetUnlockTx.getFee();
+        if (!MoneyRange(txfee_aux)) {
+            return state.Invalid(ValidationInvalidReason::CONSENSUS, false, REJECT_INVALID, "bad-txns-assetunlock-fee-outofrange");
+        }
+        txfee = txfee_aux;
+        return true;
+    }
+
     // are the actual inputs available?
     if (!inputs.HaveInputs(tx)) {
         return state.Invalid(ValidationInvalidReason::TX_MISSING_INPUTS, false, REJECT_INVALID, "bad-txns-inputs-missingorspent", strprintf("%s: inputs missing/spent", __func__));
