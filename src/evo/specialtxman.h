@@ -11,14 +11,22 @@
 
 class CBlock;
 class CBlockIndex;
+class CCreditPool;
 class CCoinsViewCache;
 class CValidationState;
+namespace llmq {
+class CQuorumBlockProcessor;
+} // namespace llmq
+namespace Consensus {
+class Params;
+} // namespace Consensus
 
 extern CCriticalSection cs_main;
 
-bool CheckSpecialTx(const CTransaction& tx, const CBlockIndex* pindexPrev, CValidationState& state, const CCoinsViewCache& view, bool check_sigs) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
-bool ProcessSpecialTxsInBlock(const CBlock& block, const CBlockIndex* pindex, llmq::CQuorumBlockProcessor& quorum_block_processor,
-                              CValidationState& state, const CCoinsViewCache& view, bool fJustCheck, bool fCheckCbTxMerleRoots) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
+bool CheckSpecialTx(const CTransaction& tx, const CBlockIndex* pindexPrev, const CCoinsViewCache& view, const CCreditPool& pool, bool check_sigs,
+                    CValidationState& state) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
+bool ProcessSpecialTxsInBlock(const CBlock& block, const CBlockIndex* pindex, llmq::CQuorumBlockProcessor& quorum_block_processor, const Consensus::Params& consensusParams,
+                              const CCoinsViewCache& view, bool fJustCheck, bool fCheckCbTxMerleRoots, CValidationState& state) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 bool UndoSpecialTxsInBlock(const CBlock& block, const CBlockIndex* pindex, llmq::CQuorumBlockProcessor& quorum_block_processor) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 
 #endif // BITCOIN_EVO_SPECIALTXMAN_H
