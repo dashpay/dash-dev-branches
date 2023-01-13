@@ -1,4 +1,4 @@
-// Copyright (c) 2019-2022 The Dash Core developers
+// Copyright (c) 2019-2023 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -19,6 +19,7 @@
 #include <unordered_set>
 
 class CSporkManager;
+class CMasternodeSync;
 
 namespace llmq
 {
@@ -58,6 +59,7 @@ struct CInstantSendLock
 
     uint256 GetRequestId() const;
     bool IsDeterministic() const { return nVersion != islock_version; }
+    bool TriviallyValid() const;
 };
 
 using CInstantSendLockPtr = std::shared_ptr<CInstantSendLock>;
@@ -207,6 +209,7 @@ private:
     CSigningManager& sigman;
     CSigSharesManager& shareman;
     CChainLocksHandler& clhandler;
+    const std::unique_ptr<CMasternodeSync>& m_mn_sync;
 
     std::atomic<bool> fUpgradedDB{false};
 
@@ -254,10 +257,11 @@ private:
     std::unordered_set<uint256, StaticSaltedHasher> pendingRetryTxs GUARDED_BY(cs_pendingRetry);
 
 public:
-    explicit CInstantSendManager(CTxMemPool& _mempool, CConnman& _connman, CSporkManager& sporkManager, CQuorumManager& _qman,
-                                 CSigningManager& _sigman, CSigSharesManager& _shareman, CChainLocksHandler& _clhandler, bool unitTests, bool fWipe) :
+    explicit CInstantSendManager(CTxMemPool& _mempool, CConnman& _connman, CSporkManager& sporkManager,
+                                 CQuorumManager& _qman, CSigningManager& _sigman, CSigSharesManager& _shareman,
+                                 CChainLocksHandler& _clhandler, const std::unique_ptr<CMasternodeSync>& mn_sync, bool unitTests, bool fWipe) :
         db(unitTests, fWipe), mempool(_mempool), connman(_connman), spork_manager(sporkManager), qman(_qman), sigman(_sigman), shareman(_shareman),
-        clhandler(_clhandler)
+        clhandler(_clhandler), m_mn_sync(mn_sync)
     {
         workInterrupt.reset();
     }
@@ -280,7 +284,6 @@ private:
     void TrySignInstantSendLock(const CTransaction& tx) LOCKS_EXCLUDED(cs_creating);
 
     void ProcessMessageInstantSendLock(const CNode* pfrom, const CInstantSendLockPtr& islock);
-    static bool PreVerifyInstantSendLock(const CInstantSendLock& islock);
     bool ProcessPendingInstantSendLocks();
     bool ProcessPendingInstantSendLocks(bool deterministic) LOCKS_EXCLUDED(cs_pendingLocks);
 

@@ -11,9 +11,10 @@
 #include <random.h>
 #include <set>
 #include <sync.h>
+#include <versionbits.h>
+
 #include <optional>
 #include <vector>
-#include <versionbits.h>
 
 class CConnman;
 class CBlockIndex;
@@ -92,6 +93,8 @@ bool IsQuorumRotationEnabled(Consensus::LLMQType llmqType, const CBlockIndex* pi
 Consensus::LLMQType GetInstantSendLLMQType(const CQuorumManager& qman, const CBlockIndex* pindex);
 Consensus::LLMQType GetInstantSendLLMQType(bool deterministic);
 bool IsDIP0024Active(const CBlockIndex* pindex);
+bool IsV19Active(const CBlockIndex* pindex);
+const CBlockIndex* V19ActivationIndex(const CBlockIndex* pindex);
 static bool IsInstantSendLLMQTypeShared();
 
 /// Returns the state of `-llmq-data-recovery`

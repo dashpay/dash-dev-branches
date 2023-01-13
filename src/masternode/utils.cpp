@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2022 The Dash Core developers
+// Copyright (c) 2014-2023 The Dash Core developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -15,9 +15,9 @@
 #include <util/ranges.h>
 
 
-void CMasternodeUtils::DoMaintenance(CConnman& connman)
+void CMasternodeUtils::DoMaintenance(CConnman& connman, const CMasternodeSync& mn_sync)
 {
-    if (masternodeSync == nullptr || !masternodeSync->IsBlockchainSynced()) return;
+    if (!mn_sync.IsBlockchainSynced()) return;
     if (ShutdownRequested()) return;
 
     std::vector<CDeterministicMNCPtr> vecDmns; // will be empty when no wallet

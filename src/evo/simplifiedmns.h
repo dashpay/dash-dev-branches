@@ -23,6 +23,9 @@ class CQuorumBlockProcessor;
 class CSimplifiedMNListEntry
 {
 public:
+    static constexpr uint16_t LEGACY_BLS_VERSION = 1;
+    static constexpr uint16_t BASIC_BLS_VERSION = 2;
+
     uint256 proRegTxHash;
     uint256 confirmedHash;
     CService service;
@@ -31,6 +34,7 @@ public:
     bool isValid{false};
     CScript scriptPayout; // mem-only
     CScript scriptOperatorPayout; // mem-only
+    uint16_t nVersion{LEGACY_BLS_VERSION}; // mem-only
 
     CSimplifiedMNListEntry() = default;
     explicit CSimplifiedMNListEntry(const CDeterministicMN& dmn);
@@ -42,7 +46,8 @@ public:
                service == rhs.service &&
                pubKeyOperator == rhs.pubKeyOperator &&
                keyIDVoting == rhs.keyIDVoting &&
-               isValid == rhs.isValid;
+               isValid == rhs.isValid &&
+               nVersion == rhs.nVersion;
     }
 
     bool operator!=(const CSimplifiedMNListEntry& rhs) const
@@ -56,7 +61,7 @@ public:
                 obj.proRegTxHash,
                 obj.confirmedHash,
                 obj.service,
-                obj.pubKeyOperator,
+                CBLSLazyPublicKeyVersionWrapper(const_cast<CBLSLazyPublicKey&>(obj.pubKeyOperator), (obj.nVersion == LEGACY_BLS_VERSION)),
                 obj.keyIDVoting,
                 obj.isValid
                 );
@@ -75,7 +80,7 @@ public:
 
     CSimplifiedMNList() = default;
     explicit CSimplifiedMNList(const std::vector<CSimplifiedMNListEntry>& smlEntries);
-    explicit CSimplifiedMNList(const CDeterministicMNList& dmnList);
+    explicit CSimplifiedMNList(const CDeterministicMNList& dmnList, bool isV19Active);
 
     uint256 CalcMerkleRoot(bool* pmutated = nullptr) const;
     bool operator==(const CSimplifiedMNList& rhs) const;
@@ -98,19 +103,27 @@ public:
 class CSimplifiedMNListDiff
 {
 public:
+    static constexpr uint16_t LEGACY_BLS_VERSION = 1;
+    static constexpr uint16_t BASIC_BLS_VERSION = 2;
+
     uint256 baseBlockHash;
     uint256 blockHash;
     CPartialMerkleTree cbTxMerkleTree;
     CTransactionRef cbTx;
     std::vector<uint256> deletedMNs;
     std::vector<CSimplifiedMNListEntry> mnList;
+    uint16_t nVersion{LEGACY_BLS_VERSION};
 
     std::vector<std::pair<uint8_t, uint256>> deletedQuorums; // p<LLMQType, quorumHash>
     std::vector<llmq::CFinalCommitment> newQuorums;
 
     SERIALIZE_METHODS(CSimplifiedMNListDiff, obj)
     {
-        READWRITE(obj.baseBlockHash, obj.blockHash, obj.cbTxMerkleTree, obj.cbTx, obj.deletedMNs, obj.mnList);
+        READWRITE(obj.baseBlockHash, obj.blockHash, obj.cbTxMerkleTree, obj.cbTx);
+        if ((s.GetType() & SER_NETWORK) && s.GetVersion() >= BLS_SCHEME_PROTO_VERSION) {
+            READWRITE(obj.nVersion);
+        }
+        READWRITE(obj.deletedMNs, obj.mnList);
         READWRITE(obj.deletedQuorums, obj.newQuorums);
     }
 

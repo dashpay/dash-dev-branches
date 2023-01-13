@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2022 The Dash Core developers
+// Copyright (c) 2014-2023 The Dash Core developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -10,6 +10,7 @@
 #include <consensus/validation.h>
 #include <llmq/chainlocks.h>
 #include <llmq/instantsend.h>
+#include <llmq/utils.h>
 #include <masternode/node.h>
 #include <masternode/sync.h>
 #include <messagesigner.h>
@@ -55,7 +56,8 @@ bool CCoinJoinQueue::Sign()
     if (!sig.IsValid()) {
         return false;
     }
-    vchSig = sig.ToByteVector();
+    bool legacy_bls_scheme = !llmq::utils::IsV19Active(::ChainActive().Tip());
+    vchSig = sig.ToByteVector(legacy_bls_scheme);
 
     return true;
 }
@@ -97,12 +99,12 @@ bool CCoinJoinBroadcastTx::Sign()
     if (!fMasternodeMode) return false;
 
     uint256 hash = GetSignatureHash();
-
     CBLSSignature sig = WITH_LOCK(activeMasternodeInfoCs, return activeMasternodeInfo.blsKeyOperator->Sign(hash));
     if (!sig.IsValid()) {
         return false;
     }
-    vchSig = sig.ToByteVector();
+    bool legacy_bls_scheme = !llmq::utils::IsV19Active(::ChainActive().Tip());
+    vchSig = sig.ToByteVector(legacy_bls_scheme);
 
     return true;
 }
@@ -128,6 +130,9 @@ bool CCoinJoinBroadcastTx::IsExpired(const CBlockIndex* pindex, const llmq::CCha
 bool CCoinJoinBroadcastTx::IsValidStructure() const
 {
     // some trivial checks only
+    if (masternodeOutpoint.IsNull() && m_protxHash.IsNull()) {
+        return false;
+    }
     if (tx->vin.size() != tx->vout.size()) {
         return false;
     }
@@ -455,16 +460,16 @@ void CCoinJoin::CheckDSTXes(const CBlockIndex* pindex, const llmq::CChainLocksHa
     LogPrint(BCLog::COINJOIN, "CCoinJoin::CheckDSTXes -- mapDSTX.size()=%llu\n", mapDSTX.size());
 }
 
-void CCoinJoin::UpdatedBlockTip(const CBlockIndex* pindex, const llmq::CChainLocksHandler& clhandler)
+void CCoinJoin::UpdatedBlockTip(const CBlockIndex* pindex, const llmq::CChainLocksHandler& clhandler, const std::unique_ptr<CMasternodeSync>& mn_sync)
 {
-    if (pindex && masternodeSync->IsBlockchainSynced()) {
+    if (pindex && mn_sync->IsBlockchainSynced()) {
         CheckDSTXes(pindex, clhandler);
     }
 }
 
-void CCoinJoin::NotifyChainLock(const CBlockIndex* pindex, const llmq::CChainLocksHandler& clhandler)
+void CCoinJoin::NotifyChainLock(const CBlockIndex* pindex, const llmq::CChainLocksHandler& clhandler, const std::unique_ptr<CMasternodeSync>& mn_sync)
 {
-    if (pindex && masternodeSync->IsBlockchainSynced()) {
+    if (pindex && mn_sync->IsBlockchainSynced()) {
         CheckDSTXes(pindex, clhandler);
     }
 }

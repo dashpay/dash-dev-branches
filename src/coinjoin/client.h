@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2022 The Dash Core developers
+// Copyright (c) 2014-2023 The Dash Core developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -22,6 +22,7 @@ class CConnman;
 class CNode;
 
 class UniValue;
+class CMasternodeSync;
 
 
 // The main object for accessing mixing
@@ -49,9 +50,9 @@ public:
     {
     }
 
-    CService GetAddr() const { return addr; }
-    CCoinJoinAccept GetDSA() const { return dsa; }
-    bool IsExpired() const { return GetTime() - nTimeCreated > TIMEOUT; }
+    [[nodiscard]] CService GetAddr() const { return addr; }
+    [[nodiscard]] CCoinJoinAccept GetDSA() const { return dsa; }
+    [[nodiscard]] bool IsExpired() const { return GetTime() - nTimeCreated > TIMEOUT; }
 
     friend bool operator==(const CPendingDsaRequest& a, const CPendingDsaRequest& b)
     {
@@ -70,6 +71,8 @@ public:
 class CCoinJoinClientSession : public CCoinJoinBaseSession
 {
 private:
+    const std::unique_ptr<CMasternodeSync>& m_mn_sync;
+
     std::vector<COutPoint> vecOutPointLocked;
 
     bilingual_str strLastMessage;
@@ -111,19 +114,19 @@ private:
     void CompletedTransaction(PoolMessage nMessageID);
 
     /// As a client, check and sign the final transaction
-    bool SignFinalTransaction(const CTransaction& finalTransactionNew, CNode* pnode, CConnman& connman) LOCKS_EXCLUDED(cs_coinjoin);
+    bool SignFinalTransaction(const CTransaction& finalTransactionNew, CNode& peer, CConnman& connman) LOCKS_EXCLUDED(cs_coinjoin);
 
     void RelayIn(const CCoinJoinEntry& entry, CConnman& connman) const;
 
     void SetNull() EXCLUSIVE_LOCKS_REQUIRED(cs_coinjoin);
 
 public:
-    explicit CCoinJoinClientSession(CWallet& pwallet) :
-        mixingWallet(pwallet)
+    explicit CCoinJoinClientSession(CWallet& pwallet, const std::unique_ptr<CMasternodeSync>& mn_sync) :
+        mixingWallet(pwallet), m_mn_sync(mn_sync)
     {
     }
 
-    void ProcessMessage(CNode* pfrom, const std::string& msg_type, CDataStream& vRecv, CConnman& connman, bool enable_bip61);
+    void ProcessMessage(CNode& peer, std::string_view msg_type, CDataStream& vRecv, CConnman& connman);
 
     void UnlockCoins();
 
@@ -152,13 +155,14 @@ class CCoinJoinClientQueueManager : public CCoinJoinBaseManager
 {
 private:
     CConnman& connman;
+    const std::unique_ptr<CMasternodeSync>& m_mn_sync;
 
 public:
-    explicit CCoinJoinClientQueueManager(CConnman& _connman) :
-        connman(_connman) {};
+    explicit CCoinJoinClientQueueManager(CConnman& _connman, const std::unique_ptr<CMasternodeSync>& mn_sync) :
+        connman(_connman), m_mn_sync(mn_sync) {};
 
-    void ProcessMessage(CNode* pfrom, const std::string& msg_type, CDataStream& vRecv, bool enable_bip61) LOCKS_EXCLUDED(cs_vecqueue);
-    void ProcessDSQueue(CNode* pfrom, const std::string& msg_type, CDataStream& vRecv, bool enable_bip61);
+    void ProcessMessage(const CNode& peer, std::string_view msg_type, CDataStream& vRecv) LOCKS_EXCLUDED(cs_vecqueue);
+    void ProcessDSQueue(const CNode& peer, CDataStream& vRecv);
     void DoMaintenance();
 };
 
@@ -169,6 +173,8 @@ class CCoinJoinClientManager
 private:
     // Keep track of the used Masternodes
     std::vector<COutPoint> vecMasternodesUsed;
+
+    const std::unique_ptr<CMasternodeSync>& m_mn_sync;
 
     mutable Mutex cs_deqsessions;
     // TODO: or map<denom, CCoinJoinClientSession> ??
@@ -198,10 +204,10 @@ public:
     CCoinJoinClientManager(CCoinJoinClientManager const&) = delete;
     CCoinJoinClientManager& operator=(CCoinJoinClientManager const&) = delete;
 
-    explicit CCoinJoinClientManager(CWallet& wallet) :
-        mixingWallet(wallet) {}
+    explicit CCoinJoinClientManager(CWallet& wallet, const std::unique_ptr<CMasternodeSync>& mn_sync) :
+        mixingWallet(wallet), m_mn_sync(mn_sync) {}
 
-    void ProcessMessage(CNode* pfrom, const std::string& msg_type, CDataStream& vRecv, CConnman& connman, bool enable_bip61) LOCKS_EXCLUDED(cs_deqsessions);
+    void ProcessMessage(CNode& peer, std::string_view msg_type, CDataStream& vRecv, CConnman& connman) LOCKS_EXCLUDED(cs_deqsessions);
 
     bool StartMixing();
     void StopMixing();

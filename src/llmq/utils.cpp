@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2022 The Dash Core developers
+// Copyright (c) 2018-2023 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -256,8 +256,13 @@ std::vector<std::vector<CDeterministicMNCPtr>> BuildNewQuorumQuarterMembers(cons
     auto MnsNotUsedAtH = CDeterministicMNList();
     std::vector<CDeterministicMNList> MnsUsedAtHIndexed(nQuorums);
 
+    bool skipRemovedMNs = IsV19Active(pQuorumBaseBlockIndex) || (Params().NetworkIDString() == CBaseChainParams::TESTNET);
+
     for (auto i = 0; i < nQuorums; ++i) {
         for (const auto& mn : previousQuarters.quarterHMinusC[i]) {
+            if (skipRemovedMNs && !allMns.HasMN(mn->proTxHash)) {
+                continue;
+            }
             if (allMns.IsMNPoSeBanned(mn->proTxHash)) {
                 continue;
             }
@@ -271,6 +276,9 @@ std::vector<std::vector<CDeterministicMNCPtr>> BuildNewQuorumQuarterMembers(cons
             }
         }
         for (const auto& mn : previousQuarters.quarterHMinus2C[i]) {
+            if (skipRemovedMNs && !allMns.HasMN(mn->proTxHash)) {
+                continue;
+            }
             if (allMns.IsMNPoSeBanned(mn->proTxHash)) {
                 continue;
             }
@@ -284,6 +292,9 @@ std::vector<std::vector<CDeterministicMNCPtr>> BuildNewQuorumQuarterMembers(cons
             }
         }
         for (const auto& mn : previousQuarters.quarterHMinus3C[i]) {
+            if (skipRemovedMNs && !allMns.HasMN(mn->proTxHash)) {
+                continue;
+            }
             if (allMns.IsMNPoSeBanned(mn->proTxHash)) {
                 continue;
             }
@@ -323,7 +334,7 @@ std::vector<std::vector<CDeterministicMNCPtr>> BuildNewQuorumQuarterMembers(cons
             ss << m->proTxHash.ToString().substr(0, 4) << "|";
         }
         ss << "]";
-        LogPrint(BCLog::LLMQ, "BuildNewQuorumQuarterMembers h[%d] sortedCombinedMnsList[%s]\n",
+        LogPrint(BCLog::LLMQ, "BuildNewQuorumQuarterMembers h[%d] sortedCombinedMns[%s]\n",
                  pQuorumBaseBlockIndex->nHeight, ss.str());
     }
 
@@ -332,10 +343,21 @@ std::vector<std::vector<CDeterministicMNCPtr>> BuildNewQuorumQuarterMembers(cons
     auto idx = 0;
     for (auto i = 0; i < nQuorums; ++i) {
         auto usedMNsCount = MnsUsedAtHIndexed[i].GetAllMNsCount();
+        auto updated{false};
+        auto initial_loop_idx = idx;
         while (quarterQuorumMembers[i].size() < quarterSize && (usedMNsCount + quarterQuorumMembers[i].size() < sortedCombinedMnsList.size())) {
+            bool skip{true};
             if (!MnsUsedAtHIndexed[i].HasMN(sortedCombinedMnsList[idx]->proTxHash)) {
-                quarterQuorumMembers[i].push_back(sortedCombinedMnsList[idx]);
-            } else {
+                try {
+                    // NOTE: AddMN is the one that can throw exceptions, must be exicuted first
+                    MnsUsedAtHIndexed[i].AddMN(sortedCombinedMnsList[idx]);
+                    quarterQuorumMembers[i].push_back(sortedCombinedMnsList[idx]);
+                    updated = true;
+                    skip = false;
+                } catch (const std::runtime_error& e) {
+                }
+            }
+            if (skip) {
                 if (firstSkippedIndex == 0) {
                     firstSkippedIndex = idx;
                     skipList.push_back(idx);
@@ -345,6 +367,15 @@ std::vector<std::vector<CDeterministicMNCPtr>> BuildNewQuorumQuarterMembers(cons
             }
             if (++idx == sortedCombinedMnsList.size()) {
                 idx = 0;
+            }
+            if (idx == initial_loop_idx) {
+                // we made full "while" loop
+                if (!updated) {
+                    // there are not enough MNs, there is nothing we can do here
+                    return std::vector<std::vector<CDeterministicMNCPtr>>(nQuorums);
+                }
+                // reset and try again
+                updated = false;
             }
         }
     }
@@ -596,6 +627,26 @@ bool IsDIP0024Active(const CBlockIndex* pindex)
 
     LOCK(cs_llmq_vbc);
     return VersionBitsState(pindex, Params().GetConsensus(), Consensus::DEPLOYMENT_DIP0024, llmq_versionbitscache) == ThresholdState::ACTIVE;
+}
+
+bool IsV19Active(const CBlockIndex* pindex)
+{
+    assert(pindex);
+
+    LOCK(cs_llmq_vbc);
+    return VersionBitsState(pindex, Params().GetConsensus(), Consensus::DEPLOYMENT_V19, llmq_versionbitscache) == ThresholdState::ACTIVE;
+}
+
+const CBlockIndex* V19ActivationIndex(const CBlockIndex* pindex)
+{
+    assert(pindex);
+
+    LOCK(cs_llmq_vbc);
+    if (VersionBitsState(pindex, Params().GetConsensus(), Consensus::DEPLOYMENT_V19, llmq_versionbitscache) != ThresholdState::ACTIVE) {
+        return nullptr;
+    }
+    int nHeight = VersionBitsStateSinceHeight(pindex, Params().GetConsensus(), Consensus::DEPLOYMENT_V19, llmq_versionbitscache);
+    return pindex->GetAncestor(nHeight);
 }
 
 bool IsInstantSendLLMQTypeShared()

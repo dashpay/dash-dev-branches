@@ -47,6 +47,7 @@ FUZZ_SUITE_LD_COMMON = \
  $(LIBBITCOIN_CRYPTO) \
  $(LIBBITCOIN_WALLET) \
  $(LIBBITCOIN_CLI) \
+ $(LIBDASHBLS) \
  $(BDB_LIBS) \
  $(LIBUNIVALUE) \
  $(LIBLEVELDB) \
@@ -56,7 +57,6 @@ FUZZ_SUITE_LD_COMMON = \
  $(LIBSECP256K1) \
  $(EVENT_LIBS) \
  $(EVENT_PTHREADS_LIBS) \
- $(BLS_LIBS) \
  $(GMP_LIBS) \
  $(BACKTRACE_LIB)
 
@@ -126,7 +126,6 @@ BITCOIN_TESTS =\
   test/raii_event_tests.cpp \
   test/random_tests.cpp \
   test/ratecheck_tests.cpp \
-  test/ref_tests.cpp \
   test/reverselock_tests.cpp \
   test/rpc_tests.cpp \
   test/sanity_tests.cpp \
@@ -142,6 +141,7 @@ BITCOIN_TESTS =\
   test/sighash_tests.cpp \
   test/sigopcount_tests.cpp \
   test/skiplist_tests.cpp \
+  test/sock_tests.cpp \
   test/specialtx_tests.cpp \
   test/streams_tests.cpp \
   test/subsidy_tests.cpp \
@@ -186,10 +186,10 @@ if ENABLE_WALLET
 test_test_dash_LDADD += $(LIBBITCOIN_WALLET)
 endif
 test_test_dash_LDADD += $(LIBBITCOIN_SERVER) $(LIBBITCOIN_CLI) $(LIBBITCOIN_COMMON) $(LIBBITCOIN_UTIL) $(LIBBITCOIN_CONSENSUS) $(LIBBITCOIN_CRYPTO) $(LIBUNIVALUE) \
-  $(LIBLEVELDB) $(LIBLEVELDB_SSE42) $(LIBMEMENV) $(BACKTRACE_LIB) $(BOOST_LIBS) $(BOOST_UNIT_TEST_FRAMEWORK_LIB) $(LIBSECP256K1) $(EVENT_LIBS) $(EVENT_PTHREADS_LIBS)
+  $(LIBDASHBLS) $(LIBLEVELDB) $(LIBLEVELDB_SSE42) $(LIBMEMENV) $(BACKTRACE_LIB) $(BOOST_LIBS) $(BOOST_UNIT_TEST_FRAMEWORK_LIB) $(LIBSECP256K1) $(EVENT_LIBS) $(EVENT_PTHREADS_LIBS)
 test_test_dash_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
 
-test_test_dash_LDADD += $(BDB_LIBS) $(MINIUPNPC_LIBS) $(NATPMP_LIBS) $(EVENT_PTHREADS_LIBS) $(EVENT_LIBS) $(BLS_LIBS) $(GMP_LIBS)
+test_test_dash_LDADD += $(BDB_LIBS) $(MINIUPNPC_LIBS) $(NATPMP_LIBS) $(EVENT_PTHREADS_LIBS) $(EVENT_LIBS) $(GMP_LIBS)
 test_test_dash_LDFLAGS = $(LDFLAGS_WRAP_EXCEPTIONS) $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS) $(PTHREAD_FLAGS) -static
 
 if ENABLE_ZMQ
@@ -202,7 +202,7 @@ FUZZ_SUITE_LDFLAGS_COMMON = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS) $(
 test_fuzz_fuzz_CPPFLAGS = $(AM_CPPFLAGS) $(BITCOIN_INCLUDES)
 test_fuzz_fuzz_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
 test_fuzz_fuzz_LDADD = $(FUZZ_SUITE_LD_COMMON)
-test_fuzz_fuzz_LDFLAGS = $(FUZZ_SUITE_LDFLAGS_COMMON)
+test_fuzz_fuzz_LDFLAGS = $(FUZZ_SUITE_LDFLAGS_COMMON) $(RUNTIME_LDFLAGS)
 test_fuzz_fuzz_SOURCES = \
   test/fuzz/addition_overflow.cpp \
   test/fuzz/addrdb.cpp \
@@ -254,6 +254,7 @@ test_fuzz_fuzz_SOURCES = \
   test/fuzz/net.cpp \
   test/fuzz/net_permissions.cpp \
   test/fuzz/netaddress.cpp \
+  test/fuzz/netbase_dns_lookup.cpp \
   test/fuzz/p2p_transport_deserializer.cpp \
   test/fuzz/parse_hd_keypath.cpp \
   test/fuzz/parse_iso8601.cpp \
@@ -282,6 +283,7 @@ test_fuzz_fuzz_SOURCES = \
   test/fuzz/secp256k1_ec_seckey_import_export_der.cpp \
   test/fuzz/secp256k1_ecdsa_signature_parse_der_lax.cpp \
   test/fuzz/signature_checker.cpp \
+  test/fuzz/socks5.cpp \
   test/fuzz/span.cpp \
   test/fuzz/spanparsing.cpp \
   test/fuzz/string.cpp \

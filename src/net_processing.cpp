@@ -50,6 +50,7 @@
 #include <llmq/blockprocessor.h>
 #include <llmq/chainlocks.h>
 #include <llmq/commitment.h>
+#include <llmq/context.h>
 #include <llmq/dkgsessionmgr.h>
 #include <llmq/instantsend.h>
 #include <llmq/quorums.h>
@@ -257,12 +258,6 @@ namespace {
 } // namespace
 
 namespace {
-struct CBlockReject {
-    unsigned char chRejectCode;
-    std::string strRejectReason;
-    uint256 hashBlock;
-};
-
 /**
  * Maintain validation-specific state about nodes, protected by cs_main, instead
  * by CNode's own locks. This simplifies asynchronous operation, where
@@ -280,8 +275,6 @@ struct CNodeState {
     bool m_should_discourage;
     //! String name of this peer (debugging/logging purposes).
     const std::string name;
-    //! List of asynchronously-determined block rejections to notify this peer about.
-    std::vector<CBlockReject> rejects;
     //! The best known block we know this peer has announced.
     const CBlockIndex *pindexBestKnownBlock;
     //! The hash of the last unknown block this peer has announced.
@@ -1168,17 +1161,6 @@ bool IsBanned(NodeId pnode)
 }
 
 /**
- * Returns true if the given validation state result may result in a peer
- * banning/disconnecting us. We use this to determine which unaccepted
- * transactions from a whitelisted peer that we can safely relay.
- */
-static bool TxRelayMayResultInDisconnect(const CValidationState& state)
-{
-    assert(IsTransactionReason(state.GetReason()));
-    return state.GetReason() == ValidationInvalidReason::CONSENSUS;
-}
-
-/**
  * Potentially mark a node discouraged based on the contents of a CValidationState object
  *
  * @param[in] via_compact_block this bool is passed in because net_processing should
@@ -1187,10 +1169,9 @@ static bool TxRelayMayResultInDisconnect(const CValidationState& state)
  * txs, the peer should not be punished. See BIP 152.
  *
  * @return Returns true if the peer was punished (probably disconnected)
- *
- * Changes here may need to be reflected in TxRelayMayResultInDisconnect().
  */
-static bool MaybePunishNode(NodeId nodeid, const CValidationState& state, bool via_compact_block, const std::string& message = "") {
+static bool MaybePunishNode(NodeId nodeid, const CValidationState& state, bool via_compact_block, const std::string& message = "")
+{
     switch (state.GetReason()) {
     case ValidationInvalidReason::NONE:
         break;
@@ -1254,12 +1235,6 @@ static bool MaybePunishNode(NodeId nodeid, const CValidationState& state, bool v
 }
 
 
-
-
-
-
-
-
 //////////////////////////////////////////////////////////////////////////////
 //
 // blockchain -> download logic notification
@@ -1279,13 +1254,8 @@ static bool BlockRequestAllowed(const CBlockIndex* pindex, const Consensus::Para
 }
 
 PeerLogicValidation::PeerLogicValidation(CConnman* connmanIn, BanMan* banman, CScheduler &scheduler, ChainstateManager& chainman, CTxMemPool& pool,
-                                        std::unique_ptr<llmq::CQuorumBlockProcessor>& quorum_block_processor, std::unique_ptr<llmq::CDKGSessionManager>& qdkgsman,
-                                        std::unique_ptr<llmq::CQuorumManager>& qman, std::unique_ptr<llmq::CSigSharesManager>& shareman,
-                                        std::unique_ptr<llmq::CSigningManager>& sigman, std::unique_ptr<llmq::CChainLocksHandler>& clhandler,
-                                        std::unique_ptr<llmq::CInstantSendManager>& isman, bool enable_bip61) :
-    connman(connmanIn), m_banman(banman), m_chainman(chainman), m_mempool(pool), m_quorum_block_processor(quorum_block_processor),
-    m_qdkgsman(qdkgsman), m_qman(qman), m_shareman(shareman), m_sigman(sigman), m_clhandler(clhandler), m_isman(isman),
-    m_stale_tip_check_time(0), m_enable_bip61(enable_bip61)
+                                        std::unique_ptr<LLMQContext>& llmq_ctx) :
+    connman(connmanIn), m_banman(banman), m_chainman(chainman), m_mempool(pool), m_llmq_ctx(llmq_ctx), m_stale_tip_check_time(0)
 {
     // Initialize global variables that cannot be constructed at startup.
     recentRejects.reset(new CRollingBloomFilter(120000, 0.000001));
@@ -1487,8 +1457,6 @@ void PeerLogicValidation::BlockChecked(const CBlock& block, const CValidationSta
     if (state.IsInvalid()) {
         // Don't send reject message with code 0 or an internal reject code.
         if (it != mapBlockSource.end() && State(it->second.first) && state.GetRejectCode() > 0 && state.GetRejectCode() < REJECT_INTERNAL) {
-            CBlockReject reject = {(unsigned char)state.GetRejectCode(), state.GetRejectReason().substr(0, MAX_REJECT_MESSAGE_LENGTH), hash};
-            State(it->second.first)->rejects.push_back(reject);
             MaybePunishNode(/*nodeid=*/ it->second.first, state, /*via_compact_block=*/ !it->second.second);
         }
     }
@@ -1515,10 +1483,7 @@ void PeerLogicValidation::BlockChecked(const CBlock& block, const CValidationSta
 //
 
 
-bool static AlreadyHave(const CInv& inv, const CTxMemPool& mempool, const llmq::CQuorumBlockProcessor& quorum_block_processor,
-                        const llmq::CDKGSessionManager& qdkgsman, const llmq::CQuorumManager& qman,
-                        const llmq::CSigSharesManager& shareman, const llmq::CSigningManager& sigman,
-                        const llmq::CChainLocksHandler& clhandler, const llmq::CInstantSendManager& isman) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+bool static AlreadyHave(const CInv& inv, const CTxMemPool& mempool, const LLMQContext& llmq_ctx) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
     switch (inv.type)
     {
@@ -1560,8 +1525,8 @@ bool static AlreadyHave(const CInv& inv, const CTxMemPool& mempool, const llmq::
             // crafted invalid DSTX-es and potentially cause high load cheaply, because
             // corresponding checks in ProcessMessage won't let it to send DSTX-es too often.
             bool fIgnoreRecentRejects = inv.type == MSG_DSTX ||
-                                        isman.IsWaitingForTx(inv.hash) ||
-                                        isman.IsLocked(inv.hash);
+                                        llmq_ctx.isman->IsWaitingForTx(inv.hash) ||
+                                        llmq_ctx.isman->IsLocked(inv.hash);
 
             return (!fIgnoreRecentRejects && recentRejects->contains(inv.hash)) ||
                    (inv.type == MSG_DSTX && static_cast<bool>(CCoinJoin::GetDSTX(inv.hash))) ||
@@ -1584,8 +1549,7 @@ bool static AlreadyHave(const CInv& inv, const CTxMemPool& mempool, const llmq::
 
     case MSG_SPORK:
         {
-            CSporkMessage spork;
-            return sporkManager->GetSporkByHash(inv.hash, spork);
+            return sporkManager->GetSporkByHash(inv.hash).has_value();
         }
 
     case MSG_GOVERNANCE_OBJECT:
@@ -1593,19 +1557,19 @@ bool static AlreadyHave(const CInv& inv, const CTxMemPool& mempool, const llmq::
         return ! governance->ConfirmInventoryRequest(inv);
 
     case MSG_QUORUM_FINAL_COMMITMENT:
-        return quorum_block_processor.HasMineableCommitment(inv.hash);
+        return llmq_ctx.quorum_block_processor->HasMineableCommitment(inv.hash);
     case MSG_QUORUM_CONTRIB:
     case MSG_QUORUM_COMPLAINT:
     case MSG_QUORUM_JUSTIFICATION:
     case MSG_QUORUM_PREMATURE_COMMITMENT:
-        return qdkgsman.AlreadyHave(inv);
+        return llmq_ctx.qdkgsman->AlreadyHave(inv);
     case MSG_QUORUM_RECOVERED_SIG:
-        return sigman.AlreadyHave(inv);
+        return llmq_ctx.sigman->AlreadyHave(inv);
     case MSG_CLSIG:
-        return clhandler.AlreadyHave(inv);
+        return llmq_ctx.clhandler->AlreadyHave(inv);
     case MSG_ISLOCK:
     case MSG_ISDLOCK:
-        return isman.AlreadyHave(inv);
+        return llmq_ctx.isman->AlreadyHave(inv);
     }
 
     // Don't know what it is, just say we already got one
@@ -1805,9 +1769,7 @@ void static ProcessGetBlockData(CNode* pfrom, const CChainParams& chainparams, c
 }
 
 void static ProcessGetData(CNode* pfrom, const CChainParams& chainparams, CConnman* connman, CTxMemPool& mempool,
-                           llmq::CQuorumBlockProcessor &quorum_block_processor, llmq::CDKGSessionManager& qdkgsman,
-                           llmq::CQuorumManager& qman, llmq::CSigSharesManager& shareman, llmq::CSigningManager& sigman,
-                           llmq::CChainLocksHandler& clhandler, llmq::CInstantSendManager& isman, const std::atomic<bool>& interruptMsgProc) LOCKS_EXCLUDED(cs_main)
+                           LLMQContext& llmq_ctx, const std::atomic<bool>& interruptMsgProc) LOCKS_EXCLUDED(cs_main)
 {
     AssertLockNotHeld(cs_main);
 
@@ -1884,9 +1846,8 @@ void static ProcessGetData(CNode* pfrom, const CChainParams& chainparams, CConnm
             }
 
             if (!push && inv.type == MSG_SPORK) {
-                CSporkMessage spork;
-                if (sporkManager->GetSporkByHash(inv.hash, spork)) {
-                    connman->PushMessage(pfrom, msgMaker.Make(NetMsgType::SPORK, spork));
+                if (auto opt_spork = sporkManager->GetSporkByHash(inv.hash)) {
+                    connman->PushMessage(pfrom, msgMaker.Make(NetMsgType::SPORK, *opt_spork));
                     push = true;
                 }
             }
@@ -1923,7 +1884,7 @@ void static ProcessGetData(CNode* pfrom, const CChainParams& chainparams, CConnm
 
             if (!push && (inv.type == MSG_QUORUM_FINAL_COMMITMENT)) {
                 llmq::CFinalCommitment o;
-                if (quorum_block_processor.GetMineableCommitmentByHash(
+                if (llmq_ctx.quorum_block_processor->GetMineableCommitmentByHash(
                         inv.hash, o)) {
                     connman->PushMessage(pfrom, msgMaker.Make(NetMsgType::QFCOMMITMENT, o));
                     push = true;
@@ -1932,7 +1893,7 @@ void static ProcessGetData(CNode* pfrom, const CChainParams& chainparams, CConnm
 
             if (!push && (inv.type == MSG_QUORUM_CONTRIB)) {
                 llmq::CDKGContribution o;
-                if (qdkgsman.GetContribution(inv.hash, o)) {
+                if (llmq_ctx.qdkgsman->GetContribution(inv.hash, o)) {
                     connman->PushMessage(pfrom, msgMaker.Make(NetMsgType::QCONTRIB, o));
                     push = true;
                 }
@@ -1940,7 +1901,7 @@ void static ProcessGetData(CNode* pfrom, const CChainParams& chainparams, CConnm
 
             if (!push && (inv.type == MSG_QUORUM_COMPLAINT)) {
                 llmq::CDKGComplaint o;
-                if (qdkgsman.GetComplaint(inv.hash, o)) {
+                if (llmq_ctx.qdkgsman->GetComplaint(inv.hash, o)) {
                     connman->PushMessage(pfrom, msgMaker.Make(NetMsgType::QCOMPLAINT, o));
                     push = true;
                 }
@@ -1948,7 +1909,7 @@ void static ProcessGetData(CNode* pfrom, const CChainParams& chainparams, CConnm
 
             if (!push && (inv.type == MSG_QUORUM_JUSTIFICATION)) {
                 llmq::CDKGJustification o;
-                if (qdkgsman.GetJustification(inv.hash, o)) {
+                if (llmq_ctx.qdkgsman->GetJustification(inv.hash, o)) {
                     connman->PushMessage(pfrom, msgMaker.Make(NetMsgType::QJUSTIFICATION, o));
                     push = true;
                 }
@@ -1956,7 +1917,7 @@ void static ProcessGetData(CNode* pfrom, const CChainParams& chainparams, CConnm
 
             if (!push && (inv.type == MSG_QUORUM_PREMATURE_COMMITMENT)) {
                 llmq::CDKGPrematureCommitment o;
-                if (qdkgsman.GetPrematureCommitment(inv.hash, o)) {
+                if (llmq_ctx.qdkgsman->GetPrematureCommitment(inv.hash, o)) {
                     connman->PushMessage(pfrom, msgMaker.Make(NetMsgType::QPCOMMITMENT, o));
                     push = true;
                 }
@@ -1964,7 +1925,7 @@ void static ProcessGetData(CNode* pfrom, const CChainParams& chainparams, CConnm
 
             if (!push && (inv.type == MSG_QUORUM_RECOVERED_SIG)) {
                 llmq::CRecoveredSig o;
-                if (sigman.GetRecoveredSigForGetData(inv.hash, o)) {
+                if (llmq_ctx.sigman->GetRecoveredSigForGetData(inv.hash, o)) {
                     connman->PushMessage(pfrom, msgMaker.Make(NetMsgType::QSIGREC, o));
                     push = true;
                 }
@@ -1972,7 +1933,7 @@ void static ProcessGetData(CNode* pfrom, const CChainParams& chainparams, CConnm
 
             if (!push && (inv.type == MSG_CLSIG)) {
                 llmq::CChainLockSig o;
-                if (clhandler.GetChainLockByHash(inv.hash, o)) {
+                if (llmq_ctx.clhandler->GetChainLockByHash(inv.hash, o)) {
                     connman->PushMessage(pfrom, msgMaker.Make(NetMsgType::CLSIG, o));
                     push = true;
                 }
@@ -1980,7 +1941,7 @@ void static ProcessGetData(CNode* pfrom, const CChainParams& chainparams, CConnm
 
             if (!push && (inv.type == MSG_ISLOCK || inv.type == MSG_ISDLOCK)) {
                 llmq::CInstantSendLock o;
-                if (isman.GetInstantSendLockByHash(inv.hash, o)) {
+                if (llmq_ctx.isman->GetInstantSendLockByHash(inv.hash, o)) {
                     const auto msg_type = inv.type == MSG_ISLOCK ? NetMsgType::ISLOCK : NetMsgType::ISDLOCK;
                     connman->PushMessage(pfrom, msgMaker.Make(msg_type, o));
                     push = true;
@@ -1997,7 +1958,7 @@ void static ProcessGetData(CNode* pfrom, const CChainParams& chainparams, CConnm
         const CInv &inv = *it;
         if (inv.type == MSG_BLOCK || inv.type == MSG_FILTERED_BLOCK || inv.type == MSG_CMPCT_BLOCK) {
             it++;
-            ProcessGetBlockData(pfrom, chainparams, inv, connman, isman);
+            ProcessGetBlockData(pfrom, chainparams, inv, connman, *llmq_ctx.isman);
         }
     }
 
@@ -2519,7 +2480,7 @@ std::string RejectCodeToString(const unsigned char code)
     return "";
 }
 
-std::pair<bool /*ret*/, bool /*do_return*/> static ValidateDSTX(CCoinJoinBroadcastTx dstx, uint256 hashTx)
+std::pair<bool /*ret*/, bool /*do_return*/> static ValidateDSTX(CCoinJoinBroadcastTx& dstx, uint256 hashTx)
 {
     if (!dstx.IsValidStructure()) {
         LogPrint(BCLog::COINJOIN, "DSTX -- Invalid DSTX structure: %s\n", hashTx.ToString());
@@ -2538,11 +2499,26 @@ std::pair<bool /*ret*/, bool /*do_return*/> static ValidateDSTX(CCoinJoinBroadca
     }
     // It could be that a MN is no longer in the list but its DSTX is not yet mined.
     // Try to find a MN up to 24 blocks deep to make sure such dstx-es are relayed and processed correctly.
-    for (int i = 0; i < 24 && pindex; ++i) {
-        dmn = deterministicMNManager->GetListForBlock(pindex).GetMNByCollateral(dstx.masternodeOutpoint);
-        if (dmn) break;
-        pindex = pindex->pprev;
+    if (dstx.masternodeOutpoint.IsNull()) {
+        for (int i = 0; i < 24 && pindex; ++i) {
+            dmn = deterministicMNManager->GetListForBlock(pindex).GetMN(dstx.m_protxHash);
+            if (dmn) {
+                dstx.masternodeOutpoint = dmn->collateralOutpoint;
+                break;
+            }
+            pindex = pindex->pprev;
+        }
+    } else {
+        for (int i = 0; i < 24 && pindex; ++i) {
+            dmn = deterministicMNManager->GetListForBlock(pindex).GetMNByCollateral(dstx.masternodeOutpoint);
+            if (dmn) {
+                dstx.m_protxHash = dmn->proTxHash;
+                break;
+            }
+            pindex = pindex->pprev;
+        }
     }
+
     if (!dmn) {
         LogPrint(BCLog::COINJOIN, "DSTX -- Can't find masternode %s to verify %s\n", dstx.masternodeOutpoint.ToStringShort(), hashTx.ToString());
         return {false, true};
@@ -2569,10 +2545,7 @@ std::pair<bool /*ret*/, bool /*do_return*/> static ValidateDSTX(CCoinJoinBroadca
 
 bool ProcessMessage(CNode* pfrom, const std::string& msg_type, CDataStream& vRecv, int64_t nTimeReceived,
                     const CChainParams& chainparams, ChainstateManager& chainman, CTxMemPool& mempool,
-                    llmq::CQuorumBlockProcessor& quorum_block_processor, llmq::CDKGSessionManager& qdkgsman,
-                    llmq::CQuorumManager& qman, llmq::CSigSharesManager& shareman, llmq::CSigningManager& sigman,
-                    llmq::CChainLocksHandler& clhandler, llmq::CInstantSendManager& isman, CConnman* connman,
-                    BanMan* banman, const std::atomic<bool>& interruptMsgProc, bool enable_bip61)
+                    LLMQContext& llmq_ctx, CConnman* connman, BanMan* banman, const std::atomic<bool>& interruptMsgProc)
 {
     LogPrint(BCLog::NET, "received: %s (%u bytes) peer=%d\n", SanitizeString(msg_type), vRecv.size(), pfrom->GetId());
     statsClient.inc("message.received." + SanitizeString(msg_type), 1.0f);
@@ -2592,48 +2565,10 @@ bool ProcessMessage(CNode* pfrom, const std::string& msg_type, CDataStream& vRec
         return false;
     }
 
-    if (msg_type == NetMsgType::REJECT)
-    {
-        std::string strMsg; unsigned char ccode; std::string strReason;
-        uint256 hash;
-        try {
-            vRecv >> LIMITED_STRING(strMsg, CMessageHeader::COMMAND_SIZE) >> ccode >> LIMITED_STRING(strReason, MAX_REJECT_MESSAGE_LENGTH);
-            if (strMsg == NetMsgType::BLOCK || strMsg == NetMsgType::TX) {
-                vRecv >> hash;
-            }
-        } catch (const std::ios_base::failure&) {
-            // Avoid feedback loops by preventing reject messages from triggering a new reject message.
-            LogPrint(BCLog::NET, "Unparseable reject message received\n");
-        }
-
-        if (strMsg == NetMsgType::BLOCK) {
-            // The node requested a block from us and then rejected it, which indicates that it's most likely running
-            // on rules which are incompatible to ours. Better to ban him after some time as it might otherwise keep
-            // asking for the same block (if -addnode/-connect was used on the other side).
-            LOCK(cs_main);
-            Misbehaving(pfrom->GetId(), 1);
-        }
-
-        if (LogAcceptCategory(BCLog::NET)) {
-            std::ostringstream ss;
-            ss << strMsg << " code " << itostr(ccode) << ": " << strReason;
-
-            if (strMsg == NetMsgType::BLOCK || strMsg == NetMsgType::TX) {
-                ss << ": hash " << hash.ToString();
-            }
-            LogPrint(BCLog::NET, "Reject %s\n", SanitizeString(ss.str()));
-        }
-        statsClient.inc("message.sent.reject_" + strMsg + "_" + RejectCodeToString(ccode), 1.0f);
-        return true;
-    }
-
     if (msg_type == NetMsgType::VERSION) {
         // Each connection can only send one version message
         if (pfrom->nVersion != 0)
         {
-            if (enable_bip61) {
-                connman->PushMessage(pfrom, CNetMsgMaker(INIT_PROTO_VERSION).Make(NetMsgType::REJECT, msg_type, REJECT_DUPLICATE, std::string("Duplicate version message")));
-            }
             LOCK(cs_main);
             Misbehaving(pfrom->GetId(), 1);
             return false;
@@ -2661,10 +2596,6 @@ bool ProcessMessage(CNode* pfrom, const std::string& msg_type, CDataStream& vRec
         if (!pfrom->fInbound && !pfrom->fFeeler && !pfrom->m_manual_connection && !HasAllDesirableServiceFlags(nServices))
         {
             LogPrint(BCLog::NET, "peer=%d does not offer the expected services (%08x offered, %08x expected); disconnecting\n", pfrom->GetId(), nServices, GetDesirableServiceFlags(nServices));
-            if (enable_bip61) {
-                connman->PushMessage(pfrom, CNetMsgMaker(INIT_PROTO_VERSION).Make(NetMsgType::REJECT, msg_type, REJECT_NONSTANDARD,
-                                   strprintf("Expected to offer services %08x", GetDesirableServiceFlags(nServices))));
-            }
             pfrom->fDisconnect = true;
             return false;
         }
@@ -2672,10 +2603,6 @@ bool ProcessMessage(CNode* pfrom, const std::string& msg_type, CDataStream& vRec
         if (nVersion < MIN_PEER_PROTO_VERSION) {
             // disconnect from peers older than this proto version
             LogPrint(BCLog::NET, "peer=%d using obsolete version %i; disconnecting\n", pfrom->GetId(), nVersion);
-            if (enable_bip61) {
-                connman->PushMessage(pfrom, CNetMsgMaker(INIT_PROTO_VERSION).Make(NetMsgType::REJECT, msg_type, REJECT_OBSOLETE,
-                                   strprintf("Version must be %d or greater", MIN_PEER_PROTO_VERSION)));
-            }
             pfrom->fDisconnect = true;
             return false;
         }
@@ -2857,7 +2784,7 @@ bool ProcessMessage(CNode* pfrom, const std::string& msg_type, CDataStream& vRec
         }
 
         if (!pfrom->m_masternode_probe_connection) {
-            CMNAuth::PushMNAUTH(pfrom, *connman);
+            CMNAuth::PushMNAUTH(*pfrom, *connman, ::ChainActive().Tip());
         }
 
         // Tell our peer we prefer to receive headers rather than inv's
@@ -3063,7 +2990,7 @@ bool ProcessMessage(CNode* pfrom, const std::string& msg_type, CDataStream& vRec
             if (interruptMsgProc)
                 return true;
 
-            bool fAlreadyHave = AlreadyHave(inv, mempool, quorum_block_processor, qdkgsman, qman, shareman, sigman, clhandler, isman);
+            bool fAlreadyHave = AlreadyHave(inv, mempool, llmq_ctx);
             LogPrint(BCLog::NET, "got inv: %s  %s peer=%d\n", inv.ToString(), fAlreadyHave ? "have" : "new", pfrom->GetId());
             statsClient.inc(strprintf("message.received.inv_%s", inv.GetCommand()), 1.0f);
 
@@ -3147,7 +3074,7 @@ bool ProcessMessage(CNode* pfrom, const std::string& msg_type, CDataStream& vRec
         }
 
         pfrom->vRecvGetData.insert(pfrom->vRecvGetData.end(), vInv.begin(), vInv.end());
-        ProcessGetData(pfrom, chainparams, connman, mempool, quorum_block_processor, qdkgsman, qman, shareman, sigman, clhandler, isman, interruptMsgProc);
+        ProcessGetData(pfrom, chainparams, connman, mempool, llmq_ctx, interruptMsgProc);
         return true;
     }
 
@@ -3394,7 +3321,7 @@ bool ProcessMessage(CNode* pfrom, const std::string& msg_type, CDataStream& vRec
         bool fMissingInputs = false;
         CValidationState state;
 
-        if (!AlreadyHave(inv, mempool, quorum_block_processor, qdkgsman, qman, shareman, sigman, clhandler, isman) && AcceptToMemoryPool(mempool, state, ptx, &fMissingInputs /* pfMissingInputs */,
+        if (!AlreadyHave(inv, mempool, llmq_ctx) && AcceptToMemoryPool(mempool, state, ptx, &fMissingInputs /* pfMissingInputs */,
                 false /* bypass_limits */, 0 /* nAbsurdFee */)) {
             // Process custom txes, this changes AlreadyHave to "true"
             if (nInvType == MSG_DSTX) {
@@ -3440,11 +3367,11 @@ bool ProcessMessage(CNode* pfrom, const std::string& msg_type, CDataStream& vRec
                 for (const CTxIn& txin : tx.vin) {
                     CInv _inv(MSG_TX, txin.prevout.hash);
                     pfrom->AddInventoryKnown(_inv);
-                    if (!AlreadyHave(_inv, mempool, quorum_block_processor, qdkgsman, qman, shareman, sigman, clhandler, isman)) RequestObject(State(pfrom->GetId()), _inv, current_time);
+                    if (!AlreadyHave(_inv, mempool, llmq_ctx)) RequestObject(State(pfrom->GetId()), _inv, current_time);
                     // We don't know if the previous tx was a regular or a mixing one, try both
                     CInv _inv2(MSG_DSTX, txin.prevout.hash);
                     pfrom->AddInventoryKnown(_inv2);
-                    if (!AlreadyHave(_inv2, mempool, quorum_block_processor, qdkgsman, qman, shareman, sigman, clhandler, isman)) RequestObject(State(pfrom->GetId()), _inv2, current_time);
+                    if (!AlreadyHave(_inv2, mempool, llmq_ctx)) RequestObject(State(pfrom->GetId()), _inv2, current_time);
                 }
                 AddOrphanTx(ptx, pfrom->GetId());
 
@@ -3459,7 +3386,7 @@ bool ProcessMessage(CNode* pfrom, const std::string& msg_type, CDataStream& vRec
                 // We will continue to reject this tx since it has rejected
                 // parents so avoid re-requesting it from other peers.
                 recentRejects->insert(tx.GetHash());
-                isman.TransactionRemovedFromMempool(ptx);
+                llmq_ctx.isman->TransactionRemovedFromMempool(ptx);
             }
         } else {
             assert(IsTransactionReason(state.GetReason()));
@@ -3471,14 +3398,11 @@ bool ProcessMessage(CNode* pfrom, const std::string& msg_type, CDataStream& vRec
 
             if (pfrom->HasPermission(PF_FORCERELAY)) {
                 // Always relay transactions received from whitelisted peers, even
-                // if they were already in the mempool or rejected from it due
-                // to policy, allowing the node to function as a gateway for
+                // if they were already in the mempool,
+                // allowing the node to function as a gateway for
                 // nodes hidden behind it.
-                //
-                // Never relay transactions that might result in being
-                // disconnected (or banned).
-                if (state.IsInvalid() && TxRelayMayResultInDisconnect(state)) {
-                    LogPrintf("Not relaying invalid transaction %s from whitelisted peer=%d (%s)\n", tx.GetHash().ToString(), pfrom->GetId(), FormatStateMessage(state));
+                if (!mempool.exists(tx.GetHash())) {
+                    LogPrintf("Not relaying non-mempool transaction %s from whitelisted peer=%d\n", tx.GetHash().ToString(), pfrom->GetId());
                 } else {
                     LogPrintf("Force relaying tx %s from whitelisted peer=%d\n", tx.GetHash().ToString(), pfrom->GetId());
                     RelayTransaction(tx.GetHash(), *connman);
@@ -3508,12 +3432,8 @@ bool ProcessMessage(CNode* pfrom, const std::string& msg_type, CDataStream& vRec
             LogPrint(BCLog::MEMPOOLREJ, "%s from peer=%d was not accepted: %s\n", tx.GetHash().ToString(),
                 pfrom->GetId(),
                 FormatStateMessage(state));
-            if (enable_bip61 && state.GetRejectCode() > 0 && state.GetRejectCode() < REJECT_INTERNAL) { // Never send AcceptToMemoryPool's internal codes over P2P
-                connman->PushMessage(pfrom, msgMaker.Make(NetMsgType::REJECT, msg_type, (unsigned char)state.GetRejectCode(),
-                                   state.GetRejectReason().substr(0, MAX_REJECT_MESSAGE_LENGTH), inv.hash));
-            }
             MaybePunishNode(pfrom->GetId(), state, /*via_compact_block*/ false);
-            isman.TransactionRemovedFromMempool(ptx);
+            llmq_ctx.isman->TransactionRemovedFromMempool(ptx);
         }
         return true;
     }
@@ -3686,7 +3606,7 @@ bool ProcessMessage(CNode* pfrom, const std::string& msg_type, CDataStream& vRec
         } // cs_main
 
         if (fProcessBLOCKTXN)
-            return ProcessMessage(pfrom, NetMsgType::BLOCKTXN, blockTxnMsg, nTimeReceived, chainparams, chainman, mempool, quorum_block_processor, qdkgsman, qman, shareman, sigman, clhandler, isman, connman, banman, interruptMsgProc, enable_bip61);
+            return ProcessMessage(pfrom, NetMsgType::BLOCKTXN, blockTxnMsg, nTimeReceived, chainparams, chainman, mempool, llmq_ctx, connman, banman, interruptMsgProc);
 
         if (fRevertToHeaderProcessing) {
             // Headers received from HB compact block peers are permitted to be
@@ -4085,7 +4005,7 @@ bool ProcessMessage(CNode* pfrom, const std::string& msg_type, CDataStream& vRec
 
         CSimplifiedMNListDiff mnListDiff;
         std::string strError;
-        if (BuildSimplifiedMNListDiff(cmd.baseBlockHash, cmd.blockHash, mnListDiff, quorum_block_processor, strError)) {
+        if (BuildSimplifiedMNListDiff(cmd.baseBlockHash, cmd.blockHash, mnListDiff, *llmq_ctx.quorum_block_processor, strError)) {
             connman->PushMessage(pfrom, msgMaker.Make(NetMsgType::MNLISTDIFF, mnListDiff));
         } else {
             strError = strprintf("getmnlistdiff failed for baseBlockHash=%s, blockHash=%s. error=%s", cmd.baseBlockHash.ToString(), cmd.blockHash.ToString(), strError);
@@ -4125,7 +4045,7 @@ bool ProcessMessage(CNode* pfrom, const std::string& msg_type, CDataStream& vRec
 
         llmq::CQuorumRotationInfo quorumRotationInfoRet;
         std::string strError;
-        if (BuildQuorumRotationInfo(cmd, quorumRotationInfoRet, qman, quorum_block_processor, strError)) {
+        if (BuildQuorumRotationInfo(cmd, quorumRotationInfoRet, *llmq_ctx.qman, *llmq_ctx.quorum_block_processor, strError)) {
             connman->PushMessage(pfrom, msgMaker.Make(NetMsgType::QUORUMROTATIONINFO, quorumRotationInfoRet));
         } else {
             strError = strprintf("getquorumrotationinfo failed for size(baseBlockHashes)=%d, blockRequestHash=%s. error=%s", cmd.baseBlockHashes.size(), cmd.blockRequestHash.ToString(), strError);
@@ -4179,23 +4099,23 @@ bool ProcessMessage(CNode* pfrom, const std::string& msg_type, CDataStream& vRec
     {
         //probably one the extensions
 #ifdef ENABLE_WALLET
-        coinJoinClientQueueManager->ProcessMessage(pfrom, msg_type, vRecv, enable_bip61);
+        coinJoinClientQueueManager->ProcessMessage(*pfrom, msg_type, vRecv);
         for (auto& pair : coinJoinClientManagers) {
-            pair.second->ProcessMessage(pfrom, msg_type, vRecv, *connman, enable_bip61);
+            pair.second->ProcessMessage(*pfrom, msg_type, vRecv, *connman);
         }
 #endif // ENABLE_WALLET
-        coinJoinServer->ProcessMessage(pfrom, msg_type, vRecv, enable_bip61);
-        sporkManager->ProcessSporkMessages(pfrom, msg_type, vRecv, *connman);
-        masternodeSync->ProcessMessage(pfrom, msg_type, vRecv);
-        governance->ProcessMessage(pfrom, msg_type, vRecv, *connman, enable_bip61);
-        CMNAuth::ProcessMessage(pfrom, msg_type, vRecv, *connman);
-        quorum_block_processor.ProcessMessage(pfrom, msg_type, vRecv);
-        qdkgsman.ProcessMessage(pfrom, qman, msg_type, vRecv);
-        qman.ProcessMessage(pfrom, msg_type, vRecv);
-        shareman.ProcessMessage(pfrom, msg_type, vRecv, *sporkManager);
-        sigman.ProcessMessage(pfrom, msg_type, vRecv);
-        clhandler.ProcessMessage(pfrom, msg_type, vRecv);
-        isman.ProcessMessage(pfrom, msg_type, vRecv);
+        coinJoinServer->ProcessMessage(*pfrom, msg_type, vRecv);
+        sporkManager->ProcessSporkMessages(*pfrom, msg_type, vRecv, *connman);
+        ::masternodeSync->ProcessMessage(*pfrom, msg_type, vRecv);
+        governance->ProcessMessage(*pfrom, msg_type, vRecv, *connman);
+        CMNAuth::ProcessMessage(*pfrom, msg_type, vRecv, *connman);
+        llmq_ctx.quorum_block_processor->ProcessMessage(*pfrom, msg_type, vRecv);
+        llmq_ctx.qdkgsman->ProcessMessage(pfrom, *llmq_ctx.qman, msg_type, vRecv);
+        llmq_ctx.qman->ProcessMessage(pfrom, msg_type, vRecv);
+        llmq_ctx.shareman->ProcessMessage(pfrom, msg_type, vRecv, *sporkManager);
+        llmq_ctx.sigman->ProcessMessage(pfrom, msg_type, vRecv);
+        llmq_ctx.clhandler->ProcessMessage(pfrom, msg_type, vRecv);
+        llmq_ctx.isman->ProcessMessage(pfrom, msg_type, vRecv);
         return true;
     }
 
@@ -4205,17 +4125,10 @@ bool ProcessMessage(CNode* pfrom, const std::string& msg_type, CDataStream& vRec
     return true;
 }
 
-bool PeerLogicValidation::MaybeDiscourageAndDisconnect(CNode* pnode, bool enable_bip61)
+bool PeerLogicValidation::MaybeDiscourageAndDisconnect(CNode* pnode)
 {
     AssertLockHeld(cs_main);
     CNodeState &state = *State(pnode->GetId());
-
-    if (enable_bip61) {
-        for (const CBlockReject& reject : state.rejects) {
-            connman->PushMessage(pnode, CNetMsgMaker(INIT_PROTO_VERSION).Make(NetMsgType::REJECT, std::string(NetMsgType::BLOCK), reject.chRejectCode, reject.strRejectReason, reject.hashBlock));
-        }
-    }
-    state.rejects.clear();
 
     if (state.m_should_discourage) {
         state.m_should_discourage = false;
@@ -4246,7 +4159,7 @@ bool PeerLogicValidation::ProcessMessages(CNode* pfrom, std::atomic<bool>& inter
     bool fMoreWork = false;
 
     if (!pfrom->vRecvGetData.empty())
-        ProcessGetData(pfrom, chainparams, connman, m_mempool, *m_quorum_block_processor, *m_qdkgsman, *m_qman, *m_shareman, *m_sigman, *m_clhandler, *m_isman, interruptMsgProc);
+        ProcessGetData(pfrom, chainparams, connman, m_mempool, *m_llmq_ctx, interruptMsgProc);
 
     if (!pfrom->orphan_work_set.empty()) {
         LOCK2(cs_main, g_cs_orphans);
@@ -4288,7 +4201,7 @@ bool PeerLogicValidation::ProcessMessages(CNode* pfrom, std::atomic<bool>& inter
     bool fRet = false;
     try
     {
-        fRet = ProcessMessage(pfrom, msg_type, msg.m_recv, msg.m_time, chainparams, m_chainman, m_mempool, *m_quorum_block_processor, *m_qdkgsman, *m_qman, *m_shareman, *m_sigman, *m_clhandler, *m_isman, connman, m_banman, interruptMsgProc, m_enable_bip61);
+        fRet = ProcessMessage(pfrom, msg_type, msg.m_recv, msg.m_time, chainparams, m_chainman, m_mempool, *m_llmq_ctx, connman, m_banman, interruptMsgProc);
         if (interruptMsgProc)
             return false;
         if (!pfrom->vRecvGetData.empty())
@@ -4296,9 +4209,6 @@ bool PeerLogicValidation::ProcessMessages(CNode* pfrom, std::atomic<bool>& inter
     }
     catch (const std::ios_base::failure& e)
     {
-        if (m_enable_bip61) {
-            connman->PushMessage(pfrom, CNetMsgMaker(INIT_PROTO_VERSION).Make(NetMsgType::REJECT, msg_type, REJECT_MALFORMED, std::string("error parsing message")));
-        }
         if (strstr(e.what(), "end of data")) {
             // Allow exceptions from under-length message on vRecv
             LogPrint(BCLog::NET, "%s(%s, %u bytes): Exception '%s' caught, normally caused by a message being shorter than its stated length\n", __func__, SanitizeString(msg_type), nMessageSize, e.what());
@@ -4326,7 +4236,7 @@ bool PeerLogicValidation::ProcessMessages(CNode* pfrom, std::atomic<bool>& inter
     }
 
     LOCK(cs_main);
-    MaybeDiscourageAndDisconnect(pfrom, m_enable_bip61);
+    MaybeDiscourageAndDisconnect(pfrom);
 
     return fMoreWork;
 }
@@ -4494,8 +4404,7 @@ public:
 
 bool PeerLogicValidation::SendMessages(CNode* pto)
 {
-    assert(m_clhandler);
-    assert(m_isman);
+    assert(m_llmq_ctx);
 
     const Consensus::Params& consensusParams = Params().GetConsensus();
     {
@@ -4529,11 +4438,11 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
             connman->PushMessage(pto, msgMaker.Make(NetMsgType::PING, nonce));
         }
 
-        TRY_LOCK(cs_main, lockMain); // Acquire cs_main for IsInitialBlockDownload() and CNodeState()
+        TRY_LOCK(cs_main, lockMain);
         if (!lockMain)
             return true;
 
-        if (MaybeDiscourageAndDisconnect(pto, m_enable_bip61)) return true;
+        if (MaybeDiscourageAndDisconnect(pto)) return true;
 
         CNodeState &state = *State(pto->GetId());
 
@@ -4844,14 +4753,14 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
                         int nInvType = CCoinJoin::GetDSTX(hash) ? MSG_DSTX : MSG_TX;
                         queueAndMaybePushInv(CInv(nInvType, hash));
 
-                        const auto islock = m_isman->GetInstantSendLockByTxid(hash);
+                        const auto islock = m_llmq_ctx->isman->GetInstantSendLockByTxid(hash);
                         if (islock == nullptr) continue;
                         if (pto->nVersion < ISDLOCK_PROTO_VERSION && islock->IsDeterministic()) continue;
                         queueAndMaybePushInv(CInv(islock->IsDeterministic() ? MSG_ISDLOCK : MSG_ISLOCK, ::SerializeHash(*islock)));
                     }
 
                     // Send an inv for the best ChainLock we have
-                    const auto& clsig = m_clhandler->GetBestChainLock();
+                    const auto& clsig = m_llmq_ctx->clhandler->GetBestChainLock();
                     if (!clsig.IsNull()) {
                         uint256 chainlockHash = ::SerializeHash(clsig);
                         queueAndMaybePushInv(CInv(MSG_CLSIG, chainlockHash));
@@ -5063,7 +4972,7 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
                 state.m_object_download.m_object_in_flight.erase(inv);
                 continue;
             }
-            if (!AlreadyHave(inv, m_mempool, *m_quorum_block_processor, *m_qdkgsman, *m_qman, *m_shareman, *m_sigman, *m_clhandler, *m_isman)) {
+            if (!AlreadyHave(inv, m_mempool, *m_llmq_ctx)) {
                 // If this object was last requested more than GetObjectInterval ago,
                 // then request.
                 const auto last_request_time = GetObjectRequestTime(inv.hash);

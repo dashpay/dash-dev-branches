@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2022 The Dash Core developers
+// Copyright (c) 2018-2023 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -182,7 +182,12 @@ public:
     SERIALIZE_METHODS(CDeterministicMNStateDiff, obj)
     {
         READWRITE(VARINT(obj.fields));
-#define DMN_STATE_DIFF_LINE(f) if (obj.fields & Field_##f) READWRITE(obj.state.f);
+#define DMN_STATE_DIFF_LINE(f) \
+        if (obj.fields & Field_pubKeyOperator) {\
+            /* TODO: implement migration to Basic BLS after the fork */ \
+            READWRITE(CBLSLazyPublicKeyVersionWrapper(const_cast<CBLSLazyPublicKey&>(obj.state.pubKeyOperator), true)); \
+        } else if (obj.fields & Field_##f) READWRITE(obj.state.f);
+
         DMN_STATE_DIFF_ALL_FIELDS
 #undef DMN_STATE_DIFF_LINE
     }

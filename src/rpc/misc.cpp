@@ -1,6 +1,6 @@
 // Copyright (c) 2010 Satoshi Nakamoto
 // Copyright (c) 2009-2015 The Bitcoin Core developers
-// Copyright (c) 2014-2022 The Dash Core developers
+// Copyright (c) 2014-2023 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -11,6 +11,7 @@
 #include <init.h>
 #include <interfaces/chain.h>
 #include <key_io.h>
+#include <llmq/utils.h>
 #include <net.h>
 #include <node/context.h>
 #include <rpc/blockchain.h>
@@ -21,7 +22,6 @@
 #include <txmempool.h>
 #include <util/check.h>
 #include <util/message.h> // For MessageSign(), MessageVerify()
-#include <util/ref.h>
 #include <util/strencodings.h>
 #include <util/system.h>
 #include <validation.h>
@@ -91,24 +91,24 @@ static UniValue mnsync(const JSONRPCRequest& request)
 
     if(strMode == "status") {
         UniValue objStatus(UniValue::VOBJ);
-        objStatus.pushKV("AssetID", masternodeSync->GetAssetID());
-        objStatus.pushKV("AssetName", masternodeSync->GetAssetName());
-        objStatus.pushKV("AssetStartTime", masternodeSync->GetAssetStartTime());
-        objStatus.pushKV("Attempt", masternodeSync->GetAttempt());
-        objStatus.pushKV("IsBlockchainSynced", masternodeSync->IsBlockchainSynced());
-        objStatus.pushKV("IsSynced", masternodeSync->IsSynced());
+        objStatus.pushKV("AssetID", ::masternodeSync->GetAssetID());
+        objStatus.pushKV("AssetName", ::masternodeSync->GetAssetName());
+        objStatus.pushKV("AssetStartTime", ::masternodeSync->GetAssetStartTime());
+        objStatus.pushKV("Attempt", ::masternodeSync->GetAttempt());
+        objStatus.pushKV("IsBlockchainSynced", ::masternodeSync->IsBlockchainSynced());
+        objStatus.pushKV("IsSynced", ::masternodeSync->IsSynced());
         return objStatus;
     }
 
     if(strMode == "next")
     {
-        masternodeSync->SwitchToNextAsset();
-        return "sync updated to " + masternodeSync->GetAssetName();
+        ::masternodeSync->SwitchToNextAsset();
+        return "sync updated to " + ::masternodeSync->GetAssetName();
     }
 
     if(strMode == "reset")
     {
-        masternodeSync->Reset(true);
+        ::masternodeSync->Reset(true);
         return "success";
     }
     return "failure";
@@ -523,8 +523,8 @@ static UniValue setmocktime(const JSONRPCRequest& request)
     RPCTypeCheck(request.params, {UniValue::VNUM});
     int64_t time = request.params[0].get_int64();
     SetMockTime(time);
-    if (request.context.Has<NodeContext>()) {
-        for (const auto& chain_client : request.context.Get<NodeContext>().chain_clients) {
+    if (auto* node_context = GetContext<NodeContext>(request.context)) {
+        for (const auto& chain_client : node_context->chain_clients) {
             chain_client->setMockTime(time);
         }
     }
@@ -556,7 +556,8 @@ static UniValue mnauth(const JSONRPCRequest& request)
         throw JSONRPCError(RPC_INVALID_PARAMETER, "proTxHash invalid");
     }
     CBLSPublicKey publicKey;
-    publicKey.SetHexStr(request.params[2].get_str());
+    bool bls_legacy_scheme = !llmq::utils::IsV19Active(::ChainActive().Tip());
+    publicKey.SetHexStr(request.params[2].get_str(), bls_legacy_scheme);
     if (!publicKey.IsValid()) {
         throw JSONRPCError(RPC_INVALID_PARAMETER, "publicKey invalid");
     }
@@ -590,8 +591,8 @@ static bool getIndexKey(const std::string& str, uint160& hashBytes, int& type)
         type = 0;
         return false;
     }
-    const CKeyID *keyID = boost::get<CKeyID>(&dest);
-    const CScriptID *scriptID = boost::get<CScriptID>(&dest);
+    const CKeyID *keyID = std::get_if<CKeyID>(&dest);
+    const CScriptID *scriptID = std::get_if<CScriptID>(&dest);
     type = keyID ? 1 : 2;
     hashBytes = keyID ? *keyID : *scriptID;
     return true;
@@ -1082,11 +1083,11 @@ static UniValue mockscheduler(const JSONRPCRequest& request)
         throw std::runtime_error("delta_time must be between 1 and 3600 seconds (1 hr)");
     }
 
+    auto* node_context = GetContext<NodeContext>(request.context);
     // protect against null pointer dereference
-    CHECK_NONFATAL(request.context.Has<NodeContext>());
-    NodeContext& node = request.context.Get<NodeContext>();
-    CHECK_NONFATAL(node.scheduler);
-    node.scheduler->MockForward(std::chrono::seconds(delta_seconds));
+    CHECK_NONFATAL(node_context);
+    CHECK_NONFATAL(node_context->scheduler);
+    node_context->scheduler->MockForward(std::chrono::seconds(delta_seconds));
 
     return NullUniValue;
 }
@@ -1321,6 +1322,7 @@ static const CRPCCommand commands[] =
 
 void RegisterMiscRPCCommands(CRPCTable &t)
 {
-    for (unsigned int vcidx = 0; vcidx < ARRAYLEN(commands); vcidx++)
-        t.appendCommand(commands[vcidx].name, &commands[vcidx]);
+    for (const auto& command : commands) {
+        t.appendCommand(command.name, &command);
+    }
 }

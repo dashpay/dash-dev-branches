@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2022 The Dash Core developers
+// Copyright (c) 2014-2023 The Dash Core developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -16,6 +16,7 @@
 #include <rpc/server.h>
 #include <rpc/util.h>
 #include <univalue.h>
+#include <util/strencodings.h>
 #include <spork.h>
 #include <validation.h>
 #include <wallet/coincontrol.h>
@@ -35,6 +36,7 @@ static void masternode_list_help(const JSONRPCRequest& request)
         "Get a list of masternodes in different modes. This call is identical to 'masternode list' call.\n"
         "Available modes:\n"
         "  addr           - Print ip address associated with a masternode (can be additionally filtered, partial match)\n"
+        "  recent         - Print info in JSON format for active and recently banned masternodes (can be additionally filtered, partial match)\n"
         "  full           - Print info in format 'status payee lastpaidtime lastpaidblock IP'\n"
         "                   (can be additionally filtered, partial match)\n"
         "  info           - Print info in format 'status payee IP'\n"
@@ -196,15 +198,14 @@ static UniValue masternode_outputs(const JSONRPCRequest& request)
 
     std::shared_ptr<CWallet> const wallet = GetWalletForJSONRPCRequest(request);
     if (!wallet) return NullUniValue;
-    CWallet* const pwallet = wallet.get();
 
     // Find possible candidates
     std::vector<COutput> vPossibleCoins;
     CCoinControl coin_control;
     coin_control.nCoinType = CoinType::ONLY_MASTERNODE_COLLATERAL;
     {
-        LOCK(pwallet->cs_wallet);
-        pwallet->AvailableCoins(vPossibleCoins, true, &coin_control);
+        LOCK(wallet->cs_wallet);
+        wallet->AvailableCoins(vPossibleCoins, true, &coin_control);
     }
     UniValue outputsArr(UniValue::VARR);
     for (const auto& out : vPossibleCoins) {
@@ -322,7 +323,7 @@ static UniValue masternode_winners(const JSONRPCRequest& request)
     std::string strFilter = "";
 
     if (!request.params[0].isNull()) {
-        nCount = atoi(request.params[0].get_str());
+        nCount = LocaleIndependentAtoi<int>(request.params[0].get_str());
     }
 
     if (!request.params[1].isNull()) {
@@ -561,7 +562,7 @@ static UniValue masternodelist(const JSONRPCRequest& request)
                 strMode != "owneraddress" && strMode != "votingaddress" &&
                 strMode != "lastpaidtime" && strMode != "lastpaidblock" &&
                 strMode != "payee" && strMode != "pubkeyoperator" &&
-                strMode != "status"))
+                strMode != "status" && strMode != "recent"))
     {
         masternode_list_help(request);
     }
@@ -588,7 +589,15 @@ static UniValue masternodelist(const JSONRPCRequest& request)
         return (int)pindex->nTime;
     };
 
+    bool showRecentMnsOnly = strMode == "recent";
+    int tipHeight = WITH_LOCK(cs_main, return ::ChainActive().Tip()->nHeight);
     mnList.ForEachMN(false, [&](auto& dmn) {
+        if (showRecentMnsOnly && mnList.IsMNPoSeBanned(dmn)) {
+            if (tipHeight - dmn.pdmnState->GetBannedHeight() > Params().GetConsensus().nSuperblockCycle) {
+                return;
+            }
+        }
+
         std::string strOutpoint = dmn.collateralOutpoint.ToStringShort();
         Coin coin;
         std::string collateralAddressStr = "UNKNOWN";
@@ -635,7 +644,7 @@ static UniValue masternodelist(const JSONRPCRequest& request)
             if (strFilter !="" && strInfo.find(strFilter) == std::string::npos &&
                 strOutpoint.find(strFilter) == std::string::npos) return;
             obj.pushKV(strOutpoint, strInfo);
-        } else if (strMode == "json") {
+        } else if (strMode == "json" || strMode == "recent") {
             std::ostringstream streamInfo;
             streamInfo <<  dmn.proTxHash.ToString() << " " <<
                            dmn.pdmnState->addr.ToString() << " " <<
@@ -703,6 +712,7 @@ static const CRPCCommand commands[] =
 // clang-format on
 void RegisterMasternodeRPCCommands(CRPCTable &t)
 {
-    for (unsigned int vcidx = 0; vcidx < ARRAYLEN(commands); vcidx++)
-        t.appendCommand(commands[vcidx].name, &commands[vcidx]);
+    for (const auto& command : commands) {
+        t.appendCommand(command.name, &command);
+    }
 }

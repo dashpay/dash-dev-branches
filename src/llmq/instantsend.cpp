@@ -1,4 +1,4 @@
-// Copyright (c) 2019-2022 The Dash Core developers
+// Copyright (c) 2019-2023 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -481,7 +481,7 @@ void CInstantSendManager::Stop()
 
 void CInstantSendManager::ProcessTx(const CTransaction& tx, bool fRetroactive, const Consensus::Params& params)
 {
-    if (!fMasternodeMode || !IsInstantSendEnabled() || !masternodeSync->IsBlockchainSynced()) {
+    if (!fMasternodeMode || !IsInstantSendEnabled() || !m_mn_sync->IsBlockchainSynced()) {
         return;
     }
 
@@ -787,7 +787,7 @@ void CInstantSendManager::ProcessMessageInstantSendLock(const CNode* pfrom, cons
         fDIP0024IsActive = utils::IsDIP0024Active(::ChainActive().Tip());
     }
 
-    if (!PreVerifyInstantSendLock(*islock)) {
+    if (!islock->TriviallyValid()) {
         LOCK(cs_main);
         Misbehaving(pfrom->GetId(), 100);
         return;
@@ -830,18 +830,17 @@ void CInstantSendManager::ProcessMessageInstantSendLock(const CNode* pfrom, cons
 
 /**
  * Handles trivial ISLock verification
- * @param islock The islock message being undergoing verification
  * @return returns false if verification failed, otherwise true
  */
-bool CInstantSendManager::PreVerifyInstantSendLock(const llmq::CInstantSendLock& islock)
+bool CInstantSendLock::TriviallyValid() const
 {
-    if (islock.txid.IsNull() || islock.inputs.empty()) {
+    if (txid.IsNull() || inputs.empty()) {
         return false;
     }
 
     // Check that each input is unique
     std::set<COutPoint> dups;
-    for (const auto& o : islock.inputs) {
+    for (const auto& o : inputs) {
         if (!dups.emplace(o).second) {
             return false;
         }
@@ -1132,7 +1131,7 @@ void CInstantSendManager::ProcessInstantSendLock(NodeId from, const uint256& has
 
 void CInstantSendManager::TransactionAddedToMempool(const CTransactionRef& tx)
 {
-    if (!IsInstantSendEnabled() || !masternodeSync->IsBlockchainSynced() || tx->vin.empty()) {
+    if (!IsInstantSendEnabled() || !m_mn_sync->IsBlockchainSynced() || tx->vin.empty()) {
         return;
     }
 
@@ -1191,7 +1190,7 @@ void CInstantSendManager::BlockConnected(const std::shared_ptr<const CBlock>& pb
         }
     }
 
-    if (masternodeSync->IsBlockchainSynced()) {
+    if (m_mn_sync->IsBlockchainSynced()) {
         for (const auto& tx : pblock->vtx) {
             if (tx->IsCoinBase() || tx->vin.empty()) {
                 // coinbase and TXs with no inputs can't be locked
@@ -1738,7 +1737,7 @@ bool CInstantSendManager::IsInstantSendMempoolSigningEnabled() const
 
 bool CInstantSendManager::RejectConflictingBlocks() const
 {
-    if (masternodeSync == nullptr || !masternodeSync->IsBlockchainSynced()) {
+    if (m_mn_sync == nullptr || !m_mn_sync->IsBlockchainSynced()) {
         return false;
     }
     if (!spork_manager.IsSporkActive(SPORK_3_INSTANTSEND_BLOCK_FILTERING)) {

@@ -192,6 +192,8 @@ LCOV_FILTER_PATTERN = \
 	-p "/usr/include/" \
 	-p "/usr/lib/" \
 	-p "/usr/lib64/" \
+	-p "src/dashbls/" \
+	-p "src/immer/" \
 	-p "src/leveldb/" \
 	-p "src/crc32c/" \
 	-p "src/bench/" \
@@ -287,6 +289,8 @@ EXTRA_DIST += \
     test/util/data/txcreatescript1.json \
     test/util/data/txcreatescript2.hex \
     test/util/data/txcreatescript2.json \
+    test/util/data/txcreatescript5.hex \
+    test/util/data/txcreatescript6.hex \
     test/util/data/txcreatesignv1.hex \
     test/util/data/txcreatesignv1.json \
     test/util/data/txcreatesignv2.hex \

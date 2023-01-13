@@ -729,9 +729,13 @@ class BitcoinTestFramework(metaclass=BitcoinTestMetaClass):
                     cwd=self.options.tmpdir,
                 ))
             self.start_node(CACHE_NODE_ID)
+            cache_node = self.nodes[CACHE_NODE_ID]
 
             # Wait for RPC connections to be ready
-            self.nodes[CACHE_NODE_ID].wait_for_rpc_connection()
+            cache_node.wait_for_rpc_connection()
+
+            # Set a time in the past, so that blocks don't end up in the future
+            cache_node.setmocktime(cache_node.getblockheader(cache_node.getbestblockhash())['time'])
 
             # Create a 199-block-long chain; each of the 4 first nodes
             # gets 25 mature blocks and 25 immature.
@@ -742,12 +746,12 @@ class BitcoinTestFramework(metaclass=BitcoinTestMetaClass):
             self.set_genesis_mocktime()
             for i in range(8):
                 self.bump_mocktime((25 if i != 7 else 24) * 156)
-                self.nodes[CACHE_NODE_ID].generatetoaddress(
+                cache_node.generatetoaddress(
                     nblocks=25 if i != 7 else 24,
                     address=TestNode.PRIV_KEYS[i % 4].address,
                 )
 
-            assert_equal(self.nodes[CACHE_NODE_ID].getblockchaininfo()["blocks"], 199)
+            assert_equal(cache_node.getblockchaininfo()["blocks"], 199)
 
             # Shut it down, and clean up cache directories:
             self.stop_nodes()
@@ -893,15 +897,8 @@ class DashTestFramework(BitcoinTestFramework):
                 self.sync_blocks()
         self.sync_blocks()
 
-    def activate_dip0024(self, expected_activation_height=None):
-        self.log.info("Wait for dip0024 activation")
-
-        # disable spork17 while mining blocks to activate dip0024 to prevent accidental quorum formation
-        spork17_value = self.nodes[0].spork('show')['SPORK_17_QUORUM_DKG_ENABLED']
-        self.bump_mocktime(1)
-        self.nodes[0].sporkupdate("SPORK_17_QUORUM_DKG_ENABLED", 4070908800)
-        self.wait_for_sporks_same()
-
+    def activate_by_name(self, name, expected_activation_height=None):
+        self.log.info("Wait for " + name + " activation")
         # mine blocks in batches
         batch_size = 10
         if expected_activation_height is not None:
@@ -916,18 +913,30 @@ class DashTestFramework(BitcoinTestFramework):
             self.bump_mocktime(blocks_left)
             self.nodes[0].generate(blocks_left)
             self.sync_blocks()
-            assert self.nodes[0].getblockchaininfo()['bip9_softforks']['dip0024']['status'] != 'active'
+            assert self.nodes[0].getblockchaininfo()['bip9_softforks'][name]['status'] != 'active'
 
-        while self.nodes[0].getblockchaininfo()['bip9_softforks']['dip0024']['status'] != 'active':
+        while self.nodes[0].getblockchaininfo()['bip9_softforks'][name]['status'] != 'active':
             self.bump_mocktime(batch_size)
             self.nodes[0].generate(batch_size)
             self.sync_blocks()
         self.sync_blocks()
 
+    def activate_dip0024(self, expected_activation_height=None):
+        # disable spork17 while mining blocks to activate dip0024 to prevent accidental quorum formation
+        spork17_value = self.nodes[0].spork('show')['SPORK_17_QUORUM_DKG_ENABLED']
+        self.bump_mocktime(1)
+        self.nodes[0].sporkupdate("SPORK_17_QUORUM_DKG_ENABLED", 4070908800)
+        self.wait_for_sporks_same()
+
+        self.activate_by_name('dip0024', expected_activation_height)
+
         # revert spork17 changes
         self.bump_mocktime(1)
         self.nodes[0].sporkupdate("SPORK_17_QUORUM_DKG_ENABLED", spork17_value)
         self.wait_for_sporks_same()
+
+    def activate_v19(self, expected_activation_height=None):
+        self.activate_by_name('v19', expected_activation_height)
 
     def set_dash_llmq_test_params(self, llmq_size, llmq_threshold):
         self.llmq_size = llmq_size
@@ -1320,7 +1329,7 @@ class DashTestFramework(BitcoinTestFramework):
 
         wait_until(check_probes, timeout=timeout, sleep=1)
 
-    def wait_for_quorum_phase(self, quorum_hash, phase, expected_member_count, check_received_messages, check_received_messages_count, mninfos, llmq_type_name="llmq_test", timeout=30, sleep=1):
+    def wait_for_quorum_phase(self, quorum_hash, phase, expected_member_count, check_received_messages, check_received_messages_count, mninfos, llmq_type_name="llmq_test", timeout=30, sleep=0.5):
         def check_dkg_session():
             member_count = 0
             for mn in mninfos:

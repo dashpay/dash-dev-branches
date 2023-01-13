@@ -9,6 +9,7 @@
 #include <netbase.h>
 #include <net.h>
 #include <util/system.h>
+#include <util/time.h>
 #include <crypto/hmac_sha256.h>
 
 #include <vector>
@@ -146,7 +147,7 @@ void TorControlConnection::readcb(struct bufferevent *bev, void *ctx)
         if (s.size() < 4) // Short line
             continue;
         // <status>(-|+| )<data><CRLF>
-        self->message.code = atoi(s.substr(0,3));
+        self->message.code = LocaleIndependentAtoi<int>(s.substr(0,3));
         self->message.lines.push_back(s.substr(4));
         char ch = s[3]; // '-','+' or ' '
         if (ch == ' ') {

@@ -14,6 +14,7 @@
 #include <uint256.h>
 
 #include <array>
+#include <optional>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -144,7 +145,7 @@ public:
      * This method was introduced along with the multi-signer sporks feature,
      * in order to identify which spork key signed this message.
      */
-    bool GetSignerKeyID(CKeyID& retKeyidSporkSigner) const;
+    std::optional<CKeyID> GetSignerKeyID() const;
 
     /**
      * Relay is used to send this spork message to other peers.
@@ -178,10 +179,10 @@ private:
     CKey sporkPrivKey GUARDED_BY(cs);
 
     /**
-     * SporkValueIsActive is used to get the value agreed upon by the majority
+     * SporkValueIfActive is used to get the value agreed upon by the majority
      * of signed spork messages for a given Spork ID.
      */
-    bool SporkValueIsActive(SporkId nSporkID, int64_t& nActiveValueRet) const EXCLUSIVE_LOCKS_REQUIRED(cs);
+    std::optional<int64_t> SporkValueIfActive(SporkId nSporkID) const EXCLUSIVE_LOCKS_REQUIRED(cs);
 
 public:
 
@@ -231,7 +232,7 @@ public:
     /**
      * ProcessSporkMessages is used to call ProcessSpork and ProcessGetSporks. See below
      */
-    void ProcessSporkMessages(CNode* pfrom, std::string_view msg_type, CDataStream& vRecv, CConnman& connman);
+    void ProcessSporkMessages(CNode& peer, std::string_view msg_type, CDataStream& vRecv, CConnman& connman);
 
     /**
      * ProcessSpork is used to handle the 'spork' p2p message.
@@ -239,7 +240,7 @@ public:
      * For 'spork', it validates the spork and adds it to the internal spork storage and
      * performs any necessary processing.
      */
-    void ProcessSpork(const CNode* pfrom, std::string_view msg_type, CDataStream& vRecv, CConnman& connman) LOCKS_EXCLUDED(cs);
+    void ProcessSpork(const CNode& peer, CDataStream& vRecv, CConnman& connman) LOCKS_EXCLUDED(cs);
 
 
     /**
@@ -247,7 +248,7 @@ public:
      *
      * For 'getsporks', it sends active sporks to the requesting peer.
      */
-    void ProcessGetSporks(CNode* pfrom, std::string_view msg_type, CConnman& connman) LOCKS_EXCLUDED(cs);
+    void ProcessGetSporks(CNode& peer, CConnman& connman) LOCKS_EXCLUDED(cs);
 
     /**
      * UpdateSpork is used by the spork RPC command to set a new spork value, sign
@@ -284,7 +285,7 @@ public:
      * hash-based index of sporks for this reason, and this function is the access
      * point into that index.
      */
-    bool GetSporkByHash(const uint256& hash, CSporkMessage &sporkRet) const LOCKS_EXCLUDED(cs);
+    std::optional<CSporkMessage> GetSporkByHash(const uint256& hash) const LOCKS_EXCLUDED(cs);
 
     /**
      * SetSporkAddress is used to set a public key ID which will be used to

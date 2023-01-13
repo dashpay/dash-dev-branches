@@ -121,7 +121,8 @@ bool CalcCbTxMerkleRootMNList(const CBlock& block, const CBlockIndex* pindexPrev
         int64_t nTime2 = GetTimeMicros(); nTimeDMN += nTime2 - nTime1;
         LogPrint(BCLog::BENCHMARK, "            - BuildNewListFromBlock: %.2fms [%.2fs]\n", 0.001 * (nTime2 - nTime1), nTimeDMN * 0.000001);
 
-        CSimplifiedMNList sml(tmpMNList);
+        bool v19active = llmq::utils::IsV19Active(pindexPrev);
+        CSimplifiedMNList sml(tmpMNList, v19active);
 
         int64_t nTime3 = GetTimeMicros(); nTimeSMNL += nTime3 - nTime2;
         LogPrint(BCLog::BENCHMARK, "            - CSimplifiedMNList: %.2fms [%.2fs]\n", 0.001 * (nTime3 - nTime2), nTimeSMNL * 0.000001);
@@ -229,7 +230,7 @@ bool CalcCbTxMerkleRootQuorums(const CBlock& block, const CBlockIndex* pindexPre
     int64_t nTime1 = GetTimeMicros();
 
     auto retVal = CachedGetQcHashesQcIndexedHashes(pindexPrev, quorum_block_processor);
-    if (retVal == std::nullopt) {
+    if (!retVal) {
         return state.Invalid(ValidationInvalidReason::CONSENSUS, false, REJECT_INVALID, "commitment-not-found");
     }
     // The returned quorums are in reversed order, so the most recent one is at index 0

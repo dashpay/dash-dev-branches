@@ -34,7 +34,6 @@
 #include <txmempool.h>
 #include <ui_interface.h>
 #include <util/check.h>
-#include <util/ref.h>
 #include <util/system.h>
 #include <util/translation.h>
 #include <validation.h>
@@ -85,15 +84,15 @@ class MasternodeSyncImpl : public Masternode::Sync
 public:
     bool isSynced() override
     {
-        return masternodeSync == nullptr ? false : masternodeSync->IsSynced();
+        return ::masternodeSync == nullptr ? false : ::masternodeSync->IsSynced();
     }
     bool isBlockchainSynced() override
     {
-        return masternodeSync == nullptr ? false : masternodeSync->IsBlockchainSynced();
+        return ::masternodeSync == nullptr ? false : ::masternodeSync->IsBlockchainSynced();
     }
     std::string getSyncStatus() override
     {
-        return masternodeSync == nullptr ? "" : masternodeSync->GetSyncStatus();
+        return ::masternodeSync == nullptr ? "" : ::masternodeSync->GetSyncStatus();
     }
 };
 
@@ -440,17 +439,17 @@ public:
     {
         m_context = context;
         if (context) {
-            m_context_ref.Set(*context);
+            m_context_ref = *context;
         } else {
-            m_context_ref.Clear();
+            m_context_ref = std::nullopt;
         }
     }
     NodeContext* m_context{nullptr};
-    util::Ref m_context_ref;
+    CoreContext m_context_ref{std::nullopt};
 };
 
 } // namespace
 
-std::unique_ptr<Node> MakeNode(NodeContext* context) { return MakeUnique<NodeImpl>(context); }
+std::unique_ptr<Node> MakeNode(NodeContext* context) { return std::make_unique<NodeImpl>(context); }
 
 } // namespace interfaces

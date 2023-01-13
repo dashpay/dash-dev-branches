@@ -49,6 +49,7 @@ EXPECTED_CIRCULAR_DEPENDENCIES=(
     "llmq/signing_shares -> net_processing -> llmq/signing_shares"
     "logging -> util/system -> logging"
     "masternode/payments -> validation -> masternode/payments"
+    "masternode/sync -> validation -> masternode/sync"
     "net -> netmessagemaker -> net"
     "net_processing -> spork -> net_processing"
     "netaddress -> netbase -> netaddress"
@@ -81,7 +82,10 @@ EXPECTED_CIRCULAR_DEPENDENCIES=(
     "evo/specialtxman -> validation -> evo/specialtxman"
 
     "evo/simplifiedmns -> llmq/blockprocessor -> net_processing -> llmq/snapshot -> evo/simplifiedmns"
+    "llmq/blockprocessor -> net_processing -> llmq/context -> llmq/blockprocessor"
     "llmq/blockprocessor -> net_processing -> llmq/snapshot -> llmq/blockprocessor"
+    "llmq/chainlocks -> net_processing -> llmq/context -> llmq/chainlocks"
+    "llmq/context -> llmq/dkgsessionmgr -> net_processing -> llmq/context"
     "llmq/dkgsession -> llmq/dkgsessionmgr -> llmq/quorums -> llmq/dkgsession"
     "llmq/dkgsessionmgr -> llmq/quorums -> llmq/dkgsessionmgr"
     "llmq/snapshot -> llmq/utils -> llmq/snapshot"

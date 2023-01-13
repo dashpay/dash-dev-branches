@@ -22,9 +22,6 @@
 
 namespace llmq
 {
-
-std::unique_ptr<CSigSharesManager> quorumSigSharesManager;
-
 void CSigShare::UpdateKey()
 {
     key.first = this->buildSignHash();
@@ -1168,7 +1165,6 @@ bool CSigSharesManager::SendMessages()
                 }
                 totalSigsCount += inv.sigShares.size();
                 msgs.emplace_back(inv);
-
             }
             if (!msgs.empty()) {
                 connman.PushMessage(pnode, msgMaker.Make(NetMsgType::QBSIGSHARES, std::move(msgs)));
@@ -1431,13 +1427,6 @@ void CSigSharesManager::WorkThreadMain()
     int64_t lastSendTime = 0;
 
     while (!workInterrupt) {
-        if (quorumSigningManager == nullptr) {
-            if (!workInterrupt.sleep_for(std::chrono::milliseconds(100))) {
-                return;
-            }
-            continue;
-        }
-
         bool fMoreWork{false};
 
         RemoveBannedNodeStates();

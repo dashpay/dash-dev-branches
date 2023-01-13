@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2022 The Dash Core developers
+// Copyright (c) 2014-2023 The Dash Core developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -15,6 +15,7 @@
 #include <univalue.h>
 #include <util/ranges.h>
 #include <util/translation.h>
+#include <version.h>
 
 #include <utility>
 
@@ -22,6 +23,7 @@ class CCoinJoin;
 class CConnman;
 class CBLSPublicKey;
 class CBlockIndex;
+class CMasternodeSync;
 
 namespace llmq {
 class CChainLocksHandler;
@@ -105,7 +107,7 @@ public:
     SERIALIZE_METHODS(CCoinJoinStatusUpdate, obj)
     {
         READWRITE(obj.nSessionID, obj.nState);
-        if (s.GetVersion() <= 702015) {
+        if (s.GetVersion() <= COINJOIN_SU_PROTO_VERSION) {
             READWRITE(obj.nEntriesCount);
         }
         READWRITE(obj.nStatusUpdate, obj.nMessageID);
@@ -194,6 +196,7 @@ class CCoinJoinQueue
 public:
     int nDenom{0};
     COutPoint masternodeOutpoint;
+    uint256 m_protxHash;
     int64_t nTime{0};
     bool fReady{false}; //ready for submit
     std::vector<unsigned char> vchSig;
@@ -202,9 +205,10 @@ public:
 
     CCoinJoinQueue() = default;
 
-    CCoinJoinQueue(int nDenom, const COutPoint& outpoint, int64_t nTime, bool fReady) :
+    CCoinJoinQueue(int nDenom, const COutPoint& outpoint, const uint256& proTxHash, int64_t nTime, bool fReady) :
         nDenom(nDenom),
         masternodeOutpoint(outpoint),
+        m_protxHash(proTxHash),
         nTime(nTime),
         fReady(fReady)
     {
@@ -212,13 +216,20 @@ public:
 
     SERIALIZE_METHODS(CCoinJoinQueue, obj)
     {
-        READWRITE(obj.nDenom, obj.masternodeOutpoint, obj.nTime, obj.fReady);
+        READWRITE(obj.nDenom);
+
+        if (s.GetVersion() < COINJOIN_PROTX_HASH_PROTO_VERSION || (s.GetType() & SER_GETHASH)) {
+            READWRITE(obj.masternodeOutpoint);
+        } else {
+            READWRITE(obj.m_protxHash);
+        }
+        READWRITE(obj.nTime, obj.fReady);
         if (!(s.GetType() & SER_GETHASH)) {
             READWRITE(obj.vchSig);
         }
     }
 
-    uint256 GetSignatureHash() const;
+    [[nodiscard]] uint256 GetSignatureHash() const;
     /** Sign this mixing transaction
      *  return true if all conditions are met:
      *     1) we have an active Masternode,
@@ -228,14 +239,14 @@ public:
      */
     bool Sign();
     /// Check if we have a valid Masternode address
-    bool CheckSignature(const CBLSPublicKey& blsPubKey) const;
+    [[nodiscard]] bool CheckSignature(const CBLSPublicKey& blsPubKey) const;
 
     bool Relay(CConnman& connman);
 
     /// Check if a queue is too old or too far into the future
-    bool IsTimeOutOfBounds(int64_t current_time = GetAdjustedTime()) const;
+    [[nodiscard]] bool IsTimeOutOfBounds(int64_t current_time = GetAdjustedTime()) const;
 
-    std::string ToString() const
+    [[nodiscard]] std::string ToString() const
     {
         return strprintf("nDenom=%d, nTime=%lld, fReady=%s, fTried=%s, masternode=%s",
             nDenom, nTime, fReady ? "true" : "false", fTried ? "true" : "false", masternodeOutpoint.ToStringShort());
@@ -259,6 +270,7 @@ private:
 public:
     CTransactionRef tx;
     COutPoint masternodeOutpoint;
+    uint256 m_protxHash;
     std::vector<unsigned char> vchSig;
     int64_t sigTime{0};
 
@@ -267,16 +279,24 @@ public:
     {
     }
 
-    CCoinJoinBroadcastTx(CTransactionRef _tx, const COutPoint& _outpoint, int64_t _sigTime) :
+    CCoinJoinBroadcastTx(CTransactionRef _tx, const COutPoint& _outpoint, const uint256& proTxHash, int64_t _sigTime) :
         tx(std::move(_tx)),
         masternodeOutpoint(_outpoint),
+        m_protxHash(proTxHash),
         sigTime(_sigTime)
     {
     }
 
     SERIALIZE_METHODS(CCoinJoinBroadcastTx, obj)
     {
-        READWRITE(obj.tx, obj.masternodeOutpoint);
+        READWRITE(obj.tx);
+
+        if (s.GetVersion() < COINJOIN_PROTX_HASH_PROTO_VERSION || (s.GetType() & SER_GETHASH)) {
+            READWRITE(obj.masternodeOutpoint);
+        } else {
+            READWRITE(obj.m_protxHash);
+        }
+
         if (!(s.GetType() & SER_GETHASH)) {
             READWRITE(obj.vchSig);
         }
@@ -296,14 +316,14 @@ public:
         return *this != CCoinJoinBroadcastTx();
     }
 
-    uint256 GetSignatureHash() const;
+    [[nodiscard]] uint256 GetSignatureHash() const;
 
     bool Sign();
-    bool CheckSignature(const CBLSPublicKey& blsPubKey) const;
+    [[nodiscard]] bool CheckSignature(const CBLSPublicKey& blsPubKey) const;
 
     void SetConfirmedHeight(int nConfirmedHeightIn) { nConfirmedHeight = nConfirmedHeightIn; }
     bool IsExpired(const CBlockIndex* pindex, const llmq::CChainLocksHandler& clhandler) const;
-    bool IsValidStructure() const;
+    [[nodiscard]] bool IsValidStructure() const;
 };
 
 // base class
@@ -481,8 +501,8 @@ public:
     static void AddDSTX(const CCoinJoinBroadcastTx& dstx) LOCKS_EXCLUDED(cs_mapdstx);
     static CCoinJoinBroadcastTx GetDSTX(const uint256& hash) LOCKS_EXCLUDED(cs_mapdstx);
 
-    static void UpdatedBlockTip(const CBlockIndex* pindex, const llmq::CChainLocksHandler& clhandler);
-    static void NotifyChainLock(const CBlockIndex* pindex, const llmq::CChainLocksHandler& clhandler);
+    static void UpdatedBlockTip(const CBlockIndex* pindex, const llmq::CChainLocksHandler& clhandler, const std::unique_ptr<CMasternodeSync>& mn_sync);
+    static void NotifyChainLock(const CBlockIndex* pindex, const llmq::CChainLocksHandler& clhandler, const std::unique_ptr<CMasternodeSync>& mn_sync);
 
     static void UpdateDSTXConfirmedHeight(const CTransactionRef& tx, int nHeight);
     static void TransactionAddedToMempool(const CTransactionRef& tx) LOCKS_EXCLUDED(cs_mapdstx);

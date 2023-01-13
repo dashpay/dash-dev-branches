@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2021 The Dash Core developers
+// Copyright (c) 2018-2022 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -109,7 +109,5 @@ private:
     void CommitCurTransaction() LOCKS_EXCLUDED(cs);
     void RollbackCurTransaction() LOCKS_EXCLUDED(cs);
 };
-
-extern std::unique_ptr<CEvoDB> evoDb;
 
 #endif // BITCOIN_EVO_EVODB_H

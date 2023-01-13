@@ -67,6 +67,7 @@ void CSimplifiedMNListEntry::ToJson(UniValue& obj, bool extended) const
     obj.pushKV("pubKeyOperator", pubKeyOperator.Get().ToString());
     obj.pushKV("votingAddress", EncodeDestination(keyIDVoting));
     obj.pushKV("isValid", isValid);
+    obj.pushKV("nVersion", nVersion);
 
     if (!extended) return;
 
@@ -91,13 +92,15 @@ CSimplifiedMNList::CSimplifiedMNList(const std::vector<CSimplifiedMNListEntry>& 
     });
 }
 
-CSimplifiedMNList::CSimplifiedMNList(const CDeterministicMNList& dmnList)
+CSimplifiedMNList::CSimplifiedMNList(const CDeterministicMNList& dmnList, bool isV19Active)
 {
     mnList.resize(dmnList.GetAllMNsCount());
 
     size_t i = 0;
-    dmnList.ForEachMN(false, [this, &i](auto& dmn) {
-        mnList[i++] = std::make_unique<CSimplifiedMNListEntry>(dmn);
+    dmnList.ForEachMN(false, [this, &i, isV19Active](auto& dmn) {
+        auto sme = std::make_unique<CSimplifiedMNListEntry>(dmn);
+        sme->nVersion = isV19Active ? CSimplifiedMNListEntry::BASIC_BLS_VERSION : CSimplifiedMNListEntry::LEGACY_BLS_VERSION;
+        mnList[i++] = std::move(sme);
     });
 
     std::sort(mnList.begin(), mnList.end(), [&](const std::unique_ptr<CSimplifiedMNListEntry>& a, const std::unique_ptr<CSimplifiedMNListEntry>& b) {
@@ -193,6 +196,7 @@ void CSimplifiedMNListDiff::ToJson(UniValue& obj, bool extended) const
         mnListArr.push_back(eObj);
     }
     obj.pushKV("mnList", mnListArr);
+    obj.pushKV("nVersion", nVersion);
 
     UniValue deletedQuorumsArr(UniValue::VARR);
     for (const auto& e : deletedQuorums) {

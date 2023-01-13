@@ -16,6 +16,7 @@
 #include <txdb.h>
 #include <txmempool.h>
 #include <util/check.h>
+#include <util/string.h>
 
 #include <type_traits>
 
@@ -84,14 +85,21 @@ private:
     const fs::path m_path_root;
 };
 
-/** Testing setup that configures a complete environment.
- * Included are coins database, script check threads setup.
+/** Testing setup that performs all steps up until right before
+ * ChainstateManager gets initialized. Meant for testing ChainstateManager
+ * initialization behaviour.
  */
-struct TestingSetup : public BasicTestingSetup {
+struct ChainTestingSetup : public BasicTestingSetup {
     boost::thread_group threadGroup;
 
+    explicit ChainTestingSetup(const std::string& chainName = CBaseChainParams::MAIN, const std::vector<const char*>& extra_args = {});
+    ~ChainTestingSetup();
+};
+
+/** Testing setup that configures a complete environment.
+ */
+struct TestingSetup : public ChainTestingSetup {
     explicit TestingSetup(const std::string& chainName = CBaseChainParams::MAIN, const std::vector<const char*>& extra_args = {});
-    ~TestingSetup();
 };
 
 /** Identical to TestingSetup, but chain set to regtest */
@@ -135,6 +143,11 @@ struct TestChain100Setup : public TestChainSetup {
 struct TestChainDIP3Setup : public TestChainSetup
 {
     TestChainDIP3Setup() : TestChainSetup(431) {}
+};
+
+struct TestChainDIP3V19Setup : public TestChainSetup
+{
+    TestChainDIP3V19Setup() : TestChainSetup(1000) {}
 };
 
 struct TestChainDIP3BeforeActivationSetup : public TestChainSetup
