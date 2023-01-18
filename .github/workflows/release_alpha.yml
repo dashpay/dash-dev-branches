@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Docker tag'
+        description: 'Git/Docker tag (without v)'
         required: true
 
 jobs:
@@ -16,6 +16,8 @@ jobs:
       uses: actions/checkout@v3
       with:
         path: dash
+        ref: v${{ github.event.inputs.tag }}
+
     - name: Checkout Gitian builder
       uses: actions/checkout@v3
       with:
@@ -50,17 +52,17 @@ jobs:
         sudo DEBIAN_FRONTEND=noninteractive apt-get update
         sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq apt-cacher-ng
 
-    - name: Get branch name
-      id: branch-name
-      uses: tj-actions/branch-names@v5
+    - name: Set major version environment variable
+      id: major-version
+      run: echo "MAJOR_VERSION=$(${{ github.event.inputs.tag }}%%.*)" >> $GITHUB_OUTPUT
 
     - name: Prepare Gitian
-      run: dash/contrib/gitian-build.py --setup "dummy" "${{ steps.branch-name.outputs.current_branch }}"
+      run: dash/contrib/gitian-build.py --setup "dummy" "${{ github.event.inputs.tag }}"
 
     - uses: actions/cache@v3
       id: ccache
       with:
-        path: /opt/actions-runner/_work/dash/dash/gitian-builder/cache/dash-linux-0.17
+        path: /opt/actions-runner/_work/dash/dash/gitian-builder/cache/dash-linux-${{ steps.major-version.outputs.MAJOR_VERSION }}
         key: ${{ runner.os }}-ccache-${{ github.sha }}
         restore-keys: ${{ runner.os }}-ccache-
 
@@ -70,7 +72,7 @@ jobs:
         dash/contrib/gitian-build.py -c -b -n -D -o l \
         -u https://github.com/dashevo/dash-evo-branches \
         -j $(nproc) -m `awk '/^Mem/ {print $7}' <(free -m)` \
-        dummy ${{ steps.branch-name.outputs.current_branch }}
+        dummy ${{ github.event.inputs.tag }}
 
     - name: Set up QEMU to run multi-arch builds
       uses: docker/setup-qemu-action@v2
@@ -99,5 +101,4 @@ jobs:
         labels: ${{ steps.docker_meta.outputs.labels }}
         platforms: linux/amd64,linux/arm64
         build-args: |
-          TAG=${{ steps.docker_meta.outputs.version }}
-          BRANCH=${{ steps.branch-name.outputs.current_branch }}
+          TAG=${{ github.event.inputs.tag }}
