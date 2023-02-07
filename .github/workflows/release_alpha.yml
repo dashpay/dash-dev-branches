@@ -16,7 +16,7 @@ jobs:
       uses: actions/checkout@v3
       with:
         path: dash
-        ref: v${{ github.event.inputs.tag }}
+        ref: develop
 
     - name: Checkout Gitian builder
       uses: actions/checkout@v3
