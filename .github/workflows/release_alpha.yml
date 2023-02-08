@@ -54,7 +54,9 @@ jobs:
 
     - name: Set major version environment variable
       id: major-version
-      run: echo "MAJOR_VERSION=$(${{ github.event.inputs.tag }}%%.*)" >> $GITHUB_OUTPUT
+      run: |
+        VERSION=${{ github.event.inputs.tag }}
+        echo "MAJOR_VERSION=${VERSION%%.*}" >> $GITHUB_OUTPUT
 
     - name: Prepare Gitian
       run: dash/contrib/gitian-build.py --setup "dummy" "${{ github.event.inputs.tag }}"
