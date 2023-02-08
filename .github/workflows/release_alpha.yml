@@ -51,6 +51,7 @@ jobs:
       run: |
         sudo DEBIAN_FRONTEND=noninteractive apt-get update
         sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq apt-cacher-ng
+        sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade
 
     - name: Set major version environment variable
       id: major-version
