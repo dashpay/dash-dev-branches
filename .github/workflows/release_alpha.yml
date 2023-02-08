@@ -59,7 +59,7 @@ jobs:
         echo "MAJOR_VERSION=${VERSION%%.*}" >> $GITHUB_OUTPUT
 
     - name: Prepare Gitian
-      run: dash/contrib/gitian-build.py --setup "dummy" "${{ github.event.inputs.tag }}"
+      run: dash/contrib/gitian-build.py --setup "dummy" "v${{ github.event.inputs.tag }}"
 
     - uses: actions/cache@v3
       id: ccache
