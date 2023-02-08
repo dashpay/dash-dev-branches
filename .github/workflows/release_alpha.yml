@@ -102,3 +102,7 @@ jobs:
         platforms: linux/amd64,linux/arm64
         build-args: |
           TAG=${{ github.event.inputs.tag }}
+
+    - name: Setup tmate session
+      if: ${{ failure() }}
+      uses: mxschmitt/action-tmate@v3
