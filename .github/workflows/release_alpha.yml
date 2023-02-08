@@ -69,10 +69,10 @@ jobs:
     - name: Run Gitian build
       run: |
         export GPG_TTY=$(tty)
-        dash/contrib/gitian-build.py -c -b -n -D -o l \
+        dash/contrib/gitian-build.py -b -n -D -o l \
         -u https://github.com/dashevo/dash-evo-branches \
         -j $(nproc) -m `awk '/^Mem/ {print $7}' <(free -m)` \
-        dummy v${{ github.event.inputs.tag }}
+        dummy ${{ github.event.inputs.tag }}
 
     - name: Set up QEMU to run multi-arch builds
       uses: docker/setup-qemu-action@v2
