@@ -208,6 +208,7 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(CChainState& chai
 
         if (fV20Active_context) {
             cbTx.nVersion = 3;
+            assert(creditPoolDiff); // should be init for v20
             cbTx.assetLockedAmount = creditPoolDiff->getTotalLocked();
         } else if (fDIP0008Active_context) {
             cbTx.nVersion = 2;

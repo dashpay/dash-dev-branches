@@ -98,6 +98,9 @@ private:
     CAmount sessionLocked{0};
     CAmount sessionUnlocked{0};
 
+    // target value is used to validate CbTx. If values mismatched, block is invalid
+    std::optional<CAmount> targetLocked;
+
     const CBlockIndex *pindex{nullptr};
 public:
     explicit CCreditPoolDiff(CCreditPool starter, const CBlockIndex *pindex, const Consensus::Params& consensusParams);
@@ -113,7 +116,16 @@ public:
         return pool.locked + sessionLocked - sessionUnlocked;
     }
 
+    const std::optional<CAmount>& getTargetLocked() const {
+        return targetLocked;
+    }
+
+    std::string ToString() const {
+        return strprintf("CCreditPoolDiff(target=%lld,sessionLocked=%lld,sessionUnlocked=%lld,newIndexes=%lld,pool=%s", getTargetLocked() ? *getTargetLocked() : -1, sessionLocked, sessionUnlocked, newIndexes.size(), pool.ToString());
+    }
+
 private:
+    bool setTarget(const CTransaction& tx, CValidationState& state);
     bool lock(const CTransaction& tx, CValidationState& state);
     bool unlock(const CTransaction& tx, CValidationState& state);
 };
