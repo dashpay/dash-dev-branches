@@ -251,6 +251,18 @@ CCreditPoolDiff::CCreditPoolDiff(CCreditPool starter, const CBlockIndex *pindex,
     assert(pindex);
 }
 
+bool CCreditPoolDiff::setTarget(const CTransaction& tx, TxValidationState& state)
+{
+    CCbTx cbTx;
+    if (!GetTxPayload(tx, cbTx)) {
+        return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-cbtx-payload");
+    }
+
+    if (cbTx.nVersion == 3) {
+        targetLocked = cbTx.assetLockedAmount;
+    }
+    return true;
+}
 
 bool CCreditPoolDiff::lock(const CTransaction& tx, TxValidationState& state)
 {
@@ -298,6 +310,8 @@ bool CCreditPoolDiff::unlock(const CTransaction& tx, TxValidationState& state)
 
 bool CCreditPoolDiff::processTransaction(const CTransaction& tx, TxValidationState& state) {
     if (tx.nVersion != 3) return true;
+    if (tx.nType == TRANSACTION_COINBASE) return setTarget(tx, state);
+
     if (tx.nType != TRANSACTION_ASSET_LOCK && tx.nType != TRANSACTION_ASSET_UNLOCK) return true;
 
     if (!CheckAssetLockUnlockTx(tx, pindex, this->pool, state)) {

@@ -142,7 +142,7 @@ class AssetLocksTest(DashTestFramework):
         assert_equal([result_expected], result_test)
         self.check_mempool_size()
 
-    def create_and_check_block(self, tx, expected_error = None):
+    def create_and_check_block(self, txes, expected_error = None):
         node = self.nodes[0]
         best_block_hash = node.getbestblockhash()
         best_block = node.getblock(best_block_hash)
@@ -151,8 +151,10 @@ class AssetLocksTest(DashTestFramework):
         block_time = best_block["time"] + 1
 
         cbb = create_coinbase(height, dip4_activated=True, v20_activated=True)
+        cbb.calc_sha256()
         block = create_block(tip, cbb, block_time, version=3)
-        block.vtx.append(tx)
+        for tx in txes:
+            block.vtx.append(tx)
         block.hashMerkleRoot = block.calc_merkle_root()
         block.solve()
         result = node.submitblock(block.serialize().hex())
@@ -265,6 +267,10 @@ class AssetLocksTest(DashTestFramework):
         assert_equal(get_credit_pool_amount(node), locked_1)
         self.sync_all()
 
+        self.log.info('Mine block with incorrect credit-poool value...')
+        extra_lock_tx = create_assetlock(node, coin, COIN, pubkey)
+        self.create_and_check_block([extra_lock_tx], expected_error = 'bad-cbtx-assetlocked-amount')
+
         self.log.info("Mine a quorum...")
         self.mine_quorum()
         assert_equal(get_credit_pool_amount(node), locked_1)
@@ -362,7 +368,7 @@ class AssetLocksTest(DashTestFramework):
         assert_equal(get_credit_pool_amount(node), locked_1 - 3 * COIN)
 
         # Forcibly mine asset_unlock_tx_too_late and ensure block is invalid
-        self.create_and_check_block(asset_unlock_tx_too_late, expected_error = "bad-assetunlock-not-active-quorum")
+        self.create_and_check_block([asset_unlock_tx_too_late], expected_error = "bad-assetunlock-not-active-quorum")
 
         node.generate(1)
         self.sync_all()
@@ -384,7 +390,7 @@ class AssetLocksTest(DashTestFramework):
         self.ensure_tx_is_not_mined(txid_in_block)
 
         # Forcibly mine asset_unlock_tx_full and ensure block is invalid
-        self.create_and_check_block(asset_unlock_tx_full, expected_error = "failed-creditpool-unlock-too-much")
+        self.create_and_check_block([asset_unlock_tx_full], expected_error = "failed-creditpool-unlock-too-much")
 
         self.mempool_size += 1
         asset_unlock_tx_full = create_assetunlock(node, self.mninfo, 301, get_credit_pool_amount(node), pubkey)
@@ -404,7 +410,7 @@ class AssetLocksTest(DashTestFramework):
                 reason = "double index")
 
         # Forcibly mine asset_unlock_tx_full and ensure block is invalid
-        self.create_and_check_block(asset_unlock_tx_duplicate_index, expected_error = "bad-assetunlock-duplicated-index")
+        self.create_and_check_block([asset_unlock_tx_duplicate_index], expected_error = "bad-assetunlock-duplicated-index")
 
         self.log.info("Fast forward to the next day to reset all current unlock limits...")
         self.slowly_generate_batch(blocks_in_one_day  + 1)

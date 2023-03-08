@@ -156,6 +156,16 @@ bool ProcessSpecialTxsInBlock(const CBlock& block, const CBlockIndex* pindex, ll
                 return false;
             }
         }
+        if (creditPoolDiff) {
+            CAmount locked_proposed{0};
+            if(creditPoolDiff->getTargetLocked()) locked_proposed = *creditPoolDiff->getTargetLocked();
+
+            CAmount locked_calculated = creditPoolDiff->getTotalLocked();
+            if (locked_proposed != locked_calculated) {
+                LogPrintf("%s: mismatched locked amount in CbTx: %lld against re-calculated: %lld\n", __func__, locked_proposed, locked_calculated);
+                return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-cbtx-assetlocked-amount");
+            }
+        }
 
         int64_t nTime2 = GetTimeMicros();
         nTimeLoop += nTime2 - nTime1;
