@@ -12,6 +12,7 @@
 #include <tinyformat.h>
 #include <util/ranges.h>
 #include <util/system.h>
+#include <util/underlying.h>
 #include <versionbitsinfo.h>
 
 #include <arith_uint256.h>
@@ -1292,7 +1293,7 @@ void CRegTestParams::UpdateLLMQInstantSendFromArgs(const ArgsManager& args)
     if (llmqType == Consensus::LLMQType::LLMQ_NONE) {
         throw std::runtime_error("Invalid LLMQ type specified for -llmqinstantsend.");
     }
-    LogPrintf("Setting llmqinstantsend to size=%ld\n", static_cast<uint8_t>(llmqType));
+    LogPrintf("Setting llmqinstantsend to size=%ld\n", ToUnderlying(llmqType));
     UpdateLLMQInstantSend(llmqType);
 }
 
@@ -1314,7 +1315,7 @@ void CRegTestParams::UpdateLLMQInstantSendDIP0024FromArgs(const ArgsManager& arg
     if (llmqType == Consensus::LLMQType::LLMQ_NONE) {
         throw std::runtime_error("Invalid LLMQ type specified for -llmqinstantsenddip0024.");
     }
-    LogPrintf("Setting llmqinstantsenddip0024 to size=%ld\n", static_cast<uint8_t>(llmqType));
+    LogPrintf("Setting llmqinstantsenddip0024 to size=%ld\n", ToUnderlying(llmqType));
     UpdateLLMQDIP0024InstantSend(llmqType);
 }
 
