@@ -119,7 +119,7 @@ public:
     Errors GetError() const { return nError; }
     std::string GetErrorString() const;
 
-    bool IsExpired() const { return (GetTime() - nTime) >= EXPIRATION_TIMEOUT; }
+    bool IsExpired(int bias=0) const { return (GetTime() - nTime) >= (EXPIRATION_TIMEOUT + bias); }
     bool IsProcessed() const { return fProcessed; }
     void SetProcessed() { fProcessed = true; }
 

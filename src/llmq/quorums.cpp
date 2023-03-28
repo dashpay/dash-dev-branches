@@ -474,7 +474,7 @@ bool CQuorumManager::RequestQuorumData(CNode* pfrom, Consensus::LLMQType llmqTyp
     key.quorumHash = pQuorumBaseBlockIndex->GetBlockHash();
     key.llmqType = llmqType;
     auto it = mapQuorumDataRequests.emplace(key, CQuorumDataRequest(llmqType, pQuorumBaseBlockIndex->GetBlockHash(), nDataMask, proTxHash));
-    if (!it.second && !it.first->second.IsExpired()) {
+    if (!it.second && !it.first->second.IsExpired(60)) {
         LogPrint(BCLog::LLMQ, "CQuorumManager::%s -- Already requested\n", __func__);
         return false;
     }
