@@ -103,7 +103,7 @@ static void WalletCreateTx(benchmark::Bench& bench, const OutputType output_type
     }
 
     // Check available balance
-    auto bal = wallet::GetAvailableBalance(wallet); // Cache
+    auto bal = WITH_LOCK(wallet.cs_wallet, return wallet::AvailableCoins(wallet).total_amount); // Cache
     assert(bal == 50 * COIN * (chain_size - COINBASE_MATURITY));
 
     wallet::CCoinControl coin_control;
