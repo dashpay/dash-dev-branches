@@ -20,7 +20,7 @@ class CQuorumBlockProcessor;
 class CChainLocksHandler;
 } // namespace llmq
 namespace Consensus {
-class Params;
+struct Params;
 } // namespace Consensus
 
 extern RecursiveMutex cs_main;
