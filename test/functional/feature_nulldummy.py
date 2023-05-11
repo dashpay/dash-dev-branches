@@ -17,7 +17,7 @@ from test_framework.blocktools import create_coinbase, create_block, create_tran
 from test_framework.messages import CTransaction
 from test_framework.script import CScript
 from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import assert_equal, assert_raises_rpc_error, get_bip9_status
+from test_framework.util import assert_equal, assert_raises_rpc_error
 
 
 NULLDUMMY_ERROR = "non-mandatory-script-verify-flag (Dummy CHECKMULTISIG argument must be zero)"
@@ -88,8 +88,7 @@ class NULLDUMMYTest(BitcoinTestFramework):
 
     def block_submit(self, node, txs, accept = False):
         dip4_activated = self.lastblockheight + 1 >= 432
-        v20_activated = get_bip9_status(self.nodes[0], 'v20')['status'] == 'active'
-        block = create_block(self.tip, create_coinbase(self.lastblockheight + 1, dip4_activated=dip4_activated, v20_activated=v20_activated), self.lastblocktime + 1)
+        block = create_block(self.tip, create_coinbase(self.lastblockheight + 1, dip4_activated=dip4_activated), self.lastblocktime + 1)
         block.nVersion = 4
         for tx in txs:
             tx.rehash()
