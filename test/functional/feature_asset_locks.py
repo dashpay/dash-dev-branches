@@ -115,7 +115,8 @@ class AssetLocksTest(DashTestFramework):
         return unlock_tx
 
     def get_credit_pool_amount(self, node=None, block_hash = None):
-        if node is None: node = self.nodes[0]
+        if node is None:
+            node = self.nodes[0]
 
         if block_hash is None:
             block_hash = node.getbestblockhash()
