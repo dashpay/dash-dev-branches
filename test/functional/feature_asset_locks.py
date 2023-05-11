@@ -53,13 +53,9 @@ class AssetLocksTest(DashTestFramework):
     def skip_test_if_missing_module(self):
         self.skip_if_no_wallet()
 
-    def create_assetlock(self, amount, pubkey):
+    def create_assetlock(self, coin, amount, pubkey):
         node = self.nodes[0]
 
-        coins = node.listunspent()
-        coin = None
-        while coin is None or COIN * coin['amount'] < amount:
-            coin = coins.pop()
 
         inputs = [CTxIn(COutPoint(int(coin["txid"], 16), coin["vout"]))]
 
@@ -164,7 +160,7 @@ class AssetLocksTest(DashTestFramework):
 
         cbb = create_coinbase(height, dip4_activated=True, v20_activated=True)
         cbb.calc_sha256()
-        block = create_block(tip, cbb, block_time, version=3)
+        block = create_block(tip, cbb, block_time, version=4)
         for tx in txes:
             block.vtx.append(tx)
         block.hashMerkleRoot = block.calc_merkle_root()
@@ -230,7 +226,12 @@ class AssetLocksTest(DashTestFramework):
         self.log.info("Testing asset lock...")
         locked_1 = 10 * COIN + 141421
         locked_2 = 10 * COIN + 314159
-        asset_lock_tx = self.create_assetlock(locked_1, pubkey)
+
+        coins = node.listunspent()
+        coin = None
+        while coin is None or COIN * coin['amount'] < locked_2:
+            coin = coins.pop()
+        asset_lock_tx = self.create_assetlock(coin, locked_1, pubkey)
 
         self.check_mempool_result(tx=asset_lock_tx, result_expected={'allowed': True})
         assert_equal(self.get_credit_pool_amount(), 0)
@@ -259,7 +260,7 @@ class AssetLocksTest(DashTestFramework):
         assert_equal(self.get_credit_pool_amount(), 0)
         self.log.info("Resubmit asset lock tx to new chain...")
         # NEW tx appears
-        asset_lock_tx_2 = self.create_assetlock(locked_2, pubkey)
+        asset_lock_tx_2 = self.create_assetlock(coin, locked_2, pubkey)
         txid_in_block = self.send_tx(asset_lock_tx_2)
         node.generate(1)
         self.sync_all()
@@ -276,7 +277,7 @@ class AssetLocksTest(DashTestFramework):
         self.sync_all()
 
         self.log.info('Mine block with incorrect credit-poool value...')
-        extra_lock_tx = self.create_assetlock(COIN, pubkey)
+        extra_lock_tx = self.create_assetlock(coin, COIN, pubkey)
         self.create_and_check_block([extra_lock_tx], expected_error = 'bad-cbtx-assetlocked-amount')
 
         self.log.info("Mine a quorum...")
@@ -431,7 +432,7 @@ class AssetLocksTest(DashTestFramework):
             if to_lock > 50 * COIN:
                 to_lock = 50 * COIN
             total += to_lock
-            tx = self.create_assetlock(to_lock, pubkey)
+            tx = self.create_assetlock(coin, to_lock, pubkey)
             self.send_tx(tx)
         node.generate(1)
         self.sync_all()
