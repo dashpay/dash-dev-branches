@@ -39,7 +39,6 @@ from test_framework.util import (
     assert_equal,
     assert_greater_than,
     assert_greater_than_or_equal,
-    wait_until,
 )
 
 llmq_type_test = 100
@@ -80,16 +79,6 @@ class AssetLocksTest(DashTestFramework):
 
 
     def create_assetunlock(self, index, withdrawal, pubkey=None):
-
-        def check_sigs(mninfo, id, msgHash):
-            for mn in mninfo:
-                if not mn.node.quorum("hasrecsig", llmq_type_test, id, msgHash):
-                    return False
-            return True
-
-        def wait_for_sigs(mninfo, id, msgHash, timeout):
-            wait_until(lambda: check_sigs(mninfo, id, msgHash), timeout = timeout)
-
         node = self.nodes[0]
         mninfo = self.mninfo
         tx_output = CTxOut(int(withdrawal) - tiny_amount, CScript([pubkey, OP_CHECKSIG]))
@@ -119,12 +108,7 @@ class AssetLocksTest(DashTestFramework):
         unlock_tx.calc_sha256()
         msgHash = format(unlock_tx.sha256, '064x')
 
-        for mn in mninfo:
-            mn.node.quorum("sign", llmq_type_test, id, msgHash, quorumHash)
-
-        wait_for_sigs(mninfo, id, msgHash, 5)
-
-        recsig = mninfo[0].node.quorum("getrecsig", llmq_type_test, id, msgHash)
+        recsig = self.get_recovered_sig(id, msgHash, llmq_type=llmq_type_test)
 
         unlockTx_payload.quorumSig = bytearray.fromhex(recsig["sig"])
         unlock_tx.vExtraPayload = unlockTx_payload.serialize()
