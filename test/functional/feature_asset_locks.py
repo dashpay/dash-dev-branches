@@ -414,7 +414,7 @@ class AssetLocksTest(DashTestFramework):
         total = self.get_credit_pool_amount()
         while total <= 10_900 * COIN:
             self.log.info(f"Collecting coins in pool... Collected {total}/{10_900 * COIN}")
-            coin = node.listunspent().pop()
+            coin = coins.pop()
             to_lock = int(coin['amount'] * COIN) - tiny_amount
             if to_lock > 50 * COIN:
                 to_lock = 50 * COIN
