@@ -140,8 +140,8 @@ class CCreditPoolManager
 {
 private:
     static constexpr size_t CreditPoolCacheSize = 1000;
-    CCriticalSection cs_cache;
-    unordered_lru_cache<uint256, CCreditPool, StaticSaltedHasher> creditPoolCache GUARDED_BY(cs_cache) {CreditPoolCacheSize};
+    RecursiveMutex cache_mutex;
+    unordered_lru_cache<uint256, CCreditPool, StaticSaltedHasher> creditPoolCache GUARDED_BY(cache_mutex) {CreditPoolCacheSize};
 
     CEvoDB& evoDb;
 

@@ -457,8 +457,8 @@ void BlockAssembler::addPackageTxs(int &nPackagesSelected, int &nDescendantsUpda
                     mapModifiedTx.get<ancestor_score>().erase(modit);
                     failedTx.insert(iter);
                 }
-                LogPrintf("%s: asset locks tx skipped due %s txid %s\n",
-                          __func__, FormatStateMessage(state), iter->GetTx().GetHash().ToString());
+                LogPrintf("%s: asset-locks tx %s skipped due %s\n",
+                          __func__, iter->GetTx().GetHash().ToString(), state.ToString());
                 continue;
             }
         }

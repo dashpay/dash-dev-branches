@@ -11,7 +11,6 @@
 
 #include <chain.h>
 #include <logging.h>
-#include <util/validation.h>
 #include <validation.h>
 
 #include <algorithm>
@@ -58,7 +57,7 @@ static UnlockDataPerBlock getDataFromUnlockTxes(const std::vector<CTransactionRe
         TxValidationState tx_state;
         uint64_t index{0};
         if (!getDataFromUnlockTx(*tx, unlocked, index, tx_state)) {
-            throw std::runtime_error(strprintf("%s: CCreditPoolManager::getCreditPool failed: %s", __func__, FormatStateMessage(tx_state)));
+            throw std::runtime_error(strprintf("%s: CCreditPoolManager::getCreditPool failed: %s", __func__, tx_state.ToString()));
         }
         blockData.unlocked += unlocked;
         blockData.indexes.insert(index);
@@ -116,14 +115,14 @@ std::optional<CCreditPool> CCreditPoolManager::getFromCache(const CBlockIndex* c
     uint256 block_hash = block_index->GetBlockHash();
     CCreditPool pool;
     {
-        LOCK(cs_cache);
+        LOCK(cache_mutex);
         if (creditPoolCache.get(block_hash, pool)) {
             return pool;
         }
     }
     if (block_index->nHeight % DISK_SNAPSHOT_PERIOD == 0) {
         if (evoDb.Read(std::make_pair(DB_CREDITPOOL_SNAPSHOT, block_hash), pool)) {
-            LOCK(cs_cache);
+            LOCK(cache_mutex);
             creditPoolCache.insert(block_hash, pool);
             return pool;
         }
@@ -133,7 +132,7 @@ std::optional<CCreditPool> CCreditPoolManager::getFromCache(const CBlockIndex* c
 
 void CCreditPoolManager::addToCache(const uint256& block_hash, int height, const CCreditPool &pool) {
     {
-        LOCK(cs_cache);
+        LOCK(cache_mutex);
         creditPoolCache.insert(block_hash, pool);
     }
     if (height % DISK_SNAPSHOT_PERIOD == 0) {
