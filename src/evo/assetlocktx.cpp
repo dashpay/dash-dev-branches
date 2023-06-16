@@ -96,7 +96,7 @@ std::string CAssetLockPayload::ToString() const
     return strprintf("CAssetLockPayload(nVersion=%d,creditOutputs=%s)", nVersion, outputs.c_str());
 }
 
-uint16_t CAssetLockPayload::getVersion() const {
+uint8_t CAssetLockPayload::getVersion() const {
     return nVersion;
 }
 
@@ -199,7 +199,7 @@ std::string CAssetUnlockPayload::ToString() const
             nVersion, index, fee / COIN, fee % COIN, requestedHeight, quorumHash.GetHex(), quorumSig.ToString().c_str());
 }
 
-uint16_t CAssetUnlockPayload::getVersion() const {
+uint8_t CAssetUnlockPayload::getVersion() const {
     return nVersion;
 }
 

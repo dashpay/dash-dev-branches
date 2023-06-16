@@ -300,8 +300,6 @@ BOOST_FIXTURE_TEST_CASE(evo_assetunlock, TestChain100Setup)
         BOOST_CHECK(tx_state.GetRejectReason() == "bad-assetunlocktx-have-input");
     }
 
-    // Check version
-    BOOST_CHECK(tx.nVersion == 3);
     {
         CAssetUnlockPayload unlockPayload;
         GetTxPayload(tx, unlockPayload);
@@ -315,13 +313,26 @@ BOOST_FIXTURE_TEST_CASE(evo_assetunlock, TestChain100Setup)
         txWrongType.nType = TRANSACTION_ASSET_LOCK;
         BOOST_CHECK(!CheckAssetUnlockTx(CTransaction(txWrongType), block_index, pool, tx_state));
         BOOST_CHECK(tx_state.GetRejectReason() == "bad-assetunlocktx-type");
-    }
 
-    {
+        // Check version of tx and payload
         BOOST_CHECK(tx.nVersion == 3);
-
-        // Version of payload is not `1`
-        CMutableTransaction txWrongVersion = tx;
+        for (uint8_t payload_version : {0, 1, 2, 255}) {
+            CAssetUnlockPayload unlockPayload_tmp{payload_version,
+                unlockPayload.getIndex(),
+                unlockPayload.getFee(),
+                unlockPayload.getRequestedHeight(),
+                unlockPayload.getQuorumHash(),
+                unlockPayload.getQuorumSig()};
+            CMutableTransaction txWrongVersion = tx;
+            SetTxPayload(txWrongVersion, unlockPayload_tmp);
+            if (payload_version != 1) {
+                BOOST_CHECK(!CheckAssetUnlockTx(CTransaction(txWrongVersion), block_index, pool, tx_state));
+                BOOST_CHECK(tx_state.GetRejectReason() == "bad-assetunlocktx-version");
+            } else {
+                BOOST_CHECK(!CheckAssetUnlockTx(CTransaction(txWrongVersion), block_index, pool, tx_state));
+                BOOST_CHECK(tx_state.GetRejectReason() == "bad-assetunlock-quorum-hash");
+            }
+        }
     }
 
     {

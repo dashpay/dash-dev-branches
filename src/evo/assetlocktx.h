@@ -20,11 +20,11 @@ struct CCreditPool;
 class CAssetLockPayload
 {
 public:
-    static constexpr uint16_t CURRENT_VERSION = 1;
+    static constexpr uint8_t CURRENT_VERSION = 1;
     static constexpr auto SPECIALTX_TYPE = TRANSACTION_ASSET_LOCK;
 
 private:
-    uint16_t nVersion{CURRENT_VERSION};
+    uint8_t nVersion{CURRENT_VERSION};
     std::vector<CTxOut> creditOutputs;
 
 public:
@@ -58,20 +58,20 @@ public:
     }
 
     // getters
-    uint16_t getVersion() const;
+    uint8_t getVersion() const;
     const std::vector<CTxOut>& getCreditOutputs() const;
 };
 
 class CAssetUnlockPayload
 {
 public:
-    static constexpr uint16_t CURRENT_VERSION = 1;
+    static constexpr uint8_t CURRENT_VERSION = 1;
     static constexpr auto SPECIALTX_TYPE = TRANSACTION_ASSET_UNLOCK;
 
     static constexpr size_t MAXIMUM_WITHDRAWALS = 32;
 
 private:
-    uint16_t nVersion{CURRENT_VERSION};
+    uint8_t nVersion{CURRENT_VERSION};
     uint64_t index{0};
     uint32_t fee{0};
     uint32_t requestedHeight{0};
@@ -79,7 +79,7 @@ private:
     CBLSSignature quorumSig{};
 
 public:
-    CAssetUnlockPayload(uint16_t nVersion, uint64_t index, uint32_t fee, uint32_t requestedHeight,
+    CAssetUnlockPayload(uint8_t nVersion, uint64_t index, uint32_t fee, uint32_t requestedHeight,
             uint256 quorumHash, CBLSSignature quorumSig) :
         nVersion(nVersion),
         index(index),
@@ -120,8 +120,7 @@ public:
     bool VerifySig(const uint256& msgHash, const CBlockIndex* pindexTip, TxValidationState& state) const;
 
     // getters
-    uint16_t getVersion() const;
-    uint16_t getType() const;
+    uint8_t getVersion() const;
     uint64_t getIndex() const;
     uint32_t getFee() const;
     uint32_t getRequestedHeight() const;

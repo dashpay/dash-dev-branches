@@ -1113,12 +1113,12 @@ class CAssetLockTx:
         self.creditOutputs = None
 
     def deserialize(self, f):
-        self.version = struct.unpack("<H", f.read(2))[0]
+        self.version = struct.unpack("<B", f.read(1))[0]
         self.creditOutputs = deser_vector(f, CTxOut)
 
     def serialize(self):
         r = b""
-        r += struct.pack("<H", self.version)
+        r += struct.pack("<B", self.version)
         r += ser_vector(self.creditOutputs)
         return r
 
@@ -1154,7 +1154,7 @@ class CAssetUnlockTx:
         self.quorumSig = b'\x00' * 96
 
     def deserialize(self, f):
-        self.version = struct.unpack("<H", f.read(2))[0]
+        self.version = struct.unpack("<B", f.read(1))[0]
         self.index = struct.unpack("<Q", f.read(8))[0]
         self.fee = struct.unpack("<I", f.read(4))[0]
         self.requestedHeight = struct.unpack("<I", f.read(4))[0]
@@ -1163,7 +1163,7 @@ class CAssetUnlockTx:
 
     def serialize(self):
         r = b""
-        r += struct.pack("<H", self.version)
+        r += struct.pack("<B", self.version)
         r += struct.pack("<Q", self.index)
         r += struct.pack("<I", self.fee)
         r += struct.pack("<I", self.requestedHeight)
