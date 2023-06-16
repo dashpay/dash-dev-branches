@@ -25,12 +25,10 @@ public:
 
 private:
     uint16_t nVersion{CURRENT_VERSION};
-    uint16_t nType{0};
     std::vector<CTxOut> creditOutputs;
 
 public:
-    CAssetLockPayload(uint16_t nType, const std::vector<CTxOut>& creditOutputs) :
-        nType(nType),
+    CAssetLockPayload(const std::vector<CTxOut>& creditOutputs) :
         creditOutputs(creditOutputs)
     {}
 
@@ -40,7 +38,6 @@ public:
     {
         READWRITE(
             obj.nVersion,
-            obj.nType,
             obj.creditOutputs
         );
     }
@@ -52,7 +49,6 @@ public:
         obj.clear();
         obj.setObject();
         obj.pushKV("version", int(nVersion));
-        obj.pushKV("type", int(nType));
         UniValue outputs;
         outputs.setArray();
         for (const CTxOut& out : creditOutputs) {
@@ -63,7 +59,6 @@ public:
 
     // getters
     uint16_t getVersion() const;
-    uint16_t getType() const;
     const std::vector<CTxOut>& getCreditOutputs() const;
 };
 

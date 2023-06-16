@@ -1100,36 +1100,31 @@ class CCbTx:
 
 
 class CAssetLockTx:
-    __slots__ = ("version", "nType", "creditOutputs")
+    __slots__ = ("version", "creditOutputs")
 
-    def __init__(self, version=None, nType=None, creditOutputs=None):
+    def __init__(self, version=None, creditOutputs=None):
         self.set_null()
         if version is not None:
             self.version = version
-        if nType is not None:
-            self.nType = nType
         self.creditOutputs = creditOutputs if creditOutputs is not None else []
 
     def set_null(self):
         self.version = 0
-        self.nType = 0
         self.creditOutputs = None
 
     def deserialize(self, f):
         self.version = struct.unpack("<H", f.read(2))[0]
-        self.nType = struct.unpack("<H", f.read(2))[0]
         self.creditOutputs = deser_vector(f, CTxOut)
 
     def serialize(self):
         r = b""
         r += struct.pack("<H", self.version)
-        r += struct.pack("<H", self.nType)
         r += ser_vector(self.creditOutputs)
         return r
 
     def __repr__(self):
-        return "CAssetLockTx(version={} nType={} creditOutputs={}" \
-            .format(self.version, self.nType, repr(self.creditOutputs))
+        return "CAssetLockTx(version={} creditOutputs={}" \
+            .format(self.version, repr(self.creditOutputs))
 
 
 class CAssetUnlockTx:

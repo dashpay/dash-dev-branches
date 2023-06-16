@@ -60,7 +60,7 @@ class AssetLocksTest(DashTestFramework):
 
         credit_outputs = CTxOut(amount, CScript([OP_DUP, OP_HASH160, hash160(pubkey), OP_EQUALVERIFY, OP_CHECKSIG]))
 
-        lockTx_payload = CAssetLockTx(1, 0, [credit_outputs])
+        lockTx_payload = CAssetLockTx(1, [credit_outputs])
 
         remaining = int(COIN * coin['amount']) - tiny_amount - credit_outputs.nValue
 

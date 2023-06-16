@@ -67,10 +67,6 @@ bool CheckAssetLockTx(const CTransaction& tx, TxValidationState& state)
         return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-assetlocktx-version");
     }
 
-    if (assetLockTx.getType() != 0) {
-        return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-assetlocktx-locktype");
-    }
-
     if (assetLockTx.getCreditOutputs().empty()) {
         return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-assetlocktx-emptycreditoutputs");
     }
@@ -97,15 +93,11 @@ std::string CAssetLockPayload::ToString() const
         outputs.append(",");
     }
     outputs.back() = ']';
-    return strprintf("CAssetLockPayload(nVersion=%d,nType=%d,creditOutputs=%s)", nVersion, nType, outputs.c_str());
+    return strprintf("CAssetLockPayload(nVersion=%d,creditOutputs=%s)", nVersion, outputs.c_str());
 }
 
 uint16_t CAssetLockPayload::getVersion() const {
     return nVersion;
-}
-
-uint16_t CAssetLockPayload::getType() const {
-    return nType;
 }
 
 const std::vector<CTxOut>& CAssetLockPayload::getCreditOutputs() const {

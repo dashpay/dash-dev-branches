@@ -69,10 +69,10 @@ static CMutableTransaction CreateAssetLockTx(FillableSigningProvider& keystore, 
     creditOutputs[1].nValue = 13 * CENT;
     creditOutputs[1].scriptPubKey = GetScriptForDestination(PKHash(key.GetPubKey()));
 
-    CAssetLockPayload assetLockTx(0, creditOutputs);
+    CAssetLockPayload assetLockTx(creditOutputs);
 
     CMutableTransaction tx;
-    tx.nVersion = 2;
+    tx.nVersion = 3;
     tx.nType = TRANSACTION_ASSET_LOCK;
     SetTxPayload(tx, assetLockTx);
 
@@ -105,7 +105,7 @@ static CMutableTransaction CreateAssetUnlockTx(FillableSigningProvider& keystore
     CAssetUnlockPayload assetUnlockTx(nVersion, index, fee, requestedHeight, quorumHash, quorumSig);
 
     CMutableTransaction tx;
-    tx.nVersion = 2;
+    tx.nVersion = 3;
     tx.nType = TRANSACTION_ASSET_UNLOCK;
     SetTxPayload(tx, assetUnlockTx);
 
@@ -149,7 +149,7 @@ BOOST_FIXTURE_TEST_CASE(evo_assetlock, TestChain100Setup)
 
     // Check version
     {
-        BOOST_CHECK(tx.nVersion == 2);
+        BOOST_CHECK(tx.nVersion == 3);
 
         CAssetLockPayload lockPayload;
         GetTxPayload(tx, lockPayload);
@@ -194,23 +194,10 @@ BOOST_FIXTURE_TEST_CASE(evo_assetlock, TestChain100Setup)
     const std::vector<CTxOut> creditOutputs = assetLockPayload.getCreditOutputs();
 
     {
-        BOOST_CHECK(assetLockPayload.getType() == 0);
-
-        // Type of payload is not `0`
-        CMutableTransaction txPayloadWrongType = tx;
-
-        CAssetLockPayload assetLockWrongType(1, creditOutputs);
-        SetTxPayload(txPayloadWrongType, assetLockWrongType);
-
-        BOOST_CHECK(!CheckAssetLockTx(CTransaction(txPayloadWrongType), tx_state));
-        BOOST_CHECK(tx_state.GetRejectReason() == "bad-assetlocktx-locktype");
-    }
-
-    {
         // Sum of credit output greater than OP_RETURN
         std::vector<CTxOut> wrongOutput = creditOutputs;
         wrongOutput[0].nValue += CENT;
-        CAssetLockPayload greaterCreditsPayload(0, wrongOutput);
+        CAssetLockPayload greaterCreditsPayload(wrongOutput);
 
         CMutableTransaction txGreaterCredits = tx;
         SetTxPayload(txGreaterCredits, greaterCreditsPayload);
@@ -220,7 +207,7 @@ BOOST_FIXTURE_TEST_CASE(evo_assetlock, TestChain100Setup)
 
         // Sum of credit output less than OP_RETURN
         wrongOutput[1].nValue -= 2 * CENT;
-        CAssetLockPayload lessCreditsPayload(0, wrongOutput);
+        CAssetLockPayload lessCreditsPayload(wrongOutput);
 
         CMutableTransaction txLessCredits = tx;
         SetTxPayload(txLessCredits, lessCreditsPayload);
@@ -233,7 +220,7 @@ BOOST_FIXTURE_TEST_CASE(evo_assetlock, TestChain100Setup)
         // One credit output keys is not pub key
         std::vector<CTxOut> creditOutputsNotPubkey = creditOutputs;
         creditOutputsNotPubkey[0].scriptPubKey = CScript() << OP_1;
-        CAssetLockPayload notPubkeyPayload(0, creditOutputsNotPubkey);
+        CAssetLockPayload notPubkeyPayload(creditOutputsNotPubkey);
 
         CMutableTransaction txNotPubkey = tx;
         SetTxPayload(txNotPubkey, notPubkeyPayload);
@@ -314,7 +301,7 @@ BOOST_FIXTURE_TEST_CASE(evo_assetunlock, TestChain100Setup)
     }
 
     // Check version
-    BOOST_CHECK(tx.nVersion == 2);
+    BOOST_CHECK(tx.nVersion == 3);
     {
         CAssetUnlockPayload unlockPayload;
         GetTxPayload(tx, unlockPayload);
@@ -331,7 +318,7 @@ BOOST_FIXTURE_TEST_CASE(evo_assetunlock, TestChain100Setup)
     }
 
     {
-        BOOST_CHECK(tx.nVersion == 2);
+        BOOST_CHECK(tx.nVersion == 3);
 
         // Version of payload is not `1`
         CMutableTransaction txWrongVersion = tx;
