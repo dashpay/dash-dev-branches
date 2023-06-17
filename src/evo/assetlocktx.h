@@ -28,7 +28,7 @@ private:
     std::vector<CTxOut> creditOutputs;
 
 public:
-    CAssetLockPayload(const std::vector<CTxOut>& creditOutputs) :
+    explicit CAssetLockPayload(const std::vector<CTxOut>& creditOutputs) :
         creditOutputs(creditOutputs)
     {}
 
