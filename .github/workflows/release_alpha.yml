@@ -10,7 +10,7 @@ on:
 jobs:
   build:
     name: Run Gitian build
-    runs-on: self-hosted
+    runs-on: [ "self-hosted", "linux", "x64", "ubuntu-core" ]
     steps:
     - name: Checkout
       uses: actions/checkout@v3
