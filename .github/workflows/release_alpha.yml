@@ -105,6 +105,6 @@ jobs:
         build-args: |
           TAG=${{ github.event.inputs.tag }}
 
-    - name: Setup tmate session
-      if: ${{ failure() }}
-      uses: mxschmitt/action-tmate@v3
+    # - name: Setup tmate session
+    #   if: ${{ failure() }}
+    #   uses: mxschmitt/action-tmate@v3
