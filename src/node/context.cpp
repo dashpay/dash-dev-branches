@@ -10,6 +10,7 @@
 #include <interfaces/chain.h>
 #include <llmq/context.h>
 #include <evo/evodb.h>
+#include <evo/mnhftx.h>
 #include <net.h>
 #include <net_processing.h>
 #include <policy/fees.h>

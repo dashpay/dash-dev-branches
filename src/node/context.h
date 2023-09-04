@@ -20,6 +20,7 @@ class CScheduler;
 class CTxMemPool;
 class ChainstateManager;
 struct LLMQContext;
+class CMNHFManager;
 class PeerManager;
 class CEvoDB;
 namespace interfaces {
@@ -58,6 +59,7 @@ struct NodeContext {
     //! Dash
     std::unique_ptr<LLMQContext> llmq_ctx;
     std::unique_ptr<CCreditPoolManager> creditPoolManager;
+    std::unique_ptr<CMNHFManager> mnhf_manager;
 
     std::unique_ptr<CEvoDB> evodb;
 

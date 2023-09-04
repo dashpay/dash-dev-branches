@@ -53,6 +53,7 @@
 #include <masternode/sync.h>
 
 #include <evo/evodb.h>
+#include <evo/mnhftx.h>
 #include <evo/specialtx.h>
 #include <evo/specialtxman.h>
 #include <governance/governance.h>
@@ -794,7 +795,11 @@ bool MemPoolAccept::PreChecks(ATMPArgs& args, Workspace& ws)
 
     // No transactions are allowed below minRelayTxFee except from disconnected
     // blocks
-    if (!bypass_limits && !CheckFeeRate(nSize, nModifiedFees, state)) return false;
+    // Checking of fee for MNHF_SIGNAL should be skipped: mnhf does not have
+    // inputs, outputs, or fee
+    if (tx.nVersion != 3 || tx.nType != TRANSACTION_MNHF_SIGNAL) {
+        if (!bypass_limits && !CheckFeeRate(nSize, nModifiedFees, state)) return false;
+    }
 
     if (nAbsurdFee && nFees > nAbsurdFee)
         return state.Invalid(TxValidationResult::TX_NOT_STANDARD,
@@ -1244,6 +1249,7 @@ void CoinsViews::InitCache()
 
 CChainState::CChainState(CTxMemPool* mempool,
                          BlockManager& blockman,
+                         CMNHFManager& mnhfManager,
                          CEvoDB& evoDb,
                          const std::unique_ptr<llmq::CChainLocksHandler>& clhandler,
                          const std::unique_ptr<llmq::CInstantSendManager>& isman,
@@ -1254,6 +1260,7 @@ CChainState::CChainState(CTxMemPool* mempool,
       m_clhandler(clhandler),
       m_isman(isman),
       m_quorum_block_processor(quorum_block_processor),
+      m_mnhfManager(mnhfManager),
       m_evoDb(evoDb),
       m_blockman(blockman),
       m_from_snapshot_blockhash(from_snapshot_blockhash) {}
@@ -1690,7 +1697,7 @@ DisconnectResult CChainState::DisconnectBlock(const CBlock& block, const CBlockI
     std::vector<std::pair<CAddressUnspentKey, CAddressUnspentValue> > addressUnspentIndex;
     std::vector<std::pair<CSpentIndexKey, CSpentIndexValue> > spentIndex;
 
-    if (!UndoSpecialTxsInBlock(block, pindex, *m_quorum_block_processor)) {
+    if (!UndoSpecialTxsInBlock(block, pindex, m_mnhfManager, *m_quorum_block_processor)) {
         error("DisconnectBlock(): UndoSpecialTxsInBlock failed");
         return DISCONNECT_FAILED;
     }
@@ -1947,6 +1954,7 @@ public:
 
     int64_t BeginTime(const Consensus::Params& params) const override { return 0; }
     int64_t EndTime(const Consensus::Params& params) const override { return std::numeric_limits<int64_t>::max(); }
+    int MasternodeBeginHeight(const Consensus::Params& params) const override { return 0; }
     int Period(const Consensus::Params& params) const override { return params.nMinerConfirmationWindow; }
     int Threshold(const Consensus::Params& params, int nAttempt) const override { return params.nRuleChangeActivationThreshold; }
 
@@ -2200,7 +2208,7 @@ bool CChainState::ConnectBlock(const CBlock& block, BlockValidationState& state,
     bool fDIP0001Active_context = pindex->nHeight >= Params().GetConsensus().DIP0001Height;
 
     // MUST process special txes before updating UTXO to ensure consistency between mempool and block processing
-    if (!ProcessSpecialTxsInBlock(block, pindex, *m_quorum_block_processor, *m_clhandler, m_params.GetConsensus(), view, fJustCheck, fScriptChecks, state)) {
+    if (!ProcessSpecialTxsInBlock(block, pindex, m_mnhfManager, *m_quorum_block_processor, *m_clhandler, m_params.GetConsensus(), view, fJustCheck, fScriptChecks, state)) {
         return error("ConnectBlock(DASH): ProcessSpecialTxsInBlock for block %s failed with %s",
                      pindex->GetBlockHash().ToString(), state.ToString());
     }
@@ -4840,7 +4848,7 @@ bool CChainState::RollforwardBlock(const CBlockIndex* pindex, CCoinsViewCache& i
 
     // MUST process special txes before updating UTXO to ensure consistency between mempool and block processing
     BlockValidationState state;
-    if (!ProcessSpecialTxsInBlock(block, pindex, *m_quorum_block_processor, *m_clhandler, m_params.GetConsensus(), inputs, false /*fJustCheck*/, false /*fScriptChecks*/, state)) {
+    if (!ProcessSpecialTxsInBlock(block, pindex, m_mnhfManager, *m_quorum_block_processor, *m_clhandler, m_params.GetConsensus(), inputs, false /*fJustCheck*/, false /*fScriptChecks*/, state)) {
         return error("RollforwardBlock(DASH): ProcessSpecialTxsInBlock for block %s failed with %s",
             pindex->GetBlockHash().ToString(), state.ToString());
     }
@@ -5706,6 +5714,7 @@ std::vector<CChainState*> ChainstateManager::GetAll()
 }
 
 CChainState& ChainstateManager::InitializeChainstate(CTxMemPool* mempool,
+                                                     CMNHFManager& mnhfManager,
                                                      CEvoDB& evoDb,
                                                      const std::unique_ptr<llmq::CChainLocksHandler>& clhandler,
                                                      const std::unique_ptr<llmq::CInstantSendManager>& isman,
@@ -5720,7 +5729,7 @@ CChainState& ChainstateManager::InitializeChainstate(CTxMemPool* mempool,
         throw std::logic_error("should not be overwriting a chainstate");
     }
 
-    to_modify.reset(new CChainState(mempool, m_blockman, evoDb, clhandler, isman, quorum_block_processor, snapshot_blockhash));
+    to_modify.reset(new CChainState(mempool, m_blockman, mnhfManager, evoDb, clhandler, isman, quorum_block_processor, snapshot_blockhash));
 
     // Snapshot chainstates and initial IBD chaintates always become active.
     if (is_snapshot || (!is_snapshot && !m_active_chainstate)) {
@@ -5790,9 +5799,13 @@ bool ChainstateManager::ActivateSnapshot(
     }
 
     auto snapshot_chainstate = WITH_LOCK(::cs_main, return std::make_unique<CChainState>(
-            /* mempool */ nullptr, m_blockman, this->ActiveChainstate().m_evoDb,
-            this->ActiveChainstate().m_clhandler, this->ActiveChainstate().m_isman,
-            this->ActiveChainstate().m_quorum_block_processor, base_blockhash
+            /* mempool */ nullptr, m_blockman,
+            this->ActiveChainstate().m_mnhfManager,
+            this->ActiveChainstate().m_evoDb,
+            this->ActiveChainstate().m_clhandler,
+            this->ActiveChainstate().m_isman,
+            this->ActiveChainstate().m_quorum_block_processor,
+            base_blockhash
         )
     );
 
