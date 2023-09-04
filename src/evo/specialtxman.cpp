@@ -51,6 +51,9 @@ static bool CheckSpecialTxInner(const CTransaction& tx, const CBlockIndex* pinde
             return CheckMNHFTx(tx, pindexPrev, state);
         case TRANSACTION_ASSET_LOCK:
         case TRANSACTION_ASSET_UNLOCK:
+            if (Params().NetworkIDString() != CBaseChainParams::REGTEST) {
+                return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-assetlock-regtest-only");
+            }
             if (!llmq::utils::IsV20Active(pindexPrev)) {
                 return state.Invalid(TxValidationResult::TX_CONSENSUS, "assetlocks-before-v20");
             }

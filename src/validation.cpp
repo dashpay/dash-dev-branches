@@ -392,6 +392,11 @@ static bool ContextualCheckTransaction(const CTransaction& tx, TxValidationState
                 tx.nType != TRANSACTION_ASSET_UNLOCK) {
                 return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-txns-type");
             }
+            if (Params().NetworkIDString() != CBaseChainParams::REGTEST &&
+                    (tx.nType == TRANSACTION_ASSET_LOCK || tx.nType == TRANSACTION_ASSET_UNLOCK)) {
+                return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-txns-assetlock-regtest-only");
+            }
+
             if (tx.IsCoinBase() && tx.nType != TRANSACTION_COINBASE)
                 return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-txns-cb-type");
         } else if (tx.nType != TRANSACTION_NORMAL) {
