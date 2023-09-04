@@ -311,7 +311,8 @@ void CGovernanceManager::AddGovernanceObject(CGovernanceObject& govobj, CConnman
     GetMainSignals().NotifyGovernanceObject(std::make_shared<const CGovernanceObject>(govobj));
 
     if (govobj.GetObjectType() == GovernanceObject::TRIGGER && HasAlreadyVotedFundingTrigger()) {
-        VoteFundingTrigger(govobj.GetHash(), VOTE_OUTCOME_NO, connman);
+        vote_outcome_enum_t funding_vote = HasAlreadyVotedFundingTrigger() ? VOTE_OUTCOME_NO : VOTE_OUTCOME_YES;
+        VoteFundingTrigger(govobj.GetHash(), funding_vote, connman);
     }
 }
 
