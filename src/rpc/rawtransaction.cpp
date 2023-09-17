@@ -50,6 +50,34 @@
 
 #include <univalue.h>
 
+static void TxLockStatusToUniv(const CTransaction& tx, const uint256 hashBlock, CChainState& active_chainstate, llmq::CChainLocksHandler& clhandler, llmq::CInstantSendManager& isman, UniValue& entry)
+{
+    bool chainLock = false;
+    if (!hashBlock.IsNull()) {
+        LOCK(cs_main);
+
+        entry.pushKV("blockhash", hashBlock.GetHex());
+        CBlockIndex* pindex = active_chainstate.m_blockman.LookupBlockIndex(hashBlock);
+        if (pindex) {
+            if (active_chainstate.m_chain.Contains(pindex)) {
+                entry.pushKV("height", pindex->nHeight);
+                entry.pushKV("confirmations", 1 + active_chainstate.m_chain.Height() - pindex->nHeight);
+                entry.pushKV("time", pindex->GetBlockTime());
+                entry.pushKV("blocktime", pindex->GetBlockTime());
+                chainLock = clhandler.HasChainLock(pindex->nHeight, pindex->GetBlockHash());
+            } else {
+                entry.pushKV("height", -1);
+                entry.pushKV("confirmations", 0);
+            }
+        }
+    }
+
+    bool fLocked = isman.IsLocked(tx.GetHash());
+    entry.pushKV("instantlock", fLocked || chainLock);
+    entry.pushKV("instantlock_internal", fLocked);
+    entry.pushKV("chainlock", chainLock);
+}
+
 void TxToJSON(const CTransaction& tx, const uint256 hashBlock, CTxMemPool& mempool, CChainState& active_chainstate, llmq::CChainLocksHandler& clhandler, llmq::CInstantSendManager& isman, UniValue& entry)
 {
     // Call into TxToUniv() in bitcoin-common to decode the transaction hex.
@@ -80,31 +108,7 @@ void TxToJSON(const CTransaction& tx, const uint256 hashBlock, CTxMemPool& mempo
     }
 
     TxToUniv(tx, uint256(), entry, true, &txSpentInfo);
-
-    bool chainLock = false;
-    if (!hashBlock.IsNull()) {
-        LOCK(cs_main);
-
-        entry.pushKV("blockhash", hashBlock.GetHex());
-        CBlockIndex* pindex = active_chainstate.m_blockman.LookupBlockIndex(hashBlock);
-        if (pindex) {
-            if (active_chainstate.m_chain.Contains(pindex)) {
-                entry.pushKV("height", pindex->nHeight);
-                entry.pushKV("confirmations", 1 + active_chainstate.m_chain.Height() - pindex->nHeight);
-                entry.pushKV("time", pindex->GetBlockTime());
-                entry.pushKV("blocktime", pindex->GetBlockTime());
-                chainLock = clhandler.HasChainLock(pindex->nHeight, pindex->GetBlockHash());
-            } else {
-                entry.pushKV("height", -1);
-                entry.pushKV("confirmations", 0);
-            }
-        }
-    }
-
-    bool fLocked = isman.IsLocked(txid);
-    entry.pushKV("instantlock", fLocked || chainLock);
-    entry.pushKV("instantlock_internal", fLocked);
-    entry.pushKV("chainlock", chainLock);
+    TxLockStatusToUniv(tx, hashBlock, active_chainstate, clhandler, isman, entry);
 }
 
 static UniValue getrawtransaction(const JSONRPCRequest& request)
@@ -260,31 +264,40 @@ static UniValue getrawtransaction(const JSONRPCRequest& request)
     TxToJSON(*tx, hash_block, mempool, chainman.ActiveChainstate(), *llmq_ctx.clhandler, *llmq_ctx.isman, result);
     return result;
 }
-static UniValue getrawtransactions(const JSONRPCRequest& request)
+static UniValue gettransactionsarelocked(const JSONRPCRequest& request)
 {
     RPCHelpMan{
-                "getrawtransactions",
-                "\nReturn the raw transactions data.\n"
-                "\nHint: Use gettransaction for wallet transactions.\n",
+        "gettransactionsarelocked",
+        "\nReturn the raw transactions data.\n"
+        "\nHint: Use gettransaction for wallet transactions.\n",
+        {
+            {"txids", RPCArg::Type::ARR, RPCArg::Optional::NO, "The transaction id",
                 {
-                    {"txids", RPCArg::Type::ARR, RPCArg::Optional::NO, "The transaction id",
-                        {
-                            {"txid", RPCArg::Type::STR_HEX, RPCArg::Optional::OMITTED, "A transaction hash"},
-                        },
-                    },
+                    {"txid", RPCArg::Type::STR_HEX, RPCArg::Optional::OMITTED, "A transaction hash"},
                 },
-                RPCResult{
-                    RPCResult::Type::STR, "Array of objects from rpc result getrawtransaction with verbose on", "."
-                },
-                RPCExamples{
-                    HelpExampleCli("getrawtransactions", "\"mytxids\"")
-                },
+            },
+        },
+        RPCResult{
+                RPCResult::Type::ARR, "", "Response is an array with the same size as the input txids",
+                {
+                        {RPCResult::Type::OBJ, "", "",
+                         {
+                                {RPCResult::Type::STR_HEX, "txid", "The transaction hash"},
+                                {RPCResult::Type::BOOL, "instantlock", "Current transaction lock state"},
+                                {RPCResult::Type::BOOL, "chainlock", "he state of the corresponding block chainlock"},
+                                {RPCResult::Type::NUM, "height", "The block height"},
+                         }},
+                }
+        },
+        RPCExamples{
+            HelpExampleCli("gettransactionsarelocked", "\"mytxids\"")
+        + HelpExampleCli("gettransactionsarelocked", "\"[tx1, tx2, ...]\"")
+        },
     }.Check(request);
 
     const NodeContext& node = EnsureAnyNodeContext(request.context);
     ChainstateManager& chainman = EnsureChainman(node);
 
-    bool in_active_chain = true;
     CBlockIndex* blockindex = nullptr;
 
     bool f_txindex_ready = false;
@@ -293,7 +306,6 @@ static UniValue getrawtransactions(const JSONRPCRequest& request)
     }
 
     LLMQContext& llmq_ctx = EnsureLLMQContext(node);
-    CTxMemPool& mempool = EnsureMemPool(node);
 
     UniValue result_arr(UniValue::VARR);
     UniValue txids = request.params[0].get_array();
@@ -326,8 +338,7 @@ static UniValue getrawtransactions(const JSONRPCRequest& request)
             }
 
             UniValue result(UniValue::VOBJ);
-            if (blockindex) result.pushKV("in_active_chain", in_active_chain);
-            TxToJSON(*tx, hash_block, mempool, chainman.ActiveChainstate(), *llmq_ctx.clhandler, *llmq_ctx.isman, result);
+            TxLockStatusToUniv(*tx, hash_block, chainman.ActiveChainstate(), *llmq_ctx.clhandler, *llmq_ctx.isman, result);
             result_arr.push_back(result);
         } catch (const UniValue& error) {
             result_arr.push_back(error);
@@ -1758,7 +1769,7 @@ static const CRPCCommand commands[] =
 { //  category              name                            actor (function)            argNames
   //  --------------------- ------------------------        -----------------------     ----------
     { "rawtransactions",    "getrawtransaction",            &getrawtransaction,         {"txid","verbose","blockhash"} },
-    { "rawtransactions",    "getrawtransactions",           &getrawtransactions,        {"txids"} },
+    { "rawtransactions",    "gettransactionsarelocked",     &gettransactionsarelocked,  {"txids"} },
     { "rawtransactions",    "createrawtransaction",         &createrawtransaction,      {"inputs","outputs","locktime"} },
     { "rawtransactions",    "decoderawtransaction",         &decoderawtransaction,      {"hexstring"} },
     { "rawtransactions",    "decodescript",                 &decodescript,              {"hexstring"} },
