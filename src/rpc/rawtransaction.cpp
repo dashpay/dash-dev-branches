@@ -50,17 +50,18 @@
 
 #include <univalue.h>
 
-static void TxLockStatusToUniv(const CTransaction& tx, const uint256 hashBlock, CChainState& active_chainstate, llmq::CChainLocksHandler& clhandler, llmq::CInstantSendManager& isman, UniValue& entry, bool detailed = true)
+static void TxLockStatusToUniv(const CTransaction* const tx, const uint256 hashBlock, CChainState& active_chainstate, llmq::CChainLocksHandler& clhandler, llmq::CInstantSendManager& isman, UniValue& entry, bool detailed = true)
 {
     bool chainLock = false;
-    if (!hashBlock.IsNull()) {
+    int height = -1;
+    if (!hashBlock.IsNull() && tx != nullptr) {
         LOCK(cs_main);
 
-        entry.pushKV("blockhash", hashBlock.GetHex());
+        if (detailed) entry.pushKV("blockhash", hashBlock.GetHex());
         CBlockIndex* pindex = active_chainstate.m_blockman.LookupBlockIndex(hashBlock);
         if (pindex) {
             if (active_chainstate.m_chain.Contains(pindex)) {
-                entry.pushKV("height", pindex->nHeight);
+                height = pindex->nHeight;
                 if (detailed) {
                     entry.pushKV("confirmations", 1 + active_chainstate.m_chain.Height() - pindex->nHeight);
                     entry.pushKV("time", pindex->GetBlockTime());
@@ -68,17 +69,17 @@ static void TxLockStatusToUniv(const CTransaction& tx, const uint256 hashBlock, 
                 }
                 chainLock = clhandler.HasChainLock(pindex->nHeight, pindex->GetBlockHash());
             } else {
-                entry.pushKV("height", -1);
                 if (detailed) entry.pushKV("confirmations", 0);
             }
         }
     }
 
     if (detailed) {
-        bool fLocked = isman.IsLocked(tx.GetHash());
+        bool fLocked = isman.IsLocked(tx->GetHash());
         entry.pushKV("instantlock", fLocked || chainLock);
         entry.pushKV("instantlock_internal", fLocked);
     }
+    entry.pushKV("height", height);
     entry.pushKV("chainlock", chainLock);
 }
 
@@ -112,7 +113,7 @@ void TxToJSON(const CTransaction& tx, const uint256 hashBlock, CTxMemPool& mempo
     }
 
     TxToUniv(tx, uint256(), entry, true, &txSpentInfo);
-    TxLockStatusToUniv(tx, hashBlock, active_chainstate, clhandler, isman, entry);
+    TxLockStatusToUniv(&tx, hashBlock, active_chainstate, clhandler, isman, entry);
 }
 
 static UniValue getrawtransaction(const JSONRPCRequest& request)
@@ -302,7 +303,7 @@ static UniValue gettransactionsarelocked(const JSONRPCRequest& request)
     const NodeContext& node = EnsureAnyNodeContext(request.context);
     ChainstateManager& chainman = EnsureChainman(node);
 
-    CBlockIndex* blockindex = nullptr;
+    const CBlockIndex* blockindex = nullptr;
 
     bool f_txindex_ready = false;
     if (g_txindex && !blockindex) {
@@ -315,38 +316,18 @@ static UniValue gettransactionsarelocked(const JSONRPCRequest& request)
     UniValue txids = request.params[0].get_array();
     for (size_t idx = 0; idx < std::min<size_t>(100, txids.size()); ++idx) {
         UniValue result(UniValue::VOBJ);
-        try {
-            const UniValue& txid = txids[idx];
-            uint256 hash(ParseHashV(txid, "txid"));
-            if (hash == Params().GenesisBlock().hashMerkleRoot) {
-                // Special exception for the genesis block coinbase transaction
-                throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "The genesis block coinbase is not considered an ordinary transaction and cannot be retrieved");
-            }
-
-            uint256 hash_block;
-            const CTransactionRef tx = GetTransaction(blockindex, node.mempool.get(), hash, Params().GetConsensus(), hash_block);
-            if (!tx) {
-                std::string errmsg;
-                if (blockindex) {
-                    if (!(blockindex->nStatus & BLOCK_HAVE_DATA)) {
-                        throw JSONRPCError(RPC_MISC_ERROR, "Block not available");
-                    }
-                    errmsg = "No such transaction found in the provided block";
-                } else if (!g_txindex) {
-                    errmsg = "No such mempool transaction. Use -txindex or provide a block hash to enable blockchain transaction queries";
-                } else if (!f_txindex_ready) {
-                    errmsg = "No such mempool transaction. Blockchain transactions are still in the process of being indexed";
-                } else {
-                    errmsg = "No such mempool or blockchain transaction";
-                }
-                throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, errmsg + ". Use gettransaction for wallet transactions.");
-            }
-
-            TxLockStatusToUniv(*tx, hash_block, chainman.ActiveChainstate(), *llmq_ctx.clhandler, *llmq_ctx.isman, result, false);
-
-        } catch (const UniValue& error) {
-            result.pushKV("error", error);
+        const UniValue& txid = txids[idx];
+        uint256 hash(ParseHashV(txid, "txid"));
+        if (hash == Params().GenesisBlock().hashMerkleRoot) {
+            // Special exception for the genesis block coinbase transaction
+            throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "The genesis block coinbase is not considered an ordinary transaction and cannot be retrieved");
         }
+
+        uint256 hash_block;
+        CTransactionRef tx = GetTransaction(nullptr, nullptr, hash, Params().GetConsensus(), hash_block);
+
+        TxLockStatusToUniv(tx.get(), hash_block, chainman.ActiveChainstate(), *llmq_ctx.clhandler, *llmq_ctx.isman, result, false);
+
         result_arr.push_back(result);
     }
     return result_arr;
