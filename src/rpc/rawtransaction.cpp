@@ -50,7 +50,7 @@
 
 #include <univalue.h>
 
-static void TxLockStatusToUniv(const CTransaction& tx, const uint256 hashBlock, CChainState& active_chainstate, llmq::CChainLocksHandler& clhandler, llmq::CInstantSendManager& isman, UniValue& entry)
+static void TxLockStatusToUniv(const CTransaction& tx, const uint256 hashBlock, CChainState& active_chainstate, llmq::CChainLocksHandler& clhandler, llmq::CInstantSendManager& isman, UniValue& entry, bool detailed = true)
 {
     bool chainLock = false;
     if (!hashBlock.IsNull()) {
@@ -61,20 +61,24 @@ static void TxLockStatusToUniv(const CTransaction& tx, const uint256 hashBlock, 
         if (pindex) {
             if (active_chainstate.m_chain.Contains(pindex)) {
                 entry.pushKV("height", pindex->nHeight);
-                entry.pushKV("confirmations", 1 + active_chainstate.m_chain.Height() - pindex->nHeight);
-                entry.pushKV("time", pindex->GetBlockTime());
-                entry.pushKV("blocktime", pindex->GetBlockTime());
+                if (detailed) {
+                    entry.pushKV("confirmations", 1 + active_chainstate.m_chain.Height() - pindex->nHeight);
+                    entry.pushKV("time", pindex->GetBlockTime());
+                    entry.pushKV("blocktime", pindex->GetBlockTime());
+                }
                 chainLock = clhandler.HasChainLock(pindex->nHeight, pindex->GetBlockHash());
             } else {
                 entry.pushKV("height", -1);
-                entry.pushKV("confirmations", 0);
+                if (detailed) entry.pushKV("confirmations", 0);
             }
         }
     }
 
-    bool fLocked = isman.IsLocked(tx.GetHash());
-    entry.pushKV("instantlock", fLocked || chainLock);
-    entry.pushKV("instantlock_internal", fLocked);
+    if (detailed) {
+        bool fLocked = isman.IsLocked(tx.GetHash());
+        entry.pushKV("instantlock", fLocked || chainLock);
+        entry.pushKV("instantlock_internal", fLocked);
+    }
     entry.pushKV("chainlock", chainLock);
 }
 
@@ -309,7 +313,8 @@ static UniValue gettransactionsarelocked(const JSONRPCRequest& request)
 
     UniValue result_arr(UniValue::VARR);
     UniValue txids = request.params[0].get_array();
-    for (size_t idx = 0; idx < std::min(100, txids.size()); ++idx) {
+    for (size_t idx = 0; idx < std::min<size_t>(100, txids.size()); ++idx) {
+        UniValue result(UniValue::VOBJ);
         try {
             const UniValue& txid = txids[idx];
             uint256 hash(ParseHashV(txid, "txid"));
@@ -337,12 +342,12 @@ static UniValue gettransactionsarelocked(const JSONRPCRequest& request)
                 throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, errmsg + ". Use gettransaction for wallet transactions.");
             }
 
-            UniValue result(UniValue::VOBJ);
-            TxLockStatusToUniv(*tx, hash_block, chainman.ActiveChainstate(), *llmq_ctx.clhandler, *llmq_ctx.isman, result);
-            result_arr.push_back(result);
+            TxLockStatusToUniv(*tx, hash_block, chainman.ActiveChainstate(), *llmq_ctx.clhandler, *llmq_ctx.isman, result, false);
+
         } catch (const UniValue& error) {
-            result_arr.push_back(error);
+            result.pushKV("error", error);
         }
+        result_arr.push_back(result);
     }
     return result_arr;
 }
