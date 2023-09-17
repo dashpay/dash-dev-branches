@@ -260,6 +260,100 @@ static UniValue getrawtransaction(const JSONRPCRequest& request)
     TxToJSON(*tx, hash_block, mempool, chainman.ActiveChainstate(), *llmq_ctx.clhandler, *llmq_ctx.isman, result);
     return result;
 }
+static UniValue getrawtransactions(const JSONRPCRequest& request)
+{
+    RPCHelpMan{
+                "getrawtransactions",
+                "\nReturn the raw transactions data.\n"
+                "\nHint: Use gettransaction for wallet transactions.\n",
+                {
+                    {"txids", RPCArg::Type::ARR, RPCArg::Optional::NO, "The transaction id",
+                        {
+                            {"txid", RPCArg::Type::STR_HEX, RPCArg::Optional::OMITTED, "A transaction hash"},
+                        },
+                    },
+                },
+                RPCResult{
+                    RPCResult::Type::STR, "data", "."
+                },
+                RPCExamples{
+                    HelpExampleCli("getrawtransactions", "\"mytxids\"")
+                },
+    }.Check(request);
+
+    {
+        std::set<uint256> setTxids;
+        uint256 oneTxid;
+        LogPrintf("in-1\n");
+        UniValue txids = request.params[0].get_array();
+        LogPrintf("in-2\n");
+        for (unsigned int idx = 0; idx < txids.size(); idx++) {
+           LogPrintf("ids: %d\n", idx);
+            const UniValue& txid = txids[idx];
+            uint256 hash(ParseHashV(txid, "txid"));
+            if (setTxids.count(hash)) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER, std::string("Invalid parameter, duplicated txid: ")+txid.get_str());
+            }
+           setTxids.insert(hash);
+           oneTxid = hash;
+           LogPrintf("hash: %s\n", hash.ToString());
+        }
+    }
+
+    const NodeContext& node = EnsureAnyNodeContext(request.context);
+    ChainstateManager& chainman = EnsureChainman(node);
+
+    bool in_active_chain = true;
+    CBlockIndex* blockindex = nullptr;
+
+    bool f_txindex_ready = false;
+    if (g_txindex && !blockindex) {
+        f_txindex_ready = g_txindex->BlockUntilSyncedToCurrentChain();
+    }
+
+    LLMQContext& llmq_ctx = EnsureLLMQContext(node);
+    CTxMemPool& mempool = EnsureMemPool(node);
+
+    UniValue result_arr(UniValue::VARR);
+    UniValue txids = request.params[0].get_array();
+    for (unsigned int idx = 0; idx < txids.size(); ++idx) {
+        try {
+            const UniValue& txid = txids[idx];
+            uint256 hash(ParseHashV(txid, "txid"));
+            if (hash == Params().GenesisBlock().hashMerkleRoot) {
+                // Special exception for the genesis block coinbase transaction
+                throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "The genesis block coinbase is not considered an ordinary transaction and cannot be retrieved");
+            }
+
+            uint256 hash_block;
+            const CTransactionRef tx = GetTransaction(blockindex, node.mempool.get(), hash, Params().GetConsensus(), hash_block);
+            if (!tx) {
+                std::string errmsg;
+                if (blockindex) {
+                    if (!(blockindex->nStatus & BLOCK_HAVE_DATA)) {
+                        throw JSONRPCError(RPC_MISC_ERROR, "Block not available");
+                    }
+                    errmsg = "No such transaction found in the provided block";
+                } else if (!g_txindex) {
+                    errmsg = "No such mempool transaction. Use -txindex or provide a block hash to enable blockchain transaction queries";
+                } else if (!f_txindex_ready) {
+                    errmsg = "No such mempool transaction. Blockchain transactions are still in the process of being indexed";
+                } else {
+                    errmsg = "No such mempool or blockchain transaction";
+                }
+                throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, errmsg + ". Use gettransaction for wallet transactions.");
+            }
+
+            UniValue result(UniValue::VOBJ);
+            if (blockindex) result.pushKV("in_active_chain", in_active_chain);
+            TxToJSON(*tx, hash_block, mempool, chainman.ActiveChainstate(), *llmq_ctx.clhandler, *llmq_ctx.isman, result);
+            result_arr.push_back(result);
+        } catch (const UniValue& error) {
+            result_arr.push_back(error);
+        }
+    }
+    return result_arr;
+}
 
 static UniValue gettxoutproof(const JSONRPCRequest& request)
 {
@@ -1683,6 +1777,7 @@ static const CRPCCommand commands[] =
 { //  category              name                            actor (function)            argNames
   //  --------------------- ------------------------        -----------------------     ----------
     { "rawtransactions",    "getrawtransaction",            &getrawtransaction,         {"txid","verbose","blockhash"} },
+    { "rawtransactions",    "getrawtransactions",           &getrawtransactions,        {"txids"} },
     { "rawtransactions",    "createrawtransaction",         &createrawtransaction,      {"inputs","outputs","locktime"} },
     { "rawtransactions",    "decoderawtransaction",         &decoderawtransaction,      {"hexstring"} },
     { "rawtransactions",    "decodescript",                 &decodescript,              {"hexstring"} },
