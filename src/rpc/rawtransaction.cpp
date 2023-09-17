@@ -274,31 +274,12 @@ static UniValue getrawtransactions(const JSONRPCRequest& request)
                     },
                 },
                 RPCResult{
-                    RPCResult::Type::STR, "data", "."
+                    RPCResult::Type::STR, "Array of objects from rpc result getrawtransaction with verbose on", "."
                 },
                 RPCExamples{
                     HelpExampleCli("getrawtransactions", "\"mytxids\"")
                 },
     }.Check(request);
-
-    {
-        std::set<uint256> setTxids;
-        uint256 oneTxid;
-        LogPrintf("in-1\n");
-        UniValue txids = request.params[0].get_array();
-        LogPrintf("in-2\n");
-        for (unsigned int idx = 0; idx < txids.size(); idx++) {
-           LogPrintf("ids: %d\n", idx);
-            const UniValue& txid = txids[idx];
-            uint256 hash(ParseHashV(txid, "txid"));
-            if (setTxids.count(hash)) {
-                throw JSONRPCError(RPC_INVALID_PARAMETER, std::string("Invalid parameter, duplicated txid: ")+txid.get_str());
-            }
-           setTxids.insert(hash);
-           oneTxid = hash;
-           LogPrintf("hash: %s\n", hash.ToString());
-        }
-    }
 
     const NodeContext& node = EnsureAnyNodeContext(request.context);
     ChainstateManager& chainman = EnsureChainman(node);
