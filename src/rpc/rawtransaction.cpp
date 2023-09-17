@@ -271,7 +271,7 @@ static UniValue gettransactionsarelocked(const JSONRPCRequest& request)
         "\nReturn the raw transactions data.\n"
         "\nHint: Use gettransaction for wallet transactions.\n",
         {
-            {"txids", RPCArg::Type::ARR, RPCArg::Optional::NO, "The transaction id",
+            {"txids", RPCArg::Type::ARR, RPCArg::Optional::NO, "The transaction ids (no more than 100)",
                 {
                     {"txid", RPCArg::Type::STR_HEX, RPCArg::Optional::OMITTED, "A transaction hash"},
                 },
@@ -309,7 +309,7 @@ static UniValue gettransactionsarelocked(const JSONRPCRequest& request)
 
     UniValue result_arr(UniValue::VARR);
     UniValue txids = request.params[0].get_array();
-    for (unsigned int idx = 0; idx < txids.size(); ++idx) {
+    for (size_t idx = 0; idx < std::min(100, txids.size()); ++idx) {
         try {
             const UniValue& txid = txids[idx];
             uint256 hash(ParseHashV(txid, "txid"));
