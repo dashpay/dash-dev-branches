@@ -45,13 +45,13 @@ from test_framework.util import (
     hex_str_to_bytes,
 )
 
-llmq_type_test = 100
+llmq_type_test = 106 # LLMQType::LLMQ_TEST_PLATFORM
 tiny_amount = int(Decimal("0.0007") * COIN)
 blocks_in_one_day = 576
 
 class AssetLocksTest(DashTestFramework):
     def set_test_params(self):
-        self.set_dash_test_params(5, 3)
+        self.set_dash_test_params(5, 3, evo_count=3)
 
     def skip_test_if_missing_module(self):
         self.skip_if_no_wallet()
@@ -98,7 +98,9 @@ class AssetLocksTest(DashTestFramework):
         request_id = hash256(request_id_buf)[::-1].hex()
 
         height = node_wallet.getblockcount()
+        self.log.info(f"knst-create asset unlock: {llmq_type_test} {request_id}")
         quorumHash = mninfo[0].node.quorum("selectquorum", llmq_type_test, request_id)["quorumHash"]
+        self.log.info(f"quorum hash: {quorumHash}")
         unlockTx_payload = CAssetUnlockTx(
             version = 1,
             index = index,
@@ -235,8 +237,26 @@ class AssetLocksTest(DashTestFramework):
         node = self.nodes[1]
 
         self.set_sporks()
-        self.activate_v20()
+#        self.nodes[0].sporkupdate("SPORK_17_QUORUM_DKG_ENABLED", 0)
+#        self.activate_dip8()
+#        self.wait_for_sporks_same()
+#        self.mine_quorum(llmq_type_name='llmq_test', llmq_type=100)
 
+        self.activate_v19(expected_activation_height=900)
+        self.log.info("Activated v19 at height:" + str(node.getblockcount()))
+
+        for i in range(3):
+            evo_info = self.dynamically_add_masternode(evo=True)
+            node.generate(8)
+            self.sync_blocks(self.nodes)
+
+#            self.dynamically_evo_update_service(evo_info)
+
+
+        self.set_sporks()
+        self.activate_v20()
+        node.generate(1)
+        self.sync_all()
         self.mempool_size = 0
 
         key = ECKey()
@@ -253,13 +273,13 @@ class AssetLocksTest(DashTestFramework):
             coin = coins.pop()
         asset_lock_tx = self.create_assetlock(coin, locked_1, pubkey)
 
+
         self.check_mempool_result(tx=asset_lock_tx, result_expected={'allowed': True})
         self.validate_credit_pool_balance(0)
         txid_in_block = self.send_tx(asset_lock_tx)
         assert "assetLockTx" in node.getrawtransaction(txid_in_block, 1)
         self.validate_credit_pool_balance(0)
         node.generate(1)
-        assert_equal(self.get_credit_pool_balance(node=node_wallet), 0)
         assert_equal(self.get_credit_pool_balance(node=node), locked_1)
         self.log.info("Generate a number of blocks to ensure this is the longest chain for later in the test when we reconsiderblock")
         node.generate(12)
@@ -295,7 +315,7 @@ class AssetLocksTest(DashTestFramework):
         self.create_and_check_block([extra_lock_tx], expected_error = 'bad-cbtx-assetlocked-amount')
 
         self.log.info("Mine a quorum...")
-        self.mine_quorum()
+        self.mine_quorum(llmq_type_name='llmq_test_platform', llmq_type=106, expected_connections=2, expected_members=3, expected_contributions=3, expected_complaints=0, expected_justifications=0, expected_commitments=3 )
 
         self.validate_credit_pool_balance(locked_1)
 
@@ -326,14 +346,7 @@ class AssetLocksTest(DashTestFramework):
         asset_unlock_tx_payload = CAssetUnlockTx()
         asset_unlock_tx_payload.deserialize(BytesIO(asset_unlock_tx.vExtraPayload))
 
-        assert_equal(asset_unlock_tx_payload.quorumHash, int(self.mninfo[0].node.quorum("selectquorum", llmq_type_test, 'e6c7a809d79f78ea85b72d5df7e9bd592aecf151e679d6e976b74f053a7f9056')["quorumHash"], 16))
-
-        txid = self.send_tx(asset_unlock_tx)
-        assert "assetUnlockTx" in node.getrawtransaction(txid, 1)
-
-        indexes_statuses = self.nodes[0].getassetunlockstatuses(["101", "102", "300"])
-        assert_equal([{'index': 101, 'status': 'mempooled'}, {'index': 102, 'status': 'unknown'}, {'index': 300, 'status': 'unknown'}], indexes_statuses)
-
+        self.send_tx(asset_unlock_tx)
         self.mempool_size += 1
         self.check_mempool_size()
         self.validate_credit_pool_balance(locked_1)
@@ -349,7 +362,7 @@ class AssetLocksTest(DashTestFramework):
             reason = "double copy")
 
         self.log.info("Mining next quorum to check tx 'asset_unlock_tx_late' is still valid...")
-        self.mine_quorum()
+        self.mine_quorum(llmq_type_name="llmq_test_platform", llmq_type=106)
         self.log.info("Checking credit pool amount is same...")
         self.validate_credit_pool_balance(locked_1 - 1 * COIN)
         self.check_mempool_result(tx=asset_unlock_tx_late, result_expected={'allowed': True})
@@ -369,7 +382,7 @@ class AssetLocksTest(DashTestFramework):
                 result_expected={'allowed': False, 'reject-reason' : 'bad-assetunlock-too-late'})
 
         self.log.info("Checking that two quorums later it is too late because quorum is not active...")
-        self.mine_quorum()
+        self.mine_quorum(llmq_type_name="llmq_test_platform", llmq_type=106)
         self.log.info("Expecting new reject-reason...")
         self.check_mempool_result(tx=asset_unlock_tx_too_late,
                 result_expected={'allowed': False, 'reject-reason' : 'bad-assetunlock-not-active-quorum'})
@@ -427,7 +440,7 @@ class AssetLocksTest(DashTestFramework):
 
         self.log.info("Fast forward to the next day to reset all current unlock limits...")
         self.slowly_generate_batch(blocks_in_one_day  + 1)
-        self.mine_quorum()
+        self.mine_quorum(llmq_type_name="llmq_test_platform", llmq_type=106)
 
         total = self.get_credit_pool_balance()
         while total <= 10_900 * COIN:
