@@ -32,11 +32,11 @@ const std::string CLIENT_NAME("Dash Core");
     #if defined(BUILD_GIT_DESCRIPTION)
         // build in a cloned folder
         #define BUILD_DESC BUILD_GIT_DESCRIPTION
-        #define BUILD_SUFFIX "-dev"
+        #define BUILD_SUFFIX ""
     #elif defined(ARCHIVE_GIT_DESCRIPTION)
         // build in a folder from git archive
         #define BUILD_DESC ARCHIVE_GIT_DESCRIPTION
-        #define BUILD_SUFFIX "-gitarc"
+        #define BUILD_SUFFIX ""
     #else
         #define BUILD_DESC "v" PACKAGE_VERSION
         #define BUILD_SUFFIX "-unk"
