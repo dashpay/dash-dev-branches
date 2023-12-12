@@ -3747,7 +3747,7 @@ void CConnman::RelayTransaction(const CTransaction& tx)
 {
     uint256 hash = tx.GetHash();
     int nInv = MSG_TX;
-    if (CCoinJoin::GetDSTX(hash)) {
+    if (::dstxManager->GetDSTX(hash)) {
         nInv = MSG_DSTX;
     }
     CInv inv(nInv, hash);
