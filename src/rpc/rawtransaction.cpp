@@ -17,6 +17,7 @@
 #include <node/blockstorage.h>
 #include <node/coin.h>
 #include <node/context.h>
+#include <node/psbt.h>
 #include <node/transaction.h>
 #include <policy/policy.h>
 #include <policy/settings.h>
