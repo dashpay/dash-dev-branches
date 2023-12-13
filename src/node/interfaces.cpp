@@ -926,6 +926,14 @@ public:
         assert(::coinJoinClientManagers != nullptr);
         ::coinJoinClientManagers->Remove(name);
     }
+    void cjFlushWallet(const CWallet& wallet) override
+    {
+        assert(::coinJoinClientManagers != nullptr);
+        auto cj_clientman = ::coinJoinClientManagers->Get(wallet);
+        assert(cj_clientman != nullptr);
+        cj_clientman->ResetPool();
+        cj_clientman->StopMixing();
+    }
     void cjStopMixingWallet(const CWallet& wallet) override
     {
         assert(::coinJoinClientManagers != nullptr);
