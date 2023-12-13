@@ -25,6 +25,7 @@ class CScheduler;
 class CTxMemPool;
 class CFeeRate;
 class CBlockIndex;
+class CWallet;
 class Coin;
 class uint256;
 struct bilingual_str;
@@ -251,6 +252,17 @@ public:
 
     //! Send progress indicator.
     virtual void showProgress(const std::string& title, int progress, bool resume_possible) = 0;
+
+#ifdef ENABLE_WALLET
+    //! Add new wallet to CoinJoin client manager
+    virtual void cjAddWallet(CWallet&) = 0;
+    //! Remove wallet from CoinJoin client manager
+    virtual void cjRemoveWallet(const std::string&) = 0;
+    //! Notify CoinJoin client manager that wallet is flush
+    virtual void cjFlushWallet(const CWallet&) = 0;
+    //! Ask CoinJoin client manager to stop mixing for wallet
+    virtual void cjStopMixingWallet(const CWallet&) = 0;
+#endif // ENABLE_WALLET
 
     //! Chain notifications.
     class Notifications

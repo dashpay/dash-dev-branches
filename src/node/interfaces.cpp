@@ -55,6 +55,7 @@
 #include <config/bitcoin-config.h>
 #endif
 
+#include <coinjoin/client.h>
 #include <coinjoin/coinjoin.h>
 #include <coinjoin/options.h>
 
@@ -914,6 +915,24 @@ public:
     {
         ::uiInterface.ShowProgress(title, progress, resume_possible);
     }
+#ifdef ENABLE_WALLET
+    void cjAddWallet(CWallet& wallet) override
+    {
+        assert(::coinJoinClientManagers != nullptr);
+        ::coinJoinClientManagers->Add(wallet);
+    }
+    void cjRemoveWallet(const std::string& name) override
+    {
+        assert(::coinJoinClientManagers != nullptr);
+        ::coinJoinClientManagers->Remove(name);
+    }
+    void cjStopMixingWallet(const CWallet& wallet) override
+    {
+        assert(::coinJoinClientManagers != nullptr);
+        auto cj_clientman = ::coinJoinClientManagers->Get(wallet);
+        if (cj_clientman != nullptr) cj_clientman->StopMixing();
+    }
+#endif // ENABLE_WALLET
     std::unique_ptr<Handler> handleNotifications(std::shared_ptr<Notifications> notifications) override
     {
         return std::make_unique<NotificationsHandlerImpl>(std::move(notifications));

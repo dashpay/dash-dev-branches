@@ -27,6 +27,7 @@ class CDeterministicMNList;
 class CFeeRate;
 class CGovernanceObject;
 class CNodeStats;
+class CWallet;
 class Coin;
 class RPCTimerInterface;
 class UniValue;
