@@ -52,24 +52,6 @@ struct WalletTxStatus;
 using WalletOrderForm = std::vector<std::pair<std::string, std::string>>;
 using WalletValueMap = std::map<std::string, std::string>;
 
-namespace CoinJoin {
-//! Interface for the wallet constrained src/coinjoin part of a dash node (dashd process).
-class Client
-{
-public:
-    virtual ~Client() {}
-    virtual void resetCachedBlocks() = 0;
-    virtual void resetPool() = 0;
-    virtual int getCachedBlocks() = 0;
-    virtual std::string getSessionDenoms() = 0;
-    virtual void setCachedBlocks(int nCachedBlocks) = 0;
-    virtual void disableAutobackups() = 0;
-    virtual bool isMixing() = 0;
-    virtual bool startMixing() = 0;
-    virtual void stopMixing() = 0;
-};
-}
-
 //! Interface for accessing a wallet.
 class Wallet
 {
@@ -295,8 +277,6 @@ public:
 
     // Return whether private keys enabled.
     virtual bool privateKeysDisabled() = 0;
-
-    virtual CoinJoin::Client& coinJoin() = 0;
 
     //! Get max tx fee.
     virtual CAmount getDefaultMaxTxFee() = 0;

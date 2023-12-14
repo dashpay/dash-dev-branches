@@ -409,7 +409,7 @@ void OptionsDialog::on_okButton_clicked()
 #ifdef ENABLE_WALLET
     if (m_enable_wallet) {
         for (auto& wallet : model->node().walletLoader().getWallets()) {
-            wallet->coinJoin().resetCachedBlocks();
+            model->node().coinJoinClient(wallet->getWalletName())->resetCachedBlocks();
             wallet->markDirty();
         }
     }

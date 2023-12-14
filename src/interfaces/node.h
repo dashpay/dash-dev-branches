@@ -108,6 +108,22 @@ public:
     virtual bool isDenominated(CAmount nAmount) = 0;
     virtual std::array<CAmount, 5> getStandardDenominations() = 0;
 };
+
+//! Interface for the wallet constrained src/coinjoin part of a dash node (dashd process).
+class Client
+{
+public:
+    virtual ~Client() {}
+    virtual void resetCachedBlocks() = 0;
+    virtual void resetPool() = 0;
+    virtual int getCachedBlocks() = 0;
+    virtual std::string getSessionDenoms() = 0;
+    virtual void setCachedBlocks(int nCachedBlocks) = 0;
+    virtual void disableAutobackups() = 0;
+    virtual bool isMixing() = 0;
+    virtual bool startMixing() = 0;
+    virtual void stopMixing() = 0;
+};
 }
 
 //! Block and header tip information
@@ -301,8 +317,13 @@ public:
     //! Return interface for accessing masternode related handler.
     virtual Masternode::Sync& masternodeSync() = 0;
 
-    //! Return interface for accessing coinjoin related handler.
+    //! Return interface for accessing coinjoin options related handler.
     virtual CoinJoin::Options& coinJoinOptions() = 0;
+
+#ifdef ENABLE_WALLET
+    //! Return interface for accessing coinjoin client related handler.
+    virtual std::unique_ptr<CoinJoin::Client> coinJoinClient(const std::string&)  = 0;
+#endif // ENABLE_WALLET
 
     //! Register handler for init messages.
     using InitMessageFn = std::function<void(const std::string& message)>;

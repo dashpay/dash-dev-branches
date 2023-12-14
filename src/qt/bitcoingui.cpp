@@ -1360,7 +1360,7 @@ void BitcoinGUI::setNumBlocks(int count, const QDateTime& blockDate, const QStri
 #ifdef ENABLE_WALLET
     if (enableWallet) {
         for (const auto& wallet : m_node.walletLoader().getWallets()) {
-            disableAppNap |= wallet->coinJoin().isMixing();
+            disableAppNap |= m_node.coinJoinClient(wallet->getWalletName())->isMixing();
         }
     }
 #endif // ENABLE_WALLET

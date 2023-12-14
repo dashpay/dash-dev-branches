@@ -38,6 +38,9 @@ class uint256;
 
 namespace interfaces {
 class Node;
+namespace CoinJoin {
+class Client;
+} // namespace interfaces::CoinJoin
 } // namespace interfaces
 
 QT_BEGIN_NAMESPACE
@@ -151,7 +154,7 @@ public:
     interfaces::Node& node() const { return m_node; }
     interfaces::Wallet& wallet() const { return *m_wallet; }
     void setClientModel(ClientModel* client_model);
-    interfaces::CoinJoin::Client& coinJoin() const { return m_wallet->coinJoin(); }
+    interfaces::CoinJoin::Client& coinJoin() const {  return *m_coinjoinClient; }
 
     QString getWalletName() const;
     QString getDisplayName() const;
@@ -175,6 +178,7 @@ private:
     std::unique_ptr<interfaces::Handler> m_handler_can_get_addrs_changed;
     ClientModel* m_client_model;
     interfaces::Node& m_node;
+    std::unique_ptr<interfaces::CoinJoin::Client> m_coinjoinClient;
 
     bool fHaveWatchOnly;
     bool fForceCheckBalanceChanged{false};

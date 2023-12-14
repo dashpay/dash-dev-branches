@@ -5,7 +5,7 @@
 #include <interfaces/wallet.h>
 
 #include <amount.h>
-#include <coinjoin/client.h>
+#include <coinjoin/common.h>
 #include <interfaces/chain.h>
 #include <interfaces/handler.h>
 #include <policy/fees.h>
@@ -120,57 +120,10 @@ WalletTxOut MakeWalletTxOut(const CWallet& wallet,
     return result;
 }
 
-namespace CoinJoin = interfaces::CoinJoin;
-class CoinJoinImpl : public CoinJoin::Client
-{
-    CCoinJoinClientManager& m_manager;
-
-public:
-    CoinJoinImpl(const CJClientManager& clientman, const std::shared_ptr<CWallet>& wallet)
-        : m_manager(*Assert(clientman.Get(*wallet))) {}
-
-    void resetCachedBlocks() override
-    {
-        m_manager.nCachedNumBlocks = std::numeric_limits<int>::max();
-    }
-    void resetPool() override
-    {
-        m_manager.ResetPool();
-    }
-    void disableAutobackups() override
-    {
-        m_manager.fCreateAutoBackups = false;
-    }
-    int getCachedBlocks() override
-    {
-        return m_manager.nCachedNumBlocks;
-    }
-    std::string getSessionDenoms() override
-    {
-        return m_manager.GetSessionDenoms();
-    }
-    void setCachedBlocks(int nCachedBlocks) override
-    {
-       m_manager.nCachedNumBlocks = nCachedBlocks;
-    }
-    bool isMixing() override
-    {
-        return m_manager.IsMixing();
-    }
-    bool startMixing() override
-    {
-        return m_manager.StartMixing();
-    }
-    void stopMixing() override
-    {
-        m_manager.StopMixing();
-    }
-};
-
 class WalletImpl : public Wallet
 {
 public:
-    explicit WalletImpl(const std::shared_ptr<CWallet>& wallet, const CJClientManager& clientman) : m_wallet(wallet), m_coinjoin(clientman, wallet) {}
+    explicit WalletImpl(const std::shared_ptr<CWallet>& wallet) : m_wallet(wallet) {}
 
     void markDirty() override
     {
@@ -550,7 +503,6 @@ public:
     bool hdEnabled() override { return m_wallet->IsHDEnabled(); }
     bool canGetAddresses() override { return m_wallet->CanGetAddresses(); }
     bool privateKeysDisabled() override { return m_wallet->IsWalletFlagSet(WALLET_FLAG_DISABLE_PRIVATE_KEYS); }
-    CoinJoin::Client& coinJoin() override { return m_coinjoin; }
     CAmount getDefaultMaxTxFee() override { return m_wallet->m_default_max_tx_fee; }
     void remove() override
     {
@@ -600,7 +552,6 @@ public:
     CWallet* wallet() override { return m_wallet.get(); }
 
     std::shared_ptr<CWallet> m_wallet;
-    CoinJoinImpl m_coinjoin;
 };
 
 class WalletLoaderImpl : public WalletLoader
@@ -682,7 +633,7 @@ public:
 } // namespace wallet
 
 namespace interfaces {
-std::unique_ptr<Wallet> MakeWallet(const std::shared_ptr<CWallet>& wallet) { return wallet ? std::make_unique<wallet::WalletImpl>(wallet, *::coinJoinClientManagers) : nullptr; }
+std::unique_ptr<Wallet> MakeWallet(const std::shared_ptr<CWallet>& wallet) { return wallet ? std::make_unique<wallet::WalletImpl>(wallet) : nullptr; }
 std::unique_ptr<WalletLoader> MakeWalletLoader(Chain& chain, ArgsManager& args) {
     return std::make_unique<wallet::WalletLoaderImpl>(chain, args);
 }

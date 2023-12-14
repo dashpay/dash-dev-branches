@@ -42,6 +42,7 @@ WalletModel::WalletModel(std::unique_ptr<interfaces::Wallet> wallet, ClientModel
     m_wallet(std::move(wallet)),
     m_client_model(&client_model),
     m_node(client_model.node()),
+    m_coinjoinClient{m_node.coinJoinClient(m_wallet->getWalletName())},
     optionsModel(client_model.getOptionsModel()),
     addressTableModel(nullptr),
     transactionTableModel(nullptr),

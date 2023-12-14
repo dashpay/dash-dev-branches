@@ -217,6 +217,52 @@ public:
     }
 };
 
+class CoinJoinClientImpl : public CoinJoin::Client
+{
+    CCoinJoinClientManager& m_manager;
+
+public:
+    CoinJoinClientImpl(const std::string& walletName)
+        : m_manager(*Assert(::coinJoinClientManagers->Get(walletName))) {}
+
+    void resetCachedBlocks() override
+    {
+        m_manager.nCachedNumBlocks = std::numeric_limits<int>::max();
+    }
+    void resetPool() override
+    {
+        m_manager.ResetPool();
+    }
+    void disableAutobackups() override
+    {
+        m_manager.fCreateAutoBackups = false;
+    }
+    int getCachedBlocks() override
+    {
+        return m_manager.nCachedNumBlocks;
+    }
+    std::string getSessionDenoms() override
+    {
+        return m_manager.GetSessionDenoms();
+    }
+    void setCachedBlocks(int nCachedBlocks) override
+    {
+       m_manager.nCachedNumBlocks = nCachedBlocks;
+    }
+    bool isMixing() override
+    {
+        return m_manager.IsMixing();
+    }
+    bool startMixing() override
+    {
+        return m_manager.StartMixing();
+    }
+    void stopMixing() override
+    {
+        m_manager.StopMixing();
+    }
+};
+
 class NodeImpl : public Node
 {
 private:
@@ -451,7 +497,9 @@ public:
     LLMQ& llmq() override { return m_llmq; }
     Masternode::Sync& masternodeSync() override { return m_masternodeSync; }
     CoinJoin::Options& coinJoinOptions() override { return m_coinjoin; }
-
+#ifdef ENABLE_WALLET
+    std::unique_ptr<CoinJoin::Client> coinJoinClient(const std::string& walletName) override { return std::make_unique<CoinJoinClientImpl>(walletName); }
+#endif // ENABLE_WALLET
     std::unique_ptr<Handler> handleInitMessage(InitMessageFn fn) override
     {
         return MakeHandler(::uiInterface.InitMessage_connect(fn));

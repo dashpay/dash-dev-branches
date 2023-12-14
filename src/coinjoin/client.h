@@ -93,6 +93,11 @@ public:
         return (it != m_wallet_manager_map.end()) ? it->second.get() : nullptr;
     }
 
+    CCoinJoinClientManager* Get(const std::string& name) const {
+        auto it = m_wallet_manager_map.find(name);
+        return (it != m_wallet_manager_map.end()) ? it->second.get() : nullptr;
+    }
+
     const wallet_name_cjman_map& raw() const { return m_wallet_manager_map; }
 
 private:
