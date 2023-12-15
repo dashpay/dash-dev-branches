@@ -51,7 +51,8 @@ static UniValue coinjoin(const JSONRPCRequest& request)
         }
     }
 
-    auto cj_clientman = ::coinJoinClientManagers->Get(*wallet);
+    const NodeContext& node = EnsureAnyNodeContext(request.context);
+    auto cj_clientman = node.cj_ctx->clientman->Get(wallet->GetName());
     CHECK_NONFATAL(cj_clientman != nullptr);
 
     if (request.params[0].get_str() == "start") {
@@ -61,13 +62,12 @@ static UniValue coinjoin(const JSONRPCRequest& request)
                 throw JSONRPCError(RPC_WALLET_UNLOCK_NEEDED, "Error: Please unlock wallet for mixing with walletpassphrase first.");
         }
 
+        CTxMemPool& mempool = EnsureMemPool(node);
+        CBlockPolicyEstimator& fee_estimator = EnsureFeeEstimator(node);
         if (!cj_clientman->StartMixing()) {
             throw JSONRPCError(RPC_INTERNAL_ERROR, "Mixing has been started already.");
         }
 
-        const NodeContext& node = EnsureAnyNodeContext(request.context);
-        CTxMemPool& mempool = EnsureMemPool(node);
-        CBlockPolicyEstimator& fee_estimator = EnsureFeeEstimator(node);
         bool result = cj_clientman->DoAutomaticDenominating(*node.connman, fee_estimator, mempool);
         return "Mixing " + (result ? "started successfully" : ("start failed: " + cj_clientman->GetStatuses().original + ", will retry"));
     }
@@ -163,7 +163,7 @@ static UniValue getcoinjoininfo(const JSONRPCRequest& request)
         return obj;
     }
 
-    auto manager = ::coinJoinClientManagers->Get(*wallet);
+    auto manager = node.cj_ctx->clientman->Get(wallet->GetName());
     CHECK_NONFATAL(manager != nullptr);
     manager->GetJsonInfo(obj);
 

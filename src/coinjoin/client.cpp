@@ -29,8 +29,6 @@
 #include <memory>
 #include <univalue.h>
 
-std::unique_ptr<CJClientManager> coinJoinClientManagers;
-
 void CCoinJoinClientQueueManager::ProcessMessage(const CNode& peer, PeerManager& peerman, std::string_view msg_type, CDataStream& vRecv)
 {
     if (fMasternodeMode) return;

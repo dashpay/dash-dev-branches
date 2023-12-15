@@ -57,6 +57,7 @@
 
 #include <coinjoin/client.h>
 #include <coinjoin/coinjoin.h>
+#include <coinjoin/context.h>
 #include <coinjoin/options.h>
 
 #include <univalue.h>
@@ -222,8 +223,8 @@ class CoinJoinClientImpl : public CoinJoin::Client
     CCoinJoinClientManager& m_manager;
 
 public:
-    CoinJoinClientImpl(const std::string& walletName)
-        : m_manager(*Assert(::coinJoinClientManagers->Get(walletName))) {}
+    CoinJoinClientImpl(CCoinJoinClientManager& clientManager)
+        : m_manager(clientManager) {}
 
     void resetCachedBlocks() override
     {
@@ -498,7 +499,10 @@ public:
     Masternode::Sync& masternodeSync() override { return m_masternodeSync; }
     CoinJoin::Options& coinJoinOptions() override { return m_coinjoin; }
 #ifdef ENABLE_WALLET
-    std::unique_ptr<CoinJoin::Client> coinJoinClient(const std::string& walletName) override { return std::make_unique<CoinJoinClientImpl>(walletName); }
+    std::unique_ptr<CoinJoin::Client> coinJoinClient(const std::string& walletName) override {
+        assert(m_context->cj_ctx != nullptr);
+        return std::make_unique<CoinJoinClientImpl>(*Assert(m_context->cj_ctx->clientman->Get(walletName)));
+    }
 #endif // ENABLE_WALLET
     std::unique_ptr<Handler> handleInitMessage(InitMessageFn fn) override
     {
@@ -966,26 +970,26 @@ public:
 #ifdef ENABLE_WALLET
     void cjAddWallet(CWallet& wallet) override
     {
-        assert(::coinJoinClientManagers != nullptr);
-        ::coinJoinClientManagers->Add(wallet);
+        assert(m_node.cj_ctx != nullptr);
+        m_node.cj_ctx->clientman->Add(wallet);
     }
     void cjRemoveWallet(const std::string& name) override
     {
-        assert(::coinJoinClientManagers != nullptr);
-        ::coinJoinClientManagers->Remove(name);
+        assert(m_node.cj_ctx != nullptr);
+        m_node.cj_ctx->clientman->Remove(name);
     }
     void cjFlushWallet(const CWallet& wallet) override
     {
-        assert(::coinJoinClientManagers != nullptr);
-        auto cj_clientman = ::coinJoinClientManagers->Get(wallet);
+        assert(m_node.cj_ctx != nullptr);
+        auto cj_clientman = m_node.cj_ctx->clientman->Get(wallet);
         assert(cj_clientman != nullptr);
         cj_clientman->ResetPool();
         cj_clientman->StopMixing();
     }
     void cjStopMixingWallet(const CWallet& wallet) override
     {
-        assert(::coinJoinClientManagers != nullptr);
-        auto cj_clientman = ::coinJoinClientManagers->Get(wallet);
+        assert(m_node.cj_ctx != nullptr);
+        auto cj_clientman = m_node.cj_ctx->clientman->Get(wallet);
         if (cj_clientman != nullptr) cj_clientman->StopMixing();
     }
 #endif // ENABLE_WALLET

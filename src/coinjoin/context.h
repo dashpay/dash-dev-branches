@@ -30,7 +30,8 @@ struct CJContext {
     ~CJContext();
 
 #ifdef ENABLE_WALLET
-    CJClientManager* const clientman;
+    // The main object for accessing mixing
+    const std::unique_ptr<CJClientManager> clientman;
     const std::unique_ptr<CCoinJoinClientQueueManager> queueman;
 #endif // ENABLE_WALLET
     const std::unique_ptr<CCoinJoinServer> server;
