@@ -471,23 +471,19 @@ void CChainLocksHandler::EnforceBestChainLock()
     AssertLockNotHeld(cs);
     AssertLockNotHeld(cs_main);
 
-    std::shared_ptr<CChainLockSig> clsig;
-    const CBlockIndex* pindex;
-    const CBlockIndex* currentBestChainLockBlockIndex;
-    {
+    auto [clsig, pindex, currentBestChainLockBlockIndex2] = [&]() -> std::tuple<CChainLockSig, const CBlockIndex*, const CBlockIndex*> {
         LOCK(cs);
 
         if (!isEnforced) {
-            return;
+            return {};
         }
 
-        clsig = std::make_shared<CChainLockSig>(bestChainLockWithKnownBlock);
-        pindex = currentBestChainLockBlockIndex = this->bestChainLockBlockIndex;
-
-        if (currentBestChainLockBlockIndex == nullptr) {
-            // we don't have the header/block, so we can't do anything right now
-            return;
-        }
+        return {bestChainLockWithKnownBlock, this->bestChainLockBlockIndex, this->bestChainLockBlockIndex};
+    }();
+    auto& currentBestChainLockBlockIndex = currentBestChainLockBlockIndex2; // Allow this to be captured
+    if (currentBestChainLockBlockIndex == nullptr) {
+        // we don't have the header/block, so we can't do anything right now
+        return;
     }
 
     BlockValidationState dummy_state;
@@ -495,7 +491,7 @@ void CChainLocksHandler::EnforceBestChainLock()
     // Go backwards through the chain referenced by clsig until we find a block that is part of the main chain.
     // For each of these blocks, check if there are children that are NOT part of the chain referenced by clsig
     // and mark all of them as conflicting.
-    LogPrint(BCLog::CHAINLOCKS, "CChainLocksHandler::%s -- enforcing block %s via CLSIG (%s)\n", __func__, pindex->GetBlockHash().ToString(), clsig->ToString());
+    LogPrint(BCLog::CHAINLOCKS, "CChainLocksHandler::%s -- enforcing block %s via CLSIG (%s)\n", __func__, pindex->GetBlockHash().ToString(), clsig.ToString());
     m_chainstate.EnforceBlock(dummy_state, pindex);
 
     bool activateNeeded = WITH_LOCK(::cs_main, return m_chainstate.m_chain.Tip()->GetAncestor(currentBestChainLockBlockIndex->nHeight)) != currentBestChainLockBlockIndex;
@@ -511,14 +507,13 @@ void CChainLocksHandler::EnforceBestChainLock()
         }
     }
 
-    {
-        LOCK(cs);
-        if (lastNotifyChainLockBlockIndex == currentBestChainLockBlockIndex) return;
+    if (LOCK(cs); lastNotifyChainLockBlockIndex == currentBestChainLockBlockIndex) {
+        return;
+    } else {
         lastNotifyChainLockBlockIndex = currentBestChainLockBlockIndex;
     }
-
-    GetMainSignals().NotifyChainLock(currentBestChainLockBlockIndex, clsig);
-    uiInterface.NotifyChainLock(clsig->getBlockHash().ToString(), clsig->getHeight());
+    uiInterface.NotifyChainLock(clsig.getBlockHash().ToString(), clsig.getHeight());
+    GetMainSignals().NotifyChainLock(currentBestChainLockBlockIndex, std::make_shared<CChainLockSig>(std::move(clsig)));
 }
 
 void CChainLocksHandler::HandleNewRecoveredSig(const llmq::CRecoveredSig& recoveredSig)
@@ -527,23 +522,21 @@ void CChainLocksHandler::HandleNewRecoveredSig(const llmq::CRecoveredSig& recove
         return;
     }
 
-    CChainLockSig clsig;
-    {
+    const auto clsig = [&]() -> std::optional<const CChainLockSig> {
         LOCK(cs);
 
         if (recoveredSig.getId() != lastSignedRequestId || recoveredSig.getMsgHash() != lastSignedMsgHash) {
             // this is not what we signed, so lets not create a CLSIG for it
-            return;
+            return std::nullopt;
         }
         if (bestChainLock.getHeight() >= lastSignedHeight) {
             // already got the same or a better CLSIG through the CLSIG message
-            return;
+            return std::nullopt;
         }
 
-
-        clsig = CChainLockSig(lastSignedHeight, lastSignedMsgHash, recoveredSig.sig.Get());
-    }
-    ProcessNewChainLock(-1, clsig, ::SerializeHash(clsig));
+        return CChainLockSig(lastSignedHeight, lastSignedMsgHash, recoveredSig.sig.Get());
+    }();
+    if (clsig) ProcessNewChainLock(-1, *clsig, ::SerializeHash(*clsig));
 }
 
 bool CChainLocksHandler::HasChainLock(int nHeight, const uint256& blockHash) const
@@ -620,11 +613,8 @@ void CChainLocksHandler::Cleanup()
         return;
     }
 
-    {
-        LOCK(cs);
-        if (GetTimeMillis() - lastCleanupTime < CLEANUP_INTERVAL) {
-            return;
-        }
+    if (LOCK(cs); GetTimeMillis() - lastCleanupTime < CLEANUP_INTERVAL) {
+        return;
     }
 
     // need mempool.cs due to GetTransaction calls
