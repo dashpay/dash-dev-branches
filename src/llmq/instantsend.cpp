@@ -1198,8 +1198,7 @@ void CInstantSendManager::RemoveNonLockedTx(const uint256& txid, bool retryChild
 
     if (info.tx) {
         for (const auto& in : info.tx->vin) {
-            auto jt = nonLockedTxs.find(in.prevout.hash);
-            if (jt != nonLockedTxs.end()) {
+            if (auto jt = nonLockedTxs.find(in.prevout.hash); jt != nonLockedTxs.end()) {
                 jt->second.children.erase(txid);
                 if (!jt->second.tx && jt->second.children.empty()) {
                     nonLockedTxs.erase(jt);
