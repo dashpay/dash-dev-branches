@@ -39,7 +39,7 @@ private:
     CChainState& m_chainstate;
     CConnman& connman;
     CEvoDB& m_evoDb;
-    const std::unique_ptr<PeerManager>& m_peerman;
+    PeerManager& m_peerman;
 
     mutable RecursiveMutex minableCommitmentsCs;
     std::map<std::pair<Consensus::LLMQType, uint256>, uint256> minableCommitmentsByQuorum GUARDED_BY(minableCommitmentsCs);
@@ -48,7 +48,7 @@ private:
     mutable std::map<Consensus::LLMQType, unordered_lru_cache<uint256, bool, StaticSaltedHasher>> mapHasMinedCommitmentCache GUARDED_BY(minableCommitmentsCs);
 
 public:
-    explicit CQuorumBlockProcessor(CChainState& chainstate, CConnman& _connman, CEvoDB& evoDb, const std::unique_ptr<PeerManager>& peerman);
+    explicit CQuorumBlockProcessor(CChainState& chainstate, CConnman& _connman, CEvoDB& evoDb, PeerManager& peerman);
 
     void ProcessMessage(const CNode& peer, std::string_view msg_type, CDataStream& vRecv);
 
