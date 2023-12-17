@@ -53,7 +53,7 @@ private:
     CSigSharesManager& shareman;
     CSporkManager& spork_manager;
     CTxMemPool& mempool;
-    const std::unique_ptr<PeerManager>& m_peerman;
+    PeerManager& m_peerman;
 
     std::unique_ptr<CScheduler> scheduler;
     std::unique_ptr<std::thread> scheduler_thread;
@@ -89,7 +89,7 @@ private:
 public:
     explicit CChainLocksHandler(CChainState& chainstate, CConnman& _connman, CMasternodeSync& mn_sync, CQuorumManager& _qman,
                                 CSigningManager& _sigman, CSigSharesManager& _shareman, CSporkManager& sporkManager,
-                                CTxMemPool& _mempool, const std::unique_ptr<PeerManager>& peerman);
+                                CTxMemPool& _mempool, PeerManager& peerman);
     ~CChainLocksHandler();
 
     void Start();
