@@ -1480,7 +1480,7 @@ void CInstantSendManager::AskNodesForLockedTx(const uint256& txid, const CConnma
 
 void CInstantSendManager::ProcessPendingRetryLockTxs()
 {
-    decltype(pendingRetryTxs) retryTxs = WITH_LOCK(cs_pendingRetry, return std::move(pendingRetryTxs));
+    auto retryTxs = WITH_LOCK(cs_pendingRetry, return pendingRetryTxs);
 
     if (retryTxs.empty()) {
         return;
