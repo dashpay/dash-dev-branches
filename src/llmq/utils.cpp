@@ -232,16 +232,16 @@ std::vector<std::vector<CDeterministicMNCPtr>> ComputeQuorumMembersByQuarterRota
 
     for (const size_t i : irange::range(nQuorums)) {
         for (const auto &m: previousQuarters.quarterHMinus3C[i]) {
-            quorumMembers[i].push_back(std::move(m));
+            quorumMembers[i].push_back(m);
         }
         for (const auto &m: previousQuarters.quarterHMinus2C[i]) {
-            quorumMembers[i].push_back(std::move(m));
+            quorumMembers[i].push_back(m);
         }
         for (const auto &m: previousQuarters.quarterHMinusC[i]) {
-            quorumMembers[i].push_back(std::move(m));
+            quorumMembers[i].push_back(m);
         }
         for (const auto &m: newQuarterMembers[i]) {
-            quorumMembers[i].push_back(std::move(m));
+            quorumMembers[i].push_back(m);
         }
 
         if (LogAcceptCategory(BCLog::LLMQ)) {
