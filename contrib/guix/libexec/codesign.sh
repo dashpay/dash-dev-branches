@@ -38,8 +38,12 @@ ACTUAL_OUTDIR="${OUTDIR}"
 OUTDIR="${DISTSRC}/output"
 
 git_head_version() {
-    recent_tag="$(git -C "$1" describe --abbrev=12 --dirty 2> /dev/null)"
-    echo "${recent_tag#v}"
+    local recent_tag
+    if recent_tag="$(git describe --abbrev=12 --dirty 2> /dev/null)"; then
+        echo "${recent_tag#v}"
+    else
+        git -C "$1" rev-parse --short=12 HEAD
+    fi
 }
 
 CODESIGNATURE_GIT_ARCHIVE="${DIST_ARCHIVE_BASE}/${DISTNAME}-codesignatures-$(git_head_version "$DETACHED_SIGS_REPO").tar.gz"
