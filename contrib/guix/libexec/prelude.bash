@@ -65,6 +65,8 @@ time-machine() {
 # Set common variables
 ################
 
+echo "DEBUG: git_head_version: '$(git_head_version)'"
+echo "DEBUG: PWD: '${PWD}'"
 VERSION="${FORCE_VERSION:-$(git_head_version)}"
 DISTNAME="${DISTNAME:-dashcore-${VERSION}}"
 
