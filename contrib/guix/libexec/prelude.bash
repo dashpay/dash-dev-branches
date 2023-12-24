@@ -65,6 +65,8 @@ time-machine() {
 # Set common variables
 ################
 
+echo "DEBUG: git tag:\n$(git tag)\nDEBUG: Done"
+echo "DEBUG: git describe --abbrev=12 --dirty --debug: $(git describe --abbrev=12 --dirty --debug)"
 VERSION="${FORCE_VERSION:-$(git_head_version)}"
 DISTNAME="${DISTNAME:-dashcore-${VERSION}}"
 
