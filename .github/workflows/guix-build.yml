@@ -17,9 +17,6 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           path: dash
 
-      - name: Get tags
-        run: pushd ${{ github.workspace }}/dash && git fetch --tags origin && popd
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
