@@ -16,6 +16,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           path: dash
+          fetch-depth: 0
           fetch-tags: true
 
       - name: Get tags
