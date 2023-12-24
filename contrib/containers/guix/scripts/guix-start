@@ -26,6 +26,7 @@ fi
 
 cd "${WORKSPACE_PATH}"
 git config --global --add safe.directory "${WORKSPACE_PATH}"
+git fetch --tags origin
 git status >> /dev/null
 
 ./contrib/guix/guix-build
