@@ -911,7 +911,7 @@ bool CDeterministicMNManager::BuildNewListFromBlock(const CBlock& block, gsl::no
                 return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-qc-payload");
             }
             if (!qc.commitment.IsNull()) {
-                const auto& llmq_params_opt = llmq::GetLLMQParams(qc.commitment.llmqType);
+                const auto& llmq_params_opt = Params().GetLLMQ(qc.commitment.llmqType);
                 if (!llmq_params_opt.has_value()) {
                     return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-qc-commitment-type");
                 }
