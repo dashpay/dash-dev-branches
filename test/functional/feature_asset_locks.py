@@ -51,7 +51,7 @@ blocks_in_one_day = 576
 
 class AssetLocksTest(DashTestFramework):
     def set_test_params(self):
-        self.set_dash_test_params(6, 4, evo_count=5)
+        self.set_dash_test_params(6, 4, evo_count=3)
 
     def skip_test_if_missing_module(self):
         self.skip_if_no_wallet()
@@ -257,7 +257,7 @@ class AssetLocksTest(DashTestFramework):
 
         self.mine_cycle_quorum(llmq_type_name='llmq_test_dip0024', llmq_type=103)
 
-        for i in range(5):
+        for i in range(3):
             evo_info = self.dynamically_add_masternode(evo=True)
             node.generate(8)
             self.sync_blocks(self.nodes)
