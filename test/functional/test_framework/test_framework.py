@@ -1161,17 +1161,14 @@ class DashTestFramework(BitcoinTestFramework):
         node_p2p_port = p2p_port(mn_idx)
         node_rpc_port = rpc_port(mn_idx)
 
-        created_mn_info = self.dynamically_prepare_masternode(mn_idx, node_p2p_port, evo, rnd)
-        #protx_success = False
-        #try:
-        #    created_mn_info = self.dynamically_prepare_masternode(mn_idx, node_p2p_port, evo, rnd)
-        #    protx_success = True
-        #except Exception as e:
-        #    self.log.info(f"dynamically_prepare_masternode failed: {e}")
-        #    if not should_be_rejected:
-        #        raise e
+        protx_success = False
+        try:
+            created_mn_info = self.dynamically_prepare_masternode(mn_idx, node_p2p_port, evo, rnd)
+            protx_success = True
+        except:
+            self.log.info("dynamically_prepare_masternode failed")
 
-        #assert_equal(protx_success, not should_be_rejected)
+        assert_equal(protx_success, not should_be_rejected)
 
         if should_be_rejected:
             # nothing to do
@@ -1212,16 +1209,9 @@ class DashTestFramework(BitcoinTestFramework):
         collateral_amount = EVONODE_COLLATERAL if evo else MASTERNODE_COLLATERAL
         outputs = {collateral_address: collateral_amount, funds_address: 1}
         collateral_txid = self.nodes[0].sendmany("", outputs)
-        self.log.info(f"collateral: {collateral_txid}")
-        self.log.info(f"top block: {self.nodes[0].getblock(self.nodes[0].getbestblockhash())}")
-        
-#        self.send_tx(collateral_txid)
-        self.bump_mocktime(1)
-#        self.wait_for_instantlock(collateral_txid, self.nodes[0])
+        self.wait_for_instantlock(collateral_txid, self.nodes[0])
         tip = self.nodes[0].generate(1)[0]
-        self.sync_all()
-        self.log.info(f"top block-expected: {self.nodes[0].getblock(self.nodes[0].getbestblockhash())}")
-        
+        self.sync_all(self.nodes)
 
         rawtx = self.nodes[0].getrawtransaction(collateral_txid, 1, tip)
         assert_equal(rawtx['confirmations'], 1)
@@ -1241,11 +1231,9 @@ class DashTestFramework(BitcoinTestFramework):
         else:
             protx_result = self.nodes[0].protx("register", collateral_txid, collateral_vout, ipAndPort, owner_address, bls['public'], voting_address, operatorReward, reward_address, funds_address, True)
 
-        self.bump_mocktime(1)
-#        self.send_tx(collateral_txid)
-#        self.wait_for_instantlock(protx_result, self.nodes[0])
+        self.wait_for_instantlock(protx_result, self.nodes[0])
         tip = self.nodes[0].generate(1)[0]
-        self.sync_all()
+        self.sync_all(self.nodes)
 
         assert_equal(self.nodes[0].getrawtransaction(protx_result, 1, tip)['confirmations'], 1)
         mn_info = MasternodeInfo(protx_result, owner_address, voting_address, reward_address, operatorReward, bls['public'], bls['secret'], collateral_address, collateral_txid, collateral_vout, ipAndPort, evo)
@@ -1982,11 +1970,11 @@ class DashTestFramework(BitcoinTestFramework):
         # Note: recsigs aren't relayed to regular nodes by default,
         # make sure to pick a mn as a node to query for recsigs.
         try:
-            quorumHash = self.mninfo[1].node.quorum("selectquorum", llmq_type, rec_sig_id)["quorumHash"]
+            quorumHash = self.mninfo[0].node.quorum("selectquorum", llmq_type, rec_sig_id)["quorumHash"]
             for mn in self.mninfo:
                 mn.node.quorum("sign", llmq_type, rec_sig_id, rec_sig_msg_hash, quorumHash)
             self.wait_for_recovered_sig(rec_sig_id, rec_sig_msg_hash, llmq_type, 10)
-            return self.mninfo[1].node.quorum("getrecsig", llmq_type, rec_sig_id, rec_sig_msg_hash)
+            return self.mninfo[0].node.quorum("getrecsig", llmq_type, rec_sig_id, rec_sig_msg_hash)
         except JSONRPCException as e:
             self.log.info(f"getrecsig failed with '{e}'")
         assert False
