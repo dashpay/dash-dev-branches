@@ -258,9 +258,9 @@ class AssetLocksTest(DashTestFramework):
         self.mine_cycle_quorum(llmq_type_name='llmq_test_dip0024', llmq_type=103)
 
         for i in range(3):
-            evo_info = self.dynamically_add_masternode(evo=True)
+            self.dynamically_add_masternode(evo=True)
             node.generate(8)
-            self.sync_blocks(self.nodes)
+            self.sync_blocks()
 
         self.set_sporks()
         self.activate_v20()
