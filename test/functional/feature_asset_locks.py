@@ -289,6 +289,7 @@ class AssetLocksTest(DashTestFramework):
         assert "assetLockTx" in node.getrawtransaction(txid_in_block, 1)
         self.validate_credit_pool_balance(0)
         node.generate(1)
+        assert_equal(self.get_credit_pool_balance(node=node_wallet), 0)
         assert_equal(self.get_credit_pool_balance(node=node), locked_1)
         self.log.info("Generate a number of blocks to ensure this is the longest chain for later in the test when we reconsiderblock")
         node.generate(12)
