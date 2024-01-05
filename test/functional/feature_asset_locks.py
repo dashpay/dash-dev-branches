@@ -51,7 +51,7 @@ blocks_in_one_day = 576
 
 class AssetLocksTest(DashTestFramework):
     def set_test_params(self):
-        self.set_dash_test_params(5, 3, evo_count=3)
+        self.set_dash_test_params(6, 4, evo_count=5)
 
     def skip_test_if_missing_module(self):
         self.skip_if_no_wallet()
@@ -245,7 +245,19 @@ class AssetLocksTest(DashTestFramework):
         self.activate_v19(expected_activation_height=900)
         self.log.info("Activated v19 at height:" + str(node.getblockcount()))
 
-        for i in range(3):
+        self.nodes[0].sporkupdate("SPORK_2_INSTANTSEND_ENABLED", 0)
+        self.wait_for_sporks_same()
+
+        self.move_to_next_cycle()
+        self.log.info("Cycle H height:" + str(self.nodes[0].getblockcount()))
+        self.move_to_next_cycle()
+        self.log.info("Cycle H+C height:" + str(self.nodes[0].getblockcount()))
+        self.move_to_next_cycle()
+        self.log.info("Cycle H+2C height:" + str(self.nodes[0].getblockcount()))
+
+        self.mine_cycle_quorum(llmq_type_name='llmq_test_dip0024', llmq_type=103)
+
+        for i in range(5):
             evo_info = self.dynamically_add_masternode(evo=True)
             node.generate(8)
             self.sync_blocks(self.nodes)
