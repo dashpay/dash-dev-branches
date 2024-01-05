@@ -98,9 +98,9 @@ class AssetLocksTest(DashTestFramework):
         request_id = hash256(request_id_buf)[::-1].hex()
 
         height = node_wallet.getblockcount()
-        self.log.info(f"knst-create asset unlock: {llmq_type_test} {request_id}")
+        self.log.info(f"Creating asset unlock: {llmq_type_test} {request_id}")
         quorumHash = mninfo[0].node.quorum("selectquorum", llmq_type_test, request_id)["quorumHash"]
-        self.log.info(f"quorum hash: {quorumHash}")
+        self.log.info(f"Used quorum hash: {quorumHash}")
         unlockTx_payload = CAssetUnlockTx(
             version = 1,
             index = index,
@@ -237,14 +237,14 @@ class AssetLocksTest(DashTestFramework):
         node = self.nodes[1]
 
         self.set_sporks()
-#        self.nodes[0].sporkupdate("SPORK_17_QUORUM_DKG_ENABLED", 0)
-#        self.activate_dip8()
-#        self.wait_for_sporks_same()
-#        self.mine_quorum(llmq_type_name='llmq_test', llmq_type=100)
 
         self.activate_v19(expected_activation_height=900)
         self.log.info("Activated v19 at height:" + str(node.getblockcount()))
 
+        # TODO: need to refactor this part to common code
+        # enabling instantsend -> 3 rotating quorums -> new 103 quorum
+        # with following dynamically adding evo nodes one-by-one seems
+        # as little too much complex for functional test (each which use Evo nodes)
         self.nodes[0].sporkupdate("SPORK_2_INSTANTSEND_ENABLED", 0)
         self.wait_for_sporks_same()
 
@@ -261,9 +261,6 @@ class AssetLocksTest(DashTestFramework):
             evo_info = self.dynamically_add_masternode(evo=True)
             node.generate(8)
             self.sync_blocks(self.nodes)
-
-#            self.dynamically_evo_update_service(evo_info)
-
 
         self.set_sporks()
         self.activate_v20()
@@ -358,7 +355,14 @@ class AssetLocksTest(DashTestFramework):
         asset_unlock_tx_payload = CAssetUnlockTx()
         asset_unlock_tx_payload.deserialize(BytesIO(asset_unlock_tx.vExtraPayload))
 
-        self.send_tx(asset_unlock_tx)
+        assert_equal(asset_unlock_tx_payload.quorumHash, int(self.mninfo[0].node.quorum("selectquorum", llmq_type_test, 'e6c7a809d79f78ea85b72d5df7e9bd592aecf151e679d6e976b74f053a7f9056')["quorumHash"], 16))
+
+        txid = self.send_tx(asset_unlock_tx)
+        assert "assetUnlockTx" in node.getrawtransaction(txid, 1)
+
+        indexes_statuses = self.nodes[0].getassetunlockstatuses(["101", "102", "300"])
+        assert_equal([{'index': 101, 'status': 'mempooled'}, {'index': 102, 'status': 'unknown'}, {'index': 300, 'status': 'unknown'}], indexes_statuses)
+
         self.mempool_size += 1
         self.check_mempool_size()
         self.validate_credit_pool_balance(locked_1)
