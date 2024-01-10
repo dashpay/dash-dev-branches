@@ -1,4 +1,4 @@
-# Dash Core version v20.0.4
+# Dash Core version v20.0.3
 
 Release is now available from:
 
@@ -35,23 +35,24 @@ reindex or re-sync the whole chain.
 
 # Notable changes
 
-## Build changes
+## Masternode fix
 
-The miner has been disabled for Windows binaries built via Guix. This resolves
-an issue with false positive alerts from Microsoft Defender that were preventing
-users from installing v20.0.3.
+The memory usage during the old quorum data cleanup mechanism was reduced.
 
-Updated expired gpg keys for builders.
+## Wallet fix
 
-## Governance
+A fix has been implemented for the reported decryption of wallets.
 
-Triggers from the past are now ignored when voting.
+## RPC changes
 
-## Asset lock and unlock transactions
+In `getspecialtxes` `instantlock` and `chainlock` fields are reflecting actual values now.
 
-Fixed quorum for signing withdrawal (asset unlock) txes on RegTest.
+## Other changes
 
-# v20.0.4 Change log
+Implemented improvements in Github CI and build system for macOS. Fixed compilation issues on FreeBSD.
+
+
+# v20.0.3 Change log
 
 See detailed [set of changes][set-of-changes].
 
@@ -60,6 +61,8 @@ See detailed [set of changes][set-of-changes].
 Thanks to everyone who directly contributed to this release:
 
 - Konstantin Akimov (knst)
+- Odysseas Gabrielides (ogabrielides)
+- PastaPastaPasta
 - UdjinM6
 
 As well as everyone that submitted issues, reviewed pull requests and helped
@@ -87,7 +90,6 @@ Dash Core tree 0.12.1.x was a fork of Bitcoin Core tree 0.12.
 
 These release are considered obsolete. Old release notes can be found here:
 
-- [v20.0.3](https://github.com/dashpay/dash/blob/master/doc/release-notes/dash/release-notes-20.0.3.md) released December/26/2023
 - [v20.0.2](https://github.com/dashpay/dash/blob/master/doc/release-notes/dash/release-notes-20.0.2.md) released December/06/2023
 - [v20.0.1](https://github.com/dashpay/dash/blob/master/doc/release-notes/dash/release-notes-20.0.1.md) released November/18/2023
 - [v20.0.0](https://github.com/dashpay/dash/blob/master/doc/release-notes/dash/release-notes-20.0.0.md) released November/15/2023
@@ -133,4 +135,4 @@ These release are considered obsolete. Old release notes can be found here:
 - [v0.10.x](https://github.com/dashpay/dash/blob/master/doc/release-notes/dash/release-notes-0.10.0.md) released Sep/25/2014
 - [v0.9.x](https://github.com/dashpay/dash/blob/master/doc/release-notes/dash/release-notes-0.9.0.md) released Mar/13/2014
 
-[set-of-changes]: https://github.com/dashpay/dash/compare/v20.0.3...dashpay:v20.0.4
+[set-of-changes]: https://github.com/dashpay/dash/compare/v20.0.2...dashpay:v20.0.3
