@@ -25,7 +25,7 @@ TMPFILE="hashes.tmp"
 SIGNATUREFILENAME="SHA256SUMS.asc"
 RCSUBDIR="test"
 HOST1="https://github.com/dashpay/dash/releases/download/v"
-HOST2="https://pasta.keybase.pub/Dash-Core-Releases/"
+HOST2="https://dashcore-binaries.thepasta.org/file/dashcore-binaries/"
 BASEDIR=""
 VERSIONPREFIX=""
 RCVERSIONSTRING="rc"
@@ -149,6 +149,26 @@ for file in $FILES
 do
    echo "Downloading $file"
    wget --quiet -N "$HOST1$BASEDIR$file"
+    wget --quiet -N "$HOST1$BASEDIR$file.asc"
+
+    GPGOUT=$(gpg --verify "$file.asc" 2>&1)
+    RET="$?"
+    if [ $RET -ne 0 ]; then
+       if [ $RET -eq 1 ]; then
+          #and notify the user if it's bad
+          echo "Bad signature."
+       elif [ $RET -eq 2 ]; then
+          #or if a gpg error has occurred
+          echo "gpg error. Do you have the Dash Core binary release signing key installed?"
+       fi
+
+       echo "gpg output:"
+       # shellcheck disable=SC2001
+       echo "$GPGOUT"|sed 's/^/\t/g'
+       clean_up $SIGNATUREFILENAME $SIGNATUREFILENAME.2 $TMPFILE
+       exit "$RET"
+    fi
+
 done
 
 #check hashes
