@@ -265,6 +265,88 @@ static UniValue getrawtransaction(const JSONRPCRequest& request)
     return result;
 }
 
+static UniValue getrawtransactionmulti(const JSONRPCRequest& request) {
+    RPCHelpMan{
+            "getrawtransactionmulti",
+            "\nReturns the raw transaction data for multiple transactions.\n"
+            "\nThis call is an extension of getrawtransaction that supports multiple transactions.\n"
+            "It accepts a map of block hashes to a list of transaction hashes.\n"
+            "A block hash of 0 indicates transactions not yet mined or in the mempool.\n",
+            {
+                    {"transactions", RPCArg::Type::OBJ, RPCArg::Optional::NO,
+                     "A JSON object with block hashes as keys and lists of transaction hashes as values",
+                     {
+                             {"blockhash", RPCArg::Type::ARR, RPCArg::Optional::OMITTED,
+                              "The block hash and the list of transaction ids to fetch",
+                              {
+                                      {"txid", RPCArg::Type::STR_HEX, RPCArg::Optional::OMITTED, "The transaction id"},
+                              }},
+                     }},
+                    {"verbose", RPCArg::Type::BOOL, /* default */ "false",
+                     "If false, return a string, otherwise return a json object"},
+            },
+            RPCResults{},
+            RPCExamples{
+                    HelpExampleCli("getrawtransactionmulti",
+                                   "'{\"blockhash1\":[\"txid1\",\"txid2\"], \"0\":[\"txid3\"]}'")
+                    + HelpExampleRpc("getrawtransactionmulti",
+                                     "{\"blockhash1\":[\"txid1\",\"txid2\"], \"0\":[\"txid3\"]}")
+            }
+    }.Check(request);
+
+    // Parse arguments
+    UniValue transactions = request.params[0];
+    transactions.setObject();
+    // Accept either a bool (true) or a num (>=1) to indicate verbose output.
+    bool fVerbose = false;
+    if (!request.params[1].isNull()) {
+        fVerbose = request.params[1].isNum() ? (request.params[1].get_int() != 0) : request.params[1].get_bool();
+    }
+    const NodeContext& node = EnsureAnyNodeContext(request.context);
+    const ChainstateManager& chainman = EnsureChainman(node);
+    const LLMQContext& llmq_ctx = EnsureLLMQContext(node);
+    CTxMemPool& mempool = EnsureMemPool(node);
+
+
+    UniValue result(UniValue::VOBJ);
+    for (const std::string& blockhash_str : transactions.getKeys()) {
+        uint256 blockhash = uint256S(blockhash_str);
+        UniValue txids = transactions[blockhash_str].get_array();
+
+        CBlockIndex* blockindex = nullptr;
+        if (!blockhash.IsNull()) {
+            LOCK(cs_main);
+            blockindex = chainman.m_blockman.LookupBlockIndex(blockhash);
+            if (!blockindex) {
+                for (unsigned int idx = 0; idx < txids.size(); idx++) {
+                    result.pushKV(txids[idx].get_str(), "None");
+                }
+                continue;
+            }
+        }
+
+        for (unsigned int idx = 0; idx < txids.size(); idx++) {
+            std::string txid_str = txids[idx].get_str();
+            uint256 txid = ParseHashV(txid_str, "transaction id");
+
+            uint256 hash_block;
+            const CTransactionRef tx = GetTransaction(blockindex, node.mempool.get(), txid, Params().GetConsensus(), hash_block);
+            if (!tx) {
+                result.pushKV(txid_str, "None");
+            } else if (fVerbose) {
+                UniValue tx_data(UniValue::VOBJ);
+                TxToJSON(*tx, hash_block, mempool, chainman.ActiveChainstate(), *llmq_ctx.clhandler, *llmq_ctx.isman, result);
+                result.pushKV(txid_str, tx_data);
+            } else {
+                std::string strHex = EncodeHexTx(*tx);
+                result.pushKV(txid_str, strHex);
+            }
+        }
+    }
+
+    return result;
+}
+
 static UniValue gettxchainlocks(const JSONRPCRequest& request)
 {
     RPCHelpMan{
@@ -1885,6 +1967,7 @@ static const CRPCCommand commands[] =
   //  --------------------- ------------------------        -----------------------     ----------
     { "rawtransactions",    "getassetunlockstatuses",       &getassetunlockstatuses,    {"indexes"} },
     { "rawtransactions",    "getrawtransaction",            &getrawtransaction,         {"txid","verbose","blockhash"} },
+    { "rawtransactions",    "getrawtransactionmulti",       &getrawtransactionmulti,    {"txid_map","verbose"} },
     { "rawtransactions",    "gettxchainlocks",              &gettxchainlocks,           {"txids"} },
     { "rawtransactions",    "createrawtransaction",         &createrawtransaction,      {"inputs","outputs","locktime"} },
     { "rawtransactions",    "decoderawtransaction",         &decoderawtransaction,      {"hexstring"} },
