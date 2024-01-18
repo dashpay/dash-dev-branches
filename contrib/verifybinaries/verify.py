@@ -5,7 +5,7 @@
 """Script for verifying Dash Core release binaries
 
 This script attempts to download the signature file SHA256SUMS.asc from
-github.com and pasta.keybase.pub and compares them.
+github.com and dashcore-binaries.thepasta.org and compares them.
 It first checks if the signature passes, and then downloads the files
 specified in the file, and checks if the hashes of these files match those
 that are specified in the signature file.
@@ -22,7 +22,7 @@ from textwrap import indent
 WORKINGDIR = "/tmp/dash_verify_binaries"
 HASHFILE = "hashes.tmp"
 HOST1="https://github.com/dashpay/dash/releases/download/v"
-HOST2="https://pasta.keybase.pub/Dash-Core-Releases/"
+HOST2="https://dashcore-binaries.thepasta.org/file/dashcore-binaries/"
 VERSIONPREFIX=""
 SIGNATUREFILENAME = "SHA256SUMS.asc"
 
@@ -113,7 +113,7 @@ def main(args):
     success, output = download_with_wget(HOST2 + remote_sigfile, sigfile2)
     if not success:
         print("github.com failed to provide signature file, "
-              "but pasta.keybase.pub did?")
+              "but dashcore-binaries.thepasta.org did?")
         print("wget output:")
         print(indent(output, '\t'))
         remove_files([sigfile1])
@@ -121,7 +121,7 @@ def main(args):
 
     # ensure that both signature files are equal
     if not files_are_equal(sigfile1, sigfile2):
-        print("github.com and pasta.keybase.pub signature files were not equal?")
+        print("github.com and dashcore-binaries.thepasta.org signature files were not equal?")
         print(f"See files {WORKINGDIR}/{sigfile1} and {WORKINGDIR}/{sigfile2}")
         return 6
 
