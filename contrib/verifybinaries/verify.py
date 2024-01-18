@@ -74,6 +74,12 @@ def verify_with_gpg(signature_filename, output_filename):
     return result.returncode, result.stdout.decode().rstrip()
 
 
+def verify_signature_with_gpg(signature_file):
+    result = subprocess.run(['gpg', '--verify', signature_file],
+                            stderr=subprocess.STDOUT, stdout=subprocess.PIPE)
+    return result.returncode, result.stdout.decode().rstrip()
+
+
 def remove_files(filenames):
     for filename in filenames:
         os.remove(filename)
@@ -136,7 +142,7 @@ def main(args):
         print("gpg output:")
         print(indent(output, '\t'))
         remove_files([sigfile1, sigfile2, HASHFILE])
-        return 1
+        return retval
 
     # extract hashes/filenames of binaries to verify from hash file;
     # each line has the following format: "<hash> <binary_filename>"
@@ -148,10 +154,25 @@ def main(args):
         print("error: no files matched the platform specified")
         return 7
 
-    # download binaries
+    # download binaries and their respective signature files
     for _, binary_filename in hashes_to_verify:
         print(f"Downloading {binary_filename}")
         download_with_wget(HOST1 + remote_dir + binary_filename)
+
+        signature_file = binary_filename + ".asc"
+        download_with_wget(HOST1 + remote_dir + signature_file)
+
+        # Verify the signature file
+        retval, output = verify_signature_with_gpg(signature_file)
+        if retval != 0:
+            if retval == 1:
+                print("Bad signature.")
+            elif retval == 2:
+                print("gpg error. Do you have the Dash Core binary release signing key installed?")
+            print("gpg output:")
+            print(indent(output, '\t'))
+            remove_files([signature_file, binary_filename, sigfile1, sigfile2])
+            return retval
 
     # verify hashes
     offending_files = []
