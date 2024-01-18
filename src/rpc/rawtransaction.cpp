@@ -288,10 +288,10 @@ static UniValue getrawtransactionmulti(const JSONRPCRequest& request) {
             RPCResults{},
             RPCExamples{
                     HelpExampleCli("getrawtransactionmulti",
-                                   "'{\"blockhash1\":[\"txid1\",\"txid2\"], \"0\":[\"txid3\"]}'")
+                                   R"('{"blockhash1":["txid1","txid2"], "0":["txid3"]}')")
                     + HelpExampleRpc("getrawtransactionmulti",
-                                     "{\"blockhash1\":[\"txid1\",\"txid2\"], \"0\":[\"txid3\"]}")
-            }
+                                     R"('{"blockhash1":["txid1","txid2"], "0":["txid3"]})")
+            },
     }.Check(request);
 
     // Parse arguments
@@ -329,6 +329,7 @@ static UniValue getrawtransactionmulti(const JSONRPCRequest& request) {
             std::string txid_str = txids[idx].get_str();
             uint256 txid = ParseHashV(txid_str, "transaction id");
 
+            LogPrintf("next tx: %s\n", txid_str);
             uint256 hash_block;
             const CTransactionRef tx = GetTransaction(blockindex, node.mempool.get(), txid, Params().GetConsensus(), hash_block);
             if (!tx) {
