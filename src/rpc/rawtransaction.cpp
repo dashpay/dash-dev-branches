@@ -301,36 +301,29 @@ static UniValue getrawtransactionmulti(const JSONRPCRequest& request) {
     if (!request.params[1].isNull()) {
         fVerbose = request.params[1].isNum() ? (request.params[1].get_int() != 0) : request.params[1].get_bool();
     }
+
     const NodeContext& node = EnsureAnyNodeContext(request.context);
     const ChainstateManager& chainman = EnsureChainman(node);
     const LLMQContext& llmq_ctx = EnsureLLMQContext(node);
     CTxMemPool& mempool = EnsureMemPool(node);
 
-
     UniValue result(UniValue::VOBJ);
-    LogPrintf("transactions: %s\n", transactions.write());
     for (const std::string& blockhash_str : transactions.getKeys()) {
-        uint256 blockhash = uint256S(blockhash_str);
-        LogPrintf("next block: %s\n", blockhash.ToString());
-        UniValue txids = transactions[blockhash_str].get_array();
+        const uint256 blockhash = uint256S(blockhash_str);
+        const UniValue txids = transactions[blockhash_str].get_array();
 
-        CBlockIndex* blockindex = nullptr;
-        if (!blockhash.IsNull()) {
-            LOCK(cs_main);
-            blockindex = chainman.m_blockman.LookupBlockIndex(blockhash);
-            if (!blockindex) {
-                for (unsigned int idx = 0; idx < txids.size(); idx++) {
-                    result.pushKV(txids[idx].get_str(), "None");
-                }
-                continue;
+        CBlockIndex* blockindex{blockhash.IsNull() ? nullptr : WITH_LOCK(::cs_main, return chainman.m_blockman.LookupBlockIndex(blockhash))};
+        if (!blockindex) {
+            for (const auto idx : irange::range(txids.size())) {
+                result.pushKV(txids[idx].get_str(), "None");
             }
+            continue;
         }
 
-        for (unsigned int idx = 0; idx < txids.size(); idx++) {
+            for (const auto idx : irange::range(txids.size())) {
             std::string txid_str = txids[idx].get_str();
             uint256 txid = ParseHashV(txid_str, "transaction id");
 
-            LogPrintf("next tx: %s - %s\n", txid_str, txid.ToString());
             uint256 hash_block;
             const CTransactionRef tx = GetTransaction(blockindex, node.mempool.get(), txid, Params().GetConsensus(), hash_block);
             if (!tx) {
@@ -338,11 +331,9 @@ static UniValue getrawtransactionmulti(const JSONRPCRequest& request) {
             } else if (fVerbose) {
                 UniValue tx_data(UniValue::VOBJ);
                 TxToJSON(*tx, hash_block, mempool, chainman.ActiveChainstate(), *llmq_ctx.clhandler, *llmq_ctx.isman, result);
-                LogPrintf("tx to data: %s\n", tx_data.write());
                 result.pushKV(txid_str, tx_data);
             } else {
-                std::string strHex = EncodeHexTx(*tx);
-                result.pushKV(txid_str, strHex);
+                result.pushKV(txid_str, EncodeHexTx(*tx));
             }
         }
     }
