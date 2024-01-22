@@ -1004,7 +1004,8 @@ static void submitchainlock_help(const JSONRPCRequest& request)
                        {"signature", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "The signature of the ChainLock."},
                        {"blockHeight", RPCArg::Type::NUM, RPCArg::Optional::NO, "The height of the ChainLock."},
                },
-               RPCResults{},
+               RPCResult{
+                    RPCResult::Type::NUM, "", "The height of the current best ChainLock"},
                RPCExamples{""},
     }.Check(request);
 }

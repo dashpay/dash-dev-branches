@@ -119,7 +119,8 @@ class LLMQChainLocksTest(DashTestFramework):
         assert best_0['height'] != best_1['height']
         assert best_0['signature'] != best_1['signature']
         assert_equal(best_0['known_block'], True)
-        self.nodes[0].submitchainlock(best_1['blockhash'], best_1['signature'], best_1['height'])
+        best_rpc = self.nodes[0].submitchainlock(best_1['blockhash'], best_1['signature'], best_1['height'])
+        assert_equal(best_rpc, best_1['height'])
         best_0 = self.nodes[0].getbestchainlock()
         assert_equal(best_0['blockhash'], best_1['blockhash'])
         assert_equal(best_0['height'], best_1['height'])
