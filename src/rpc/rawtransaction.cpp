@@ -295,8 +295,7 @@ static UniValue getrawtransactionmulti(const JSONRPCRequest& request) {
     }.Check(request);
 
     // Parse arguments
-    UniValue transactions = request.params[0];
-    transactions.setObject();
+    UniValue transactions = request.params[0].get_obj();
     // Accept either a bool (true) or a num (>=1) to indicate verbose output.
     bool fVerbose = false;
     if (!request.params[1].isNull()) {
@@ -309,8 +308,10 @@ static UniValue getrawtransactionmulti(const JSONRPCRequest& request) {
 
 
     UniValue result(UniValue::VOBJ);
+    LogPrintf("transactions: %s\n", transactions.write());
     for (const std::string& blockhash_str : transactions.getKeys()) {
         uint256 blockhash = uint256S(blockhash_str);
+        LogPrintf("next block: %s\n", blockhash.ToString());
         UniValue txids = transactions[blockhash_str].get_array();
 
         CBlockIndex* blockindex = nullptr;
@@ -329,7 +330,7 @@ static UniValue getrawtransactionmulti(const JSONRPCRequest& request) {
             std::string txid_str = txids[idx].get_str();
             uint256 txid = ParseHashV(txid_str, "transaction id");
 
-            LogPrintf("next tx: %s\n", txid_str);
+            LogPrintf("next tx: %s - %s\n", txid_str, txid.ToString());
             uint256 hash_block;
             const CTransactionRef tx = GetTransaction(blockindex, node.mempool.get(), txid, Params().GetConsensus(), hash_block);
             if (!tx) {
@@ -337,6 +338,7 @@ static UniValue getrawtransactionmulti(const JSONRPCRequest& request) {
             } else if (fVerbose) {
                 UniValue tx_data(UniValue::VOBJ);
                 TxToJSON(*tx, hash_block, mempool, chainman.ActiveChainstate(), *llmq_ctx.clhandler, *llmq_ctx.isman, result);
+                LogPrintf("tx to data: %s\n", tx_data.write());
                 result.pushKV(txid_str, tx_data);
             } else {
                 std::string strHex = EncodeHexTx(*tx);
@@ -361,7 +363,7 @@ static UniValue gettxchainlocks(const JSONRPCRequest& request)
             },
         },
         RPCResult{
-            RPCResult::Type::ARR, "", "Response is an array with the same size as the input txids",
+            RPCResult::Type::OBJ_DYN, "", "Response is an array with the same size as the input txids",
             {
                 {RPCResult::Type::OBJ, "", "",
                 {
