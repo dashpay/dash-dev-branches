@@ -495,6 +495,9 @@ static UniValue getassetunlockstatuses(const JSONRPCRequest& request)
                 return pTipBlockIndex->GetAncestor(pTipBlockIndex->nHeight - cbtx_best_cl->second - 1);
             }
         }
+        else {
+            return pTipBlockIndex->GetAncestor(llmq_ctx.clhandler->GetBestChainLock().getHeight());
+        }
         return nullptr;
     }();
 
