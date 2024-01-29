@@ -445,7 +445,7 @@ static void getassetunlockstatuses_help(const JSONRPCRequest& request)
                              {"index", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "An Asset Unlock index"},
                      },
                     },
-                    {"height", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "The height index"},
+                    {"height", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "The maximum block height to check"},
             },
             RPCResult{
                     RPCResult::Type::ARR, "", "Response is an array with the same size as the input txids",
@@ -1993,7 +1993,7 @@ void RegisterRawTransactionRPCCommands(CRPCTable &t)
 static const CRPCCommand commands[] =
 { //  category              name                            actor (function)            argNames
   //  --------------------- ------------------------        -----------------------     ----------
-    { "rawtransactions",    "getassetunlockstatuses",       &getassetunlockstatuses,    {"indexes"} },
+    { "rawtransactions",    "getassetunlockstatuses",       &getassetunlockstatuses,    {"indexes","height"} },
     { "rawtransactions",    "getrawtransaction",            &getrawtransaction,         {"txid","verbose","blockhash"} },
     { "rawtransactions",    "getrawtransactionmulti",       &getrawtransactionmulti,    {"txid_map","verbose"} },
     { "rawtransactions",    "gettxchainlocks",              &gettxchainlocks,           {"txids"} },
