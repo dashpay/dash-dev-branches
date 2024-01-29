@@ -489,15 +489,14 @@ static UniValue getassetunlockstatuses(const JSONRPCRequest& request)
     }
 
     const auto pBlockIndexBestCL = [&]() -> const CBlockIndex* {
-        if (llmq_ctx.clhandler->GetBestChainLock().IsNull()) {
-            // If no CL info is available, try to use CbTx CL information
-            if (const auto cbtx_best_cl = GetNonNullCoinbaseChainlock(pTipBlockIndex)) {
-                return pTipBlockIndex->GetAncestor(pTipBlockIndex->nHeight - cbtx_best_cl->second - 1);
-            }
-        }
-        else {
+        if (!llmq_ctx.clhandler->GetBestChainLock().IsNull()) {
             return pTipBlockIndex->GetAncestor(llmq_ctx.clhandler->GetBestChainLock().getHeight());
         }
+        // If no CL info is available, try to use CbTx CL information
+        if (const auto cbtx_best_cl = GetNonNullCoinbaseChainlock(pTipBlockIndex)) {
+            return pTipBlockIndex->GetAncestor(pTipBlockIndex->nHeight - cbtx_best_cl->second - 1);
+        }
+        // no CL info, no CbTx CL
         return nullptr;
     }();
 
