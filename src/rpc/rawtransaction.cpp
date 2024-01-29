@@ -445,6 +445,7 @@ static void getassetunlockstatuses_help(const JSONRPCRequest& request)
                              {"index", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "An Asset Unlock index"},
                      },
                     },
+                    {"height", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "The height index"},
             },
             RPCResult{
                     RPCResult::Type::ARR, "", "Response is an array with the same size as the input txids",
@@ -488,29 +489,44 @@ static UniValue getassetunlockstatuses(const JSONRPCRequest& request)
         throw JSONRPCError(RPC_INTERNAL_ERROR, "No blocks in chain");
     }
 
-    const auto pBlockIndexBestCL = [&]() -> const CBlockIndex* {
-        if (!llmq_ctx.clhandler->GetBestChainLock().IsNull()) {
-            return pTipBlockIndex->GetAncestor(llmq_ctx.clhandler->GetBestChainLock().getHeight());
-        }
-        // If no CL info is available, try to use CbTx CL information
-        if (const auto cbtx_best_cl = GetNonNullCoinbaseChainlock(pTipBlockIndex)) {
-            return pTipBlockIndex->GetAncestor(pTipBlockIndex->nHeight - cbtx_best_cl->second - 1);
-        }
-        // no CL info, no CbTx CL
-        return nullptr;
-    }();
+    std::optional<CCreditPool> poolCL = std::nullopt;
+    std::optional<CCreditPool> poolOnTip = std::nullopt;
+    bool fSpecificCoreHeight = false;
 
-    // We need in 2 credit pools: at tip of chain and on best CL to know if tx is mined or chainlocked
-    // Sometimes that's two different blocks, sometimes not and we need to initialize 2nd creditPoolManager
-    std::optional<CCreditPool> poolCL = pBlockIndexBestCL ?
-                                        std::make_optional(node.creditPoolManager->GetCreditPool(pBlockIndexBestCL, Params().GetConsensus())) :
-                                        std::nullopt;
-    auto poolOnTip = [&]() -> std::optional<CCreditPool> {
-        if (pTipBlockIndex != pBlockIndexBestCL) {
-            return std::make_optional(node.creditPoolManager->GetCreditPool(pTipBlockIndex, Params().GetConsensus()));
+    if (!request.params[1].isNull()) {
+        int nHeight = request.params[1].get_int();
+        if (nHeight < 0 || nHeight > chainman.ActiveChain().Height()) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "Block height out of range");
         }
-        return std::nullopt;
-    }();
+        fSpecificCoreHeight = true;
+        poolCL = std::make_optional(node.creditPoolManager->GetCreditPool(chainman.ActiveChain()[nHeight], Params().GetConsensus()));
+    }
+    else {
+        const auto pBlockIndexBestCL = [&]() -> const CBlockIndex* {
+            if (!llmq_ctx.clhandler->GetBestChainLock().IsNull()) {
+                return pTipBlockIndex->GetAncestor(llmq_ctx.clhandler->GetBestChainLock().getHeight());
+            }
+            // If no CL info is available, try to use CbTx CL information
+            if (const auto cbtx_best_cl = GetNonNullCoinbaseChainlock(pTipBlockIndex)) {
+                return pTipBlockIndex->GetAncestor(pTipBlockIndex->nHeight - cbtx_best_cl->second - 1);
+            }
+            // no CL info, no CbTx CL
+            return nullptr;
+        }();
+
+        // We need in 2 credit pools: at tip of chain and on best CL to know if tx is mined or chainlocked
+        // Sometimes that's two different blocks, sometimes not and we need to initialize 2nd creditPoolManager
+        poolCL = pBlockIndexBestCL ?
+                 std::make_optional(node.creditPoolManager->GetCreditPool(pBlockIndexBestCL, Params().GetConsensus())) :
+                 std::nullopt;
+
+        poolOnTip = [&]() -> std::optional<CCreditPool> {
+            if (pTipBlockIndex != pBlockIndexBestCL) {
+                return std::make_optional(node.creditPoolManager->GetCreditPool(pTipBlockIndex, Params().GetConsensus()));
+            }
+            return std::nullopt;
+        }();
+    }
 
     for (const auto i : irange::range(str_indexes.size())) {
         UniValue obj(UniValue::VOBJ);
@@ -539,7 +555,7 @@ static UniValue getassetunlockstatuses(const JSONRPCRequest& request)
                     return false;
                 });
             }();
-            return is_mempooled ? "mempooled" : "unknown";
+            return is_mempooled && !fSpecificCoreHeight ? "mempooled" : "unknown";
         };
         obj.pushKV("status", status_to_push());
         result_arr.push_back(obj);
