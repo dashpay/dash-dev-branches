@@ -438,7 +438,7 @@ static void getassetunlockstatuses_help(const JSONRPCRequest& request)
 {
     RPCHelpMan{
             "getassetunlockstatuses",
-            "\nReturns the status of given Asset Unlock indexes. Block height can be also specified\n",
+            "\nReturns the status of given Asset Unlock indexes at the tip of the chain or at a specific block height if specified.\n",
             {
                     {"indexes", RPCArg::Type::ARR, RPCArg::Optional::NO, "The Asset Unlock indexes (no more than 100)",
                      {
