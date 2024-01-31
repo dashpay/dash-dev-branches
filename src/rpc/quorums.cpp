@@ -1036,6 +1036,50 @@ static UniValue submitchainlock(const JSONRPCRequest& request)
     return true;
 }
 
+static void dkginfo_help(const JSONRPCRequest& request)
+{
+    RPCHelpMan{"dkginfo",
+               "Return information regarding DKGs.\n"
+               "Enabled only for Masternode and works only when SPORK_17_QUORUM_DKG_ENABLED spork is ON.\n",
+               {
+                       {},
+               },
+               RPCResults{},
+               RPCExamples{""},
+    }.Check(request);
+}
+
+static UniValue dkginfo(const JSONRPCRequest& request)
+{
+    dkginfo_help(request);
+
+    if (!fMasternodeMode) {
+        throw JSONRPCError(RPC_INVALID_REQUEST, "RPC allowed only for Masternodes");
+    }
+
+    const NodeContext& node = EnsureAnyNodeContext(request.context);
+    const ChainstateManager& chainman = EnsureChainman(node);
+    const LLMQContext& llmq_ctx = EnsureLLMQContext(node);
+
+    llmq::CDKGDebugStatus status;
+    llmq_ctx.dkg_debugman->GetLocalDebugStatus(status);
+    UniValue ret(UniValue::VOBJ);
+    ret.pushKV("nActiveDKGs", (int)status.sessions.size());
+
+    if (status.sessions.empty()) {
+        int nTipHeight = WITH_LOCK(cs_main, return chainman.ActiveChain().Height());
+        const Consensus::Params &consensus_params = Params().GetConsensus();
+        int minDkgWindow = std::numeric_limits<int>::max();
+        for (const auto &params: consensus_params.llmqs) {
+            if (!params.useRotation)
+                minDkgWindow = std::min(minDkgWindow, params.dkgInterval - (nTipHeight % params.dkgInterval));
+        }
+        ret.pushKV("nextDKG", minDkgWindow);
+    }
+
+    return ret;
+}
+
 
 void RegisterQuorumsRPCCommands(CRPCTable &tableRPC)
 {
@@ -1047,6 +1091,7 @@ static const CRPCCommand commands[] =
     { "evo",                "submitchainlock",        &submitchainlock,        {"blockHash", "signature", "blockHeight"}  },
     { "evo",                "verifychainlock",        &verifychainlock,        {"blockHash", "signature", "blockHeight"} },
     { "evo",                "verifyislock",           &verifyislock,           {"id", "txid", "signature", "maxHeight"}  },
+    { "evo",                "dkginfo",                &dkginfo,                 {}  },
 };
 // clang-format on
     for (const auto& command : commands) {

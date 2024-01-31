@@ -76,6 +76,11 @@ class LLMQQuorumRotationTest(DashTestFramework):
 
         b_h_0 = self.nodes[0].getbestblockhash()
 
+        tip = self.nodes[0].getblockcount()
+        assert_equal(self.nodes[1].dkginfo()['nextDKG'], int(24 - (tip % 24)))
+        assert_equal(self.nodes[2].dkginfo()['nextDKG'], int(24 - (tip % 24)))
+        assert_equal(self.nodes[3].dkginfo()['nextDKG'], int(24 - (tip % 24)))
+
         #Mine 2 quorums so that Chainlocks can be available: Need them to include CL in CbTx as soon as v20 activates
         self.log.info("Mining 2 quorums")
         h_0 = self.mine_quorum()
