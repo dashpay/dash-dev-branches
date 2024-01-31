@@ -489,17 +489,16 @@ static UniValue getassetunlockstatuses(const JSONRPCRequest& request)
         throw JSONRPCError(RPC_INTERNAL_ERROR, "No blocks in chain");
     }
 
-    std::optional<CCreditPool> poolCL = std::nullopt;
-    std::optional<CCreditPool> poolOnTip = std::nullopt;
-    bool fSpecificCoreHeight = false;
+    std::optional<CCreditPool> poolCL{std::nullopt};
+    std::optional<CCreditPool> poolOnTip{std::nullopt};
+    std::optional<int> nSpecificCoreHeight{std::nullopt};
 
     if (!request.params[1].isNull()) {
-        int nHeight = request.params[1].get_int();
-        if (nHeight < 0 || nHeight > chainman.ActiveChain().Height()) {
+        nSpecificCoreHeight = request.params[1].get_int();
+        if (nSpecificCoreHeight.value() < 0 || nSpecificCoreHeight.value() > chainman.ActiveChain().Height()) {
             throw JSONRPCError(RPC_INVALID_PARAMETER, "Block height out of range");
         }
-        fSpecificCoreHeight = true;
-        poolCL = std::make_optional(node.creditPoolManager->GetCreditPool(chainman.ActiveChain()[nHeight], Params().GetConsensus()));
+        poolCL = std::make_optional(node.creditPoolManager->GetCreditPool(chainman.ActiveChain()[nSpecificCoreHeight.value()], Params().GetConsensus()));
     }
     else {
         const auto pBlockIndexBestCL = [&]() -> const CBlockIndex* {
@@ -555,7 +554,7 @@ static UniValue getassetunlockstatuses(const JSONRPCRequest& request)
                     return false;
                 });
             }();
-            return is_mempooled && !fSpecificCoreHeight ? "mempooled" : "unknown";
+            return is_mempooled && !nSpecificCoreHeight.has_value() ? "mempooled" : "unknown";
         };
         obj.pushKV("status", status_to_push());
         result_arr.push_back(obj);
