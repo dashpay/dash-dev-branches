@@ -1073,6 +1073,16 @@ static UniValue dkginfo(const JSONRPCRequest& request)
         for (const auto &params: consensus_params.llmqs) {
             if (!params.useRotation)
                 minDkgWindow = std::min(minDkgWindow, params.dkgInterval - (nTipHeight % params.dkgInterval));
+            else {
+                if (nTipHeight % params.dkgInterval > params.signingActiveQuorumCount) {
+                    // Next potential DKG is the DKG for quorumIndex 0
+                    minDkgWindow = std::min(minDkgWindow, params.dkgInterval - (nTipHeight % params.dkgInterval));
+                }
+                // We are currently during a rotation cycle. Since sessions.empty(), next we return next potential DKG is 1 (next block for next quorumIndex)
+                else {
+                    minDkgWindow = std::min(minDkgWindow, 1);
+                }
+            }
         }
         ret.pushKV("nextDKG", minDkgWindow);
     }
