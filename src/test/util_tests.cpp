@@ -54,24 +54,27 @@ BOOST_FIXTURE_TEST_SUITE(util_tests, BasicTestingSetup)
 
 BOOST_AUTO_TEST_CASE(util_datadir)
 {
-    ClearDatadirCache();
-    const fs::path dd_norm = GetDataDir();
+    // Use local args variable instead of m_args to avoid making assumptions about test setup
+    ArgsManager args;
+    args.ForceSetArg("-datadir", m_path_root.string());
 
-    gArgs.ForceSetArg("-datadir", dd_norm.string() + "/");
-    ClearDatadirCache();
-    BOOST_CHECK_EQUAL(dd_norm, GetDataDir());
+    const fs::path dd_norm = args.GetDataDirPath();
 
-    gArgs.ForceSetArg("-datadir", dd_norm.string() + "/.");
-    ClearDatadirCache();
-    BOOST_CHECK_EQUAL(dd_norm, GetDataDir());
+    args.ForceSetArg("-datadir", dd_norm.string() + "/");
+    args.ClearPathCache();
+    BOOST_CHECK_EQUAL(dd_norm, args.GetDataDirPath());
 
-    gArgs.ForceSetArg("-datadir", dd_norm.string() + "/./");
-    ClearDatadirCache();
-    BOOST_CHECK_EQUAL(dd_norm, GetDataDir());
+    args.ForceSetArg("-datadir", dd_norm.string() + "/.");
+    args.ClearPathCache();
+    BOOST_CHECK_EQUAL(dd_norm, args.GetDataDirPath());
 
-    gArgs.ForceSetArg("-datadir", dd_norm.string() + "/.//");
-    ClearDatadirCache();
-    BOOST_CHECK_EQUAL(dd_norm, GetDataDir());
+    args.ForceSetArg("-datadir", dd_norm.string() + "/./");
+    args.ClearPathCache();
+    BOOST_CHECK_EQUAL(dd_norm, args.GetDataDirPath());
+
+    args.ForceSetArg("-datadir", dd_norm.string() + "/.//");
+    args.ClearPathCache();
+    BOOST_CHECK_EQUAL(dd_norm, args.GetDataDirPath());
 }
 
 namespace {
@@ -1256,21 +1259,23 @@ BOOST_AUTO_TEST_CASE(util_ReadWriteSettings)
 {
     // Test writing setting.
     TestArgsManager args1;
+    args1.ForceSetArg("-datadir", m_path_root.string());
     args1.LockSettings([&](util::Settings& settings) { settings.rw_settings["name"] = "value"; });
     args1.WriteSettingsFile();
 
     // Test reading setting.
     TestArgsManager args2;
+    args2.ForceSetArg("-datadir", m_path_root.string());
     args2.ReadSettingsFile();
     args2.LockSettings([&](util::Settings& settings) { BOOST_CHECK_EQUAL(settings.rw_settings["name"].get_str(), "value"); });
 
     // Test error logging, and remove previously written setting.
     {
         ASSERT_DEBUG_LOG("Failed renaming settings file");
-        fs::remove(GetDataDir() / "settings.json");
-        fs::create_directory(GetDataDir() / "settings.json");
+        fs::remove(args1.GetDataDirPath() / "settings.json");
+        fs::create_directory(args1.GetDataDirPath() / "settings.json");
         args2.WriteSettingsFile();
-        fs::remove(GetDataDir() / "settings.json");
+        fs::remove(args1.GetDataDirPath() / "settings.json");
     }
 }
 
@@ -1297,6 +1302,16 @@ BOOST_AUTO_TEST_CASE(util_FormatMoney)
     BOOST_CHECK_EQUAL(FormatMoney(COIN/1000000), "0.000001");
     BOOST_CHECK_EQUAL(FormatMoney(COIN/10000000), "0.0000001");
     BOOST_CHECK_EQUAL(FormatMoney(COIN/100000000), "0.00000001");
+
+    BOOST_CHECK_EQUAL(FormatMoney(std::numeric_limits<CAmount>::max()), "92233720368.54775807");
+    BOOST_CHECK_EQUAL(FormatMoney(std::numeric_limits<CAmount>::max() - 1), "92233720368.54775806");
+    BOOST_CHECK_EQUAL(FormatMoney(std::numeric_limits<CAmount>::max() - 2), "92233720368.54775805");
+    BOOST_CHECK_EQUAL(FormatMoney(std::numeric_limits<CAmount>::max() - 3), "92233720368.54775804");
+    // ...
+    BOOST_CHECK_EQUAL(FormatMoney(std::numeric_limits<CAmount>::min() + 3), "-92233720368.54775805");
+    BOOST_CHECK_EQUAL(FormatMoney(std::numeric_limits<CAmount>::min() + 2), "-92233720368.54775806");
+    BOOST_CHECK_EQUAL(FormatMoney(std::numeric_limits<CAmount>::min() + 1), "-92233720368.54775807");
+    BOOST_CHECK_EQUAL(FormatMoney(std::numeric_limits<CAmount>::min()), "-92233720368.54775808");
 }
 
 BOOST_AUTO_TEST_CASE(util_ParseMoney)
@@ -2070,7 +2085,7 @@ static constexpr char ExitCommand = 'X';
 
 BOOST_AUTO_TEST_CASE(test_LockDirectory)
 {
-    fs::path dirname = GetDataDir() / "lock_dir";
+    fs::path dirname = m_args.GetDataDirPath() / "lock_dir";
     const std::string lockname = ".lock";
 #ifndef WIN32
     // Revert SIGCHLD to default, otherwise boost.test will catch and fail on
@@ -2159,7 +2174,7 @@ BOOST_AUTO_TEST_CASE(test_LockDirectory)
 BOOST_AUTO_TEST_CASE(test_DirIsWritable)
 {
     // Should be able to write to the data dir.
-    fs::path tmpdirname = GetDataDir();
+    fs::path tmpdirname = m_args.GetDataDirPath();
     BOOST_CHECK_EQUAL(DirIsWritable(tmpdirname), true);
 
     // Should not be able to write to a non-existent dir.
@@ -2633,6 +2648,19 @@ BOOST_AUTO_TEST_CASE(message_hash)
 
     BOOST_CHECK_EQUAL(message_hash1, message_hash2);
     BOOST_CHECK_NE(message_hash1, signature_hash);
+}
+
+BOOST_AUTO_TEST_CASE(remove_prefix)
+{
+    BOOST_CHECK_EQUAL(RemovePrefix("./util/system.h", "./"), "util/system.h");
+    BOOST_CHECK_EQUAL(RemovePrefix("foo", "foo"), "");
+    BOOST_CHECK_EQUAL(RemovePrefix("foo", "fo"), "o");
+    BOOST_CHECK_EQUAL(RemovePrefix("foo", "f"), "oo");
+    BOOST_CHECK_EQUAL(RemovePrefix("foo", ""), "foo");
+    BOOST_CHECK_EQUAL(RemovePrefix("fo", "foo"), "fo");
+    BOOST_CHECK_EQUAL(RemovePrefix("f", "foo"), "f");
+    BOOST_CHECK_EQUAL(RemovePrefix("", "foo"), "");
+    BOOST_CHECK_EQUAL(RemovePrefix("", ""), "");
 }
 
 BOOST_AUTO_TEST_SUITE_END()

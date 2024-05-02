@@ -9,16 +9,22 @@
 #include <net.h>
 #include <sync.h>
 #include <validationinterface.h>
+#include <version.h>
 
 #include <atomic>
 
+class CActiveMasternodeManager;
 class CAddrMan;
 class CTxMemPool;
 class CDeterministicMNManager;
+class CMasternodeMetaMan;
+class CMasternodeSync;
 class ChainstateManager;
 class CCoinJoinServer;
 class CGovernanceManager;
+class CInv;
 class CSporkManager;
+class CTransaction;
 struct CJContext;
 struct LLMQContext;
 
@@ -41,6 +47,10 @@ struct CNodeStateStats {
     int m_starting_height = -1;
     std::chrono::microseconds m_ping_wait;
     std::vector<int> vHeightInFlight;
+    bool m_relay_txs;
+    uint64_t m_addr_processed = 0;
+    uint64_t m_addr_rate_limited = 0;
+    bool m_addr_relay_enabled{false};
 };
 
 class PeerManager : public CValidationInterface, public NetEventsInterface
@@ -48,20 +58,40 @@ class PeerManager : public CValidationInterface, public NetEventsInterface
 public:
     static std::unique_ptr<PeerManager> make(const CChainParams& chainparams, CConnman& connman, CAddrMan& addrman,
                                              BanMan* banman, CScheduler &scheduler, ChainstateManager& chainman,
-                                             CTxMemPool& pool, CGovernanceManager& govman, CSporkManager& sporkman,
+                                             CTxMemPool& pool, CMasternodeMetaMan& mn_metaman, CMasternodeSync& mn_sync,
+                                             CGovernanceManager& govman, CSporkManager& sporkman,
+                                             const CActiveMasternodeManager* const mn_activeman,
                                              const std::unique_ptr<CDeterministicMNManager>& dmnman,
                                              const std::unique_ptr<CJContext>& cj_ctx,
                                              const std::unique_ptr<LLMQContext>& llmq_ctx, bool ignore_incoming_txs);
     virtual ~PeerManager() { }
 
     /** Get statistics from node state */
-    virtual bool GetNodeStateStats(NodeId nodeid, CNodeStateStats& stats) = 0;
+    virtual bool GetNodeStateStats(NodeId nodeid, CNodeStateStats& stats) const = 0;
 
     /** Whether this node ignores txs received over p2p. */
     virtual bool IgnoresIncomingTxs() = 0;
 
     /** Send ping message to all peers */
     virtual void SendPings() = 0;
+
+    /** Is an inventory in the known inventory filter. Used by InstantSend. */
+    virtual bool IsInvInFilter(NodeId nodeid, const uint256& hash) const = 0;
+
+    /** Broadcast inventory message to a specific peer. */
+    virtual void PushInventory(NodeId nodeid, const CInv& inv) = 0;
+
+    /** Relay inventories to all peers */
+    virtual void RelayInv(CInv &inv, const int minProtoVersion = MIN_PEER_PROTO_VERSION) = 0;
+    virtual void RelayInvFiltered(CInv &inv, const CTransaction &relatedTx,
+                                  const int minProtoVersion = MIN_PEER_PROTO_VERSION) = 0;
+
+    /**
+     * This overload will not update node filters, use it only for the cases
+     * when other messages will update related transaction data in filters
+     */
+    virtual void RelayInvFiltered(CInv &inv, const uint256 &relatedTxHash,
+                                  const int minProtoVersion = MIN_PEER_PROTO_VERSION) = 0;
 
     /** Relay transaction to all peers. */
     virtual void RelayTransaction(const uint256& txid)
@@ -86,9 +116,6 @@ public:
                                 const std::chrono::microseconds time_received, const std::atomic<bool>& interruptMsgProc) = 0;
 
     virtual bool IsBanned(NodeId pnode) = 0;
-
-    /* Can we send addr messages to a peer. Used by InstantSend. */
-    virtual bool CanRelayAddrs(NodeId pnode) const = 0;
 
     /** Whether we've completed initial sync yet, for determining when to turn
       * on extra block-relay-only peers. */

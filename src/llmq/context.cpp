@@ -4,7 +4,6 @@
 
 #include <llmq/context.h>
 
-#include <consensus/validation.h>
 #include <dbwrapper.h>
 
 #include <llmq/blockprocessor.h>
@@ -17,37 +16,38 @@
 #include <llmq/quorums.h>
 #include <llmq/signing.h>
 #include <llmq/signing_shares.h>
-#include <masternode/sync.h>
 
 LLMQContext::LLMQContext(CChainState& chainstate, CConnman& connman, CDeterministicMNManager& dmnman, CEvoDB& evo_db,
-                         CMNHFManager& mnhfman, CSporkManager& sporkman, CTxMemPool& mempool, const CActiveMasternodeManager* mn_activeman,
+                         CMasternodeMetaMan& mn_metaman, CMNHFManager& mnhfman, CSporkManager& sporkman, CTxMemPool& mempool,
+                         const CActiveMasternodeManager* const mn_activeman, const CMasternodeSync& mn_sync,
                          const std::unique_ptr<PeerManager>& peerman, bool unit_tests, bool wipe) :
+    is_masternode{mn_activeman != nullptr},
     bls_worker{std::make_shared<CBLSWorker>()},
     dkg_debugman{std::make_unique<llmq::CDKGDebugManager>()},
     quorum_block_processor{[&]() -> llmq::CQuorumBlockProcessor* const {
         assert(llmq::quorumBlockProcessor == nullptr);
-        llmq::quorumBlockProcessor = std::make_unique<llmq::CQuorumBlockProcessor>(chainstate, connman, dmnman, evo_db);
+        llmq::quorumBlockProcessor = std::make_unique<llmq::CQuorumBlockProcessor>(chainstate, dmnman, evo_db, peerman);
         return llmq::quorumBlockProcessor.get();
     }()},
-    qdkgsman{std::make_unique<llmq::CDKGSessionManager>(*bls_worker, chainstate, connman, dmnman, *dkg_debugman, *quorum_block_processor, mn_activeman, sporkman, unit_tests, wipe)},
+    qdkgsman{std::make_unique<llmq::CDKGSessionManager>(*bls_worker, chainstate, connman, dmnman, *dkg_debugman, mn_metaman, *quorum_block_processor, mn_activeman, sporkman, peerman, unit_tests, wipe)},
     qman{[&]() -> llmq::CQuorumManager* const {
         assert(llmq::quorumManager == nullptr);
-        llmq::quorumManager = std::make_unique<llmq::CQuorumManager>(*bls_worker, chainstate, connman, dmnman, *qdkgsman, evo_db, *quorum_block_processor, mn_activeman, sporkman, ::masternodeSync);
+        llmq::quorumManager = std::make_unique<llmq::CQuorumManager>(*bls_worker, chainstate, connman, dmnman, *qdkgsman, evo_db, *quorum_block_processor, mn_activeman, mn_sync, sporkman);
         return llmq::quorumManager.get();
     }()},
-    sigman{std::make_unique<llmq::CSigningManager>(connman, mn_activeman, *llmq::quorumManager, unit_tests, wipe)},
+    sigman{std::make_unique<llmq::CSigningManager>(connman, mn_activeman, *llmq::quorumManager, peerman, unit_tests, wipe)},
     shareman{std::make_unique<llmq::CSigSharesManager>(connman, *sigman, mn_activeman, *llmq::quorumManager, sporkman, peerman)},
     clhandler{[&]() -> llmq::CChainLocksHandler* const {
         assert(llmq::chainLocksHandler == nullptr);
-        llmq::chainLocksHandler = std::make_unique<llmq::CChainLocksHandler>(chainstate, connman, *::masternodeSync, *llmq::quorumManager, *sigman, *shareman, sporkman, mempool);
+        llmq::chainLocksHandler = std::make_unique<llmq::CChainLocksHandler>(chainstate, *llmq::quorumManager, *sigman, *shareman, sporkman, mempool, mn_sync, peerman, is_masternode);
         return llmq::chainLocksHandler.get();
     }()},
     isman{[&]() -> llmq::CInstantSendManager* const {
         assert(llmq::quorumInstantSendManager == nullptr);
-        llmq::quorumInstantSendManager = std::make_unique<llmq::CInstantSendManager>(*llmq::chainLocksHandler, chainstate, connman, *llmq::quorumManager, *sigman, *shareman, sporkman, mempool, *::masternodeSync, unit_tests, wipe);
+        llmq::quorumInstantSendManager = std::make_unique<llmq::CInstantSendManager>(*llmq::chainLocksHandler, chainstate, connman, *llmq::quorumManager, *sigman, *shareman, sporkman, mempool, mn_sync, peerman, is_masternode, unit_tests, wipe);
         return llmq::quorumInstantSendManager.get();
     }()},
-    ehfSignalsHandler{std::make_unique<llmq::CEHFSignalsHandler>(chainstate, connman, mnhfman, *sigman, *shareman, sporkman, *llmq::quorumManager, mempool)}
+    ehfSignalsHandler{std::make_unique<llmq::CEHFSignalsHandler>(chainstate, mnhfman, *sigman, *shareman, mempool, *llmq::quorumManager, sporkman, peerman)}
 {
     // NOTE: we use this only to wipe the old db, do NOT use it for anything else
     // TODO: remove it in some future version
@@ -77,7 +77,7 @@ void LLMQContext::Start() {
     assert(isman == llmq::quorumInstantSendManager.get());
 
     bls_worker->Start();
-    if (fMasternodeMode) {
+    if (is_masternode) {
         qdkgsman->StartThreads();
     }
     qman->Start();
@@ -102,7 +102,7 @@ void LLMQContext::Stop() {
     shareman->UnregisterAsRecoveredSigsListener();
     sigman->StopWorkerThread();
     qman->Stop();
-    if (fMasternodeMode) {
+    if (is_masternode) {
         qdkgsman->StopThreads();
     }
     bls_worker->Stop();

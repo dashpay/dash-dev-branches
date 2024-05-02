@@ -132,6 +132,7 @@ BITCOIN_TESTS =\
   test/merkleblock_tests.cpp \
   test/miner_tests.cpp \
   test/multisig_tests.cpp \
+  test/net_peer_eviction_tests.cpp \
   test/net_tests.cpp \
   test/netbase_tests.cpp \
   test/pmt_tests.cpp \
@@ -395,11 +396,6 @@ univalue_test_object_SOURCES = $(UNIVALUE_TEST_OBJECT_INT)
 univalue_test_object_LDADD = $(LIBUNIVALUE)
 univalue_test_object_CPPFLAGS = -I$(srcdir)/$(UNIVALUE_INCLUDE_DIR_INT)
 univalue_test_object_LDFLAGS = -static $(LIBTOOL_APP_LDFLAGS)
-endif
-
-if ENABLE_FUZZ_LINK_ALL
-all-local: $(FUZZ_BINARY)
-	bash ./test/fuzz/danger_link_all.sh
 endif
 
 %.cpp.test: %.cpp

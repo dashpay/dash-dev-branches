@@ -14,7 +14,7 @@
 #include <masternode/node.h>
 #include <masternode/sync.h>
 #include <messagesigner.h>
-#include <net.h>
+#include <net_processing.h>
 #include <timedata.h>
 #include <util/time.h>
 #include <validation.h>
@@ -80,8 +80,11 @@ CGovernanceObject::CGovernanceObject(const CGovernanceObject& other) :
 {
 }
 
-bool CGovernanceObject::ProcessVote(CGovernanceManager& govman, const CDeterministicMNList& tip_mn_list, const CGovernanceVote& vote, CGovernanceException& exception)
+bool CGovernanceObject::ProcessVote(CMasternodeMetaMan& mn_metaman, CGovernanceManager& govman, const CDeterministicMNList& tip_mn_list,
+                                    const CGovernanceVote& vote, CGovernanceException& exception)
 {
+    assert(mn_metaman.IsValid());
+
     LOCK(cs);
 
     // do not process already known valid votes twice
@@ -178,7 +181,7 @@ bool CGovernanceObject::ProcessVote(CGovernanceManager& govman, const CDetermini
         return false;
     }
 
-    if (!mmetaman->AddGovernanceVote(dmn->proTxHash, vote.GetParentHash())) {
+    if (!mn_metaman.AddGovernanceVote(dmn->proTxHash, vote.GetParentHash())) {
         std::ostringstream ostr;
         ostr << "CGovernanceObject::ProcessVote -- Unable to add governance vote"
              << ", MN outpoint = " << vote.GetMasternodeOutpoint().ToStringShort()
@@ -424,7 +427,7 @@ bool CGovernanceObject::IsValidLocally(const CDeterministicMNList& tip_mn_list, 
     case GovernanceObject::PROPOSAL: {
         CProposalValidator validator(GetDataAsHexString());
         // Note: It's ok to have expired proposals
-        // they are going to be cleared by CGovernanceManager::UpdateCachesAndClean()
+        // they are going to be cleared by CGovernanceManager::CheckAndRemove()
         // TODO: should they be tagged as "expired" to skip vote downloading?
         if (!validator.Validate(false)) {
             strError = strprintf("Invalid proposal data, error messages: %s", validator.GetErrorMessages());
@@ -626,10 +629,10 @@ bool CGovernanceObject::GetCurrentMNVotes(const COutPoint& mnCollateralOutpoint,
     return true;
 }
 
-void CGovernanceObject::Relay(CConnman& connman) const
+void CGovernanceObject::Relay(PeerManager& peerman, const CMasternodeSync& mn_sync) const
 {
     // Do not relay until fully synced
-    if (!::masternodeSync->IsSynced()) {
+    if (!mn_sync.IsSynced()) {
         LogPrint(BCLog::GOBJECT, "CGovernanceObject::Relay -- won't relay until fully synced\n");
         return;
     }
@@ -648,7 +651,7 @@ void CGovernanceObject::Relay(CConnman& connman) const
     }
 
     CInv inv(MSG_GOVERNANCE_OBJECT, GetHash());
-    connman.RelayInv(inv, minProtoVersion);
+    peerman.RelayInv(inv, minProtoVersion);
 }
 
 void CGovernanceObject::UpdateSentinelVariables(const CDeterministicMNList& tip_mn_list)

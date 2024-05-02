@@ -23,6 +23,7 @@
 #include <script/script.h>
 #include <script/standard.h>
 #include <util/system.h>
+#include <util/time.h>
 
 #include <cmath>
 
@@ -50,12 +51,16 @@
 #include <QFontDatabase>
 #include <QFontMetrics>
 #include <QGuiApplication>
+#include <QJsonObject>
 #include <QKeyEvent>
+#include <QKeySequence>
+#include <QLatin1String>
 #include <QLineEdit>
 #include <QList>
 #include <QLocale>
 #include <QMenu>
 #include <QMouseEvent>
+#include <QPluginLoader>
 #include <QPointer>
 #include <QProgressDialog>
 #include <QScreen>
@@ -63,6 +68,7 @@
 #include <QShortcut>
 #include <QSize>
 #include <QString>
+#include <QStringBuilder>
 #include <QTextDocument> // for Qt::mightBeRichText
 #include <QThread>
 #include <QTimer>
@@ -609,7 +615,7 @@ void bringToFront(QWidget* w)
 
 void handleCloseWindowShortcut(QWidget* w)
 {
-    QObject::connect(new QShortcut(QKeySequence(Qt::CTRL + Qt::Key_W), w), &QShortcut::activated, w, &QWidget::close);
+    QObject::connect(new QShortcut(QKeySequence(QObject::tr("Ctrl+W")), w), &QShortcut::activated, w, &QWidget::close);
 }
 
 void openDebugLogfile()
@@ -639,7 +645,7 @@ void openConfigfile()
 
 void showBackups()
 {
-    fs::path backupsDir = GetBackupsDir();
+    fs::path backupsDir = gArgs.GetBackupsDirPath();
 
     /* Open folder with default browser */
     if (fs::exists(backupsDir))
@@ -1607,14 +1613,14 @@ void updateButtonGroupShortcuts(QButtonGroup* buttonGroup)
         return;
     }
 #ifdef Q_OS_MAC
-    auto modifier = Qt::CTRL;
+    auto modifier = "Ctrl";
 #else
-    auto modifier = Qt::ALT;
+    auto modifier = "Alt";
 #endif
-    int nKey = 0;
+    int nKey = 1;
     for (auto button : buttonGroup->buttons()) {
         if (button->isVisible()) {
-            button->setShortcut(QKeySequence(modifier + Qt::Key_1 + nKey++));
+            button->setShortcut(QKeySequence(QString("%1+%2").arg(modifier).arg(nKey++)));
         } else {
             button->setShortcut(QKeySequence());
         }
@@ -1655,8 +1661,22 @@ QString NetworkToQString(Network net)
     assert(false);
 }
 
-QString formatDurationStr(int secs)
+QString ConnectionTypeToQString(ConnectionType conn_type)
 {
+    switch (conn_type) {
+    case ConnectionType::INBOUND: return QObject::tr("Inbound");
+    case ConnectionType::OUTBOUND_FULL_RELAY: return QObject::tr("Outbound Full Relay");
+    case ConnectionType::BLOCK_RELAY: return QObject::tr("Outbound Block Relay");
+    case ConnectionType::MANUAL: return QObject::tr("Outbound Manual");
+    case ConnectionType::FEELER: return QObject::tr("Outbound Feeler");
+    case ConnectionType::ADDR_FETCH: return QObject::tr("Outbound Address Fetch");
+    } // no default case, so the compiler can warn about missing cases
+    assert(false);
+}
+
+QString formatDurationStr(std::chrono::seconds dur)
+{
+    const auto secs = count_seconds(dur);
     QStringList strList;
     int days = secs / 86400;
     int hours = (secs % 86400) / 3600;
@@ -1814,6 +1834,20 @@ void LogQtInfo()
     const std::string plugin_link{"dynamic"};
 #endif
     LogPrintf("Qt %s (%s), plugin=%s (%s)\n", qVersion(), qt_link, QGuiApplication::platformName().toStdString(), plugin_link);
+    const auto static_plugins = QPluginLoader::staticPlugins();
+    if (static_plugins.empty()) {
+        LogPrintf("No static plugins.\n");
+    } else {
+        LogPrintf("Static plugins:\n");
+        for (const QStaticPlugin& p : static_plugins) {
+            QJsonObject meta_data = p.metaData();
+            const std::string plugin_class = meta_data.take(QString("className")).toString().toStdString();
+            const int plugin_version = meta_data.take(QString("version")).toInt();
+            LogPrintf(" %s, version %d\n", plugin_class, plugin_version);
+        }
+    }
+
+    LogPrintf("Style: %s / %s\n", QApplication::style()->objectName().toStdString(), QApplication::style()->metaObject()->className());
     LogPrintf("System: %s, %s\n", QSysInfo::prettyProductName().toStdString(), QSysInfo::buildAbi().toStdString());
     for (const QScreen* s : QGuiApplication::screens()) {
         LogPrintf("Screen: %s %dx%d, pixel ratio=%.1f\n", s->name().toStdString(), s->size().width(), s->size().height(), s->devicePixelRatio());
@@ -1856,6 +1890,24 @@ QImage GetImage(const QLabel* label)
 #else
     return label->pixmap()->toImage();
 #endif
+}
+
+QString MakeHtmlLink(const QString& source, const QString& link)
+{
+    return QString(source).replace(
+        link,
+        QLatin1String("<a href=\"") % link % QLatin1String("\">") % link % QLatin1String("</a>"));
+}
+
+void PrintSlotException(
+    const std::exception* exception,
+    const QObject* sender,
+    const QObject* receiver)
+{
+    std::string description = sender->metaObject()->className();
+    description += "->";
+    description += receiver->metaObject()->className();
+    PrintExceptionContinue(std::make_exception_ptr(exception), description.c_str());
 }
 
 } // namespace GUIUtil

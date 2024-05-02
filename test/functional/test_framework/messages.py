@@ -16,7 +16,7 @@ ser_*, deser_*: functions that handle serialization/deserialization.
 Classes use __slots__ to ensure extraneous attributes aren't accidentally added
 by tests, compromising their intended effect.
 """
-
+from base64 import b32decode, b32encode
 import copy
 from collections import namedtuple
 import hashlib
@@ -33,7 +33,7 @@ import dash_hash
 
 MIN_VERSION_SUPPORTED = 60001
 MY_VERSION = 70231  # NO_LEGACY_ISLOCK_PROTO_VERSION
-MY_SUBVERSION = b"/python-p2p-tester:0.0.3%s/"
+MY_SUBVERSION = "/python-p2p-tester:0.0.3%s/"
 MY_RELAY = 1 # from version 70001 onwards, fRelay should be appended to version messages (BIP37)
 
 MAX_LOCATOR_SZ = 101
@@ -251,14 +251,19 @@ class CAddress:
 
     # see https://github.com/bitcoin/bips/blob/master/bip-0155.mediawiki
     NET_IPV4 = 1
+    NET_I2P = 5
 
     ADDRV2_NET_NAME = {
-        NET_IPV4: "IPv4"
+        NET_IPV4: "IPv4",
+        NET_I2P: "I2P"
     }
 
     ADDRV2_ADDRESS_LENGTH = {
-        NET_IPV4: 4
+        NET_IPV4: 4,
+        NET_I2P: 32
     }
+
+    I2P_PAD = "===="
 
     def __init__(self):
         self.time = 0
@@ -266,6 +271,9 @@ class CAddress:
         self.net = self.NET_IPV4
         self.ip = "0.0.0.0"
         self.port = 0
+
+    def __eq__(self, other):
+        return self.net == other.net and self.ip == other.ip and self.nServices == other.nServices and self.port == other.port and self.time == other.time
 
     def deserialize(self, f, *, with_time=True):
         """Deserialize from addrv1 format (pre-BIP155)"""
@@ -299,24 +307,33 @@ class CAddress:
         self.nServices = deser_compact_size(f)
 
         self.net = struct.unpack("B", f.read(1))[0]
-        assert self.net == self.NET_IPV4
+        assert self.net in (self.NET_IPV4, self.NET_I2P)
 
         address_length = deser_compact_size(f)
         assert address_length == self.ADDRV2_ADDRESS_LENGTH[self.net]
 
-        self.ip = socket.inet_ntoa(f.read(4))
+        addr_bytes = f.read(address_length)
+        if self.net == self.NET_IPV4:
+            self.ip = socket.inet_ntoa(addr_bytes)
+        else:
+            self.ip = b32encode(addr_bytes)[0:-len(self.I2P_PAD)].decode("ascii").lower() + ".b32.i2p"
 
         self.port = struct.unpack(">H", f.read(2))[0]
 
     def serialize_v2(self):
         """Serialize in addrv2 format (BIP155)"""
-        assert self.net == self.NET_IPV4
+        assert self.net in (self.NET_IPV4, self.NET_I2P)
         r = b""
         r += struct.pack("<I", self.time)
         r += ser_compact_size(self.nServices)
         r += struct.pack("B", self.net)
         r += ser_compact_size(self.ADDRV2_ADDRESS_LENGTH[self.net])
-        r += socket.inet_aton(self.ip)
+        if self.net == self.NET_IPV4:
+            r += socket.inet_aton(self.ip)
+        else:
+            sfx = ".b32.i2p"
+            assert self.ip.endswith(sfx)
+            r += b32decode(self.ip[0:-len(sfx)] + self.I2P_PAD, True)
         r += struct.pack(">H", self.port)
         return r
 
@@ -1521,7 +1538,7 @@ class msg_version:
         self.addrTo = CAddress()
         self.addrFrom = CAddress()
         self.nNonce = random.getrandbits(64)
-        self.strSubVer = MY_SUBVERSION % b""
+        self.strSubVer = MY_SUBVERSION % ""
         self.nStartingHeight = -1
         self.nRelay = MY_RELAY
 
@@ -1535,7 +1552,7 @@ class msg_version:
         self.addrFrom = CAddress()
         self.addrFrom.deserialize(f, with_time=False)
         self.nNonce = struct.unpack("<Q", f.read(8))[0]
-        self.strSubVer = deser_string(f)
+        self.strSubVer = deser_string(f).decode('utf-8')
 
         self.nStartingHeight = struct.unpack("<i", f.read(4))[0]
 
@@ -1554,7 +1571,7 @@ class msg_version:
         r += self.addrTo.serialize(with_time=False)
         r += self.addrFrom.serialize(with_time=False)
         r += struct.pack("<Q", self.nNonce)
-        r += ser_string(self.strSubVer)
+        r += ser_string(self.strSubVer.encode('utf-8'))
         r += struct.pack("<i", self.nStartingHeight)
         r += struct.pack("<b", self.nRelay)
         return r

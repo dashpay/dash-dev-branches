@@ -206,8 +206,9 @@ private:
     CSporkManager& spork_manager;
     CTxMemPool& mempool;
     const CMasternodeSync& m_mn_sync;
-    std::atomic<PeerManager*> m_peerman{nullptr};
+    const std::unique_ptr<PeerManager>& m_peerman;
 
+    const bool m_is_masternode;
     std::atomic<bool> fUpgradedDB{false};
 
     std::thread workThread;
@@ -257,10 +258,11 @@ public:
     explicit CInstantSendManager(CChainLocksHandler& _clhandler, CChainState& chainstate, CConnman& _connman,
                                  CQuorumManager& _qman, CSigningManager& _sigman, CSigSharesManager& _shareman,
                                  CSporkManager& sporkman, CTxMemPool& _mempool, const CMasternodeSync& mn_sync,
-                                 bool unitTests, bool fWipe) :
+                                 const std::unique_ptr<PeerManager>& peerman, bool is_masternode, bool unitTests, bool fWipe) :
         db(unitTests, fWipe),
         clhandler(_clhandler), m_chainstate(chainstate), connman(_connman), qman(_qman), sigman(_sigman),
-        shareman(_shareman), spork_manager(sporkman), mempool(_mempool), m_mn_sync(mn_sync)
+        shareman(_shareman), spork_manager(sporkman), mempool(_mempool), m_mn_sync(mn_sync), m_peerman(peerman),
+        m_is_masternode{is_masternode}
     {
         workInterrupt.reset();
     }
@@ -299,7 +301,7 @@ private:
 
     void RemoveMempoolConflictsForLock(const uint256& hash, const CInstantSendLock& islock);
     void ResolveBlockConflicts(const uint256& islockHash, const CInstantSendLock& islock) LOCKS_EXCLUDED(cs_pendingLocks, cs_nonLocked);
-    static void AskNodesForLockedTx(const uint256& txid, const CConnman& connman, const PeerManager& peerman);
+    static void AskNodesForLockedTx(const uint256& txid, const CConnman& connman, const PeerManager& peerman, bool is_masternode);
     void ProcessPendingRetryLockTxs() LOCKS_EXCLUDED(cs_creating, cs_nonLocked, cs_pendingRetry);
 
     void WorkThreadMain();
@@ -313,7 +315,7 @@ public:
 
     void HandleNewRecoveredSig(const CRecoveredSig& recoveredSig) override LOCKS_EXCLUDED(cs_inputReqests, cs_creating);
 
-    PeerMsgRet ProcessMessage(const CNode& pfrom, gsl::not_null<PeerManager*> peerman, std::string_view msg_type, CDataStream& vRecv);
+    PeerMsgRet ProcessMessage(const CNode& pfrom, std::string_view msg_type, CDataStream& vRecv);
 
     void TransactionAddedToMempool(const CTransactionRef& tx) LOCKS_EXCLUDED(cs_pendingLocks);
     void TransactionRemovedFromMempool(const CTransactionRef& tx);

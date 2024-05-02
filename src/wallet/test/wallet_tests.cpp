@@ -315,8 +315,6 @@ BOOST_FIXTURE_TEST_CASE(importwallet_rescan, TestChain100Setup)
             BOOST_CHECK_EQUAL(found, expected);
         }
     }
-
-    SetMockTime(0);
 }
 
 // Verify getaddressinfo RPC produces more or less expected results
@@ -473,9 +471,6 @@ BOOST_AUTO_TEST_CASE(ComputeTimeSmart)
     // If there are future entries, new transaction should use time of the
     // newest entry that is no more than 300 seconds ahead of the clock time.
     BOOST_CHECK_EQUAL(AddTx(*m_node.chainman, m_wallet, 5, 50, 600), 300);
-
-    // Reset mock time for other tests.
-    SetMockTime(0);
 }
 
 BOOST_AUTO_TEST_CASE(LoadReceiveRequests)
@@ -483,11 +478,11 @@ BOOST_AUTO_TEST_CASE(LoadReceiveRequests)
     CTxDestination dest = PKHash();
     LOCK(m_wallet.cs_wallet);
     WalletBatch batch{m_wallet.GetDatabase()};
-    m_wallet.AddDestData(batch, dest, "misc", "val_misc");
-    m_wallet.AddDestData(batch, dest, "rr0", "val_rr0");
-    m_wallet.AddDestData(batch, dest, "rr1", "val_rr1");
+    m_wallet.SetAddressUsed(batch, dest, true);
+    m_wallet.SetAddressReceiveRequest(batch, dest, "0", "val_rr0");
+    m_wallet.SetAddressReceiveRequest(batch, dest, "1", "val_rr1");
 
-    auto values = m_wallet.GetDestValues("rr");
+    auto values = m_wallet.GetAddressReceiveRequests();
     BOOST_CHECK_EQUAL(values.size(), 2U);
     BOOST_CHECK_EQUAL(values[0], "val_rr0");
     BOOST_CHECK_EQUAL(values[1], "val_rr1");
@@ -874,7 +869,7 @@ BOOST_FIXTURE_TEST_CASE(CreateTransactionTest, CreateTransactionTestSetup)
 
     // First run the tests with only one input containing 100k duffs
     {
-        coinControl.SetNull();
+        coinControl = CCoinControl();
         coinControl.Select(GetCoins({{100000, false}})[0]);
 
         // Start with fallback feerate
@@ -914,7 +909,7 @@ BOOST_FIXTURE_TEST_CASE(CreateTransactionTest, CreateTransactionTestSetup)
     }
     // Now use 4 different inputs with a total of 100k duff
     {
-        coinControl.SetNull();
+        coinControl = CCoinControl();
         auto setCoins = GetCoins({{1000, false}, {5000, false}, {10000, false}, {84000, false}});
         for (auto coin : setCoins) {
             coinControl.Select(coin);
@@ -958,7 +953,7 @@ BOOST_FIXTURE_TEST_CASE(CreateTransactionTest, CreateTransactionTestSetup)
 
     // Last use 10 equal inputs with a total of 100k duff
     {
-        coinControl.SetNull();
+        coinControl = CCoinControl();
         auto setCoins = GetCoins({{10000, false}, {10000, false}, {10000, false}, {10000, false}, {10000, false},
                                   {10000, false}, {10000, false}, {10000, false}, {10000, false}, {10000, false}});
 
@@ -1004,7 +999,7 @@ BOOST_FIXTURE_TEST_CASE(CreateTransactionTest, CreateTransactionTestSetup)
     // Some tests without selected coins in coinControl, let the wallet decide
     // which inputs to use
     {
-        coinControl.SetNull();
+        coinControl = CCoinControl();
         coinControl.m_feerate = CFeeRate(fallbackFee);
         auto setCoins = GetCoins({{1000, false}, {1000, false}, {1000, false}, {1000, false}, {1000, false},
                                   {1100, false}, {1200, false}, {1300, false}, {1400, false}, {1500, false},
@@ -1053,7 +1048,7 @@ BOOST_FIXTURE_TEST_CASE(CreateTransactionTest, CreateTransactionTestSetup)
     }
     // Test if the change output ends up at the requested position
     {
-        coinControl.SetNull();
+        coinControl = CCoinControl();
         coinControl.m_feerate = CFeeRate(fallbackFee);
         coinControl.Select(GetCoins({{100000, false}})[0]);
 
@@ -1064,7 +1059,7 @@ BOOST_FIXTURE_TEST_CASE(CreateTransactionTest, CreateTransactionTestSetup)
     }
     // Test error cases
     {
-        coinControl.SetNull();
+        coinControl = CCoinControl();
         coinControl.m_feerate = CFeeRate(fallbackFee);
         // First try to send something without any coins available
         {
@@ -1101,7 +1096,7 @@ BOOST_FIXTURE_TEST_CASE(CreateTransactionTest, CreateTransactionTestSetup)
             }
         };
 
-        coinControl.SetNull();
+        coinControl = CCoinControl();
         coinControl.m_feerate = CFeeRate(fallbackFee);
         coinControl.Select(GetCoins({{100 * COIN, false}})[0]);
 

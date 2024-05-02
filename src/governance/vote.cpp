@@ -11,7 +11,7 @@
 #include <masternode/node.h>
 #include <masternode/sync.h>
 #include <messagesigner.h>
-#include <net.h>
+#include <net_processing.h>
 #include <util/string.h>
 #include <util/system.h>
 #include <validation.h>
@@ -122,10 +122,10 @@ std::string CGovernanceVote::ToString(const CDeterministicMNList& tip_mn_list) c
     return ostr.str();
 }
 
-void CGovernanceVote::Relay(CConnman& connman, const CDeterministicMNList& tip_mn_list) const
+void CGovernanceVote::Relay(PeerManager& peerman, const CMasternodeSync& mn_sync, const CDeterministicMNList& tip_mn_list) const
 {
     // Do not relay until fully synced
-    if (!::masternodeSync->IsSynced()) {
+    if (!mn_sync.IsSynced()) {
         LogPrint(BCLog::GOBJECT, "CGovernanceVote::Relay -- won't relay until fully synced\n");
         return;
     }
@@ -136,7 +136,7 @@ void CGovernanceVote::Relay(CConnman& connman, const CDeterministicMNList& tip_m
     }
 
     CInv inv(MSG_GOVERNANCE_OBJECT_VOTE, GetHash());
-    connman.RelayInv(inv);
+    peerman.RelayInv(inv);
 }
 
 void CGovernanceVote::UpdateHash() const

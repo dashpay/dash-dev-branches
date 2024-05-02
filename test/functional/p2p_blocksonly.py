@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2019 The Bitcoin Core developers
+# Copyright (c) 2019-2020 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Test p2p blocksonly mode & block-relay-only connections."""
@@ -87,7 +87,7 @@ class P2PBlocksOnly(BitcoinTestFramework):
 
         self.nodes[0].sendrawtransaction(tx_hex)
 
-        # Bump time forward to ensure nNextInvSend timer pops
+        # Bump time forward to ensure m_next_inv_send_time timer pops
         self.nodes[0].setmocktime(int(time.time()) + 60)
 
         conn.sync_send_with_ping()

@@ -755,9 +755,9 @@ std::set<size_t> CalcDeterministicWatchConnections(Consensus::LLMQType llmqType,
 
 bool EnsureQuorumConnections(const Consensus::LLMQParams& llmqParams, CConnman& connman, CDeterministicMNManager& dmnman, const CSporkManager& sporkman,
                              const CDeterministicMNList& tip_mn_list, gsl::not_null<const CBlockIndex*> pQuorumBaseBlockIndex,
-                             const uint256& myProTxHash)
+                             const uint256& myProTxHash, bool is_masternode)
 {
-    if (!fMasternodeMode && !IsWatchQuorumsEnabled()) {
+    if (!is_masternode && !IsWatchQuorumsEnabled()) {
         return false;
     }
 
@@ -808,10 +808,12 @@ bool EnsureQuorumConnections(const Consensus::LLMQParams& llmqParams, CConnman& 
     return true;
 }
 
-void AddQuorumProbeConnections(const Consensus::LLMQParams& llmqParams, CConnman& connman, CDeterministicMNManager& dmnman, const CSporkManager& sporkman,
-                               const CDeterministicMNList& tip_mn_list, gsl::not_null<const CBlockIndex*> pQuorumBaseBlockIndex,
-                               const uint256 &myProTxHash)
+void AddQuorumProbeConnections(const Consensus::LLMQParams& llmqParams, CConnman& connman, CDeterministicMNManager& dmnman,
+                               CMasternodeMetaMan& mn_metaman, const CSporkManager& sporkman, const CDeterministicMNList& tip_mn_list,
+                               gsl::not_null<const CBlockIndex*> pQuorumBaseBlockIndex, const uint256 &myProTxHash)
 {
+    assert(mn_metaman.IsValid());
+
     if (!IsQuorumPoseEnabled(llmqParams.type, sporkman)) {
         return;
     }
@@ -824,7 +826,7 @@ void AddQuorumProbeConnections(const Consensus::LLMQParams& llmqParams, CConnman
         if (dmn->proTxHash == myProTxHash) {
             continue;
         }
-        auto lastOutbound = mmetaman->GetMetaInfo(dmn->proTxHash)->GetLastOutboundSuccess();
+        auto lastOutbound = mn_metaman.GetMetaInfo(dmn->proTxHash)->GetLastOutboundSuccess();
         if (curTime - lastOutbound < 10 * 60) {
             // avoid re-probing nodes too often
             continue;

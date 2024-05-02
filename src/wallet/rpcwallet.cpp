@@ -2992,6 +2992,8 @@ static RPCHelpMan createwallet()
         RPCExamples{
             HelpExampleCli("createwallet", "\"testwallet\"")
             + HelpExampleRpc("createwallet", "\"testwallet\"")
+            + HelpExampleCliNamed("createwallet", {{"wallet_name", "descriptors"}, {"avoid_reuse", true}, {"descriptors", true}, {"load_on_startup", true}})
+            + HelpExampleRpcNamed("createwallet", {{"wallet_name", "descriptors"}, {"avoid_reuse", true}, {"descriptors", true}, {"load_on_startup", true}})
         },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
@@ -3863,6 +3865,7 @@ RPCHelpMan getaddressinfo()
                 {RPCResult::Type::BOOL, "iswatchonly", "If the address is watchonly."},
                 {RPCResult::Type::BOOL, "solvable", "If we know how to spend coins sent to this address, ignoring the possible lack of private keys."},
                 {RPCResult::Type::STR, "desc", /* optional */ true, "A descriptor for spending coins sent to this address (only when solvable)."},
+                {RPCResult::Type::STR, "parent_desc", /* optional */ true, "The descriptor used to derive this address if this is a descriptor wallet"},
                 {RPCResult::Type::BOOL, "isscript", "If the key is a script."},
                 {RPCResult::Type::BOOL, "ischange", "If the address was used for change output."},
                 {RPCResult::Type::STR, "script", /* optional */ true, "The output script type. Only if isscript is true and the redeemscript is known. Possible types: nonstandard, pubkey, pubkeyhash, scripthash, multisig, nulldata"},
@@ -3930,6 +3933,14 @@ RPCHelpMan getaddressinfo()
 
     if (solvable) {
         ret.pushKV("desc", InferDescriptor(scriptPubKey, *provider)->ToString());
+    }
+
+    DescriptorScriptPubKeyMan* desc_spk_man = dynamic_cast<DescriptorScriptPubKeyMan*>(pwallet->GetScriptPubKeyMan(scriptPubKey));
+    if (desc_spk_man) {
+        std::string desc_str;
+        if (desc_spk_man->GetDescriptorString(desc_str, false)) {
+            ret.pushKV("parent_desc", desc_str);
+        }
     }
 
     ret.pushKV("iswatchonly", bool(mine & ISMINE_WATCH_ONLY));
@@ -4261,21 +4272,6 @@ static RPCHelpMan send()
     };
 }
 
-RPCHelpMan abortrescan();
-RPCHelpMan dumpprivkey();
-RPCHelpMan importprivkey();
-RPCHelpMan importaddress();
-RPCHelpMan importpubkey();
-RPCHelpMan dumpwallet();
-RPCHelpMan importwallet();
-RPCHelpMan importprunedfunds();
-RPCHelpMan removeprunedfunds();
-RPCHelpMan importmulti();
-RPCHelpMan importdescriptors();
-RPCHelpMan listdescriptors();
-RPCHelpMan dumphdinfo();
-RPCHelpMan importelectrumwallet();
-
 RPCHelpMan walletprocesspsbt()
 {
     return RPCHelpMan{"walletprocesspsbt",
@@ -4508,6 +4504,21 @@ static RPCHelpMan upgradewallet()
 },
     };
 }
+
+RPCHelpMan abortrescan();
+RPCHelpMan dumpprivkey();
+RPCHelpMan importprivkey();
+RPCHelpMan importaddress();
+RPCHelpMan importpubkey();
+RPCHelpMan dumpwallet();
+RPCHelpMan importwallet();
+RPCHelpMan importprunedfunds();
+RPCHelpMan removeprunedfunds();
+RPCHelpMan importmulti();
+RPCHelpMan importdescriptors();
+RPCHelpMan listdescriptors();
+RPCHelpMan dumphdinfo();
+RPCHelpMan importelectrumwallet();
 
 Span<const CRPCCommand> GetWalletRPCCommands()
 {

@@ -275,7 +275,7 @@ static void quorum_dkgstatus_help(const JSONRPCRequest& request)
     }.Check(request);
 }
 
-static UniValue quorum_dkgstatus(const JSONRPCRequest& request, CDeterministicMNManager& dmnman, const CActiveMasternodeManager* mn_activeman,
+static UniValue quorum_dkgstatus(const JSONRPCRequest& request, CDeterministicMNManager& dmnman, const CActiveMasternodeManager* const mn_activeman,
                                  const ChainstateManager& chainman, const CSporkManager& sporkman, const LLMQContext& llmq_ctx)
 {
     quorum_dkgstatus_help(request);
@@ -296,11 +296,7 @@ static UniValue quorum_dkgstatus(const JSONRPCRequest& request, CDeterministicMN
     CBlockIndex* pindexTip = WITH_LOCK(cs_main, return chainman.ActiveChain().Tip());
     int tipHeight = pindexTip->nHeight;
 
-    const uint256 proTxHash = [&mn_activeman]() {
-        if (!fMasternodeMode) return uint256();
-        CHECK_NONFATAL(mn_activeman);
-        return mn_activeman->GetProTxHash();
-    }();
+    const uint256 proTxHash = mn_activeman ? mn_activeman->GetProTxHash() : uint256();
 
     UniValue minableCommitments(UniValue::VARR);
     UniValue quorumArrConnections(UniValue::VARR);
@@ -316,7 +312,7 @@ static UniValue quorum_dkgstatus(const JSONRPCRequest& request, CDeterministicMN
             obj.pushKV("llmqType", std::string(llmq_params.name));
             obj.pushKV("quorumIndex", quorumIndex);
 
-            if (fMasternodeMode) {
+            if (mn_activeman) {
                 int quorumHeight = tipHeight - (tipHeight % llmq_params.dkgInterval) + quorumIndex;
                 if (quorumHeight <= tipHeight) {
                     const CBlockIndex* pQuorumBaseBlockIndex = WITH_LOCK(cs_main, return chainman.ActiveChain()[quorumHeight]);
@@ -884,7 +880,7 @@ static UniValue _quorum(const JSONRPCRequest& request)
     } else if (command == "quorumdkginfo") {
         return quorum_dkginfo(new_request, llmq_ctx, chainman);
     } else if (command == "quorumdkgstatus") {
-        return quorum_dkgstatus(new_request, *node.dmnman, node.mn_activeman, chainman, *node.sporkman, llmq_ctx);
+        return quorum_dkgstatus(new_request, *node.dmnman, node.mn_activeman.get(), chainman, *node.sporkman, llmq_ctx);
     } else if (command == "quorummemberof") {
         return quorum_memberof(new_request, chainman, node, llmq_ctx);
     } else if (command == "quorumsign" || command == "quorumverify" || command == "quorumhasrecsig" || command == "quorumgetrecsig" || command == "quorumisconflicting") {

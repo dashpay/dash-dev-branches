@@ -474,7 +474,7 @@ void CInstantSendManager::Stop()
 
 void CInstantSendManager::ProcessTx(const CTransaction& tx, bool fRetroactive, const Consensus::Params& params)
 {
-    if (!fMasternodeMode || !IsInstantSendEnabled() || !m_mn_sync.IsBlockchainSynced()) {
+    if (!m_is_masternode || !IsInstantSendEnabled() || !m_mn_sync.IsBlockchainSynced()) {
         return;
     }
 
@@ -747,15 +747,9 @@ void CInstantSendManager::HandleNewInstantSendLockRecoveredSig(const llmq::CReco
     pendingInstantSendLocks.emplace(hash, std::make_pair(-1, islock));
 }
 
-PeerMsgRet CInstantSendManager::ProcessMessage(const CNode& pfrom, gsl::not_null<PeerManager*> peerman, std::string_view msg_type, CDataStream& vRecv)
+PeerMsgRet CInstantSendManager::ProcessMessage(const CNode& pfrom, std::string_view msg_type, CDataStream& vRecv)
 {
     if (IsInstantSendEnabled() && msg_type == NetMsgType::ISDLOCK) {
-        if (m_peerman == nullptr) {
-            m_peerman = peerman;
-        }
-        // we should never use one CInstantSendManager with different PeerManager
-        assert(m_peerman == peerman);
-
         const auto islock = std::make_shared<CInstantSendLock>();
         vRecv >> *islock;
         return ProcessMessageInstantSendLock(pfrom, islock);
@@ -957,7 +951,7 @@ std::unordered_set<uint256, StaticSaltedHasher> CInstantSendManager::ProcessPend
         for (const auto& nodeId : batchVerifier.badSources) {
             // Let's not be too harsh, as the peer might simply be unlucky and might have sent us an old lock which
             // does not validate anymore due to changed quorums
-            m_peerman.load()->Misbehaving(nodeId, 20);
+            Assert(m_peerman)->Misbehaving(nodeId, 20);
         }
     }
     for (const auto& p : pend) {
@@ -1051,11 +1045,11 @@ void CInstantSendManager::ProcessInstantSendLock(NodeId from, const uint256& has
 
     CInv inv(MSG_ISDLOCK, hash);
     if (tx != nullptr) {
-        connman.RelayInvFiltered(inv, *tx, ISDLOCK_PROTO_VERSION);
+        Assert(m_peerman)->RelayInvFiltered(inv, *tx, ISDLOCK_PROTO_VERSION);
     } else {
         // we don't have the TX yet, so we only filter based on txid. Later when that TX arrives, we will re-announce
         // with the TX taken into account.
-        connman.RelayInvFiltered(inv, islock->txid, ISDLOCK_PROTO_VERSION);
+        Assert(m_peerman)->RelayInvFiltered(inv, islock->txid, ISDLOCK_PROTO_VERSION);
     }
 
     ResolveBlockConflicts(hash, *islock);
@@ -1068,7 +1062,7 @@ void CInstantSendManager::ProcessInstantSendLock(NodeId from, const uint256& has
         // bump mempool counter to make sure newly locked txes are picked up by getblocktemplate
         mempool.AddTransactionsUpdated(1);
     } else {
-        AskNodesForLockedTx(islock->txid, connman, *m_peerman.load());
+        AskNodesForLockedTx(islock->txid, connman, *m_peerman, m_is_masternode);
     }
 }
 
@@ -1344,7 +1338,7 @@ void CInstantSendManager::RemoveMempoolConflictsForLock(const uint256& hash, con
         for (const auto& p : toDelete) {
             RemoveConflictedTx(*p.second);
         }
-        AskNodesForLockedTx(islock.txid, connman, *m_peerman.load());
+        AskNodesForLockedTx(islock.txid, connman, *m_peerman, m_is_masternode);
     }
 }
 
@@ -1449,7 +1443,7 @@ void CInstantSendManager::RemoveConflictingLock(const uint256& islockHash, const
     }
 }
 
-void CInstantSendManager::AskNodesForLockedTx(const uint256& txid, const CConnman& connman, const PeerManager& peerman)
+void CInstantSendManager::AskNodesForLockedTx(const uint256& txid, const CConnman& connman, const PeerManager& peerman, bool is_masternode)
 {
     std::vector<CNode*> nodesToAskFor;
     nodesToAskFor.reserve(4);
@@ -1458,12 +1452,9 @@ void CInstantSendManager::AskNodesForLockedTx(const uint256& txid, const CConnma
         if (nodesToAskFor.size() >= 4) {
             return;
         }
-        if (peerman.CanRelayAddrs(pnode->GetId())) {
-            LOCK(pnode->m_tx_relay->cs_tx_inventory);
-            if (pnode->m_tx_relay->filterInventoryKnown.contains(txid)) {
-                pnode->AddRef();
-                nodesToAskFor.emplace_back(pnode);
-            }
+        if (peerman.IsInvInFilter(pnode->GetId(), txid)) {
+            pnode->AddRef();
+            nodesToAskFor.emplace_back(pnode);
         }
     };
 
@@ -1482,7 +1473,7 @@ void CInstantSendManager::AskNodesForLockedTx(const uint256& txid, const CConnma
                       txid.ToString(), pnode->GetId());
 
             CInv inv(MSG_TX, txid);
-            RequestObject(pnode->GetId(), inv, GetTime<std::chrono::microseconds>(), true);
+            RequestObject(pnode->GetId(), inv, GetTime<std::chrono::microseconds>(), is_masternode, /* fForce = */ true);
         }
     }
     for (CNode* pnode : nodesToAskFor) {

@@ -18,8 +18,10 @@ class CCoinJoinServer;
 class CConnman;
 class CDeterministicMNManager;
 class CDSTXManager;
+class CMasternodeMetaMan;
 class CMasternodeSync;
 class CTxMemPool;
+class PeerManager;
 
 #ifdef ENABLE_WALLET
 class CCoinJoinClientQueueManager;
@@ -29,8 +31,9 @@ class CoinJoinWalletManager;
 struct CJContext {
     CJContext() = delete;
     CJContext(const CJContext&) = delete;
-    CJContext(CChainState& chainstate, CConnman& connman, CDeterministicMNManager& dmnman, CTxMemPool& mempool,
-              const CActiveMasternodeManager* mn_activeman, const CMasternodeSync& mn_sync, bool relay_txes);
+    CJContext(CChainState& chainstate, CConnman& connman, CDeterministicMNManager& dmnman, CMasternodeMetaMan& mn_metaman,
+              CTxMemPool& mempool, const CActiveMasternodeManager* const mn_activeman, const CMasternodeSync& mn_sync,
+              const std::unique_ptr<PeerManager>& peerman, bool relay_txes);
     ~CJContext();
 
     const std::unique_ptr<CDSTXManager> dstxman;

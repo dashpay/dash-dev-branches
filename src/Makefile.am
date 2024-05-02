@@ -286,6 +286,7 @@ BITCOIN_CORE_H = \
   rpc/blockchain.h \
   rpc/client.h \
   rpc/mining.h \
+  rpc/net.h \
   rpc/protocol.h \
   rpc/rawtransaction_util.h \
   rpc/register.h \
@@ -355,6 +356,7 @@ BITCOIN_CORE_H = \
   util/time.h \
   util/thread.h \
   util/threadnames.h \
+  util/tokenpipe.h \
   util/trace.h \
   util/translation.h \
   util/ui_change_type.h \
@@ -371,6 +373,7 @@ BITCOIN_CORE_H = \
   wallet/context.h \
   wallet/crypter.h \
   wallet/db.h \
+  wallet/dump.h \
   wallet/fees.h \
   wallet/hdchain.h \
   wallet/ismine.h \
@@ -549,6 +552,7 @@ libbitcoin_wallet_a_SOURCES = \
   wallet/context.cpp \
   wallet/crypter.cpp \
   wallet/db.cpp \
+  wallet/dump.cpp \
   wallet/fees.cpp \
   wallet/hdchain.cpp \
   wallet/interfaces.cpp \
@@ -790,6 +794,7 @@ libbitcoin_util_a_SOURCES = \
   util/string.cpp \
   util/thread.cpp \
   util/threadnames.cpp \
+  util/tokenpipe.cpp \
   $(BITCOIN_CORE_H)
 
 if USE_LIBEVENT

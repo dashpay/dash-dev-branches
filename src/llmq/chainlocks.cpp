@@ -11,6 +11,7 @@
 #include <chainparams.h>
 #include <consensus/validation.h>
 #include <masternode/sync.h>
+#include <net_processing.h>
 #include <node/blockstorage.h>
 #include <node/ui_interface.h>
 #include <scheduler.h>
@@ -25,17 +26,19 @@ namespace llmq
 {
 std::unique_ptr<CChainLocksHandler> chainLocksHandler;
 
-CChainLocksHandler::CChainLocksHandler(CChainState& chainstate, CConnman& _connman, CMasternodeSync& mn_sync, CQuorumManager& _qman,
-                                       CSigningManager& _sigman, CSigSharesManager& _shareman, CSporkManager& sporkman,
-                                       CTxMemPool& _mempool) :
+CChainLocksHandler::CChainLocksHandler(CChainState& chainstate, CQuorumManager& _qman, CSigningManager& _sigman,
+                                       CSigSharesManager& _shareman, CSporkManager& sporkman, CTxMemPool& _mempool,
+                                       const CMasternodeSync& mn_sync, const std::unique_ptr<PeerManager>& peerman,
+                                       bool is_masternode) :
     m_chainstate(chainstate),
-    connman(_connman),
-    m_mn_sync(mn_sync),
     qman(_qman),
     sigman(_sigman),
     shareman(_shareman),
     spork_manager(sporkman),
     mempool(_mempool),
+    m_mn_sync(mn_sync),
+    m_peerman(peerman),
+    m_is_masternode{is_masternode},
     scheduler(std::make_unique<CScheduler>()),
     scheduler_thread(std::make_unique<std::thread>(std::thread(util::TraceThread, "cl-schdlr", [&] { scheduler->serviceQueue(); })))
 {
@@ -161,7 +164,7 @@ PeerMsgRet CChainLocksHandler::ProcessNewChainLock(const NodeId from, const llmq
 
     // Note: do not hold cs while calling RelayInv
     AssertLockNotHeld(cs);
-    connman.RelayInv(clsigInv);
+    Assert(m_peerman)->RelayInv(clsigInv);
 
     if (pindex == nullptr) {
         // we don't know the block/header for this CLSIG yet, so bail out for now
@@ -237,7 +240,7 @@ void CChainLocksHandler::TrySignChainTip()
 {
     Cleanup();
 
-    if (!fMasternodeMode) {
+    if (!m_is_masternode) {
         return;
     }
 

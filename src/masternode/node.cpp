@@ -15,9 +15,6 @@
 #include <validation.h>
 #include <warnings.h>
 
-// Keep track of the active Masternode
-std::unique_ptr<CActiveMasternodeManager> activeMasternodeManager;
-
 CActiveMasternodeManager::CActiveMasternodeManager(const CBLSSecretKey& sk, CConnman& connman, const std::unique_ptr<CDeterministicMNManager>& dmnman) :
     m_info(sk, sk.GetPublicKey()),
     m_connman{connman},
@@ -77,8 +74,6 @@ std::string CActiveMasternodeManager::GetStatus() const
 void CActiveMasternodeManager::InitInternal(const CBlockIndex* pindex)
 {
     AssertLockHeld(cs);
-
-    if (!fMasternodeMode) return;
 
     if (!DeploymentDIP0003Enforced(pindex->nHeight, Params().GetConsensus())) return;
 
@@ -149,8 +144,6 @@ void CActiveMasternodeManager::InitInternal(const CBlockIndex* pindex)
 
 void CActiveMasternodeManager::UpdatedBlockTip(const CBlockIndex* pindexNew, const CBlockIndex* pindexFork, bool fInitialDownload)
 {
-    if (!fMasternodeMode) return;
-
     if (!DeploymentDIP0003Enforced(pindexNew->nHeight, Params().GetConsensus())) return;
 
     const auto [cur_state, cur_protx_hash] = WITH_READ_LOCK(cs, return std::make_pair(m_state, m_info.proTxHash));

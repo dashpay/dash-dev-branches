@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2014-2016 The Bitcoin Core developers
+# Copyright (c) 2014-2020 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Test BIP68 implementation."""
@@ -38,10 +38,7 @@ class BIP68Test(BitcoinTestFramework):
     def set_test_params(self):
         self.num_nodes = 2
         self.extra_args = [
-            [
-                "-acceptnonstdtxn=1",
-                "-peertimeout=9999",  # bump because mocktime might cause a disconnect otherwise
-            ],
+            ["-acceptnonstdtxn=1"],
             ["-acceptnonstdtxn=0"],
         ]
 

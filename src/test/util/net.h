@@ -15,6 +15,12 @@
 
 struct ConnmanTestMsg : public CConnman {
     using CConnman::CConnman;
+
+    void SetPeerConnectTimeout(std::chrono::seconds timeout)
+    {
+        m_peer_connect_timeout = timeout;
+    }
+
     void AddTestNode(CNode& node)
     {
         LOCK(cs_vNodes);
@@ -56,6 +62,15 @@ constexpr NetPermissionFlags ALL_NET_PERMISSION_FLAGS[]{
     NetPermissionFlags::Download,
     NetPermissionFlags::Implicit,
     NetPermissionFlags::All,
+};
+
+constexpr ConnectionType ALL_CONNECTION_TYPES[]{
+    ConnectionType::INBOUND,
+    ConnectionType::OUTBOUND_FULL_RELAY,
+    ConnectionType::MANUAL,
+    ConnectionType::FEELER,
+    ConnectionType::BLOCK_RELAY,
+    ConnectionType::ADDR_FETCH,
 };
 
 /**

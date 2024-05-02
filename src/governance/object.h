@@ -19,7 +19,10 @@ class CDeterministicMNList;
 class CGovernanceManager;
 class CGovernanceObject;
 class CGovernanceVote;
+class CMasternodeMetaMan;
+class CMasternodeSync;
 class CNode;
+class PeerManager;
 
 extern RecursiveMutex cs_main;
 
@@ -247,7 +250,7 @@ public:
 
     UniValue GetJSONObject() const;
 
-    void Relay(CConnman& connman) const;
+    void Relay(PeerManager& peerman, const CMasternodeSync& mn_sync) const;
 
     uint256 GetHash() const;
     uint256 GetDataHash() const;
@@ -289,7 +292,8 @@ public:
     void LoadData();
     void GetData(UniValue& objResult) const;
 
-    bool ProcessVote(CGovernanceManager& govman, const CDeterministicMNList& tip_mn_list, const CGovernanceVote& vote, CGovernanceException& exception);
+    bool ProcessVote(CMasternodeMetaMan& mn_metaman, CGovernanceManager& govman, const CDeterministicMNList& tip_mn_list,
+                     const CGovernanceVote& vote, CGovernanceException& exception);
 
     /// Called when MN's which have voted on this object have been removed
     void ClearMasternodeVotes(const CDeterministicMNList& tip_mn_list);

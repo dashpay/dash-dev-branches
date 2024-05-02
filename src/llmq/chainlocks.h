@@ -24,12 +24,12 @@
 #include <unordered_set>
 
 class CChainState;
-class CConnman;
 class CBlockIndex;
 class CMasternodeSync;
 class CScheduler;
 class CSporkManager;
 class CTxMemPool;
+class PeerManager;
 
 namespace llmq
 {
@@ -46,14 +46,15 @@ class CChainLocksHandler : public CRecoveredSigsListener
 
 private:
     CChainState& m_chainstate;
-    CConnman& connman;
-    CMasternodeSync& m_mn_sync;
     CQuorumManager& qman;
     CSigningManager& sigman;
     CSigSharesManager& shareman;
     CSporkManager& spork_manager;
     CTxMemPool& mempool;
+    const CMasternodeSync& m_mn_sync;
+    const std::unique_ptr<PeerManager>& m_peerman;
 
+    const bool m_is_masternode;
     std::unique_ptr<CScheduler> scheduler;
     std::unique_ptr<std::thread> scheduler_thread;
     mutable Mutex cs;
@@ -85,9 +86,10 @@ private:
     std::atomic<int64_t> lastCleanupTime{0};
 
 public:
-    explicit CChainLocksHandler(CChainState& chainstate, CConnman& _connman, CMasternodeSync& mn_sync, CQuorumManager& _qman,
-                                CSigningManager& _sigman, CSigSharesManager& _shareman, CSporkManager& sporkman,
-                                CTxMemPool& _mempool);
+    explicit CChainLocksHandler(CChainState& chainstate, CQuorumManager& _qman, CSigningManager& _sigman,
+                                CSigSharesManager& _shareman, CSporkManager& sporkman, CTxMemPool& _mempool,
+                                const CMasternodeSync& mn_sync, const std::unique_ptr<PeerManager>& peerman,
+                                bool is_masternode);
     ~CChainLocksHandler();
 
     void Start();

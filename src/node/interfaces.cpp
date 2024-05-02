@@ -133,6 +133,13 @@ public:
         }
         return false;
     }
+    bool isEnabled() override
+    {
+        if (context().govman != nullptr) {
+            return context().govman->IsValid();
+        }
+        return false;
+    }
     void setContext(NodeContext* context) override
     {
         m_context = context;
@@ -477,12 +484,16 @@ public:
         }
         return active_chainstate->IsInitialBlockDownload();
     }
+    bool isMasternode() override
+    {
+        return m_context->mn_activeman != nullptr;
+    }
     bool getReindex() override { return ::fReindex; }
     bool getImporting() override { return ::fImporting; }
     void setNetworkActive(bool active) override
     {
         if (m_context->connman) {
-            m_context->connman->SetNetworkActive(active);
+            m_context->connman->SetNetworkActive(active, m_context->mn_sync.get());
         }
     }
     bool getNetworkActive() override { return m_context->connman && m_context->connman->GetNetworkActive(); }

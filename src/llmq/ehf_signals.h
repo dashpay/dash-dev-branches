@@ -11,10 +11,10 @@
 
 class CBlockIndex;
 class CChainState;
-class CConnman;
 class CMNHFManager;
 class CSporkManager;
 class CTxMemPool;
+class PeerManager;
 
 namespace llmq
 {
@@ -26,13 +26,13 @@ class CEHFSignalsHandler : public CRecoveredSigsListener
 {
 private:
     CChainState& chainstate;
-    CConnman& connman;
     CMNHFManager& mnhfman;
     CSigningManager& sigman;
     CSigSharesManager& shareman;
-    const CSporkManager& sporkman;
-    const CQuorumManager& qman;
     CTxMemPool& mempool;
+    const CQuorumManager& qman;
+    const CSporkManager& sporkman;
+    const std::unique_ptr<PeerManager>& m_peerman;
 
     /**
      * keep freshly generated IDs for easier filter sigs in HandleNewRecoveredSig
@@ -40,16 +40,16 @@ private:
     mutable Mutex cs;
     std::set<uint256> ids GUARDED_BY(cs);
 public:
-    explicit CEHFSignalsHandler(CChainState& chainstate, CConnman& connman,
-                                CMNHFManager& mnhfman, CSigningManager& sigman, CSigSharesManager& shareman,
-                                const CSporkManager& sporkman, const CQuorumManager& qman, CTxMemPool& mempool);
+    explicit CEHFSignalsHandler(CChainState& chainstate, CMNHFManager& mnhfman, CSigningManager& sigman,
+                                CSigSharesManager& shareman, CTxMemPool& mempool, const CQuorumManager& qman,
+                                const CSporkManager& sporkman, const std::unique_ptr<PeerManager>& peerman);
     ~CEHFSignalsHandler();
 
 
     /**
      * Since Tip is updated it could be a time to generate EHF Signal
      */
-    void UpdatedBlockTip(const CBlockIndex* const pindexNew);
+    void UpdatedBlockTip(const CBlockIndex* const pindexNew, bool is_masternode);
 
     void HandleNewRecoveredSig(const CRecoveredSig& recoveredSig) override LOCKS_EXCLUDED(cs);
 
