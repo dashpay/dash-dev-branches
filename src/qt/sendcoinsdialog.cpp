@@ -454,7 +454,7 @@ bool SendCoinsDialog::send(const QList<SendCoinsRecipient>& recipients, QString&
         .arg(alternativeUnits.join(" " + tr("or") + " ")));
 
     if (formatted.size() > 1) {
-        informative_text = tr("To review recipient list click \"Show Details...\"");
+        informative_text = tr("To review recipient list click \"Show Details…\"");
         detailed_text = formatted.join("\n\n");
     }
 
@@ -487,7 +487,7 @@ void SendCoinsDialog::sendButtonClicked([[maybe_unused]] bool checked)
         CMutableTransaction mtx = CMutableTransaction{*(m_current_transaction->getWtx())};
         PartiallySignedTransaction psbtx(mtx);
         bool complete = false;
-        const TransactionError err = model->wallet().fillPSBT(SIGHASH_ALL, false /* sign */, true /* bip32derivs */, psbtx, complete, nullptr);
+        const TransactionError err = model->wallet().fillPSBT(SIGHASH_ALL, false /* sign */, true /* bip32derivs */, nullptr, psbtx, complete);
         assert(!complete);
         assert(err == TransactionError::OK);
         // Serialize the PSBT

@@ -918,7 +918,7 @@ CWalletTx* CWallet::AddToWallet(CTransactionRef tx, const CWalletTx::Confirmatio
     wtx.MarkDirty();
 
     // Notify UI of new or updated transaction
-    NotifyTransactionChanged(this, hash, fInsertedNew ? CT_NEW : CT_UPDATED);
+    NotifyTransactionChanged(hash, fInsertedNew ? CT_NEW : CT_UPDATED);
 
 #if HAVE_SYSTEM
     // notify an external script when a wallet transaction comes in or is updated
@@ -1101,7 +1101,7 @@ bool CWallet::AbandonTransaction(const uint256& hashTx)
             wtx.setAbandoned();
             wtx.MarkDirty();
             batch.WriteTx(wtx);
-            NotifyTransactionChanged(this, wtx.GetHash(), CT_UPDATED);
+            NotifyTransactionChanged(wtx.GetHash(), CT_UPDATED);
             // Iterate over all its outputs, and mark transactions in the wallet that spend them abandoned too
             TxSpends::const_iterator iter = mapTxSpends.lower_bound(COutPoint(now, 0));
             while (iter != mapTxSpends.end() && iter->first.hash == now) {
@@ -1953,7 +1953,7 @@ CWallet::ScanResult CWallet::ScanForWalletTransactions(const uint256& start_bloc
 
     WalletLogPrintf("Rescan started from block %s...\n", start_block.ToString());
 
-    ShowProgress(strprintf("%s " + _("Rescanning...").translated, GetDisplayName()), 0); // show rescan progress in GUI as dialog or on splashscreen, if -rescan on startup
+    ShowProgress(strprintf("%s " + _("Rescanning…").translated, GetDisplayName()), 0); // show rescan progress in GUI as dialog or on splashscreen, if -rescan on startup
     uint256 tip_hash = WITH_LOCK(cs_wallet, return GetLastBlockHash());
     uint256 end_hash = tip_hash;
     if (max_height) chain().findAncestorByHeight(tip_hash, *max_height, FoundBlock().hash(end_hash));
@@ -1969,7 +1969,7 @@ CWallet::ScanResult CWallet::ScanForWalletTransactions(const uint256& start_bloc
             m_scanning_progress = 0;
         }
         if (block_height % 100 == 0 && progress_end - progress_begin > 0.0) {
-            ShowProgress(strprintf("%s " + _("Rescanning...").translated, GetDisplayName()), std::max(1, std::min(99, (int)(m_scanning_progress * 100))));
+            ShowProgress(strprintf("%s " + _("Rescanning…").translated, GetDisplayName()), std::max(1, std::min(99, (int)(m_scanning_progress * 100))));
         }
         if (Clock::now() >= current_time + LOG_INTERVAL) {
             current_time = Clock::now();
@@ -2031,7 +2031,7 @@ CWallet::ScanResult CWallet::ScanForWalletTransactions(const uint256& start_bloc
             }
         }
     }
-    ShowProgress(strprintf("%s " + _("Rescanning...").translated, GetDisplayName()), 100); // hide progress dialog in GUI
+    ShowProgress(strprintf("%s " + _("Rescanning…").translated, GetDisplayName()), 100); // hide progress dialog in GUI
     if (block_height && fAbortRescan) {
         WalletLogPrintf("Rescan aborted at block %d. Progress=%f\n", block_height, progress_current);
         result.status = ScanResult::USER_ABORT;
@@ -2877,7 +2877,7 @@ bool CWallet::SelectCoins(const std::vector<COutput>& vAvailableCoins, const CAm
         }
     }
 
-    // remove preset inputs from vCoins
+    // remove preset inputs from vCoins so that Coin Selection doesn't pick them.
     for (std::vector<COutput>::iterator it = vCoins.begin(); it != vCoins.end() && coin_control.HasSelected();)
     {
         if (setPresetCoins.count(it->GetInputCoin()))
@@ -2889,9 +2889,9 @@ bool CWallet::SelectCoins(const std::vector<COutput>& vAvailableCoins, const CAm
     unsigned int limit_ancestor_count = 0;
     unsigned int limit_descendant_count = 0;
     chain().getPackageLimits(limit_ancestor_count, limit_descendant_count);
-    size_t max_ancestors = (size_t)std::max<int64_t>(1, limit_ancestor_count);
-    size_t max_descendants = (size_t)std::max<int64_t>(1, limit_descendant_count);
-    bool fRejectLongChains = gArgs.GetBoolArg("-walletrejectlongchains", DEFAULT_WALLET_REJECT_LONG_CHAINS);
+    const size_t max_ancestors = (size_t)std::max<int64_t>(1, limit_ancestor_count);
+    const size_t max_descendants = (size_t)std::max<int64_t>(1, limit_descendant_count);
+    const bool fRejectLongChains = gArgs.GetBoolArg("-walletrejectlongchains", DEFAULT_WALLET_REJECT_LONG_CHAINS);
 
     // form groups from remaining coins; note that preset coins will not
     // automatically have their associated (same address) coins included
@@ -2901,16 +2901,52 @@ bool CWallet::SelectCoins(const std::vector<COutput>& vAvailableCoins, const CAm
         // explicitly shuffling the outputs before processing
         Shuffle(vCoins.begin(), vCoins.end(), FastRandomContext());
     }
-    bool res = value_to_select <= 0 ||
-        SelectCoinsMinConf(value_to_select, CoinEligibilityFilter(1, 6, 0), vCoins, setCoinsRet, nValueRet, coin_selection_params, bnb_used, nCoinType) ||
-        SelectCoinsMinConf(value_to_select, CoinEligibilityFilter(1, 1, 0), vCoins, setCoinsRet, nValueRet, coin_selection_params, bnb_used, nCoinType) ||
-        (m_spend_zero_conf_change && SelectCoinsMinConf(value_to_select, CoinEligibilityFilter(0, 1, 2), vCoins, setCoinsRet, nValueRet, coin_selection_params, bnb_used, nCoinType)) ||
-        (m_spend_zero_conf_change && SelectCoinsMinConf(value_to_select, CoinEligibilityFilter(0, 1, std::min((size_t)4, max_ancestors/3), std::min((size_t)4, max_descendants/3)), vCoins, setCoinsRet, nValueRet, coin_selection_params, bnb_used, nCoinType)) ||
-        (m_spend_zero_conf_change && SelectCoinsMinConf(value_to_select, CoinEligibilityFilter(0, 1, max_ancestors/2, max_descendants/2), vCoins, setCoinsRet, nValueRet, coin_selection_params, bnb_used, nCoinType)) ||
-        (m_spend_zero_conf_change && SelectCoinsMinConf(value_to_select, CoinEligibilityFilter(0, 1, max_ancestors-1, max_descendants-1, true /* include_partial_groups */), vCoins, setCoinsRet, nValueRet, coin_selection_params, bnb_used, nCoinType)) ||
-        (m_spend_zero_conf_change && !fRejectLongChains && SelectCoinsMinConf(value_to_select, CoinEligibilityFilter(0, 1, std::numeric_limits<uint64_t>::max(), std::numeric_limits<uint64_t>::max(), true /* include_partial_groups */), vCoins, setCoinsRet, nValueRet, coin_selection_params, bnb_used, nCoinType));
+    // Coin Selection attempts to select inputs from a pool of eligible UTXOs to fund the
+    // transaction at a target feerate. If an attempt fails, more attempts may be made using a more
+    // permissive CoinEligibilityFilter.
+    const bool res = [&] {
+        // Pre-selected inputs already cover the target amount.
+        if (value_to_select <= 0) return true;
 
-    // because SelectCoinsMinConf clears the setCoinsRet, we now add the possible inputs to the coinset
+        // If possible, fund the transaction with confirmed UTXOs only. Prefer at least six
+        // confirmations on outputs received from other wallets and only spend confirmed change.
+        if (SelectCoinsMinConf(value_to_select, CoinEligibilityFilter(1, 6, 0), vCoins, setCoinsRet, nValueRet, coin_selection_params, bnb_used, nCoinType)) return true;
+        if (SelectCoinsMinConf(value_to_select, CoinEligibilityFilter(1, 1, 0), vCoins, setCoinsRet, nValueRet, coin_selection_params, bnb_used, nCoinType)) return true;
+
+        // Fall back to using zero confirmation change (but with as few ancestors in the mempool as
+        // possible) if we cannot fund the transaction otherwise. We never spend unconfirmed
+        // outputs received from other wallets.
+        if (m_spend_zero_conf_change) {
+            if (SelectCoinsMinConf(value_to_select, CoinEligibilityFilter(0, 1, 2), vCoins, setCoinsRet, nValueRet, coin_selection_params, bnb_used, nCoinType)) return true;
+            if (SelectCoinsMinConf(value_to_select, CoinEligibilityFilter(0, 1, std::min((size_t)4, max_ancestors/3), std::min((size_t)4, max_descendants/3)),
+                                   vCoins, setCoinsRet, nValueRet, coin_selection_params, bnb_used, nCoinType)) {
+                return true;
+            }
+            if (SelectCoinsMinConf(value_to_select, CoinEligibilityFilter(0, 1, max_ancestors/2, max_descendants/2),
+                                   vCoins, setCoinsRet, nValueRet, coin_selection_params, bnb_used, nCoinType)) {
+                return true;
+            }
+            // If partial groups are allowed, relax the requirement of spending OutputGroups (groups
+            // of UTXOs sent to the same address, which are obviously controlled by a single wallet)
+            // in their entirety.
+            if (SelectCoinsMinConf(value_to_select, CoinEligibilityFilter(0, 1, max_ancestors-1, max_descendants-1, true /* include_partial_groups */),
+                                   vCoins, setCoinsRet, nValueRet, coin_selection_params, bnb_used, nCoinType)) {
+                return true;
+            }
+            // Try with unlimited ancestors/descendants. The transaction will still need to meet
+            // mempool ancestor/descendant policy to be accepted to mempool and broadcasted, but
+            // OutputGroups use heuristics that may overestimate ancestor/descendant counts.
+            if (!fRejectLongChains && SelectCoinsMinConf(value_to_select,
+                                      CoinEligibilityFilter(0, 1, std::numeric_limits<uint64_t>::max(), std::numeric_limits<uint64_t>::max(), true /* include_partial_groups */),
+                                      vCoins, setCoinsRet, nValueRet, coin_selection_params, bnb_used, nCoinType)) {
+                return true;
+            }
+        }
+        // Coin Selection failed.
+        return false;
+    }();
+
+    // SelectCoinsMinConf clears setCoinsRet, so add the preset inputs from coin_control to the coinset
     util::insert(setCoinsRet, setPresetCoins);
 
     // add preset inputs to the total value selected
@@ -3804,7 +3840,7 @@ void CWallet::CommitTransaction(CTransactionRef tx, mapValue_t mapValue, std::ve
 
         CWalletTx &coin = mapWallet.at(txin.prevout.hash);
         coin.MarkDirty();
-        NotifyTransactionChanged(this, txin.prevout.hash, CT_UPDATED);
+        NotifyTransactionChanged(txin.prevout.hash, CT_UPDATED);
         updated_hahes.insert(txin.prevout.hash);
     }
     // Get the inserted-CWalletTx from mapWallet so that the
@@ -3901,7 +3937,7 @@ DBErrors CWallet::ZapSelectTx(std::vector<uint256>& vHashIn, std::vector<uint256
         for (const auto& txin : it->second.tx->vin)
             mapTxSpends.erase(txin.prevout);
         mapWallet.erase(it);
-        NotifyTransactionChanged(this, hash, CT_DELETED);
+        NotifyTransactionChanged(hash, CT_DELETED);
     }
 
     if (nZapSelectTxRet == DBErrors::NEED_REWRITE)
@@ -3936,8 +3972,8 @@ bool CWallet::SetAddressBookWithDB(WalletBatch& batch, const CTxDestination& add
             m_address_book[address].purpose = strPurpose;
         is_mine = IsMine(address) != ISMINE_NO;
     }
-    NotifyAddressBookChanged(this, address, strName, is_mine,
-                             strPurpose, (fUpdated ? CT_UPDATED : CT_NEW) );
+    NotifyAddressBookChanged(address, strName, is_mine,
+                             strPurpose, (fUpdated ? CT_UPDATED : CT_NEW));
     if (!strPurpose.empty() && !batch.WritePurpose(EncodeDestination(address), strPurpose))
         return false;
     return batch.WriteName(EncodeDestination(address), strName);
@@ -3972,7 +4008,7 @@ bool CWallet::DelAddressBook(const CTxDestination& address)
         is_mine = IsMine(address) != ISMINE_NO;
     }
 
-    NotifyAddressBookChanged(this, address, "", is_mine, "", CT_DELETED);
+    NotifyAddressBookChanged(address, "", is_mine, "", CT_DELETED);
 
     batch.ErasePurpose(EncodeDestination(address));
     return batch.EraseName(EncodeDestination(address));
@@ -4535,7 +4571,7 @@ std::shared_ptr<CWallet> CWallet::Create(interfaces::Chain& chain, interfaces::C
 {
     const std::string& walletFile = database->Filename();
 
-    chain.initMessage(_("Loading wallet...").translated);
+    chain.initMessage(_("Loading wallet…").translated);
 
     int64_t nStart = GetTimeMillis();
     bool fFirstRun = true;
@@ -4836,7 +4872,7 @@ std::shared_ptr<CWallet> CWallet::Create(interfaces::Chain& chain, interfaces::C
             }
         }
 
-        chain.initMessage(_("Rescanning...").translated);
+        chain.initMessage(_("Rescanning…").translated);
         walletInstance->WalletLogPrintf("Rescanning last %i blocks (from block %i)...\n", *tip_height - rescan_height, rescan_height);
 
         // No need to read and scan block if block was created before
@@ -5156,7 +5192,7 @@ void CWallet::notifyTransactionLock(const CTransactionRef &tx, const std::shared
     uint256 txHash = tx->GetHash();
     std::map<uint256, CWalletTx>::const_iterator mi = mapWallet.find(txHash);
     if (mi != mapWallet.end()){
-        NotifyTransactionChanged(this, txHash, CT_UPDATED);
+        NotifyTransactionChanged(txHash, CT_UPDATED);
         NotifyISLockReceived();
 #if HAVE_SYSTEM
         // notify an external script
@@ -5477,7 +5513,6 @@ ScriptPubKeyMan* CWallet::GetScriptPubKeyMan(bool internal) const
 {
     const auto spk_manager = internal ? m_internal_spk_managers : m_external_spk_managers;
     if (spk_manager == nullptr) {
-        WalletLogPrintf("%s scriptPubKey Manager does not exist\n", internal ? "Internal" : "External");
         return nullptr;
     }
     return spk_manager;
