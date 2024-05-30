@@ -41,9 +41,9 @@
 #include <functional>
 #include <map>
 #include <memory>
-#include <thread>
 #include <optional>
 #include <queue>
+#include <thread>
 #include <vector>
 
 class CConnman;
@@ -622,7 +622,7 @@ public:
 
     bool IsBlockRelayOnly() const;
 
-    CNode(NodeId id, ServiceFlags nLocalServicesIn, SOCKET hSocketIn, const CAddress &addrIn, uint64_t nKeyedNetGroupIn, uint64_t nLocalHostNonceIn, const CAddress &addrBindIn, const std::string &addrNameIn, ConnectionType conn_type_in, bool inbound_onion);
+    CNode(NodeId id, ServiceFlags nLocalServicesIn, SOCKET hSocketIn, const CAddress &addrIn, uint64_t nKeyedNetGroupIn, uint64_t nLocalHostNonceIn, const CAddress &addrBindIn, const std::string &addrNameIn, ConnectionType conn_type_in, bool inbound_onion, std::unique_ptr<i2p::sam::Session>&& i2p_sam_session = nullptr);
     ~CNode();
     CNode(const CNode&) = delete;
     CNode& operator=(const CNode&) = delete;
@@ -776,6 +776,18 @@ private:
 
     mapMsgCmdSize mapSendBytesPerMsgCmd GUARDED_BY(cs_vSend);
     mapMsgCmdSize mapRecvBytesPerMsgCmd GUARDED_BY(cs_vRecv);
+
+    /**
+     * If an I2P session is created per connection (for outbound transient I2P
+     * connections) then it is stored here so that it can be destroyed when the
+     * socket is closed. I2P sessions involve a data/transport socket (in `m_sock`)
+     * and a control socket (in `m_i2p_sam_session`). For transient sessions, once
+     * the data socket is closed, the control socket is not going to be used anymore
+     * and is just taking up resources. So better close it as soon as `m_sock` is
+     * closed.
+     * Otherwise this unique_ptr is empty.
+     */
+    std::unique_ptr<i2p::sam::Session> m_i2p_sam_session GUARDED_BY(cs_hSocket);
 };
 
 /**
@@ -913,9 +925,9 @@ public:
                                const char* strDest, ConnectionType conn_type,
                                MasternodeConn masternode_connection = MasternodeConn::IsNotConnection,
                                MasternodeProbeConn masternode_probe_connection = MasternodeProbeConn::IsNotConnection)
-        EXCLUSIVE_LOCKS_REQUIRED(!mutexMsgProc);
+        EXCLUSIVE_LOCKS_REQUIRED(!m_unused_i2p_sessions_mutex, !mutexMsgProc);
     void OpenMasternodeConnection(const CAddress& addrConnect, MasternodeProbeConn probe = MasternodeProbeConn::IsConnection)
-        EXCLUSIVE_LOCKS_REQUIRED(!mutexMsgProc);
+        EXCLUSIVE_LOCKS_REQUIRED(!m_unused_i2p_sessions_mutex, !mutexMsgProc);
     bool CheckIncomingNonce(uint64_t nonce);
 
     struct CFullyConnectedOnly {
@@ -1113,7 +1125,8 @@ public:
      *                          - Max total outbound connection capacity filled
      *                          - Max connection capacity for type is filled
      */
-    bool AddConnection(const std::string& address, ConnectionType conn_type) EXCLUSIVE_LOCKS_REQUIRED(!mutexMsgProc);
+    bool AddConnection(const std::string& address, ConnectionType conn_type)
+        EXCLUSIVE_LOCKS_REQUIRED(!m_unused_i2p_sessions_mutex, !mutexMsgProc);
 
     bool AddPendingMasternode(const uint256& proTxHash);
     void SetMasternodeQuorumNodes(Consensus::LLMQType llmqType, const uint256& quorumHash, const std::set<uint256>& proTxHashes);
@@ -1219,11 +1232,13 @@ private:
         const std::vector<NetWhitebindPermissions>& whiteBinds,
         const std::vector<CService>& onion_binds);
 
-    void ThreadOpenAddedConnections() EXCLUSIVE_LOCKS_REQUIRED(!m_added_nodes_mutex, !mutexMsgProc);
+    void ThreadOpenAddedConnections()
+        EXCLUSIVE_LOCKS_REQUIRED(!m_added_nodes_mutex, !m_unused_i2p_sessions_mutex, !mutexMsgProc);
     void AddAddrFetch(const std::string& strDest) EXCLUSIVE_LOCKS_REQUIRED(!m_addr_fetches_mutex);
-    void ProcessAddrFetch() EXCLUSIVE_LOCKS_REQUIRED(!m_addr_fetches_mutex, !mutexMsgProc);
+    void ProcessAddrFetch()
+        EXCLUSIVE_LOCKS_REQUIRED(!m_addr_fetches_mutex, !m_unused_i2p_sessions_mutex, !mutexMsgProc);
     void ThreadOpenConnections(const std::vector<std::string> connect, CDeterministicMNManager& dmnman)
-        EXCLUSIVE_LOCKS_REQUIRED(!m_addr_fetches_mutex, !m_added_nodes_mutex, !m_nodes_mutex, !mutexMsgProc);
+        EXCLUSIVE_LOCKS_REQUIRED(!m_addr_fetches_mutex, !m_added_nodes_mutex, !m_nodes_mutex, !m_unused_i2p_sessions_mutex, !mutexMsgProc);
     void ThreadMessageHandler() EXCLUSIVE_LOCKS_REQUIRED(!mutexMsgProc);
     void ThreadI2PAcceptIncoming(CMasternodeSync& mn_sync) EXCLUSIVE_LOCKS_REQUIRED(!mutexMsgProc);
     void AcceptConnection(const ListenSocket& hListenSocket, CMasternodeSync& mn_sync)
@@ -1329,7 +1344,7 @@ private:
     void ThreadDNSAddressSeed() EXCLUSIVE_LOCKS_REQUIRED(!m_addr_fetches_mutex, !m_nodes_mutex);
     void ThreadOpenMasternodeConnections(CDeterministicMNManager& dmnman, CMasternodeMetaMan& mn_metaman,
                                          CMasternodeSync& mn_sync)
-        EXCLUSIVE_LOCKS_REQUIRED(!m_addr_fetches_mutex, !m_nodes_mutex, !mutexMsgProc);
+        EXCLUSIVE_LOCKS_REQUIRED(!m_addr_fetches_mutex, !m_nodes_mutex, !m_unused_i2p_sessions_mutex, !mutexMsgProc);
 
     uint64_t CalculateKeyedNetGroup(const CAddress& ad) const;
 
@@ -1345,7 +1360,8 @@ private:
     bool AlreadyConnectedToAddress(const CAddress& addr);
 
     bool AttemptToEvictConnection();
-    CNode* ConnectNode(CAddress addrConnect, const char *pszDest = nullptr, bool fCountFailure = false, ConnectionType conn_type = ConnectionType::OUTBOUND_FULL_RELAY);
+    CNode* ConnectNode(CAddress addrConnect, const char *pszDest = nullptr, bool fCountFailure = false, ConnectionType conn_type = ConnectionType::OUTBOUND_FULL_RELAY)
+        EXCLUSIVE_LOCKS_REQUIRED(!m_unused_i2p_sessions_mutex);
     void AddWhitelistPermissionFlags(NetPermissionFlags& flags, const CNetAddr &addr) const;
 
     void DeleteNode(CNode* pnode);
@@ -1498,7 +1514,8 @@ private:
 
     /**
      * I2P SAM session.
-     * Used to accept incoming and make outgoing I2P connections.
+     * Used to accept incoming and make outgoing I2P connections from a persistent
+     * address.
      */
     std::unique_ptr<i2p::sam::Session> m_i2p_sam_session;
 
@@ -1550,6 +1567,26 @@ private:
      */
     std::vector<CService> m_onion_binds;
 
+    /**
+     * Mutex protecting m_i2p_sam_sessions.
+     */
+    Mutex m_unused_i2p_sessions_mutex;
+
+    /**
+     * A pool of created I2P SAM transient sessions that should be used instead
+     * of creating new ones in order to reduce the load on the I2P network.
+     * Creating a session in I2P is not cheap, thus if this is not empty, then
+     * pick an entry from it instead of creating a new session. If connecting to
+     * a host fails, then the created session is put to this pool for reuse.
+     */
+    std::queue<std::unique_ptr<i2p::sam::Session>> m_unused_i2p_sessions GUARDED_BY(m_unused_i2p_sessions_mutex);
+
+    /**
+     * Cap on the size of `m_unused_i2p_sessions`, to ensure it does not
+     * unexpectedly use too much memory.
+     */
+    static constexpr size_t MAX_UNUSED_I2P_SESSIONS_SIZE{10};
+
     friend struct CConnmanTest;
     friend struct ConnmanTestMsg;
 };
@@ -1583,7 +1620,7 @@ struct NodeEvictionCandidate
     uint64_t nKeyedNetGroup;
     bool prefer_evict;
     bool m_is_local;
-    bool m_is_onion;
+    Network m_network;
 };
 
 /**
@@ -1613,20 +1650,20 @@ size_t GetRequestedObjectCount(NodeId nodeId) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
  * longest, to replicate the non-eviction implicit behavior and preclude attacks
  * that start later.
  *
- * Half of these protected spots (1/4 of the total) are reserved for onion peers
- * connected via our tor control service, if any, sorted by longest uptime, even
- * if they're not longest uptime overall. Any remaining slots of the 1/4 are
- * then allocated to protect localhost peers, if any (or up to 2 localhost peers
- * if no slots remain and 2 or more onion peers were protected), sorted by
- * longest uptime, as manually configured hidden services not using
- * `-bind=addr[:port]=onion` will not be detected as inbound onion connections.
+ * Half of these protected spots (1/4 of the total) are reserved for the
+ * following categories of peers, sorted by longest uptime, even if they're not
+ * longest uptime overall:
  *
- * This helps protect onion peers, which tend to be otherwise disadvantaged
- * under our eviction criteria for their higher min ping times relative to IPv4
- * and IPv6 peers, and favorise the diversity of peer connections.
+ * - onion peers connected via our tor control service
  *
- * This function was extracted from SelectNodeToEvict() to be able to test the
- * ratio-based protection logic deterministically.
+ * - localhost peers, as manually configured hidden services not using
+ *   `-bind=addr[:port]=onion` will not be detected as inbound onion connections
+ *
+ * - I2P peers
+ *
+ * This helps protect these privacy network peers, which tend to be otherwise
+ * disadvantaged under our eviction criteria for their higher min ping times
+ * relative to IPv4/IPv6 peers, and favorise the diversity of peer connections.
  */
 void ProtectEvictionCandidatesByRatio(std::vector<NodeEvictionCandidate>& vEvictionCandidates);
 

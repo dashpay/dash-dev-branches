@@ -330,10 +330,11 @@ BASE_SCRIPTS = [
     'feature_blocksdir.py',
     'wallet_startup.py',
     'p2p_i2p_ports.py',
+    'p2p_i2p_sessions.py',
     'feature_config_args.py',
     'feature_settings.py',
     'rpc_getdescriptorinfo.py',
-    'rpc_getpeerinfo_banscore_deprecation.py',
+    'rpc_getpeerinfo_deprecation.py',
     'rpc_help.py',
     'feature_help.py',
     'feature_blockfilterindex_prune.py'
