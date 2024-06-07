@@ -25,18 +25,17 @@
 #include <test/fuzz/fuzz.h>
 #include <test/fuzz/util.h>
 #include <uint256.h>
+#include <univalue.h>
 #include <util/check.h>
 #include <util/moneystr.h>
 #include <util/overflow.h>
 #include <util/strencodings.h>
 #include <util/string.h>
 #include <util/system.h>
-#include <util/time.h>
 #include <version.h>
 
 #include <cassert>
 #include <chrono>
-#include <ctime>
 #include <limits>
 #include <optional>
 #include <set>
@@ -77,8 +76,6 @@ FUZZ_TARGET_INIT(integer, initialize_integer)
     (void)ComputeMerkleRoot(v256);
     (void)CountBits(u64);
     (void)DecompressAmount(u64);
-    (void)FormatISO8601Date(i64);
-    (void)FormatISO8601DateTime(i64);
     {
 
         if (std::optional<CAmount> parsed = ParseMoney(FormatMoney(i64))) {
