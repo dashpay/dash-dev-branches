@@ -10,6 +10,8 @@
 #include <util/time.h>
 #include <version.h>
 
+#include <memory>
+
 FuzzedSock::FuzzedSock(FuzzedDataProvider& fuzzed_data_provider)
     : m_fuzzed_data_provider{fuzzed_data_provider}
 {
@@ -155,6 +157,59 @@ int FuzzedSock::Connect(const sockaddr*, socklen_t) const
     return 0;
 }
 
+int FuzzedSock::Bind(const sockaddr*, socklen_t) const
+{
+    // Have a permanent error at bind_errnos[0] because when the fuzzed data is exhausted
+    // SetFuzzedErrNo() will always set the global errno to bind_errnos[0]. We want to
+    // avoid this method returning -1 and setting errno to a temporary error (like EAGAIN)
+    // repeatedly because proper code should retry on temporary errors, leading to an
+    // infinite loop.
+    constexpr std::array bind_errnos{
+        EACCES,
+        EADDRINUSE,
+        EADDRNOTAVAIL,
+        EAGAIN,
+    };
+    if (m_fuzzed_data_provider.ConsumeBool()) {
+        SetFuzzedErrNo(m_fuzzed_data_provider, bind_errnos);
+        return -1;
+    }
+    return 0;
+}
+
+int FuzzedSock::Listen(int) const
+{
+    // Have a permanent error at listen_errnos[0] because when the fuzzed data is exhausted
+    // SetFuzzedErrNo() will always set the global errno to listen_errnos[0]. We want to
+    // avoid this method returning -1 and setting errno to a temporary error (like EAGAIN)
+    // repeatedly because proper code should retry on temporary errors, leading to an
+    // infinite loop.
+    constexpr std::array listen_errnos{
+        EADDRINUSE,
+        EINVAL,
+        EOPNOTSUPP,
+    };
+    if (m_fuzzed_data_provider.ConsumeBool()) {
+        SetFuzzedErrNo(m_fuzzed_data_provider, listen_errnos);
+        return -1;
+    }
+    return 0;
+}
+
+std::unique_ptr<Sock> FuzzedSock::Accept(sockaddr* addr, socklen_t* addr_len) const
+{
+    constexpr std::array accept_errnos{
+        ECONNABORTED,
+        EINTR,
+        ENOMEM,
+    };
+    if (m_fuzzed_data_provider.ConsumeBool()) {
+        SetFuzzedErrNo(m_fuzzed_data_provider, accept_errnos);
+        return std::unique_ptr<FuzzedSock>();
+    }
+    return std::make_unique<FuzzedSock>(m_fuzzed_data_provider);
+}
+
 int FuzzedSock::GetSockOpt(int level, int opt_name, void* opt_val, socklen_t* opt_len) const
 {
     constexpr std::array getsockopt_errnos{
@@ -171,6 +226,33 @@ int FuzzedSock::GetSockOpt(int level, int opt_name, void* opt_val, socklen_t* op
     std::memcpy(opt_val,
                 ConsumeFixedLengthByteVector(m_fuzzed_data_provider, *opt_len).data(),
                 *opt_len);
+    return 0;
+}
+
+int FuzzedSock::SetSockOpt(int, int, const void*, socklen_t) const
+{
+    constexpr std::array setsockopt_errnos{
+        ENOMEM,
+        ENOBUFS,
+    };
+    if (m_fuzzed_data_provider.ConsumeBool()) {
+        SetFuzzedErrNo(m_fuzzed_data_provider, setsockopt_errnos);
+        return -1;
+    }
+    return 0;
+}
+
+int FuzzedSock::GetSockName(sockaddr* name, socklen_t* name_len) const
+{
+    constexpr std::array getsockname_errnos{
+        ECONNRESET,
+        ENOBUFS,
+    };
+    if (m_fuzzed_data_provider.ConsumeBool()) {
+        SetFuzzedErrNo(m_fuzzed_data_provider, getsockname_errnos);
+        return -1;
+    }
+    *name_len = m_fuzzed_data_provider.ConsumeData(name, *name_len);
     return 0;
 }
 
@@ -200,57 +282,14 @@ bool FuzzedSock::IsConnected(std::string& errmsg) const
     return false;
 }
 
-void FillNode(FuzzedDataProvider& fuzzed_data_provider, ConnmanTestMsg& connman, PeerManager& peerman, CNode& node) noexcept
+void FillNode(FuzzedDataProvider& fuzzed_data_provider, ConnmanTestMsg& connman, CNode& node) noexcept
 {
-    const bool successfully_connected{fuzzed_data_provider.ConsumeBool()};
-    const ServiceFlags remote_services = ConsumeWeakEnum(fuzzed_data_provider, ALL_SERVICE_FLAGS);
-    const NetPermissionFlags permission_flags = ConsumeWeakEnum(fuzzed_data_provider, ALL_NET_PERMISSION_FLAGS);
-    const int32_t version = fuzzed_data_provider.ConsumeIntegralInRange<int32_t>(MIN_PEER_PROTO_VERSION, std::numeric_limits<int32_t>::max());
-    const bool relay_txs{fuzzed_data_provider.ConsumeBool()};
-
-    const CNetMsgMaker mm{0};
-
-    CSerializedNetMsg msg_version{
-        mm.Make(NetMsgType::VERSION,
-                version,                                        //
-                Using<CustomUintFormatter<8>>(remote_services), //
-                int64_t{},                                      // dummy time
-                int64_t{},                                      // ignored service bits
-                CService{},                                     // dummy
-                int64_t{},                                      // ignored service bits
-                CService{},                                     // ignored
-                uint64_t{1},                                    // dummy nonce
-                std::string{},                                  // dummy subver
-                int32_t{},                                      // dummy starting_height
-                relay_txs),
-    };
-
-    (void)connman.ReceiveMsgFrom(node, msg_version);
-    node.fPauseSend = false;
-    connman.ProcessMessagesOnce(node);
-    {
-        LOCK(node.cs_sendProcessing);
-        peerman.SendMessages(&node);
-    }
-    if (node.fDisconnect) return;
-    assert(node.nVersion == version);
-    assert(node.GetCommonVersion() == std::min(version, PROTOCOL_VERSION));
-    assert(node.nServices == remote_services);
-    CNodeStateStats statestats;
-    assert(peerman.GetNodeStateStats(node.GetId(), statestats));
-    assert(statestats.m_relay_txs == (relay_txs && !node.IsBlockOnlyConn()));
-    node.m_permissionFlags = permission_flags;
-    if (successfully_connected) {
-        CSerializedNetMsg msg_verack{mm.Make(NetMsgType::VERACK)};
-        (void)connman.ReceiveMsgFrom(node, msg_verack);
-        node.fPauseSend = false;
-        connman.ProcessMessagesOnce(node);
-        {
-            LOCK(node.cs_sendProcessing);
-            peerman.SendMessages(&node);
-        }
-        assert(node.fSuccessfullyConnected == true);
-    }
+    connman.Handshake(node,
+                      /*successfully_connected=*/fuzzed_data_provider.ConsumeBool(),
+                      /*remote_services=*/ConsumeWeakEnum(fuzzed_data_provider, ALL_SERVICE_FLAGS),
+                      /*permission_flags=*/ConsumeWeakEnum(fuzzed_data_provider, ALL_NET_PERMISSION_FLAGS),
+                      /*version=*/fuzzed_data_provider.ConsumeIntegralInRange<int32_t>(MIN_PEER_PROTO_VERSION, std::numeric_limits<int32_t>::max()),
+                      /*relay_txs=*/fuzzed_data_provider.ConsumeBool());
 }
 
 int64_t ConsumeTime(FuzzedDataProvider& fuzzed_data_provider, const std::optional<int64_t>& min, const std::optional<int64_t>& max) noexcept

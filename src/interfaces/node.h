@@ -32,7 +32,7 @@ class CNodeStats;
 class Coin;
 class RPCTimerInterface;
 class UniValue;
-class proxyType;
+class Proxy;
 struct bilingual_str;
 enum class SynchronizationState;
 struct CNodeStateStats;
@@ -174,7 +174,7 @@ public:
     virtual void mapPort(bool use_upnp, bool use_natpmp) = 0;
 
     //! Get proxy.
-    virtual bool getProxy(Network net, proxyType& proxy_info) = 0;
+    virtual bool getProxy(Network net, Proxy& proxy_info) = 0;
 
     //! Get number of connections.
     virtual size_t getNodeCount(ConnectionDirection flags) = 0;
@@ -253,7 +253,7 @@ public:
     virtual UniValue executeRpc(const std::string& command, const UniValue& params, const std::string& uri) = 0;
 
     //! List rpc commands.
-    virtual std::vector<std::string> listRpcCommands() = 0;
+    virtual std::vector<std::pair<std::string, std::string>> listRpcCommands() = 0;
 
     //! Set RPC timer interface if unset.
     virtual void rpcSetTimerInterfaceIfUnset(RPCTimerInterface* iface) = 0;
