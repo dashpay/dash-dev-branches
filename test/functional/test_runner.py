@@ -93,6 +93,7 @@ BASE_SCRIPTS = [
     # Scripts that are run by default.
     # Longest test should go first, to favor running tests in parallel
     'feature_dip3_deterministicmns.py --legacy-wallet', # NOTE: needs dash_hash to pass
+    'feature_dip3_deterministicmns.py --descriptors', # NOTE: needs dash_hash to pass
     'feature_llmq_data_recovery.py',
     'wallet_hd.py --legacy-wallet',
     'wallet_hd.py --descriptors',
@@ -286,6 +287,7 @@ BASE_SCRIPTS = [
     'feature_new_quorum_type_activation.py',
     'feature_governance_objects.py',
     'feature_governance.py --legacy-wallet',
+    'feature_governance_cl.py --legacy-wallet',
     'rpc_uptime.py',
     'feature_discover.py',
     'wallet_resendwallettransactions.py --legacy-wallet',

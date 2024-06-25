@@ -294,25 +294,13 @@ static void UpdateSpecialTxInputsHash(const CMutableTransaction& tx, SpecialTxPa
 }
 
 template<typename SpecialTxPayload>
-static void SignSpecialTxPayloadByHash(const CMutableTransaction& tx, SpecialTxPayload& payload, const CKey& key)
+static void SignSpecialTxPayloadByHash(const CMutableTransaction& tx, SpecialTxPayload& payload, const CKeyID& keyID, const CWallet& wallet)
 {
     UpdateSpecialTxInputsHash(tx, payload);
     payload.vchSig.clear();
 
-    uint256 hash = ::SerializeHash(payload);
-    if (!CHashSigner::SignHash(hash, key, payload.vchSig)) {
-        throw JSONRPCError(RPC_INTERNAL_ERROR, "failed to sign special tx");
-    }
-}
-
-template<typename SpecialTxPayload>
-static void SignSpecialTxPayloadByString(const CMutableTransaction& tx, SpecialTxPayload& payload, const CKey& key)
-{
-    UpdateSpecialTxInputsHash(tx, payload);
-    payload.vchSig.clear();
-
-    std::string m = payload.MakeSignString();
-    if (!CMessageSigner::SignMessage(m, payload.vchSig, key)) {
+    const uint256 hash = ::SerializeHash(payload);
+    if (!wallet.SignSpecialTxPayload(hash, keyID, payload.vchSig)) {
         throw JSONRPCError(RPC_INTERNAL_ERROR, "failed to sign special tx");
     }
 }
@@ -1111,14 +1099,12 @@ static UniValue protx_update_registrar_wrapper(const JSONRPCRequest& request, CC
         ptx.scriptPayout = GetScriptForDestination(payoutDest);
     }
 
-    LegacyScriptPubKeyMan* spk_man = wallet->GetLegacyScriptPubKeyMan();
-    if (!spk_man) {
-        throw JSONRPCError(RPC_WALLET_ERROR, "This type of wallet does not support this command");
-    }
-
-    CKey keyOwner;
-    if (!spk_man->GetKey(dmn->pdmnState->keyIDOwner, keyOwner)) {
-        throw std::runtime_error(strprintf("Private key for owner address %s not found in your wallet", EncodeDestination(PKHash(dmn->pdmnState->keyIDOwner))));
+    {
+        const auto pkhash{PKHash(dmn->pdmnState->keyIDOwner)};
+        LOCK(wallet->cs_wallet);
+        if (wallet->IsMine(GetScriptForDestination(pkhash)) != isminetype::ISMINE_SPENDABLE) {
+            throw std::runtime_error(strprintf("Private key for owner address %s not found in your wallet", EncodeDestination(pkhash)));
+        }
     }
 
     CMutableTransaction tx;
@@ -1136,7 +1122,7 @@ static UniValue protx_update_registrar_wrapper(const JSONRPCRequest& request, CC
     }
 
     FundSpecialTx(wallet.get(), tx, ptx, feeSourceDest);
-    SignSpecialTxPayloadByHash(tx, ptx, keyOwner);
+    SignSpecialTxPayloadByHash(tx, ptx, dmn->pdmnState->keyIDOwner, *wallet);
     SetTxPayload(tx, ptx);
 
     return SignAndSendSpecialTx(request, chain_helper, chainman, tx);
@@ -1697,6 +1683,7 @@ static UniValue protx(const JSONRPCRequest& request)
     } else if (command == "protxinfo") {
         return protx_info(new_request, dmnman, mn_metaman, chainman);
     } else if (command == "protxdiff") {
+        CHECK_NONFATAL(node.llmq_ctx);
         return protx_diff(new_request, dmnman, chainman, *node.llmq_ctx);
     } else if (command == "protxlistdiff") {
         return protx_listdiff(new_request, dmnman, chainman);
