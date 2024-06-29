@@ -19,6 +19,7 @@
 #include <rpc/blockchain.h>
 #include <rpc/protocol.h>
 #include <rpc/server.h>
+#include <rpc/server_util.h>
 #include <streams.h>
 #include <sync.h>
 #include <txmempool.h>
@@ -124,7 +125,7 @@ static ChainstateManager* GetChainman(const CoreContext& context, HTTPRequest* r
                           __FILE__, __LINE__, __func__, PACKAGE_BUGREPORT));
         return nullptr;
     }
-    return node_context->chainman;
+    return node_context->chainman.get();
 }
 
 static RetFormat ParseDataFormat(std::string& param, const std::string& strReq)
@@ -521,6 +522,7 @@ static bool rest_getutxos(const CoreContext& context, HTTPRequest* req, const st
         // convert hex to bin, continue then with bin part
         std::vector<unsigned char> strRequestV = ParseHex(strRequestMutable);
         strRequestMutable.assign(strRequestV.begin(), strRequestV.end());
+        [[fallthrough]];
     }
 
     case RetFormat::BINARY: {

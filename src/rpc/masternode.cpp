@@ -15,8 +15,8 @@
 #include <net.h>
 #include <netbase.h>
 #include <rpc/blockchain.h>
-#include <rpc/net.h>
 #include <rpc/server.h>
+#include <rpc/server_util.h>
 #include <rpc/util.h>
 #include <univalue.h>
 #include <util/strencodings.h>
@@ -99,9 +99,9 @@ static RPCHelpMan masternode_count()
     };
 }
 
-static UniValue GetNextMasternodeForPayment(CDeterministicMNManager& dmnman, int heightShift)
+static UniValue GetNextMasternodeForPayment(const CChain& active_chain, CDeterministicMNManager& dmnman, int heightShift)
 {
-    const CBlockIndex *tip = WITH_LOCK(::cs_main, return ::ChainActive().Tip());
+    const CBlockIndex *tip = WITH_LOCK(::cs_main, return active_chain.Tip());
     auto mnList = dmnman.GetListForBlock(tip);
     auto payees = mnList.GetProjectedMNPayees(tip, heightShift);
     if (payees.empty())
@@ -136,8 +136,9 @@ static RPCHelpMan masternode_winner()
     }
 
     const NodeContext& node = EnsureAnyNodeContext(request.context);
+    const ChainstateManager& chainman = EnsureChainman(node);
     CHECK_NONFATAL(node.dmnman);
-    return GetNextMasternodeForPayment(*node.dmnman, 10);
+    return GetNextMasternodeForPayment(chainman.ActiveChain(), *node.dmnman, 10);
 },
     };
 }
@@ -156,8 +157,9 @@ static RPCHelpMan masternode_current()
     }
 
     const NodeContext& node = EnsureAnyNodeContext(request.context);
+    const ChainstateManager& chainman = EnsureChainman(node);
     CHECK_NONFATAL(node.dmnman);
-    return GetNextMasternodeForPayment(*node.dmnman, 1);
+    return GetNextMasternodeForPayment(chainman.ActiveChain(), *node.dmnman, 1);
 },
     };
 }
@@ -185,7 +187,7 @@ static RPCHelpMan masternode_outputs()
     coin_control.nCoinType = CoinType::ONLY_MASTERNODE_COLLATERAL;
     {
         LOCK(wallet->cs_wallet);
-        wallet->AvailableCoins(vPossibleCoins, true, &coin_control);
+        wallet->AvailableCoins(vPossibleCoins, &coin_control);
     }
     UniValue outputsArr(UniValue::VARR);
     for (const auto& out : vPossibleCoins) {
@@ -595,7 +597,7 @@ static RPCHelpMan masternodelist_helper(bool is_composite)
         std::string strOutpoint = dmn.collateralOutpoint.ToStringShort();
         Coin coin;
         std::string collateralAddressStr = "UNKNOWN";
-        if (GetUTXOCoin(dmn.collateralOutpoint, coin)) {
+        if (GetUTXOCoin(chainman.ActiveChainstate(), dmn.collateralOutpoint, coin)) {
             CTxDestination collateralDest;
             if (ExtractDestination(coin.out.scriptPubKey, collateralDest)) {
                 collateralAddressStr = EncodeDestination(collateralDest);

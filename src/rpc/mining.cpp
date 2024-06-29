@@ -26,8 +26,8 @@
 #include <pow.h>
 #include <rpc/blockchain.h>
 #include <rpc/mining.h>
-#include <rpc/net.h>
 #include <rpc/server.h>
+#include <rpc/server_util.h>
 #include <rpc/util.h>
 #include <script/descriptor.h>
 #include <script/script.h>
@@ -128,7 +128,6 @@ static bool GenerateBlock(ChainstateManager& chainman, CBlock& block, uint64_t& 
 
     {
         LOCK(cs_main);
-        CHECK_NONFATAL(std::addressof(::ChainActive()) == std::addressof(chainman.ActiveChain()));
         IncrementExtraNonce(&block, chainman.ActiveChain().Tip(), extra_nonce);
     }
 
@@ -164,7 +163,6 @@ static UniValue generateBlocks(ChainstateManager& chainman, const NodeContext& n
 
     {   // Don't keep cs_main locked
         LOCK(cs_main);
-        CHECK_NONFATAL(std::addressof(::ChainActive()) == std::addressof(chainman.ActiveChain()));
         nHeight = chainman.ActiveChain().Height();
         nHeightEnd = nHeight+nGenerate;
     }
@@ -892,7 +890,7 @@ static RPCHelpMan getblocktemplate()
             case ThresholdState::LOCKED_IN:
                 // Ensure bit is set in block version
                 pblock->nVersion |= g_versionbitscache.Mask(consensusParams, pos);
-                // FALL THROUGH to get vbavailable set...
+                [[fallthrough]];
             case ThresholdState::STARTED:
             {
                 const struct VBDeploymentInfo& vbinfo = VersionBitsDeploymentInfo[pos];
@@ -1144,6 +1142,8 @@ static RPCHelpMan estimatesmartfee()
     RPCTypeCheckArgument(request.params[0], UniValue::VNUM);
 
     CBlockPolicyEstimator& fee_estimator = EnsureAnyFeeEstimator(request.context);
+    const NodeContext& node = EnsureAnyNodeContext(request.context);
+    const CTxMemPool& mempool = EnsureMemPool(node);
 
     unsigned int max_target = fee_estimator.HighestTargetTracked(FeeEstimateHorizon::LONG_HALFLIFE);
     unsigned int conf_target = ParseConfirmTarget(request.params[0], max_target);
@@ -1159,7 +1159,10 @@ static RPCHelpMan estimatesmartfee()
     UniValue result(UniValue::VOBJ);
     UniValue errors(UniValue::VARR);
     FeeCalculation feeCalc;
-    CFeeRate feeRate = fee_estimator.estimateSmartFee(conf_target, &feeCalc, conservative);
+    CFeeRate feeRate{fee_estimator.estimateSmartFee(conf_target, &feeCalc, conservative)};
+    CFeeRate min_mempool_feerate{mempool.GetMinFee(gArgs.GetArg("-maxmempool", DEFAULT_MAX_MEMPOOL_SIZE) * 1000000)};
+    CFeeRate min_relay_feerate{::minRelayTxFee};
+    feeRate = std::max({feeRate, min_mempool_feerate, min_relay_feerate});
     if (feeRate != CFeeRate(0)) {
         result.pushKV("feerate", ValueFromAmount(feeRate.GetFeePerK()));
     } else {

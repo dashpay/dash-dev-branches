@@ -398,6 +398,7 @@ public:
 
     /** Implement PeerManager */
     void CheckForStaleTipAndEvictPeers() override;
+    std::optional<std::string> FetchBlock(NodeId peer_id, const CBlockIndex& block_index) override;
     bool GetNodeStateStats(NodeId nodeid, CNodeStateStats& stats) const override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
     bool IgnoresIncomingTxs() override { return m_ignore_incoming_txs; }
     void SendPings() override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);;
@@ -1862,6 +1863,39 @@ bool PeerManagerImpl::BlockRequestAllowed(const CBlockIndex* pindex)
         (GetBlockProofEquivalentTime(*pindexBestHeader, *pindex, *pindexBestHeader, m_chainparams.GetConsensus()) < STALE_RELAY_AGE_LIMIT);
 }
 
+std::optional<std::string> PeerManagerImpl::FetchBlock(NodeId peer_id, const CBlockIndex& block_index)
+{
+    if (fImporting) return "Importing...";
+    if (fReindex) return "Reindexing...";
+
+    LOCK(cs_main);
+    // Ensure this peer exists and hasn't been disconnected
+    CNodeState* state = State(peer_id);
+    if (state == nullptr) return "Peer does not exist";
+
+    // Mark block as in-flight unless it already is (for this peer).
+    // If a block was already in-flight for a different peer, its BLOCKTXN
+    // response will be dropped.
+    const uint256& hash{block_index.GetBlockHash()};
+    if (!MarkBlockAsInFlight(peer_id, hash, &block_index)) return "Already requested from this peer";
+
+    // Construct message to request the block
+    std::vector<CInv> invs{CInv(MSG_BLOCK, hash)};
+
+    // Send block request message to the peer
+    bool success = m_connman.ForNode(peer_id, [this, &invs](CNode* node) {
+        const CNetMsgMaker msgMaker(node->GetCommonVersion());
+        this->m_connman.PushMessage(node, msgMaker.Make(NetMsgType::GETDATA, invs));
+        return true;
+    });
+
+    if (!success) return "Peer not fully connected";
+
+    LogPrint(BCLog::NET, "Requesting block %s from peer=%d\n",
+                 hash.ToString(), peer_id);
+    return std::nullopt;
+}
+
 std::unique_ptr<PeerManager> PeerManager::make(const CChainParams& chainparams, CConnman& connman, AddrMan& addrman, BanMan* banman,
                                                CScheduler &scheduler, ChainstateManager& chainman, CTxMemPool& pool,
                                                CMasternodeMetaMan& mn_metaman, CMasternodeSync& mn_sync,
@@ -1899,7 +1933,6 @@ PeerManagerImpl::PeerManagerImpl(const CChainParams& chainparams, CConnman& conn
       m_mn_activeman(mn_activeman),
       m_ignore_incoming_txs(ignore_incoming_txs)
 {
-    assert(std::addressof(g_chainman) == std::addressof(m_chainman));
     // Stale tip checking and peer eviction are on two different timers, but we
     // don't want them to get out of sync due to drift in the scheduler, so we
     // combine them in one function and schedule at the quicker (peer-eviction)
@@ -4803,7 +4836,9 @@ void PeerManagerImpl::ProcessMessage(
 
         CSimplifiedMNListDiff mnListDiff;
         std::string strError;
-        if (BuildSimplifiedMNListDiff(cmd.baseBlockHash, cmd.blockHash, mnListDiff, *m_dmnman, *m_llmq_ctx->quorum_block_processor, *m_llmq_ctx->qman, strError)) {
+        if (BuildSimplifiedMNListDiff(*m_dmnman, m_chainman, *m_llmq_ctx->quorum_block_processor, *m_llmq_ctx->qman,
+                                      cmd.baseBlockHash, cmd.blockHash, mnListDiff, strError))
+        {
             m_connman.PushMessage(&pfrom, msgMaker.Make(NetMsgType::MNLISTDIFF, mnListDiff));
         } else {
             strError = strprintf("getmnlistdiff failed for baseBlockHash=%s, blockHash=%s. error=%s", cmd.baseBlockHash.ToString(), cmd.blockHash.ToString(), strError);
@@ -4842,7 +4877,7 @@ void PeerManagerImpl::ProcessMessage(
 
         llmq::CQuorumRotationInfo quorumRotationInfoRet;
         std::string strError;
-        if (BuildQuorumRotationInfo(cmd, quorumRotationInfoRet, *m_dmnman, *m_llmq_ctx->qman, *m_llmq_ctx->quorum_block_processor, strError)) {
+        if (BuildQuorumRotationInfo(*m_dmnman, m_chainman, *m_llmq_ctx->qman, *m_llmq_ctx->quorum_block_processor, cmd, quorumRotationInfoRet, strError)) {
             m_connman.PushMessage(&pfrom, msgMaker.Make(NetMsgType::QUORUMROTATIONINFO, quorumRotationInfoRet));
         } else {
             strError = strprintf("getquorumrotationinfo failed for size(baseBlockHashes)=%d, blockRequestHash=%s. error=%s", cmd.baseBlockHashes.size(), cmd.blockRequestHash.ToString(), strError);
@@ -4897,14 +4932,14 @@ void PeerManagerImpl::ProcessMessage(
 #ifdef ENABLE_WALLET
         ProcessPeerMsgRet(m_cj_ctx->queueman->ProcessMessage(pfrom, msg_type, vRecv), pfrom);
         for (auto& pair : m_cj_ctx->walletman->raw()) {
-            pair.second->ProcessMessage(pfrom, m_connman, m_mempool, msg_type, vRecv);
+            pair.second->ProcessMessage(pfrom, m_chainman.ActiveChainstate(), m_connman, m_mempool, msg_type, vRecv);
         }
 #endif // ENABLE_WALLET
         ProcessPeerMsgRet(m_cj_ctx->server->ProcessMessage(pfrom, msg_type, vRecv), pfrom);
         ProcessPeerMsgRet(m_sporkman.ProcessMessage(pfrom, m_connman, *this, msg_type, vRecv), pfrom);
         m_mn_sync.ProcessMessage(pfrom, msg_type, vRecv);
         ProcessPeerMsgRet(m_govman.ProcessMessage(pfrom, m_connman, *this, msg_type, vRecv), pfrom);
-        ProcessPeerMsgRet(CMNAuth::ProcessMessage(pfrom, m_connman, m_mn_metaman, m_mn_activeman, m_mn_sync, m_dmnman->GetListAtChainTip(), msg_type, vRecv), pfrom);
+        ProcessPeerMsgRet(CMNAuth::ProcessMessage(pfrom, m_connman, m_mn_metaman, m_mn_activeman, m_chainman.ActiveChain(), m_mn_sync, m_dmnman->GetListAtChainTip(), msg_type, vRecv), pfrom);
         ProcessPeerMsgRet(m_llmq_ctx->quorum_block_processor->ProcessMessage(pfrom, msg_type, vRecv), pfrom);
         ProcessPeerMsgRet(m_llmq_ctx->qdkgsman->ProcessMessage(pfrom, this, is_masternode, msg_type, vRecv), pfrom);
         ProcessPeerMsgRet(m_llmq_ctx->qman->ProcessMessage(pfrom, msg_type, vRecv), pfrom);
