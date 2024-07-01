@@ -427,7 +427,7 @@ void CTxMemPool::addUnchecked(const CTxMemPoolEntry &entry, setEntries &setAnces
     }
 }
 
-void CTxMemPool::addAddressIndex(const CTxMemPoolEntry &entry, const CCoinsViewCache &view)
+void CTxMemPool::addAddressIndex(const CTxMemPoolEntry& entry, const CCoinsViewCache& view)
 {
     LOCK(cs);
     const CTransaction& tx = entry.GetTx();
@@ -470,13 +470,14 @@ void CTxMemPool::addAddressIndex(const CTxMemPoolEntry &entry, const CCoinsViewC
     mapAddressInserted.insert(std::make_pair(txhash, inserted));
 }
 
-bool CTxMemPool::getAddressIndex(std::vector<std::pair<uint160, AddressType> > &addresses,
-                                 std::vector<std::pair<CMempoolAddressDeltaKey, CMempoolAddressDelta> > &results)
+bool CTxMemPool::getAddressIndex(const std::vector<CMempoolAddressDeltaKey>& addresses,
+                                 std::vector<CMempoolAddressDeltaEntry>& results) const
 {
     LOCK(cs);
     for (const auto& address : addresses) {
-        addressDeltaMap::iterator ait = mapAddress.lower_bound(CMempoolAddressDeltaKey(address.second, address.first));
-        while (ait != mapAddress.end() && (*ait).first.m_address_bytes == address.first && (*ait).first.m_address_type == address.second) {
+        addressDeltaMap::const_iterator ait = mapAddress.lower_bound(address);
+        while (ait != mapAddress.end() && (*ait).first.m_address_bytes == address.m_address_bytes
+               && (*ait).first.m_address_type == address.m_address_type) {
             results.push_back(*ait);
             ait++;
         }
@@ -500,7 +501,7 @@ bool CTxMemPool::removeAddressIndex(const uint256 txhash)
     return true;
 }
 
-void CTxMemPool::addSpentIndex(const CTxMemPoolEntry &entry, const CCoinsViewCache &view)
+void CTxMemPool::addSpentIndex(const CTxMemPoolEntry& entry, const CCoinsViewCache& view)
 {
     LOCK(cs);
 
@@ -530,12 +531,11 @@ void CTxMemPool::addSpentIndex(const CTxMemPoolEntry &entry, const CCoinsViewCac
     mapSpentInserted.insert(make_pair(txhash, inserted));
 }
 
-bool CTxMemPool::getSpentIndex(CSpentIndexKey &key, CSpentIndexValue &value)
+bool CTxMemPool::getSpentIndex(const CSpentIndexKey& key, CSpentIndexValue& value) const
 {
     LOCK(cs);
-    mapSpentIndex::iterator it;
+    mapSpentIndex::const_iterator it = mapSpent.find(key);
 
-    it = mapSpent.find(key);
     if (it != mapSpent.end()) {
         value = it->second;
         return true;
@@ -1171,11 +1171,16 @@ void CTxMemPool::check(CChainState& active_chainstate) const
 
 bool CTxMemPool::CompareDepthAndScore(const uint256& hasha, const uint256& hashb)
 {
+    /* Return `true` if hasha should be considered sooner than hashb. Namely when:
+     *   a is not in the mempool, but b is
+     *   both are in the mempool and a has fewer ancestors than b
+     *   both are in the mempool and a has a higher score than b
+     */
     LOCK(cs);
-    indexed_transaction_set::const_iterator i = mapTx.find(hasha);
-    if (i == mapTx.end()) return false;
     indexed_transaction_set::const_iterator j = mapTx.find(hashb);
-    if (j == mapTx.end()) return true;
+    if (j == mapTx.end()) return false;
+    indexed_transaction_set::const_iterator i = mapTx.find(hasha);
+    if (i == mapTx.end()) return true;
     uint64_t counta = i->GetCountWithAncestors();
     uint64_t countb = j->GetCountWithAncestors();
     if (counta == countb) {
