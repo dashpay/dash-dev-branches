@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <llmq/chainlocks.h>
+#include <llmq/commitment.h>
 #include <llmq/quorums.h>
 #include <llmq/instantsend.h>
 #include <llmq/signing_shares.h>
@@ -19,12 +20,16 @@
 #include <txmempool.h>
 #include <util/thread.h>
 #include <util/time.h>
+#include <util/underlying.h>
 #include <validation.h>
 #include <validationinterface.h>
 
 namespace llmq
 {
 std::unique_ptr<CChainLocksHandler> chainLocksHandler;
+
+// forward declaration to avoid circular dependency
+uint256 BuildSignHash(Consensus::LLMQType llmqType, const uint256& quorumHash, const uint256& id, const uint256& msgHash);
 
 CChainLocksHandler::CChainLocksHandler(CChainState& chainstate, CQuorumManager& _qman, CSigningManager& _sigman,
                                        CSigSharesManager& _shareman, CSporkManager& sporkman, CTxMemPool& _mempool,
@@ -130,8 +135,8 @@ PeerMsgRet CChainLocksHandler::ProcessNewChainLock(const NodeId from, const llmq
         }
     }
 
-    if (!VerifyChainLock(clsig)) {
-        LogPrint(BCLog::CHAINLOCKS, "CChainLocksHandler::%s -- invalid CLSIG (%s), peer=%d\n", __func__, clsig.ToString(), from);
+    if (const auto ret = VerifyChainLock(clsig); ret != VerifyCLStatus::Valid) {
+        LogPrint(BCLog::CHAINLOCKS, "CChainLocksHandler::%s -- invalid CLSIG (%s), status=%d peer=%d\n", __func__, clsig.ToString(), ToUnderlying(ret), from);
         if (from != -1) {
             return tl::unexpected{10};
         }
@@ -551,11 +556,23 @@ bool CChainLocksHandler::HasChainLock(int nHeight, const uint256& blockHash) con
     return InternalHasChainLock(nHeight, blockHash);
 }
 
-bool CChainLocksHandler::VerifyChainLock(const CChainLockSig& clsig) const
+
+VerifyCLStatus CChainLocksHandler::VerifyChainLock(const CChainLockSig& clsig) const
 {
     const auto llmqType = Params().GetConsensus().llmqTypeChainLocks;
     const uint256 nRequestId = ::SerializeHash(std::make_pair(llmq::CLSIG_REQUESTID_PREFIX, clsig.getHeight()));
-    return llmq::VerifyRecoveredSig(llmqType, m_chainstate.m_chain, qman, clsig.getHeight(), nRequestId, clsig.getBlockHash(), clsig.getSig());
+
+    // Verify a recovered sig that was signed while the chain tip was at signedAtTip
+    const auto& llmq_params_opt = Params().GetLLMQ(llmqType);
+    assert(llmq_params_opt.has_value());
+    auto quorum = SelectQuorumForSigning(llmq_params_opt.value(), m_chainstate.m_chain, qman, nRequestId, clsig.getHeight(), SIGN_HEIGHT_OFFSET);
+    if (!quorum) {
+        return VerifyCLStatus::NoQuorum;
+    }
+
+    uint256 signHash = BuildSignHash(llmqType, quorum->qc->quorumHash, nRequestId, clsig.getBlockHash());
+    bool ret = clsig.getSig().VerifyInsecure(quorum->qc->quorumPublicKey, signHash);
+    return ret ? VerifyCLStatus::Valid : VerifyCLStatus::Invalid;
 }
 
 bool CChainLocksHandler::InternalHasChainLock(int nHeight, const uint256& blockHash) const

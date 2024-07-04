@@ -36,6 +36,13 @@ namespace llmq
 class CSigningManager;
 class CSigSharesManager;
 
+enum class VerifyCLStatus
+{
+    NoQuorum,
+    Invalid,
+    Valid,
+};
+
 class CChainLocksHandler : public CRecoveredSigsListener
 {
     static constexpr int64_t CLEANUP_INTERVAL = 1000 * 30;
@@ -114,7 +121,7 @@ public:
 
     bool HasChainLock(int nHeight, const uint256& blockHash) const EXCLUSIVE_LOCKS_REQUIRED(!cs);
     bool HasConflictingChainLock(int nHeight, const uint256& blockHash) const EXCLUSIVE_LOCKS_REQUIRED(!cs);
-    bool VerifyChainLock(const CChainLockSig& clsig) const;
+    VerifyCLStatus VerifyChainLock(const CChainLockSig& clsig) const;
 
     bool IsTxSafeForMining(const uint256& txid) const EXCLUSIVE_LOCKS_REQUIRED(!cs);
 

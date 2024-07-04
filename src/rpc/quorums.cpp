@@ -958,7 +958,7 @@ static RPCHelpMan verifychainlock()
     }
 
     const LLMQContext& llmq_ctx = EnsureLLMQContext(node);
-    return llmq_ctx.clhandler->VerifyChainLock(llmq::CChainLockSig(nBlockHeight, nBlockHash, sig));
+    return llmq_ctx.clhandler->VerifyChainLock(llmq::CChainLockSig(nBlockHeight, nBlockHash, sig)) == llmq::VerifyCLStatus::Valid;
 },
     };
 }
@@ -1060,7 +1060,8 @@ static RPCHelpMan submitchainlock()
     if (nBlockHeight <= 0) {
         throw JSONRPCError(RPC_INVALID_PARAMETER, "invalid block height");
     }
-    const LLMQContext& llmq_ctx = EnsureLLMQContext(EnsureAnyNodeContext(request.context));
+    const NodeContext& node = EnsureAnyNodeContext(request.context);
+    const LLMQContext& llmq_ctx = EnsureLLMQContext(node);
     const int32_t bestCLHeight = llmq_ctx.clhandler->GetBestChainLock().getHeight();
     if (nBlockHeight <= bestCLHeight) return bestCLHeight;
 
@@ -1070,8 +1071,15 @@ static RPCHelpMan submitchainlock()
     }
 
 
-    auto clsig = llmq::CChainLockSig(nBlockHeight, nBlockHash, sig);
-    if (!llmq_ctx.clhandler->VerifyChainLock(clsig)) {
+    const auto clsig{llmq::CChainLockSig(nBlockHeight, nBlockHash, sig)};
+    const llmq::VerifyCLStatus ret{llmq_ctx.clhandler->VerifyChainLock(clsig)};
+    if (ret == llmq::VerifyCLStatus::NoQuorum) {
+        LOCK(cs_main);
+        const ChainstateManager& chainman = EnsureChainman(node);
+        const CBlockIndex* pIndex{chainman.ActiveChain().Tip()};
+        throw JSONRPCError(RPC_MISC_ERROR, strprintf("no quorum found. Current tip height: %d hash: %s\n", pIndex->nHeight, pIndex->GetBlockHash().ToString()));
+    }
+    if (ret != llmq::VerifyCLStatus::Valid) {
         throw JSONRPCError(RPC_INVALID_PARAMETER, "invalid signature");
     }
 
