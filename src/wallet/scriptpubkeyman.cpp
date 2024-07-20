@@ -77,7 +77,7 @@ bool HaveKeys(const std::vector<valtype>& pubkeys, const LegacyScriptPubKeyMan& 
 //! Recursively solve script and return spendable/watchonly/invalid status.
 //!
 //! @param keystore            legacy key and script store
-//! @param script              script to solve
+//! @param scriptPubKey        script to solve
 //! @param sigversion          script type (top-level / redeemscript)
 //! @param recurse_scripthash  whether to recurse into nested p2sh
 //!                            scripts or simply treat any script that has been
@@ -268,17 +268,21 @@ bool LegacyScriptPubKeyMan::Encrypt(const CKeyingMaterial& master_key, WalletBat
     }
 
     if (!hdChainCurrent.IsNull()) {
-        assert(EncryptHDChain(master_key, m_hd_chain));
-        assert(LoadHDChain(m_hd_chain));
+        bool res = EncryptHDChain(master_key, m_hd_chain);
+        assert(res);
+        res = LoadHDChain(m_hd_chain);
+        assert(res);
 
         CHDChain hdChainCrypted;
-        assert(GetHDChain(hdChainCrypted));
+        res = GetHDChain(hdChainCrypted);
+        assert(res);
 
         // ids should match, seed hashes should not
         assert(hdChainCurrent.GetID() == hdChainCrypted.GetID());
         assert(hdChainCurrent.GetSeedHash() != hdChainCrypted.GetSeedHash());
 
-        assert(AddHDChain(*encrypted_batch, hdChainCrypted));
+        res = AddHDChain(*encrypted_batch, hdChainCrypted);
+        assert(res);
     }
 
     encrypted_batch = nullptr;

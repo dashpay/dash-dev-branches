@@ -747,7 +747,7 @@ private:
     void AddToSpends(const uint256& wtxid) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
 
     std::set<COutPoint> setWalletUTXO;
-    mutable std::map<COutPoint, int> mapOutpointRoundsCache;
+    mutable std::map<COutPoint, int> mapOutpointRoundsCache GUARDED_BY(cs_wallet);
 
     /**
      * Add a transaction to the wallet, or update it.  pIndex and posInBlock should
@@ -817,16 +817,16 @@ private:
      */
     uint256 m_last_block_processed GUARDED_BY(cs_wallet);
 
-    /** Pulled from wallet DB ("ps_salt") and used when mixing a random number of rounds.
+    /** Pulled from wallet DB ("cj_salt") and used when mixing a random number of rounds.
      *  This salt is needed to prevent an attacker from learning how many extra times
      *  the input was mixed based only on information in the blockchain.
      */
     uint256 nCoinJoinSalt;
 
     /**
-     * Fetches CoinJoin salt from database or generates and saves a new one if no salt was found in the db
+     * Populates nCoinJoinSalt with value from database (and migrates salt stored with legacy key).
      */
-    void InitCoinJoinSalt();
+    void InitCJSaltFromDb();
 
     /** Height of last block processed is used by wallet to know depth of transactions
      * without relying on Chain interface beyond asynchronous updates. For safety, we
@@ -871,6 +871,19 @@ public:
     /** Get a name for this wallet for logging/debugging purposes.
      */
     const std::string& GetName() const { return m_name; }
+
+    /**
+     * Get an existing CoinJoin salt. Will attempt to read database (and migrate legacy salts) if
+     * nCoinJoinSalt is empty but will skip database read if nCoinJoinSalt is populated.
+     **/
+    const uint256& GetCoinJoinSalt();
+
+    /**
+     * Write a new CoinJoin salt. This will directly write the new salt value into the wallet database.
+     * Ensuring that undesirable behaviour like overwriting the salt of a wallet that already uses CoinJoin
+     * is the responsibility of the caller.
+     **/
+    bool SetCoinJoinSalt(const uint256& cj_salt);
 
     // Map from governance object hash to governance object, they are added by gobject_prepare.
     std::map<uint256, Governance::Object> m_gobjects;
@@ -982,6 +995,8 @@ public:
     int GetRealOutpointCoinJoinRounds(const COutPoint& outpoint, int nRounds = 0) const;
     // respect current settings
     int GetCappedOutpointCoinJoinRounds(const COutPoint& outpoint) const;
+    // drop the internal cache to let Get...Rounds recalculate CJ balance from scratch and notify UI
+    void ClearCoinJoinRoundsCache();
 
     bool IsDenominated(const COutPoint& outpoint) const;
     bool IsFullyMixed(const COutPoint& outpoint) const;
@@ -1408,7 +1423,7 @@ public:
     //! Returns all unique ScriptPubKeyMans
     std::set<ScriptPubKeyMan*> GetAllScriptPubKeyMans() const;
 
-    //! Get the ScriptPubKeyMan for the given OutputType and internal/external chain.
+    //! Get the ScriptPubKeyMan for internal/external chain.
     ScriptPubKeyMan* GetScriptPubKeyMan(bool internal) const;
 
     //! Get the ScriptPubKeyMan for a script
@@ -1472,7 +1487,6 @@ public:
 
     //! Remove specified ScriptPubKeyMan from set of active SPK managers. Writes the change to the wallet file.
     //! @param[in] id The unique id for the ScriptPubKeyMan
-    //! @param[in] type The OutputType this ScriptPubKeyMan provides addresses for
     //! @param[in] internal Whether this ScriptPubKeyMan provides change addresses
     void DeactivateScriptPubKeyMan(uint256 id, bool internal);
 
