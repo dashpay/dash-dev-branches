@@ -16,6 +16,7 @@
 #include <index/txindex.h>
 #include <masternode/sync.h>
 #include <net_processing.h>
+#include <node/blockstorage.h>
 #include <spork.h>
 #include <txmempool.h>
 #include <util/irange.h>
@@ -54,7 +55,7 @@ uint256 CInstantSendLock::GetRequestId() const
 
 
 CInstantSendDb::CInstantSendDb(bool unitTests, bool fWipe) :
-    db(std::make_unique<CDBWrapper>(unitTests ? "" : (GetDataDir() / "llmq/isdb"), 32 << 20, unitTests, fWipe))
+    db(std::make_unique<CDBWrapper>(unitTests ? "" : (gArgs.GetDataDirNet() / "llmq/isdb"), 32 << 20, unitTests, fWipe))
 {
 }
 

@@ -98,7 +98,7 @@ std::unique_ptr<CoinStatsIndex> g_coin_stats_index;
 
 CoinStatsIndex::CoinStatsIndex(size_t n_cache_size, bool f_memory, bool f_wipe)
 {
-    fs::path path{GetDataDir() / "indexes" / "coinstats"};
+    fs::path path{gArgs.GetDataDirNet() / "indexes" / "coinstats"};
     fs::create_directories(path);
 
     m_db = std::make_unique<CoinStatsIndex::DB>(path / "db", n_cache_size, f_memory, f_wipe);
@@ -272,7 +272,7 @@ bool CoinStatsIndex::Rewind(const CBlockIndex* current_tip, const CBlockIndex* n
 
     {
         LOCK(cs_main);
-        CBlockIndex* iter_tip{m_chainstate->m_blockman.LookupBlockIndex(current_tip->GetBlockHash())};
+        const CBlockIndex* iter_tip{m_chainstate->m_blockman.LookupBlockIndex(current_tip->GetBlockHash())};
         const auto& consensus_params{Params().GetConsensus()};
 
         do {
