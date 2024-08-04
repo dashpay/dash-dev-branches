@@ -1637,7 +1637,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
 
     assert(!node.peerman);
     node.peerman = PeerManager::make(chainparams, *node.connman, *node.addrman, node.banman.get(),
-                                     *node.scheduler, chainman, *node.mempool, *node.mn_metaman, *node.mn_sync,
+                                     chainman, *node.mempool, *node.mn_metaman, *node.mn_sync,
                                      *node.govman, *node.sporkman, node.mn_activeman.get(), node.dmnman,
                                      node.cj_ctx, node.llmq_ctx, ignores_incoming_txs);
     RegisterValidationInterface(node.peerman.get());
@@ -2341,6 +2341,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     connOptions.nMaxConnections = nMaxConnections;
     connOptions.m_max_outbound_full_relay = std::min(MAX_OUTBOUND_FULL_RELAY_CONNECTIONS, connOptions.nMaxConnections);
     connOptions.m_max_outbound_block_relay = std::min(MAX_BLOCK_RELAY_ONLY_CONNECTIONS, connOptions.nMaxConnections-connOptions.m_max_outbound_full_relay);
+    connOptions.m_max_outbound_onion = std::min(MAX_DESIRED_ONION_CONNECTIONS, connOptions.nMaxConnections / 2);
     connOptions.nMaxAddnode = MAX_ADDNODE_CONNECTIONS;
     connOptions.nMaxFeeler = MAX_FEELER_CONNECTIONS;
     connOptions.uiInterface = &uiInterface;
@@ -2466,6 +2467,8 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     node.scheduler->scheduleEvery([banman]{
         banman->DumpBanlist();
     }, DUMP_BANS_INTERVAL);
+
+    if (node.peerman) node.peerman->StartScheduledTasks(*node.scheduler);
 
 #if HAVE_SYSTEM
     StartupNotify(args);

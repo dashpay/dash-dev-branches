@@ -368,7 +368,7 @@ class PeerManagerImpl final : public PeerManager
 {
 public:
     PeerManagerImpl(const CChainParams& chainparams, CConnman& connman, AddrMan& addrman, BanMan* banman,
-                    CScheduler &scheduler, ChainstateManager& chainman, CTxMemPool& pool,
+                    ChainstateManager& chainman, CTxMemPool& pool,
                     CMasternodeMetaMan& mn_metaman, CMasternodeSync& mn_sync,
                     CGovernanceManager& govman, CSporkManager& sporkman,
                     const CActiveMasternodeManager* const mn_activeman,
@@ -397,6 +397,7 @@ public:
         EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_recent_confirmed_transactions_mutex);
 
     /** Implement PeerManager */
+    void StartScheduledTasks(CScheduler& scheduler) override;
     void CheckForStaleTipAndEvictPeers() override;
     std::optional<std::string> FetchBlock(NodeId peer_id, const CBlockIndex& block_index) override;
     bool GetNodeStateStats(NodeId nodeid, CNodeStateStats& stats) const override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
@@ -1893,7 +1894,7 @@ std::optional<std::string> PeerManagerImpl::FetchBlock(NodeId peer_id, const CBl
 }
 
 std::unique_ptr<PeerManager> PeerManager::make(const CChainParams& chainparams, CConnman& connman, AddrMan& addrman, BanMan* banman,
-                                               CScheduler &scheduler, ChainstateManager& chainman, CTxMemPool& pool,
+                                               ChainstateManager& chainman, CTxMemPool& pool,
                                                CMasternodeMetaMan& mn_metaman, CMasternodeSync& mn_sync,
                                                CGovernanceManager& govman, CSporkManager& sporkman,
                                                const CActiveMasternodeManager* const mn_activeman,
@@ -1901,11 +1902,11 @@ std::unique_ptr<PeerManager> PeerManager::make(const CChainParams& chainparams, 
                                                const std::unique_ptr<CJContext>& cj_ctx,
                                                const std::unique_ptr<LLMQContext>& llmq_ctx, bool ignore_incoming_txs)
 {
-    return std::make_unique<PeerManagerImpl>(chainparams, connman, addrman, banman, scheduler, chainman, pool, mn_metaman, mn_sync, govman, sporkman, mn_activeman, dmnman, cj_ctx, llmq_ctx, ignore_incoming_txs);
+    return std::make_unique<PeerManagerImpl>(chainparams, connman, addrman, banman, chainman, pool, mn_metaman, mn_sync, govman, sporkman, mn_activeman, dmnman, cj_ctx, llmq_ctx, ignore_incoming_txs);
 }
 
 PeerManagerImpl::PeerManagerImpl(const CChainParams& chainparams, CConnman& connman, AddrMan& addrman, BanMan* banman,
-                                 CScheduler &scheduler, ChainstateManager& chainman, CTxMemPool& pool,
+                                 ChainstateManager& chainman, CTxMemPool& pool,
                                  CMasternodeMetaMan& mn_metaman, CMasternodeSync& mn_sync,
                                  CGovernanceManager& govman, CSporkManager& sporkman,
                                  const CActiveMasternodeManager* const mn_activeman,
@@ -1928,6 +1929,10 @@ PeerManagerImpl::PeerManagerImpl(const CChainParams& chainparams, CConnman& conn
       m_sporkman(sporkman),
       m_mn_activeman(mn_activeman),
       m_ignore_incoming_txs(ignore_incoming_txs)
+{
+}
+
+void PeerManagerImpl::StartScheduledTasks(CScheduler& scheduler)
 {
     // Stale tip checking and peer eviction are on two different timers, but we
     // don't want them to get out of sync due to drift in the scheduler, so we
@@ -2584,7 +2589,7 @@ void PeerManagerImpl::ProcessGetData(CNode& pfrom, Peer& peer, const std::atomic
         }
         ++it;
 
-        if (!peer.m_addr_relay_enabled && NetMessageViolatesBlocksOnly(inv.GetCommand())) {
+        if (peer.m_block_relay_only && NetMessageViolatesBlocksOnly(inv.GetCommand())) {
             // Note that if we receive a getdata for non-block messages
             // from a block-relay-only outbound peer that violate the policy,
             // we skip such getdata messages from this peer
@@ -5174,9 +5179,12 @@ void PeerManagerImpl::EvictExtraOutboundPeers(std::chrono::seconds now)
         NodeId worst_peer = -1;
         int64_t oldest_block_announcement = std::numeric_limits<int64_t>::max();
 
+        // We want to prevent recently connected to Onion peers from being disconnected here, protect them as long as
+        // there are more non_onion nodes than onion nodes so far
+        size_t onion_count = 0;
         m_connman.ForEachNode([&](CNode* pnode) {
             LockAssertion lock(::cs_main);
-
+            if (pnode->addr.IsTor() && ++onion_count <= m_connman.GetMaxOutboundOnionNodeCount()) return;
             // Don't disconnect masternodes just because they were slow in block announcement
             if (pnode->m_masternode_connection) return;
             // Only consider outbound-full-relay peers that are not already

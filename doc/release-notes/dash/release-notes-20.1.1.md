@@ -1,9 +1,8 @@
-# Dash Core version v21.0.2
+# Dash Core version v20.1.1
 
-This is a new patch release, bringing an important bugfix, as well as docker build improvements.
+This is a new patch version release, including bug fixes.
 
-This release is **strongly encouraged** for all masternodes.
-This release is optional but recommended for all other nodes.
+This release is optional but recommended for all nodes.
 
 Please report bugs using the issue tracker at GitHub:
 
@@ -21,11 +20,6 @@ dashd/dash-qt (on Linux).
 
 ## Downgrade warning
 
-### Downgrade to a version < v21.0.0
-
-Downgrading to a version older than v21.0.0 may not be supported due to changes
-if you are using descriptor wallets.
-
 ### Downgrade to a version < v19.2.0
 
 Downgrading to a version older than v19.2.0 is not supported due to changes
@@ -34,21 +28,12 @@ reindex or re-sync the whole chain.
 
 # Notable changes
 
-Transaction Retrieval Bug
--------------------------
+## Work Queue RPC Fix / Deadlock Fix
 
-Resolved a bug that prevented some clients (incl. Dash mobile wallets) from receiving transactions before they are mined
-due to partial misclassification as block-only connections. Kudos to @HashEngineering and @knst for finding and
-investigating this issue.
+A deadlock caused nodes to become non-responsive and RPC to report "Work depth queue exceeded".
+Thanks to Konstantin Akimov (knst) who discovered the cause. This previously caused masternodes to become PoSe banned.
 
-Docker Images now include SBOM
-------------------------------
-
-The [docker images](https://hub.docker.com/r/dashpay/dashd) should now provide SBOM and provenance.
-SBOM and provenenance provide additional information about the build process and exact dependencies included.
-See this [blog post](https://www.docker.com/blog/generate-sboms-with-buildkit/) by Docker for more information.
-
-# v21.0.2 Change log
+# v20.1.1 Change log
 
 See detailed [set of changes][set-of-changes].
 
@@ -58,6 +43,7 @@ Thanks to everyone who directly contributed to this release:
 
 - Konstantin Akimov
 - PastaPastaPasta
+- thephez
 
 As well as everyone that submitted issues, reviewed pull requests and helped
 debug the release candidates.
@@ -66,8 +52,6 @@ debug the release candidates.
 
 These release are considered obsolete. Old release notes can be found here:
 
-- [v21.0.0](https://github.com/dashpay/dash/blob/master/doc/release-notes/dash/release-notes-21.0.0.md) released Jul/25/2024
-- [v20.1.1](https://github.com/dashpay/dash/blob/master/doc/release-notes/dash/release-notes-20.1.1.md) released April/3/2024
 - [v20.1.0](https://github.com/dashpay/dash/blob/master/doc/release-notes/dash/release-notes-20.1.0.md) released March/5/2024
 - [v20.0.4](https://github.com/dashpay/dash/blob/master/doc/release-notes/dash/release-notes-20.0.4.md) released Jan/13/2024
 - [v20.0.3](https://github.com/dashpay/dash/blob/master/doc/release-notes/dash/release-notes-20.0.3.md) released December/26/2023
@@ -116,4 +100,4 @@ These release are considered obsolete. Old release notes can be found here:
 - [v0.10.x](https://github.com/dashpay/dash/blob/master/doc/release-notes/dash/release-notes-0.10.0.md) released Sep/25/2014
 - [v0.9.x](https://github.com/dashpay/dash/blob/master/doc/release-notes/dash/release-notes-0.9.0.md) released Mar/13/2014
 
-[set-of-changes]: https://github.com/dashpay/dash/compare/v21.0.0...dashpay:v21.0.2
+[set-of-changes]: https://github.com/dashpay/dash/compare/v20.1.0...dashpay:v20.1.1
