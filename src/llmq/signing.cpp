@@ -913,13 +913,13 @@ bool CSigningManager::AsyncSignIfMember(Consensus::LLMQType llmqType, CSigShares
             uint256 prevMsgHash;
             db.GetVoteForId(llmqType, id, prevMsgHash);
             if (msgHash != prevMsgHash) {
-                if (!allowDiffMsgHashSigning) {
+                if (allowDiffMsgHashSigning) {
+                    LogPrintf("CSigningManager::%s -- already voted for id=%s and msgHash=%s. Signing for different msgHash=%s\n",
+                              __func__, id.ToString(), prevMsgHash.ToString(), msgHash.ToString());
+                } else {
                     LogPrintf("CSigningManager::%s -- already voted for id=%s and msgHash=%s. Not voting on conflicting msgHash=%s\n",
                               __func__, id.ToString(), prevMsgHash.ToString(), msgHash.ToString());
                     return false;
-                } else {
-                    LogPrintf("CSigningManager::%s -- already voted for id=%s and msgHash=%s. Signing for different msgHash=%s. voting on conflicting msgHash=%s\n",
-                              __func__, id.ToString(), prevMsgHash.ToString(), msgHash.ToString());
                 }
             } else if (allowReSign) {
                 LogPrint(BCLog::LLMQ, "CSigningManager::%s -- already voted for id=%s and msgHash=%s. Resigning!\n", __func__,
