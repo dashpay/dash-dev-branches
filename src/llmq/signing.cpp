@@ -916,6 +916,7 @@ bool CSigningManager::AsyncSignIfMember(Consensus::LLMQType llmqType, CSigShares
                 if (allowDiffMsgHashSigning) {
                     LogPrintf("CSigningManager::%s -- already voted for id=%s and msgHash=%s. Signing for different msgHash=%s\n",
                               __func__, id.ToString(), prevMsgHash.ToString(), msgHash.ToString());
+                    hasVoted = false;
                 } else {
                     LogPrintf("CSigningManager::%s -- already voted for id=%s and msgHash=%s. Not voting on conflicting msgHash=%s\n",
                               __func__, id.ToString(), prevMsgHash.ToString(), msgHash.ToString());
