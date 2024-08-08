@@ -167,6 +167,8 @@ static void WalletTxToJSON(interfaces::Chain& chain, const CWalletTx& wtx, UniVa
     entry.pushKV("chainlock", chainlock);
     if (wtx.IsCoinBase())
         entry.pushKV("generated", true);
+    if (wtx.IsPlatformTransfer())
+        entry.pushKV("platform-transfer", true);
     if (confirms > 0)
     {
         entry.pushKV("blockhash", wtx.m_confirm.hashBlock.GetHex());
@@ -1403,6 +1405,10 @@ static void ListTransactions(const CWallet& wallet, const CWalletTx& wtx, int nM
                 else
                     entry.pushKV("category", "generate");
             }
+            else if (wtx.IsPlatformTransfer())
+            {
+                entry.pushKV("category", "platform-transfer");
+            }
             else
             {
                 entry.pushKV("category", "receive");
@@ -1467,7 +1473,8 @@ static RPCHelpMan listtransactions()
                             "\"receive\"               Non-coinbase transactions received.\n"
                             "\"generate\"              Coinbase transactions received with more than 100 confirmations.\n"
                             "\"immature\"              Coinbase transactions received with 100 or fewer confirmations.\n"
-                            "\"orphan\"                Orphaned coinbase transactions received.\n"},
+                            "\"orphan\"                Orphaned coinbase transactions received.\n"
+                            "\"platform-transfer\"     Platform Transfer transactions received.\n"},
                         {RPCResult::Type::STR_AMOUNT, "amount", "The amount in " + CURRENCY_UNIT + ". This is negative for the 'send' category, and is positive\n"
                              "for all other categories"},
                         {RPCResult::Type::STR, "label", "A comment for the address/transaction, if any"},
@@ -1582,7 +1589,8 @@ static RPCHelpMan listsinceblock()
                             "\"receive\"               Non-coinbase transactions received.\n"
                             "\"generate\"              Coinbase transactions received with more than 100 confirmations.\n"
                             "\"immature\"              Coinbase transactions received with 100 or fewer confirmations.\n"
-                            "\"orphan\"                Orphaned coinbase transactions received.\n"},
+                            "\"orphan\"                Orphaned coinbase transactions received.\n"
+                            "\"platform-transfer\"     Platform Transfer transactions received.\n"},
                         {RPCResult::Type::STR_AMOUNT, "amount", "The amount in " + CURRENCY_UNIT + ". This is negative for the 'send' category, and is positive\n"
                             "for all other categories"},
                         {RPCResult::Type::NUM, "vout", "the vout value"},
@@ -1723,7 +1731,8 @@ static RPCHelpMan gettransaction()
                                         "\"receive\"               Non-coinbase transactions received.\n"
                                         "\"generate\"              Coinbase transactions received with more than 100 confirmations.\n"
                                         "\"immature\"              Coinbase transactions received with 100 or fewer confirmations.\n"
-                                        "\"orphan\"                Orphaned coinbase transactions received.\n"},
+                                        "\"orphan\"                Orphaned coinbase transactions received.\n"
+                                        "\"platform-transfer\"     Platform Transfer transactions received.\n"},
                                     {RPCResult::Type::STR_AMOUNT, "amount", "The amount in " + CURRENCY_UNIT},
                                     {RPCResult::Type::STR, "label", "A comment for the address/transaction, if any"},
                                     {RPCResult::Type::NUM, "vout", "the vout value"},
@@ -2675,7 +2684,7 @@ static RPCHelpMan listwalletdir()
     UniValue wallets(UniValue::VARR);
     for (const auto& path : ListDatabases(GetWalletDir())) {
         UniValue wallet(UniValue::VOBJ);
-        wallet.pushKV("name", path.string());
+        wallet.pushKV("name", path.u8string());
         wallets.push_back(wallet);
     }
 
@@ -3074,7 +3083,7 @@ static RPCHelpMan restorewallet()
 
     WalletContext& context = EnsureWalletContext(request.context);
 
-    std::string backup_file = request.params[1].get_str();
+    auto backup_file = fs::u8path(request.params[1].get_str());
 
     std::string wallet_name = request.params[0].get_str();
 
