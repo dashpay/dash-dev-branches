@@ -68,7 +68,11 @@ public:
 
 static inline path u8path(const std::string& utf8_str)
 {
+#if __cplusplus < 202002L
     return std::filesystem::u8path(utf8_str);
+#else
+    return std::filesystem::path(std::u8string{utf8_str.begin(), utf8_str.end()});
+#endif
 }
 
 // Disallow implicit std::string conversion for absolute to avoid
@@ -154,6 +158,28 @@ static inline path PathFromString(const std::string& string)
     return std::filesystem::path(string);
 #endif
 }
+
+/**
+ * Create directory (and if necessary its parents), unless the leaf directory
+ * already exists or is a symlink to an existing directory.
+ * This is a temporary workaround for an issue in libstdc++ that has been fixed
+ * upstream [PR101510].
+ */
+static inline bool create_directories(const std::filesystem::path& p)
+{
+    if (std::filesystem::is_symlink(p) && std::filesystem::is_directory(p)) {
+        return false;
+    }
+    return std::filesystem::create_directories(p);
+}
+
+/**
+ * This variant is not used. Delete it to prevent it from accidentally working
+ * around the workaround. If it is needed, add a workaround in the same pattern
+ * as above.
+ */
+bool create_directories(const std::filesystem::path& p, std::error_code& ec) = delete;
+
 } // namespace fs
 
 /** Bridge operations to C stdio */
