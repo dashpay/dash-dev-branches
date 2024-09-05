@@ -266,6 +266,7 @@ BITCOIN_CORE_H = \
   netaddress.h \
   netbase.h \
   netfulfilledman.h \
+  netgroup.h \
   netmessagemaker.h \
   node/blockstorage.h \
   node/coin.h \
@@ -314,6 +315,7 @@ BITCOIN_CORE_H = \
   streams.h \
   statsd_client.h \
   support/allocators/mt_pooled_secure.h \
+  support/allocators/pool.h \
   support/allocators/pooled_secure.h \
   support/allocators/secure.h \
   support/allocators/zeroafterfree.h \
@@ -328,6 +330,7 @@ BITCOIN_CORE_H = \
   torcontrol.h \
   txdb.h \
   txmempool.h \
+  txorphanage.h \
   undo.h \
   unordered_lru_cache.h \
   util/bip32.h \
@@ -490,6 +493,7 @@ libbitcoin_server_a_SOURCES = \
   miner.cpp \
   net.cpp \
   netfulfilledman.cpp \
+  netgroup.cpp \
   net_processing.cpp \
   node/blockstorage.cpp \
   node/coin.cpp \
@@ -527,6 +531,7 @@ libbitcoin_server_a_SOURCES = \
   torcontrol.cpp \
   txdb.cpp \
   txmempool.cpp \
+  txorphanage.cpp \
   validation.cpp \
   validationinterface.cpp \
   versionbits.cpp \
