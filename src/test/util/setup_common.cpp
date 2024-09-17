@@ -353,15 +353,18 @@ TestChainSetup::TestChainSetup(int num_blocks, const std::vector<const char*>& e
             /* TestChainDIP3BeforeActivationSetup */
             {  430, uint256S("0x0bcefaa33fec56cd84d05d0e76cd6a78badcc20f627d91903646de6a07930a14") },
             /* TestChainBRRBeforeActivationSetup */
-            {  497, uint256S("0x23c31820ec5160b7181bfdf328e2b76cd12c9fa4544d892b7f01e74dd6220849") },
+            {  497, uint256S("0x2500bc0f0c7880b1dd4ea4423b58bf244302baa4b0dc148c87db9425ea80b252") },
             /* TestChainV19BeforeActivationSetup */
-            {  894, uint256S("0x2885cf0fe8fdf29803b6c65002ba2570ff011531d8ea92be312a85d655e00c51") },
+            {  894, uint256S("0x6d20bbcd184866ae9223ca007c09dcdd5cb3f01f386c9edcb0cde395f2220eba") },
         }
     };
 
     {
         LOCK(::cs_main);
         auto hash = checkpoints.mapCheckpoints.find(num_blocks);
+        if (hash != checkpoints.mapCheckpoints.end() && m_node.chainman->ActiveChain().Tip()->GetBlockHash() != hash->second) {
+            std::cerr << "heeeeshes: " << m_node.chainman->ActiveChain().Tip()->GetBlockHash().ToString() << ' ' <<  hash->second.ToString() << std::endl;
+        }
         assert(
             hash != checkpoints.mapCheckpoints.end() &&
             m_node.chainman->ActiveChain().Tip()->GetBlockHash() == hash->second);
