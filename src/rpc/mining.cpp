@@ -1060,7 +1060,7 @@ static RPCHelpMan submitblock()
     bool new_block;
     auto sc = std::make_shared<submitblock_StateCatcher>(block.GetHash());
     RegisterSharedValidationInterface(sc);
-    bool accepted = chainman.ProcessNewBlock(Params(), blockptr, /* fForceProcessing */ true, /* fNewBlock */ &new_block);
+    bool accepted = chainman.ProcessNewBlock(Params(), blockptr, /*force_processing=*/true, /*new_block=*/&new_block);
     UnregisterSharedValidationInterface(sc);
     if (!new_block && accepted) {
         return "duplicate";
@@ -1169,10 +1169,10 @@ static RPCHelpMan estimatesmartfee()
     UniValue errors(UniValue::VARR);
     FeeCalculation feeCalc;
     CFeeRate feeRate{fee_estimator.estimateSmartFee(conf_target, &feeCalc, conservative)};
-    CFeeRate min_mempool_feerate{mempool.GetMinFee(gArgs.GetArg("-maxmempool", DEFAULT_MAX_MEMPOOL_SIZE) * 1000000)};
-    CFeeRate min_relay_feerate{::minRelayTxFee};
-    feeRate = std::max({feeRate, min_mempool_feerate, min_relay_feerate});
     if (feeRate != CFeeRate(0)) {
+        CFeeRate min_mempool_feerate{mempool.GetMinFee(gArgs.GetArg("-maxmempool", DEFAULT_MAX_MEMPOOL_SIZE) * 1000000)};
+        CFeeRate min_relay_feerate{::minRelayTxFee};
+        feeRate = std::max({feeRate, min_mempool_feerate, min_relay_feerate});
         result.pushKV("feerate", ValueFromAmount(feeRate.GetFeePerK()));
     } else {
         errors.push_back("Insufficient data or no feerate found");

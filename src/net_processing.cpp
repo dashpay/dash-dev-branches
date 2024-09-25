@@ -61,6 +61,7 @@
 #include <llmq/chainlocks.h>
 #include <llmq/commitment.h>
 #include <llmq/context.h>
+#include <llmq/dkgsession.h>
 #include <llmq/dkgsessionmgr.h>
 #include <llmq/instantsend.h>
 #include <llmq/options.h>
@@ -124,8 +125,11 @@ static constexpr std::chrono::minutes PING_INTERVAL{2};
 static const unsigned int MAX_LOCATOR_SZ = 101;
 /** Number of blocks that can be requested at any given time from a single peer. */
 static const int MAX_BLOCKS_IN_TRANSIT_PER_PEER = 16;
-/** Time during which a peer must stall block download progress before being disconnected. */
-static constexpr auto BLOCK_STALLING_TIMEOUT = 2s;
+/** Default time during which a peer must stall block download progress before being disconnected.
+ * the actual timeout is increased temporarily if peers are disconnected for hitting the timeout */
+static constexpr auto BLOCK_STALLING_TIMEOUT_DEFAULT{2s};
+/** Maximum timeout for stalling block download. */
+static constexpr auto BLOCK_STALLING_TIMEOUT_MAX{64s};
 /** Maximum depth of blocks we're willing to serve as compact blocks to peers
  *  when requested. For older blocks, a regular BLOCK response will be sent. */
 static const int MAX_CMPCTBLOCK_DEPTH = 5;
@@ -835,6 +839,9 @@ private:
     /** Number of preferable block download peers. */
     int m_num_preferred_download_peers GUARDED_BY(cs_main){0};
 
+    /** Stalling timeout for blocks in IBD */
+    std::atomic<std::chrono::seconds> m_block_stalling_timeout{BLOCK_STALLING_TIMEOUT_DEFAULT};
+
     bool AlreadyHave(const CInv& inv)
         EXCLUSIVE_LOCKS_REQUIRED(cs_main, !m_recent_confirmed_transactions_mutex);
 
@@ -1039,6 +1046,15 @@ static bool IsLimitedPeer(const Peer& peer)
 {
     return (!(peer.m_their_services & NODE_NETWORK) &&
              (peer.m_their_services & NODE_NETWORK_LIMITED));
+}
+
+/** Get maximum number of headers that can be included in one batch */
+static uint16_t GetHeadersLimit(const CNode& pfrom, bool compressed)
+{
+    if (pfrom.GetCommonVersion() >= INCREASE_MAX_HEADERS2_VERSION && compressed) {
+        return MAX_HEADERS_COMPRESSED_RESULT;
+    }
+    return MAX_HEADERS_UNCOMPRESSED_RESULT;
 }
 
 static void PushInv(Peer& peer, const CInv& inv)
@@ -1896,8 +1912,9 @@ void PeerManagerImpl::StartScheduledTasks(CScheduler& scheduler)
 }
 
 /**
- * Evict orphan txn pool entries (EraseOrphanTx) based on a newly connected
- * block. Also save the time of the last tip update.
+ * Evict orphan txn pool entries based on a newly connected
+ * block. Also save the time of the last tip update and
+ * possibly reduce dynamic block stalling timeout.
  */
 void PeerManagerImpl::BlockConnected(const std::shared_ptr<const CBlock>& pblock, const CBlockIndex* pindex)
 {
@@ -1916,6 +1933,16 @@ void PeerManagerImpl::BlockConnected(const std::shared_ptr<const CBlock>& pblock
         LOCK(m_recent_confirmed_transactions_mutex);
         for (const auto& ptx : pblock->vtx) {
             m_recent_confirmed_transactions.insert(ptx->GetHash());
+        }
+    }
+
+    // In case the dynamic timeout was doubled once or more, reduce it slowly back to its default value
+    auto stalling_timeout = m_block_stalling_timeout.load();
+    Assume(stalling_timeout >= BLOCK_STALLING_TIMEOUT_DEFAULT);
+    if (stalling_timeout != BLOCK_STALLING_TIMEOUT_DEFAULT) {
+        const auto new_timeout = std::max(std::chrono::duration_cast<std::chrono::seconds>(stalling_timeout * 0.85), BLOCK_STALLING_TIMEOUT_DEFAULT);
+        if (m_block_stalling_timeout.compare_exchange_strong(stalling_timeout, new_timeout)) {
+            LogPrint(BCLog::NET, "Decreased stalling timeout to %d seconds\n", count_seconds(new_timeout));
         }
     }
 }
@@ -2963,8 +2990,9 @@ void PeerManagerImpl::ProcessHeadersMessage(CNode& pfrom, Peer& peer,
     }
 
     // Consider fetching more headers.
-    if (nCount == MAX_HEADERS_RESULTS) {
-        std::string msg_type = UsesCompressedHeaders(peer) ? NetMsgType::GETHEADERS2 : NetMsgType::GETHEADERS;
+    const bool uses_compressed = UsesCompressedHeaders(peer);
+    const std::string msg_type = uses_compressed ? NetMsgType::GETHEADERS2 : NetMsgType::GETHEADERS;
+    if (nCount == GetHeadersLimit(pfrom, uses_compressed)) {
         // Headers message had its maximum size; the peer may have more headers.
         if (MaybeSendGetHeaders(pfrom, msg_type, m_chainman.ActiveChain().GetLocator(pindexLast), peer)) {
             LogPrint(BCLog::NET, "more %s (%d) to end to peer=%d (startheight:%d)\n",
@@ -2972,7 +3000,7 @@ void PeerManagerImpl::ProcessHeadersMessage(CNode& pfrom, Peer& peer,
         }
     }
 
-    UpdatePeerStateForReceivedHeaders(pfrom, pindexLast, received_new_header, nCount == MAX_HEADERS_RESULTS);
+    UpdatePeerStateForReceivedHeaders(pfrom, pindexLast, received_new_header, nCount == GetHeadersLimit(pfrom, uses_compressed));
 
     // Consider immediately downloading blocks.
     HeadersDirectFetchBlocks(pfrom, peer, pindexLast);
@@ -4066,8 +4094,8 @@ void PeerManagerImpl::ProcessMessage(
                 pindex = m_chainman.ActiveChain().Next(pindex);
         }
 
-        const auto send_headers = [this /* for m_connman */, &hashStop, &pindex, &nodestate, &pfrom, &msgMaker](auto msg_type, auto& v_headers, auto callback) {
-            int nLimit = MAX_HEADERS_RESULTS;
+        const auto send_headers = [this /* for m_connman */, &hashStop, &pindex, &nodestate, &pfrom, &msgMaker](auto msg_type_internal, auto& v_headers, auto callback) {
+            int nLimit = GetHeadersLimit(pfrom, msg_type_internal == NetMsgType::HEADERS2);
             for (; pindex; pindex = m_chainman.ActiveChain().Next(pindex)) {
                 v_headers.push_back(callback(pindex));
 
@@ -4087,7 +4115,7 @@ void PeerManagerImpl::ProcessMessage(
             // will re-announce the new block via headers (or compact blocks again)
             // in the SendMessages logic.
             nodestate->pindexBestHeaderSent = pindex ? pindex : m_chainman.ActiveChain().Tip();
-            m_connman.PushMessage(&pfrom, msgMaker.Make(msg_type, v_headers));
+            m_connman.PushMessage(&pfrom, msgMaker.Make(msg_type_internal, v_headers));
         };
 
         LogPrint(BCLog::NET, "%s %d to %s from peer=%d\n", msg_type, (pindex ? pindex->nHeight : -1), hashStop.IsNull() ? "end" : hashStop.ToString(), pfrom.GetId());
@@ -4575,7 +4603,7 @@ void PeerManagerImpl::ProcessMessage(
 
         // Bypass the normal CBlock deserialization, as we don't want to risk deserializing 2000 full blocks.
         unsigned int nCount = ReadCompactSize(vRecv);
-        if (nCount > MAX_HEADERS_RESULTS) {
+        if (nCount > GetHeadersLimit(pfrom, msg_type == NetMsgType::HEADERS2)) {
             Misbehaving(pfrom.GetId(), 20, strprintf("headers message size = %u", nCount));
             return;
         }
@@ -5067,7 +5095,7 @@ bool PeerManagerImpl::ProcessMessages(CNode* pfrom, std::atomic<bool>& interrupt
     );
 
     if (gArgs.GetBoolArg("-capturemessages", false)) {
-        CaptureMessage(pfrom->addr, msg.m_type, MakeUCharSpan(msg.m_recv), /* incoming */ true);
+        CaptureMessage(pfrom->addr, msg.m_type, MakeUCharSpan(msg.m_recv), /* is_incoming */ true);
     }
 
     msg.SetVersion(pfrom->GetCommonVersion());
@@ -5855,12 +5883,19 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
             m_connman.PushMessage(pto, msgMaker.Make(NetMsgType::INV, vInv));
 
         // Detect whether we're stalling
-        if (state.m_stalling_since.count() && state.m_stalling_since < current_time - BLOCK_STALLING_TIMEOUT) {
+        auto stalling_timeout = m_block_stalling_timeout.load();
+        if (state.m_stalling_since.count() && state.m_stalling_since < current_time - stalling_timeout) {
             // Stalling only triggers when the block download window cannot move. During normal steady state,
             // the download window should be much larger than the to-be-downloaded set of blocks, so disconnection
             // should only happen during initial block download.
             LogPrintf("Peer=%d is stalling block download, disconnecting\n", pto->GetId());
             pto->fDisconnect = true;
+            // Increase timeout for the next peer so that we don't disconnect multiple peers if our own
+            // bandwidth is insufficient.
+            const auto new_timeout = std::min(2 * stalling_timeout, BLOCK_STALLING_TIMEOUT_MAX);
+            if (stalling_timeout != new_timeout && m_block_stalling_timeout.compare_exchange_strong(stalling_timeout, new_timeout)) {
+                LogPrint(BCLog::NET, "Increased stalling timeout temporarily to %d seconds\n", count_seconds(new_timeout));
+            }
             return true;
         }
         // In case there is a block that has been in flight from this peer for block_interval * (1 + 0.5 * N)

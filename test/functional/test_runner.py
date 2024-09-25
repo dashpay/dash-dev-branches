@@ -133,6 +133,10 @@ BASE_SCRIPTS = [
     'feature_dip4_coinbasemerkleroots.py', # NOTE: needs dash_hash to pass
     'feature_asset_locks.py', # NOTE: needs dash_hash to pass
     'feature_mnehf.py', # NOTE: needs dash_hash to pass
+    'feature_governance.py --legacy-wallet',
+    'feature_governance.py --descriptors',
+    'feature_governance_cl.py --legacy-wallet',
+    'feature_governance_cl.py --descriptors',
     # vv Tests less than 60s vv
     'p2p_sendheaders.py', # NOTE: needs dash_hash to pass
     'p2p_sendheaders_compressed.py', # NOTE: needs dash_hash to pass
@@ -254,6 +258,7 @@ BASE_SCRIPTS = [
     'wallet_importprunedfunds.py --descriptors',
     'p2p_leak_tx.py',
     'p2p_eviction.py',
+    'p2p_ibd_stalling.py',
     'rpc_signmessage.py',
     'rpc_generateblock.py',
     'rpc_generate.py',
@@ -293,10 +298,6 @@ BASE_SCRIPTS = [
     'feature_cltv.py',
     'feature_new_quorum_type_activation.py',
     'feature_governance_objects.py',
-    'feature_governance.py --legacy-wallet',
-    'feature_governance.py --descriptors',
-    'feature_governance_cl.py --legacy-wallet',
-    'feature_governance_cl.py --descriptors',
     'p2p_governance_invs.py',
     'rpc_uptime.py',
     'feature_discover.py',

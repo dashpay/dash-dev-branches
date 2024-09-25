@@ -31,6 +31,7 @@ from test_framework.blocktools import (
     create_coinbase,
     TIME_GENESIS_BLOCK,
 )
+from test_framework.governance import EXPECTED_STDERR_NO_GOV_PRUNE
 from test_framework.messages import (
     CBlockHeader,
     from_hex,
@@ -125,7 +126,7 @@ class BlockchainTest(BitcoinTestFramework):
         assert res['pruned']
         assert not res['automatic_pruning']
 
-        self.restart_node(0, ['-stopatheight=207', '-txindex=0'], expected_stderr='Warning: You are starting with governance validation disabled. This is expected because you are running a pruned node.')
+        self.restart_node(0, ['-stopatheight=207', '-txindex=0'], expected_stderr=EXPECTED_STDERR_NO_GOV_PRUNE)
         res = self.nodes[0].getblockchaininfo()
         # should have exact keys
         assert_equal(sorted(res.keys()), keys)
@@ -299,7 +300,7 @@ class BlockchainTest(BitcoinTestFramework):
             assert 'muhash' not in r
 
         # Unknown hash_type raises an error
-        assert_raises_rpc_error(-8, "foohash is not a valid hash_type", node.gettxoutsetinfo, "foohash")
+        assert_raises_rpc_error(-8, "'foo hash' is not a valid hash_type", node.gettxoutsetinfo, "foo hash")
 
     def _test_getblockheader(self):
         self.log.info("Test getblockheader")
