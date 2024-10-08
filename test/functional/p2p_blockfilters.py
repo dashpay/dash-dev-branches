@@ -56,17 +56,17 @@ class CompactFiltersTest(BitcoinTestFramework):
         peer_1 = self.nodes[1].add_p2p_connection(FiltersClient())
 
         # Nodes 0 & 1 share the same first 999 blocks in the chain.
-        self.nodes[0].generate(999)
+        self.generate(self.nodes[0], 999)
         self.sync_blocks(timeout=600)
 
         # Stale blocks by disconnecting nodes 0 & 1, mining, then reconnecting
         self.disconnect_nodes(0, 1)
 
-        stale_block_hash = self.nodes[0].generate(1)[0]
+        stale_block_hash = self.generate(self.nodes[0], 1, sync_fun=self.no_op)[0]
         self.nodes[0].syncwithvalidationinterfacequeue()
         assert_equal(self.nodes[0].getblockcount(), 1000)
 
-        self.nodes[1].generate(1001)
+        self.generate(self.nodes[1], 1001, sync_fun=self.no_op)
         assert_equal(self.nodes[1].getblockcount(), 2000)
 
         # Check that nodes have signalled NODE_COMPACT_FILTERS correctly.
@@ -251,6 +251,17 @@ class CompactFiltersTest(BitcoinTestFramework):
         msg = "Error: Cannot set -peerblockfilters without -blockfilterindex."
         self.nodes[0].assert_start_raises_init_error(expected_msg=msg)
 
+        self.log.info("Test unknown value to -blockfilterindex raises an error")
+        self.nodes[0].extra_args = ["-blockfilterindex=abc"]
+        msg = "Error: Unknown -blockfilterindex value abc."
+        self.nodes[0].assert_start_raises_init_error(expected_msg=msg)
+
+        self.log.info("Test -blockfilterindex with -reindex-chainstate raises an error")
+        self.nodes[0].assert_start_raises_init_error(
+            expected_msg='Error: -reindex-chainstate option is not compatible with -blockfilterindex. '
+            'Please temporarily disable blockfilterindex while using -reindex-chainstate, or replace -reindex-chainstate with -reindex to fully rebuild all indexes.',
+            extra_args=['-blockfilterindex', '-reindex-chainstate'],
+        )
 
 def compute_last_header(prev_header, hashes):
     """Compute the last filter header from a starting header and a sequence of filter hashes."""

@@ -134,10 +134,10 @@ static RPCHelpMan coinjoin_start()
         throw JSONRPCError(RPC_INTERNAL_ERROR, "Mixing has been started already.");
     }
 
-    const ChainstateManager& chainman = EnsureChainman(node);
+    ChainstateManager& chainman = EnsureChainman(node);
     CTxMemPool& mempool = EnsureMemPool(node);
     CConnman& connman = EnsureConnman(node);
-    bool result = cj_clientman->DoAutomaticDenominating(chainman.ActiveChainstate(), connman, mempool);
+    bool result = cj_clientman->DoAutomaticDenominating(chainman, connman, mempool);
     return "Mixing " + (result ? "started successfully" : ("start failed: " + cj_clientman->GetStatuses().original + ", will retry"));
 },
     };
@@ -207,7 +207,7 @@ static RPCHelpMan coinjoinsalt_generate()
         "\nGenerate new CoinJoin salt and store it in the wallet database\n"
         "Cannot generate new salt if CoinJoin mixing is in process or wallet has private keys disabled.\n",
         {
-            {"overwrite", RPCArg::Type::BOOL, /* default */ "false", "Generate new salt even if there is an existing salt and/or there is CoinJoin balance"},
+            {"overwrite", RPCArg::Type::BOOL, RPCArg::Default{false}, "Generate new salt even if there is an existing salt and/or there is CoinJoin balance"},
         },
         RPCResult{
             RPCResult::Type::BOOL, "", "Status of CoinJoin salt generation and commitment"
@@ -309,7 +309,7 @@ static RPCHelpMan coinjoinsalt_set()
         "Will overwrite existing salt. The presence of a CoinJoin balance will cause the wallet to rescan.\n",
         {
             {"salt", RPCArg::Type::STR, RPCArg::Optional::NO, "Desired CoinJoin salt value for the wallet"},
-            {"overwrite", RPCArg::Type::BOOL, /* default */ "false", "Overwrite salt even if CoinJoin balance present"},
+            {"overwrite", RPCArg::Type::BOOL, RPCArg::Default{false}, "Overwrite salt even if CoinJoin balance present"},
         },
         RPCResult{
             RPCResult::Type::BOOL, "", "Status of CoinJoin salt change request"

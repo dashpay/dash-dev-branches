@@ -15,13 +15,11 @@ becomes valid.
 import copy
 import time
 
-from test_framework.blocktools import create_block, create_coinbase, create_tx_with_script
+from test_framework.blocktools import MAX_FUTURE_BLOCK_TIME, create_block, create_coinbase, create_tx_with_script
 from test_framework.messages import COIN
 from test_framework.p2p import P2PDataStore
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import assert_equal
-
-MAX_FUTURE_BLOCK_TIME = 2 * 60 * 60
 
 
 class InvalidBlockRequestTest(BitcoinTestFramework):
@@ -51,7 +49,7 @@ class InvalidBlockRequestTest(BitcoinTestFramework):
         peer.send_blocks_and_test([block1], node, success=True)
 
         self.log.info("Mature the block.")
-        node.generatetoaddress(100, node.get_deterministic_priv_key().address)
+        self.generatetoaddress(node, 100, node.get_deterministic_priv_key().address)
 
         best_block = node.getblock(node.getbestblockhash())
         tip = int(node.getbestblockhash(), 16)

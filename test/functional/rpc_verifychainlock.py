@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2021-2023 The Dash Core developers
+# Copyright (c) 2021-2024 The Dash Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -31,7 +31,7 @@ class RPCVerifyChainLockTest(DashTestFramework):
         self.nodes[0].sporkupdate("SPORK_17_QUORUM_DKG_ENABLED", 0)
         self.wait_for_sporks_same()
         self.mine_quorum()
-        self.wait_for_chainlocked_block(node0, node0.generate(1)[0])
+        self.wait_for_chainlocked_block(node0, self.generate(node0, 1, sync_fun=self.no_op)[0])
         chainlock = node0.getbestchainlock()
         block_hash = chainlock["blockhash"]
         height = chainlock["height"]
@@ -47,8 +47,8 @@ class RPCVerifyChainLockTest(DashTestFramework):
         self.wait_for_chainlocked_block_all_nodes(block_hash)
         # Isolate node1, mine a block on node0 and wait for its ChainLock
         node1.setnetworkactive(False)
-        node0.generate(1)
-        self.wait_for_chainlocked_block(node0, node0.generate(1)[0])
+        self.generate(node0, 1, sync_fun=self.no_op)
+        self.wait_for_chainlocked_block(node0, self.generate(node0, 1, sync_fun=self.no_op)[0])
         chainlock = node0.getbestchainlock()
         assert chainlock != node1.getbestchainlock()
         block_hash = chainlock["blockhash"]
@@ -61,7 +61,7 @@ class RPCVerifyChainLockTest(DashTestFramework):
         assert node0.verifychainlock(block_hash, chainlock_signature, height)
         assert node1.verifychainlock(block_hash, chainlock_signature, height)
 
-        node1.generate(1)
+        self.generate(node1, 1, sync_fun=self.no_op)
         height1 = node1.getblockcount()
         tx0 = node0.getblock(node0.getbestblockhash())['tx'][0]
         tx1 = node1.getblock(node1.getbestblockhash())['tx'][0]

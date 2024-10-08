@@ -39,7 +39,7 @@
 #include <scheduler.h>
 #include <script/sigcache.h>
 #include <spork.h>
-#include <statsd_client.h>
+#include <stats/client.h>
 #include <streams.h>
 #include <test/util/index.h>
 #include <txdb.h>
@@ -110,12 +110,12 @@ void DashTestSetup(NodeContext& node, const CChainParams& chainparams)
     node.dmnman = std::make_unique<CDeterministicMNManager>(chainstate, *node.connman, *node.evodb);
     node.mempool->ConnectManagers(node.dmnman.get());
 
-    node.cj_ctx = std::make_unique<CJContext>(chainstate, *node.connman, *node.dmnman, *node.mn_metaman, *node.mempool,
+    node.cj_ctx = std::make_unique<CJContext>(*node.chainman, *node.connman, *node.dmnman, *node.mn_metaman, *node.mempool,
                                               /* mn_activeman = */ nullptr, *node.mn_sync, node.peerman, /* relay_txes = */ true);
 #ifdef ENABLE_WALLET
     node.coinjoin_loader = interfaces::MakeCoinJoinLoader(*node.cj_ctx->walletman);
 #endif // ENABLE_WALLET
-    node.llmq_ctx = std::make_unique<LLMQContext>(chainstate, *node.connman, *node.dmnman, *node.evodb, *node.mn_metaman, *node.mnhf_manager, *node.sporkman, *node.mempool,
+    node.llmq_ctx = std::make_unique<LLMQContext>(*node.chainman, *node.connman, *node.dmnman, *node.evodb, *node.mn_metaman, *node.mnhf_manager, *node.sporkman, *node.mempool,
                                                   /* mn_activeman = */ nullptr, *node.mn_sync, node.peerman, /* unit_tests = */ true, /* wipe = */ false);
     Assert(node.mnhf_manager)->ConnectManagers(node.chainman.get(), node.llmq_ctx->qman.get());
     node.chain_helper = std::make_unique<CChainstateHelper>(*node.cpoolman, *node.dmnman, *node.mnhf_manager, *node.govman, *(node.llmq_ctx->quorum_block_processor), *node.chainman,
@@ -183,13 +183,7 @@ BasicTestingSetup::BasicTestingSetup(const std::string& chainName, const std::ve
     SetupNetworking();
     InitSignatureCache();
     InitScriptExecutionCache();
-    ::g_stats_client = std::make_unique<statsd::StatsdClient>(
-        m_node.args->GetArg("-statshost", DEFAULT_STATSD_HOST),
-        m_node.args->GetArg("-statshostname", DEFAULT_STATSD_HOSTNAME),
-        m_node.args->GetArg("-statsport", DEFAULT_STATSD_PORT),
-        m_node.args->GetArg("-statsns", DEFAULT_STATSD_NAMESPACE),
-        m_node.args->GetBoolArg("-statsenabled", DEFAULT_STATSD_ENABLE)
-    );
+    ::g_stats_client = InitStatsClient(*m_node.args);
     m_node.chain = interfaces::MakeChain(m_node);
 
     m_node.netgroupman = std::make_unique<NetGroupManager>(/*asmap=*/std::vector<bool>());
@@ -447,13 +441,13 @@ CBlock TestChainSetup::CreateBlock(
     if (block.vtx[0]->nType == TRANSACTION_COINBASE) {
         LOCK(cs_main);
         auto cbTx = GetTxPayload<CCbTx>(*block.vtx[0]);
-        BOOST_ASSERT(cbTx.has_value());
+        Assert(cbTx.has_value());
         BlockValidationState state;
         if (!CalcCbTxMerkleRootMNList(block, chainstate.m_chain.Tip(), cbTx->merkleRootMNList, *m_node.dmnman, state, chainstate.CoinsTip())) {
-            BOOST_ASSERT(false);
+            Assert(false);
         }
         if (!CalcCbTxMerkleRootQuorums(block, chainstate.m_chain.Tip(), *m_node.llmq_ctx->quorum_block_processor, cbTx->merkleRootQuorums, state)) {
-            BOOST_ASSERT(false);
+            Assert(false);
         }
         CMutableTransaction tmpTx{*block.vtx[0]};
         SetTxPayload(tmpTx, *cbTx);
@@ -525,7 +519,7 @@ CMutableTransaction TestChainSetup::CreateValidMempoolTransaction(CTransactionRe
     // If submit=true, add transaction to the mempool.
     if (submit) {
         LOCK(cs_main);
-        const MempoolAcceptResult result = AcceptToMemoryPool(m_node.chainman->ActiveChainstate(), *m_node.mempool, MakeTransactionRef(mempool_txn), /* bypass_limits */ false);
+        const MempoolAcceptResult result = m_node.chainman->ProcessTransaction(MakeTransactionRef(mempool_txn));
         assert(result.m_result_type == MempoolAcceptResult::ResultType::VALID);
     }
 

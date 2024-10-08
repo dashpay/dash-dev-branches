@@ -106,7 +106,7 @@
 #include <llmq/snapshot.h>
 #include <llmq/signing_shares.h>
 
-#include <statsd_client.h>
+#include <stats/client.h>
 
 #include <algorithm>
 #include <condition_variable>
@@ -554,8 +554,8 @@ void SetupServerArgs(ArgsManager& argsman)
     argsman.AddArg("-version", "Print version and exit", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
 
     argsman.AddArg("-addressindex", strprintf("Maintain a full address index, used to query for the balance, txids and unspent outputs for addresses (default: %u)", DEFAULT_ADDRESSINDEX), ArgsManager::ALLOW_ANY, OptionsCategory::INDEXING);
-    argsman.AddArg("-reindex", "Rebuild chain state and block index from the blk*.dat files on disk", ArgsManager::ALLOW_ANY, OptionsCategory::INDEXING);
-    argsman.AddArg("-reindex-chainstate", "Rebuild chain state from the currently indexed blocks. When in pruning mode or if blocks on disk might be corrupted, use full -reindex instead.", ArgsManager::ALLOW_ANY, OptionsCategory::INDEXING);
+    argsman.AddArg("-reindex", "Rebuild chain state and block index from the blk*.dat files on disk. This will also rebuild active optional indexes.", ArgsManager::ALLOW_ANY, OptionsCategory::INDEXING);
+    argsman.AddArg("-reindex-chainstate", "Rebuild chain state from the currently indexed blocks. When in pruning mode or if blocks on disk might be corrupted, use full -reindex instead. Deactivate all optional indexes before running this.", ArgsManager::ALLOW_ANY, OptionsCategory::INDEXING);
     argsman.AddArg("-spentindex", strprintf("Maintain a full spent index, used to query the spending txid and input index for an outpoint (default: %u)", DEFAULT_SPENTINDEX), ArgsManager::ALLOW_ANY, OptionsCategory::INDEXING);
     argsman.AddArg("-timestampindex", strprintf("Maintain a timestamp index for block hashes, used to query blocks hashes by a range of timestamps (default: %u)", DEFAULT_TIMESTAMPINDEX), ArgsManager::ALLOW_ANY, OptionsCategory::INDEXING);
     argsman.AddArg("-txindex", strprintf("Maintain a full transaction index, used by the getrawtransaction rpc call (default: %u)", DEFAULT_TXINDEX), ArgsManager::ALLOW_ANY, OptionsCategory::INDEXING);
@@ -583,7 +583,7 @@ void SetupServerArgs(ArgsManager& argsman)
     argsman.AddArg("-maxreceivebuffer=<n>", strprintf("Maximum per-connection receive buffer, <n>*1000 bytes (default: %u)", DEFAULT_MAXRECEIVEBUFFER), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-maxsendbuffer=<n>", strprintf("Maximum per-connection memory usage for the send buffer, <n>*1000 bytes (default: %u)", DEFAULT_MAXSENDBUFFER), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-maxtimeadjustment", strprintf("Maximum allowed median peer time offset adjustment. Local perspective of time may be influenced by peers forward or backward by this amount. (default: %u seconds)", DEFAULT_MAX_TIME_ADJUSTMENT), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
-    argsman.AddArg("-maxuploadtarget=<n>", strprintf("Tries to keep outbound traffic under the given target (in MiB per 24h). Limit does not apply to peers with 'download' permission. 0 = no limit (default: %d)", DEFAULT_MAX_UPLOAD_TARGET), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
+    argsman.AddArg("-maxuploadtarget=<n>", strprintf("Tries to keep outbound traffic under the given target per 24h. Limit does not apply to peers with 'download' permission or blocks created within past week. 0 = no limit (default: %s). Optional suffix units [k|K|m|M|g|G|t|T] (default: M). Lowercase is 1000 base while uppercase is 1024 base", DEFAULT_MAX_UPLOAD_TARGET), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-onion=<ip:port>", "Use separate SOCKS5 proxy to reach peers via Tor onion services, set -noonion to disable (default: -proxy)", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-i2psam=<ip:port>", "I2P SAM proxy to reach I2P peers and accept I2P connections (default: none)", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-i2pacceptincoming", strprintf("Whether to accept inbound I2P connections (default: %i). Ignored if -i2psam is not set. Listening for inbound I2P connections is done through the SAM proxy, not by binding to a local address and port.", DEFAULT_I2P_ACCEPT_INCOMING), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
@@ -770,12 +770,16 @@ void SetupServerArgs(ArgsManager& argsman)
     argsman.AddArg("-rpcworkqueue=<n>", strprintf("Set the depth of the work queue to service RPC calls (default: %d)", DEFAULT_HTTP_WORKQUEUE), ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::RPC);
     argsman.AddArg("-server", "Accept command line and JSON-RPC commands", ArgsManager::ALLOW_ANY, OptionsCategory::RPC);
 
-    argsman.AddArg("-statsenabled", strprintf("Publish internal stats to statsd (default: %u)", DEFAULT_STATSD_ENABLE), ArgsManager::ALLOW_ANY, OptionsCategory::STATSD);
+    hidden_args.emplace_back("-statsenabled");
+    argsman.AddArg("-statsbatchsize=<bytes>", strprintf("Specify the size of each batch of stats messages (default: %d)", DEFAULT_STATSD_BATCH_SIZE), ArgsManager::ALLOW_ANY, OptionsCategory::STATSD);
+    argsman.AddArg("-statsduration=<ms>", strprintf("Specify the number of milliseconds between stats messages (default: %d)", DEFAULT_STATSD_DURATION), ArgsManager::ALLOW_ANY, OptionsCategory::STATSD);
     argsman.AddArg("-statshost=<ip>", strprintf("Specify statsd host (default: %s)", DEFAULT_STATSD_HOST), ArgsManager::ALLOW_ANY, OptionsCategory::STATSD);
-    argsman.AddArg("-statshostname=<ip>", strprintf("Specify statsd host name (default: %s)", DEFAULT_STATSD_HOSTNAME), ArgsManager::ALLOW_ANY, OptionsCategory::STATSD);
+    hidden_args.emplace_back("-statshostname");
     argsman.AddArg("-statsport=<port>", strprintf("Specify statsd port (default: %u)", DEFAULT_STATSD_PORT), ArgsManager::ALLOW_ANY, OptionsCategory::STATSD);
-    argsman.AddArg("-statsns=<ns>", strprintf("Specify additional namespace prefix (default: %s)", DEFAULT_STATSD_NAMESPACE), ArgsManager::ALLOW_ANY, OptionsCategory::STATSD);
+    hidden_args.emplace_back("-statsns");
     argsman.AddArg("-statsperiod=<seconds>", strprintf("Specify the number of seconds between periodic measurements (default: %d)", DEFAULT_STATSD_PERIOD), ArgsManager::ALLOW_ANY, OptionsCategory::STATSD);
+    argsman.AddArg("-statsprefix=<string>", strprintf("Specify an optional string prepended to every stats key (default: %s)", DEFAULT_STATSD_PREFIX), ArgsManager::ALLOW_ANY, OptionsCategory::STATSD);
+    argsman.AddArg("-statssuffix=<string>", strprintf("Specify an optional string appended to every stats key (default: %s)", DEFAULT_STATSD_SUFFIX), ArgsManager::ALLOW_ANY, OptionsCategory::STATSD);
 #if HAVE_DECL_FORK
     argsman.AddArg("-daemon", strprintf("Run in the background as a daemon and accept commands (default: %d)", DEFAULT_DAEMON), ArgsManager::ALLOW_BOOL, OptionsCategory::OPTIONS);
     argsman.AddArg("-daemonwait", strprintf("Wait for initialization to be finished before exiting. This implies -daemon (default: %d)", DEFAULT_DAEMONWAIT), ArgsManager::ALLOW_BOOL, OptionsCategory::OPTIONS);
@@ -833,12 +837,15 @@ static void StartupNotify(const ArgsManager& args)
 }
 #endif
 
-static void PeriodicStats(ArgsManager& args, ChainstateManager& chainman, const CTxMemPool& mempool)
+static void PeriodicStats(NodeContext& node)
 {
-    assert(args.GetBoolArg("-statsenabled", DEFAULT_STATSD_ENABLE));
+    assert(::g_stats_client->active());
+    const ArgsManager& args = *Assert(node.args);
+    ChainstateManager& chainman = *Assert(node.chainman);
+    const CTxMemPool& mempool = *Assert(node.mempool);
     CCoinsStats stats{CoinStatsHashType::NONE};
     chainman.ActiveChainstate().ForceFlushStateToDisk();
-    if (WITH_LOCK(cs_main, return GetUTXOStats(&chainman.ActiveChainstate().CoinsDB(), std::ref(chainman.m_blockman), stats, RpcInterruptionPoint, chainman.ActiveChain().Tip()))) {
+    if (WITH_LOCK(cs_main, return GetUTXOStats(&chainman.ActiveChainstate().CoinsDB(), chainman.m_blockman, stats, node.rpc_interruption_point, chainman.ActiveChain().Tip()))) {
         ::g_stats_client->gauge("utxoset.tx", stats.nTransactions, 1.0f);
         ::g_stats_client->gauge("utxoset.txOutputs", stats.nTransactionOutputs, 1.0f);
         ::g_stats_client->gauge("utxoset.dbSizeBytes", stats.nDiskSize, 1.0f);
@@ -1339,6 +1346,19 @@ bool AppInitParameterInteraction(const ArgsManager& args)
         return InitError(_("No proxy server specified. Use -proxy=<ip> or -proxy=<ip:port>."));
     }
 
+    if (args.GetBoolArg("-reindex-chainstate", false)) {
+        // indexes that must be deactivated to prevent index corruption, see #24630
+        if (args.GetBoolArg("-coinstatsindex", DEFAULT_COINSTATSINDEX)) {
+            return InitError(_("-reindex-chainstate option is not compatible with -coinstatsindex. Please temporarily disable coinstatsindex while using -reindex-chainstate, or replace -reindex-chainstate with -reindex to fully rebuild all indexes."));
+        }
+        if (g_enabled_filter_types.count(BlockFilterType::BASIC_FILTER)) {
+            return InitError(_("-reindex-chainstate option is not compatible with -blockfilterindex. Please temporarily disable blockfilterindex while using -reindex-chainstate, or replace -reindex-chainstate with -reindex to fully rebuild all indexes."));
+        }
+        if (args.GetBoolArg("-txindex", DEFAULT_TXINDEX)) {
+            return InitError(_("-reindex-chainstate option is not compatible with -txindex. Please temporarily disable txindex while using -reindex-chainstate, or replace -reindex-chainstate with -reindex to fully rebuild all indexes."));
+        }
+    }
+
     try {
         const bool fRecoveryEnabled{llmq::QuorumDataRecoveryEnabled()};
         const bool fQuorumVvecRequestsEnabled{llmq::GetEnabledQuorumVvecSyncEntries().size() > 0};
@@ -1436,6 +1456,12 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
 {
     const ArgsManager& args = *Assert(node.args);
     const CChainParams& chainparams = Params();
+
+    auto opt_max_upload = ParseByteUnits(args.GetArg("-maxuploadtarget", DEFAULT_MAX_UPLOAD_TARGET), ByteUnit::M);
+    if (!opt_max_upload) {
+        return InitError(strprintf(_("Unable to parse -maxuploadtarget: '%s' (possible integer overflow?)"), args.GetArg("-maxuploadtarget", "")));
+    }
+
     // ********************************************************* Step 4a: application initialization
     if (!CreatePidFile(args)) {
         // Detailed error printed inside CreatePidFile().
@@ -1538,11 +1564,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     // We need to initialize g_stats_client early as currently, g_stats_client is called
     // regardless of whether transmitting stats are desirable or not and if
     // g_stats_client isn't present when that attempt is made, the client will crash.
-    ::g_stats_client = std::make_unique<statsd::StatsdClient>(args.GetArg("-statshost", DEFAULT_STATSD_HOST),
-                                                              args.GetArg("-statshostname", DEFAULT_STATSD_HOSTNAME),
-                                                              args.GetArg("-statsport", DEFAULT_STATSD_PORT),
-                                                              args.GetArg("-statsns", DEFAULT_STATSD_NAMESPACE),
-                                                              args.GetBoolArg("-statsenabled", DEFAULT_STATSD_ENABLE));
+    ::g_stats_client = InitStatsClient(args);
 
     {
 
@@ -1891,7 +1913,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
                     node.llmq_ctx->Stop();
                 }
                 node.llmq_ctx.reset();
-                node.llmq_ctx = std::make_unique<LLMQContext>(chainman.ActiveChainstate(), *node.connman, *node.dmnman, *node.evodb, *node.mn_metaman, *node.mnhf_manager, *node.sporkman,
+                node.llmq_ctx = std::make_unique<LLMQContext>(chainman, *node.connman, *node.dmnman, *node.evodb, *node.mn_metaman, *node.mnhf_manager, *node.sporkman,
                                                               *node.mempool, node.mn_activeman.get(), *node.mn_sync, node.peerman, /* unit_tests = */ false, /* wipe = */ fReset || fReindexChainState);
                 // Enable CMNHFManager::{Process, Undo}Block
                 node.mnhf_manager->ConnectManagers(node.chainman.get(), node.llmq_ctx->qman.get());
@@ -2050,7 +2072,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
 
                         const CBlockIndex* tip = chainstate->m_chain.Tip();
                         RPCNotifyBlockChange(tip);
-                        if (tip && tip->nTime > GetAdjustedTime() + 2 * 60 * 60) {
+                        if (tip && tip->nTime > GetTime() + MAX_FUTURE_BLOCK_TIME) {
                             strLoadError = _("The block database contains a block which appears to be from the future. "
                                     "This may be due to your computer's date and time being set incorrectly. "
                                     "Only rebuild the block database if you are sure that your computer's date and time are correct");
@@ -2153,7 +2175,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
 
     // ********************************************************* Step 7c: Setup CoinJoin
 
-    node.cj_ctx = std::make_unique<CJContext>(chainman.ActiveChainstate(), *node.connman, *node.dmnman, *node.mn_metaman, *node.mempool,
+    node.cj_ctx = std::make_unique<CJContext>(chainman, *node.connman, *node.dmnman, *node.mn_metaman, *node.mempool,
                                               node.mn_activeman.get(), *node.mn_sync, node.peerman, !ignores_incoming_txs);
 
 #ifdef ENABLE_WALLET
@@ -2193,6 +2215,11 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
 
     // ********************************************************* Step 8: start indexers
     if (args.GetBoolArg("-txindex", DEFAULT_TXINDEX)) {
+        LOCK(::cs_main);
+        if (const auto error{CheckLegacyTxindex(*Assert(chainman.m_blockman.m_block_tree_db))}) {
+            return InitError(*error);
+        }
+
         g_txindex = std::make_unique<TxIndex>(nTxIndexCache, false, fReindex);
         if (!g_txindex->Start(chainman.ActiveChainstate())) {
             return false;
@@ -2273,9 +2300,9 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
 #endif // ENABLE_WALLET
     }
 
-    if (args.GetBoolArg("-statsenabled", DEFAULT_STATSD_ENABLE)) {
+    if (::g_stats_client->active()) {
         int nStatsPeriod = std::min(std::max((int)args.GetArg("-statsperiod", DEFAULT_STATSD_PERIOD), MIN_STATSD_PERIOD), MAX_STATSD_PERIOD);
-        node.scheduler->scheduleEvery(std::bind(&PeriodicStats, std::ref(*node.args), std::ref(chainman), std::cref(*node.mempool)), std::chrono::seconds{nStatsPeriod});
+        node.scheduler->scheduleEvery(std::bind(&PeriodicStats, std::ref(node)), std::chrono::seconds{nStatsPeriod});
     }
 
     // ********************************************************* Step 11: import blocks
@@ -2388,7 +2415,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     connOptions.nSendBufferMaxSize = 1000 * args.GetArg("-maxsendbuffer", DEFAULT_MAXSENDBUFFER);
     connOptions.nReceiveFloodSize = 1000 * args.GetArg("-maxreceivebuffer", DEFAULT_MAXRECEIVEBUFFER);
     connOptions.m_added_nodes = args.GetArgs("-addnode");
-    connOptions.nMaxOutboundLimit = 1024 * 1024 * args.GetArg("-maxuploadtarget", DEFAULT_MAX_UPLOAD_TARGET);
+    connOptions.nMaxOutboundLimit = *opt_max_upload;
     connOptions.m_peer_connect_timeout = peer_connect_timeout;
 
     // Port to bind to if `-bind=addr` is provided without a `:port` suffix.

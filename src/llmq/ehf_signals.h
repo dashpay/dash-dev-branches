@@ -1,4 +1,4 @@
-// Copyright (c) 2023 The Dash Core developers
+// Copyright (c) 2023-2024 The Dash Core developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -10,11 +10,8 @@
 #include <set>
 
 class CBlockIndex;
-class CChainState;
+class ChainstateManager;
 class CMNHFManager;
-class CSporkManager;
-class CTxMemPool;
-class PeerManager;
 
 namespace llmq
 {
@@ -25,14 +22,11 @@ class CSigningManager;
 class CEHFSignalsHandler : public CRecoveredSigsListener
 {
 private:
-    CChainState& chainstate;
+    ChainstateManager& m_chainman;
     CMNHFManager& mnhfman;
     CSigningManager& sigman;
     CSigSharesManager& shareman;
-    CTxMemPool& mempool;
     const CQuorumManager& qman;
-    const CSporkManager& sporkman;
-    const std::unique_ptr<PeerManager>& m_peerman;
 
     /**
      * keep freshly generated IDs for easier filter sigs in HandleNewRecoveredSig
@@ -40,9 +34,9 @@ private:
     mutable Mutex cs;
     std::set<uint256> ids GUARDED_BY(cs);
 public:
-    explicit CEHFSignalsHandler(CChainState& chainstate, CMNHFManager& mnhfman, CSigningManager& sigman,
-                                CSigSharesManager& shareman, CTxMemPool& mempool, const CQuorumManager& qman,
-                                const CSporkManager& sporkman, const std::unique_ptr<PeerManager>& peerman);
+    explicit CEHFSignalsHandler(ChainstateManager& chainman, CMNHFManager& mnhfman, CSigningManager& sigman,
+                                CSigSharesManager& shareman, const CQuorumManager& qman);
+
     ~CEHFSignalsHandler();
 
 
@@ -51,7 +45,8 @@ public:
      */
     void UpdatedBlockTip(const CBlockIndex* const pindexNew, bool is_masternode) EXCLUSIVE_LOCKS_REQUIRED(!cs);
 
-    void HandleNewRecoveredSig(const CRecoveredSig& recoveredSig) override EXCLUSIVE_LOCKS_REQUIRED(!cs);
+    [[nodiscard]] MessageProcessingResult HandleNewRecoveredSig(const CRecoveredSig& recoveredSig) override
+        EXCLUSIVE_LOCKS_REQUIRED(!cs);
 
 private:
     void trySignEHFSignal(int bit, const CBlockIndex* const pindex) EXCLUSIVE_LOCKS_REQUIRED(!cs);

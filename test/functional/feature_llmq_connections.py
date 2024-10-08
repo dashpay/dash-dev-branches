@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2015-2023 The Dash Core developers
+# Copyright (c) 2015-2024 The Dash Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -44,7 +44,7 @@ class LLMQConnections(DashTestFramework):
         self.wait_for_sporks_same()
 
         self.log.info("mining one block and waiting for all members to connect to each other")
-        self.nodes[0].generate(1)
+        self.generate(self.nodes[0], 1, sync_fun=self.no_op)
         for mn in self.get_quorum_masternodes(q):
             self.wait_for_mnauth(mn.node, 4)
 

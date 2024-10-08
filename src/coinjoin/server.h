@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2023 The Dash Core developers
+// Copyright (c) 2014-2024 The Dash Core developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -7,14 +7,14 @@
 
 #include <coinjoin/coinjoin.h>
 
-#include <net_types.h>
+#include <protocol.h>
 
 class CActiveMasternodeManager;
-class CChainState;
 class CCoinJoinServer;
 class CDataStream;
 class CDeterministicMNManager;
 class CDSTXManager;
+class ChainstateManager;
 class CMasternodeMetaMan;
 class CNode;
 class CTxMemPool;
@@ -27,7 +27,7 @@ class UniValue;
 class CCoinJoinServer : public CCoinJoinBaseSession, public CCoinJoinBaseManager
 {
 private:
-    CChainState& m_chainstate;
+    ChainstateManager& m_chainman;
     CConnman& connman;
     CDeterministicMNManager& m_dmnman;
     CDSTXManager& m_dstxman;
@@ -90,11 +90,11 @@ private:
     void SetNull() override EXCLUSIVE_LOCKS_REQUIRED(cs_coinjoin);
 
 public:
-    explicit CCoinJoinServer(CChainState& chainstate, CConnman& _connman, CDeterministicMNManager& dmnman,
+    explicit CCoinJoinServer(ChainstateManager& chainman, CConnman& _connman, CDeterministicMNManager& dmnman,
                              CDSTXManager& dstxman, CMasternodeMetaMan& mn_metaman, CTxMemPool& mempool,
                              const CActiveMasternodeManager* const mn_activeman, const CMasternodeSync& mn_sync,
                              std::unique_ptr<PeerManager>& peerman) :
-        m_chainstate(chainstate),
+        m_chainman(chainman),
         connman(_connman),
         m_dmnman(dmnman),
         m_dstxman(dstxman),

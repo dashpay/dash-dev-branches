@@ -1,5 +1,5 @@
 // Copyright (c) 2011-2020 The Bitcoin Core developers
-// Copyright (c) 2014-2023 The Dash Core developers
+// Copyright (c) 2014-2024 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -1862,12 +1862,8 @@ void LogQtInfo()
 #else
     const std::string qt_link{"dynamic"};
 #endif
-#ifdef QT_STATICPLUGIN
-    const std::string plugin_link{"static"};
-#else
-    const std::string plugin_link{"dynamic"};
-#endif
-    LogPrintf("Qt %s (%s), plugin=%s (%s)\n", qVersion(), qt_link, QGuiApplication::platformName().toStdString(), plugin_link);
+    // TODO replace instances of LogPrintf with LogInfo once 28318 is merged
+    LogPrintf("Qt %s (%s), plugin=%s\n", qVersion(), qt_link, QGuiApplication::platformName().toStdString());
     const auto static_plugins = QPluginLoader::staticPlugins();
     if (static_plugins.empty()) {
         LogPrintf("No static plugins.\n");

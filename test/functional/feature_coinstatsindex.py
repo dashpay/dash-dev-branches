@@ -81,10 +81,10 @@ class CoinStatsIndexTest(BitcoinTestFramework):
         index_hash_options = ['none', 'muhash']
 
         # Generate a normal transaction and mine it
-        node.generate(101)
+        self.generate(node, 101)
         address = self.nodes[0].get_deterministic_priv_key().address
         node.sendtoaddress(address=address, amount=10, subtractfeefromamount=True)
-        node.generate(1)
+        self.generate(node, 1)
 
         self.sync_blocks(timeout=120)
 
@@ -106,7 +106,7 @@ class CoinStatsIndexTest(BitcoinTestFramework):
         self.log.info("Test that gettxoutsetinfo() can get fetch data on specific heights with index")
 
         # Generate a new tip
-        node.generate(5)
+        self.generate(node, 5)
 
         for hash_option in index_hash_options:
             # Fetch old stats by height
@@ -183,8 +183,7 @@ class CoinStatsIndexTest(BitcoinTestFramework):
         self.nodes[0].sendrawtransaction(tx2_hex)
 
         # Include both txs in a block
-        self.nodes[0].generate(1)
-        self.sync_all()
+        self.generate(self.nodes[0], 1)
 
         for hash_option in index_hash_options:
             # Check all amounts were registered correctly
@@ -242,9 +241,23 @@ class CoinStatsIndexTest(BitcoinTestFramework):
         res9 = index_node.gettxoutsetinfo('muhash')
         assert_equal(res8, res9)
 
-        index_node.generate(1)
+        self.generate(index_node, 1, sync_fun=self.no_op)
         res10 = index_node.gettxoutsetinfo('muhash')
         assert(res8['txouts'] < res10['txouts'])
+
+        self.log.info("Test that the index works with -reindex")
+
+        self.restart_node(1, extra_args=["-coinstatsindex", "-reindex"])
+        res11 = index_node.gettxoutsetinfo('muhash')
+        assert_equal(res11, res10)
+
+        self.log.info("Test that -reindex-chainstate is disallowed with coinstatsindex")
+
+        self.nodes[1].assert_start_raises_init_error(
+            expected_msg='Error: -reindex-chainstate option is not compatible with -coinstatsindex. '
+            'Please temporarily disable coinstatsindex while using -reindex-chainstate, or replace -reindex-chainstate with -reindex to fully rebuild all indexes.',
+            extra_args=['-coinstatsindex', '-reindex-chainstate'],
+        )
 
     def _test_use_index_option(self):
         self.log.info("Test use_index option for nodes running the index")
@@ -261,14 +274,14 @@ class CoinStatsIndexTest(BitcoinTestFramework):
 
         # Generate two block, let the index catch up, then invalidate the blocks
         index_node = self.nodes[1]
-        reorg_blocks = index_node.generatetoaddress(2, index_node.getnewaddress())
+        reorg_blocks = self.generatetoaddress(index_node, 2, index_node.getnewaddress())
         reorg_block = reorg_blocks[1]
         res_invalid = index_node.gettxoutsetinfo('muhash')
         index_node.invalidateblock(reorg_blocks[0])
         assert_equal(index_node.gettxoutsetinfo('muhash')['height'], 110)
 
         # Add two new blocks
-        block = index_node.generate(2)[1]
+        block = self.generate(index_node, 2, sync_fun=self.no_op)[1]
         res = index_node.gettxoutsetinfo(hash_type='muhash', hash_or_height=None, use_index=False)
 
         # Test that the result of the reorged block is not returned for its old block height
@@ -284,8 +297,7 @@ class CoinStatsIndexTest(BitcoinTestFramework):
 
         # Add another block, so we don't depend on reconsiderblock remembering which
         # blocks were touched by invalidateblock
-        index_node.generate(1)
-        self.sync_all()
+        self.generate(index_node, 1)
 
         # Ensure that removing and re-adding blocks yields consistent results
         block = index_node.getblockhash(99)

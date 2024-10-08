@@ -31,6 +31,8 @@ MAX_BLOCK_SIGOPS = 40000
 # Genesis block time (regtest)
 TIME_GENESIS_BLOCK = 1417713337
 
+MAX_FUTURE_BLOCK_TIME = 2 * 60 * 60
+
 # Coinbase transaction outputs can only be spent after this number of new blocks (network rule)
 COINBASE_MATURITY = 100
 
@@ -64,6 +66,7 @@ def create_block(hashprev=None, coinbase=None, ntime=None, *, version=None, tmpl
     block.calc_sha256()
     return block
 
+# TODO: imlement MN_RR support here or remove it
 def create_block_with_mnpayments(mninfo, node, vtx=None, mn_payee=None, mn_amount=None):
     if vtx is None:
         vtx = []

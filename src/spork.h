@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2023 The Dash Core developers
+// Copyright (c) 2014-2024 The Dash Core developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -42,7 +42,7 @@ enum SporkId : int32_t {
     SPORK_19_CHAINLOCKS_ENABLED                            = 10018,
     SPORK_21_QUORUM_ALL_CONNECTED                          = 10020,
     SPORK_23_QUORUM_POSE                                   = 10022,
-    SPORK_24_TEST_EHF                                      = 10023,
+    // SPORK_24_DEPRECATED = 10023,
 
     SPORK_INVALID                                          = -1,
 };
@@ -76,7 +76,6 @@ struct CSporkDef
     MAKE_SPORK_DEF(SPORK_19_CHAINLOCKS_ENABLED,            4070908800ULL), // OFF
     MAKE_SPORK_DEF(SPORK_21_QUORUM_ALL_CONNECTED,          4070908800ULL), // OFF
     MAKE_SPORK_DEF(SPORK_23_QUORUM_POSE,                   4070908800ULL), // OFF
-    MAKE_SPORK_DEF(SPORK_24_TEST_EHF,                      4070908800ULL), // OFF
 };
 #undef MAKE_SPORK_DEF
 

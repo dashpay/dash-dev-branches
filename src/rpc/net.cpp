@@ -5,6 +5,7 @@
 
 #include <rpc/server.h>
 
+#include <addrman.h>
 #include <banman.h>
 #include <chainparams.h>
 #include <clientversion.h>
@@ -156,7 +157,7 @@ static RPCHelpMan getpeerinfo()
                                                       "When a message type is not listed in this json object, the bytes sent are 0.\n"
                                                       "Only known message types can appear as keys in the object."}
                     }},
-                    {RPCResult::Type::OBJ, "bytesrecv_per_msg", "",
+                    {RPCResult::Type::OBJ_DYN, "bytesrecv_per_msg", "",
                     {
                         {RPCResult::Type::NUM, "msg", "The total bytes received aggregated by message type\n"
                                                       "When a message type is not listed in this json object, the bytes received are 0.\n"
@@ -352,7 +353,7 @@ static RPCHelpMan addconnection()
         "\nOpen an outbound connection to a specified node. This RPC is for testing only.\n",
         {
             {"address", RPCArg::Type::STR, RPCArg::Optional::NO, "The IP address and port to attempt connecting to."},
-            {"connection_type", RPCArg::Type::STR, RPCArg::Optional::NO, "Type of connection to open (\"outbound-full-relay\", \"block-relay-only\" or \"addr-fetch\")."},
+            {"connection_type", RPCArg::Type::STR, RPCArg::Optional::NO, "Type of connection to open (\"outbound-full-relay\", \"block-relay-only\", \"addr-fetch\" or \"feeler\")."},
         },
         RPCResult{
             RPCResult::Type::OBJ, "", "",
@@ -380,6 +381,8 @@ static RPCHelpMan addconnection()
         conn_type = ConnectionType::BLOCK_RELAY;
     } else if (conn_type_in == "addr-fetch") {
         conn_type = ConnectionType::ADDR_FETCH;
+    } else if (conn_type_in == "feeler") {
+        conn_type = ConnectionType::FEELER;
     } else {
         throw JSONRPCError(RPC_INVALID_PARAMETER, self.ToString());
     }
@@ -408,8 +411,8 @@ static RPCHelpMan disconnectnode()
         "\nStrictly one out of 'address' and 'nodeid' can be provided to identify the node.\n"
         "\nTo disconnect by nodeid, either set 'address' to the empty string, or call using the named 'nodeid' argument only.\n",
         {
-            {"address", RPCArg::Type::STR, /* default */ "fallback to nodeid", "The IP address/port of the node"},
-            {"nodeid", RPCArg::Type::NUM, /* default */ "fallback to address", "The node ID (see getpeerinfo for node IDs)"},
+            {"address", RPCArg::Type::STR, RPCArg::DefaultHint{"fallback to nodeid"}, "The IP address/port of the node"},
+            {"nodeid", RPCArg::Type::NUM, RPCArg::DefaultHint{"fallback to address"}, "The node ID (see getpeerinfo for node IDs)"},
         },
         RPCResult{RPCResult::Type::NONE, "", ""},
         RPCExamples{
@@ -454,7 +457,7 @@ static RPCHelpMan getaddednodeinfo()
                 "\nReturns information about the given added node, or all added nodes\n"
                 "(note that onetry addnodes are not listed here)\n",
                 {
-                    {"node", RPCArg::Type::STR, /* default */ "all nodes", "If provided, return information about this specific node, otherwise all nodes are returned."},
+                    {"node", RPCArg::Type::STR, RPCArg::DefaultHint{"all nodes"}, "If provided, return information about this specific node, otherwise all nodes are returned."},
                 },
                 RPCResult{
                     RPCResult::Type::ARR, "", "",
@@ -706,8 +709,8 @@ static RPCHelpMan setban()
                 {
                     {"subnet", RPCArg::Type::STR, RPCArg::Optional::NO, "The IP/Subnet (see getpeerinfo for nodes IP) with an optional netmask (default is /32 = single IP)"},
                     {"command", RPCArg::Type::STR, RPCArg::Optional::NO, "'add' to add an IP/Subnet to the list, 'remove' to remove an IP/Subnet from the list"},
-                    {"bantime", RPCArg::Type::NUM, /* default */ "0", "time in seconds how long (or until when if [absolute] is set) the IP is banned (0 or empty means using the default time of 24h which can also be overwritten by the -bantime startup argument)"},
-                    {"absolute", RPCArg::Type::BOOL, /* default */ "false", "If set, the bantime must be an absolute timestamp expressed in " + UNIX_EPOCH_TIME},
+                    {"bantime", RPCArg::Type::NUM, RPCArg::Default{0}, "time in seconds how long (or until when if [absolute] is set) the IP is banned (0 or empty means using the default time of 24h which can also be overwritten by the -bantime startup argument)"},
+                    {"absolute", RPCArg::Type::BOOL, RPCArg::Default{false}, "If set, the bantime must be an absolute timestamp expressed in " + UNIX_EPOCH_TIME},
                 },
                 RPCResult{RPCResult::Type::NONE, "", ""},
                 RPCExamples{
@@ -910,8 +913,8 @@ static RPCHelpMan getnodeaddresses()
     return RPCHelpMan{"getnodeaddresses",
                 "\nReturn known addresses, which can potentially be used to find new nodes in the network.\n",
                 {
-                    {"count", RPCArg::Type::NUM, /* default */ "1", "The maximum number of addresses to return. Specify 0 to return all known addresses."},
-                    {"network", RPCArg::Type::STR, /* default */ "all networks", "Return only addresses of the specified network. Can be one of: " + Join(GetNetworkNames(), ", ") + "."},
+                    {"count", RPCArg::Type::NUM, RPCArg::Default{1}, "The maximum number of addresses to return. Specify 0 to return all known addresses."},
+                    {"network", RPCArg::Type::STR, RPCArg::DefaultHint{"all networks"}, "Return only addresses of the specified network. Can be one of: " + Join(GetNetworkNames(), ", ") + "."},
                 },
                 RPCResult{
                     RPCResult::Type::ARR, "", "",
@@ -971,7 +974,7 @@ static RPCHelpMan addpeeraddress()
         {
             {"address", RPCArg::Type::STR, RPCArg::Optional::NO, "The IP address of the peer"},
             {"port", RPCArg::Type::NUM, RPCArg::Optional::NO, "The port of the peer"},
-            {"tried", RPCArg::Type::BOOL, /* default */ "false", "If true, attempt to add the peer to the tried addresses table"},
+            {"tried", RPCArg::Type::BOOL, RPCArg::Default{false}, "If true, attempt to add the peer to the tried addresses table"},
         },
         RPCResult{
             RPCResult::Type::OBJ, "", "",
@@ -1016,6 +1019,53 @@ static RPCHelpMan addpeeraddress()
     obj.pushKV("success", success);
     return obj;
 },
+    };
+}
+
+static RPCHelpMan sendmsgtopeer()
+{
+    return RPCHelpMan{
+        "sendmsgtopeer",
+        "Send a p2p message to a peer specified by id.\n"
+        "The message type and body must be provided, the message header will be generated.\n"
+        "This RPC is for testing only.",
+        {
+            {"peer_id", RPCArg::Type::NUM, RPCArg::Optional::NO, "The peer to send the message to."},
+            {"msg_type", RPCArg::Type::STR, RPCArg::Optional::NO, strprintf("The message type (maximum length %i)", CMessageHeader::COMMAND_SIZE)},
+            {"msg", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "The serialized message body to send, in hex, without a message header"},
+        },
+        RPCResult{RPCResult::Type::NONE, "", ""},
+        RPCExamples{
+            HelpExampleCli("sendmsgtopeer", "0 \"addr\" \"ffffff\"") + HelpExampleRpc("sendmsgtopeer", "0 \"addr\" \"ffffff\"")},
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue {
+            const NodeId peer_id{request.params[0].get_int()};
+            const std::string& msg_type{request.params[1].get_str()};
+            if (msg_type.size() > CMessageHeader::COMMAND_SIZE) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("Error: msg_type too long, max length is %i", CMessageHeader::COMMAND_SIZE));
+            }
+            const std::string& msg{request.params[2].get_str()};
+            if (!msg.empty() && !IsHex(msg)) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER, "Error parsing input for msg");
+            }
+
+            NodeContext& node = EnsureAnyNodeContext(request.context);
+            CConnman& connman = EnsureConnman(node);
+
+            CSerializedNetMsg msg_ser;
+            msg_ser.data = ParseHex(msg);
+            msg_ser.m_type = msg_type;
+
+            bool success = connman.ForNode(peer_id, [&](CNode* node) {
+                connman.PushMessage(node, std::move(msg_ser));
+                return true;
+            });
+
+            if (!success) {
+                throw JSONRPCError(RPC_MISC_ERROR, "Error: Could not send message to peer");
+            }
+
+            return NullUniValue;
+        },
     };
 }
 
@@ -1068,6 +1118,7 @@ static const CRPCCommand commands[] =
 
     { "hidden",              &addconnection,           },
     { "hidden",              &addpeeraddress,          },
+    { "hidden",              &sendmsgtopeer            },
     { "hidden",              &setmnthreadactive        },
 };
 // clang-format on

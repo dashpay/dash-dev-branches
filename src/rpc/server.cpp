@@ -1,6 +1,6 @@
 // Copyright (c) 2010 Satoshi Nakamoto
 // Copyright (c) 2009-2020 The Bitcoin Core developers
-// Copyright (c) 2014-2023 The Dash Core developers
+// Copyright (c) 2014-2024 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -168,8 +168,8 @@ static RPCHelpMan help()
     return RPCHelpMan{"help",
         "\nList all commands, or get help for a specified command.\n",
         {
-            {"command", RPCArg::Type::STR, /* default */ "all commands", "The command to get help on"},
-            {"subcommand", RPCArg::Type::STR, /* default */ "all subcommands", "The subcommand to get help on."},
+            {"command", RPCArg::Type::STR, RPCArg::DefaultHint{"all commands"}, "The command to get help on"},
+            {"subcommand", RPCArg::Type::STR, RPCArg::DefaultHint{"all subcommands"}, "The subcommand to get help on."},
         },
         {
             RPCResult{RPCResult::Type::STR, "", "The help text"},

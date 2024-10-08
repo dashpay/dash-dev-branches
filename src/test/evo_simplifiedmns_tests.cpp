@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2023 The Dash Core developers
+// Copyright (c) 2018-2024 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -26,7 +26,7 @@ BOOST_AUTO_TEST_CASE(simplifiedmns_merkleroots)
         if (auto service = Lookup(ip, i, false); service.has_value()) {
             smle.service = service.value();
         } else {
-            BOOST_ASSERT(false);
+            BOOST_REQUIRE(false);
         }
 
         std::vector<unsigned char> vecBytes{static_cast<unsigned char>(i)};

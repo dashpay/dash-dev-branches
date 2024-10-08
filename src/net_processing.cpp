@@ -70,7 +70,7 @@
 #include <llmq/signing_shares.h>
 #include <llmq/snapshot.h>
 
-#include <statsd_client.h>
+#include <stats/client.h>
 
 /** Maximum number of in-flight objects from a peer */
 static constexpr int32_t MAX_PEER_OBJECT_IN_FLIGHT = 100;
@@ -272,25 +272,34 @@ struct Peer {
 
     struct TxRelay {
         mutable RecursiveMutex m_bloom_filter_mutex;
-        // We use m_relay_txs for two purposes -
-        // a) it allows us to not relay tx invs before receiving the peer's version message
-        // b) the peer may tell us in its version message that we should not relay tx invs
-        //    unless it loads a bloom filter.
+        /** Whether the peer wishes to receive transaction announcements.
+         *
+         * This is initially set based on the fRelay flag in the received
+         * `version` message. If initially set to false, it can only be flipped
+         * to true if we have offered the peer NODE_BLOOM services and it sends
+         * us a `filterload` or `filterclear` message. See BIP37. */
         bool m_relay_txs GUARDED_BY(m_bloom_filter_mutex){false};
+        /** A bloom filter for which transactions to announce to the peer. See BIP37. */
         std::unique_ptr<CBloomFilter> m_bloom_filter PT_GUARDED_BY(m_bloom_filter_mutex) GUARDED_BY(m_bloom_filter_mutex){nullptr};
 
         mutable RecursiveMutex m_tx_inventory_mutex;
-        // inventory based relay
+        /** A filter of all the txids that the peer has announced to
+         *  us or we have announced to the peer. We use this to avoid announcing
+         *  the same txid to a peer that already has the transaction. */
         CRollingBloomFilter m_tx_inventory_known_filter GUARDED_BY(m_tx_inventory_mutex){50000, 0.000001};
-        // Set of transaction ids we still have to announce.
-        // They are sorted by the mempool before relay, so the order is not important.
+        /** Set of transaction ids we still have to announce. We use the
+         *  mempool to sort transactions in dependency order before relay, so
+         *  this does not have to be sorted. */
         std::set<uint256> m_tx_inventory_to_send GUARDED_BY(m_tx_inventory_mutex);
-        // List of non-tx/non-block inventory items
+        /** List of non-tx/non-block inventory items */
         std::vector<CInv> vInventoryOtherToSend GUARDED_BY(m_tx_inventory_mutex);
-        // Used for BIP35 mempool sending, also protected by m_tx_inventory_mutex
+        /** Whether the peer has requested us to send our complete mempool. Only
+         *  permitted if the peer has NetPermissionFlags::Mempool. See BIP35. */
         bool m_send_mempool GUARDED_BY(m_tx_inventory_mutex){false};
-        // Last time a "MEMPOOL" request was serviced.
+        /** The last time a BIP35 `mempool` request was serviced. */
         std::atomic<std::chrono::seconds> m_last_mempool_req{0s};
+        /** The next time after which we will send an `inv` message containing
+         *  transaction announcements to this peer. */
         std::chrono::microseconds m_next_inv_send_time GUARDED_BY(NetEventsInterface::g_msgproc_mutex){0};
     };
 
@@ -584,8 +593,9 @@ public:
     bool IsInvInFilter(NodeId nodeid, const uint256& hash) const override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
 
 private:
-    /** Helper to process result of external handlers of message */
+    /** Helpers to process result of external handlers of message */
     void ProcessPeerMsgRet(const PeerMsgRet& ret, CNode& pfrom) EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
+    void PostProcessMessage(MessageProcessingResult&& ret, NodeId node) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
 
     /** Consider evicting an outbound peer based on the amount of time they've been behind our tip */
     void ConsiderEviction(CNode& pto, Peer& peer, std::chrono::seconds time_in_seconds) EXCLUSIVE_LOCKS_REQUIRED(cs_main, g_msgproc_mutex);
@@ -846,9 +856,9 @@ private:
         EXCLUSIVE_LOCKS_REQUIRED(cs_main, !m_recent_confirmed_transactions_mutex);
 
     /**
-     * Filter for transactions that were recently rejected by
-     * AcceptToMemoryPool. These are not rerequested until the chain tip
-     * changes, at which point the entire filter is reset.
+     * Filter for transactions that were recently rejected by the mempool.
+     * These are not rerequested until the chain tip changes, at which point
+     * the entire filter is reset.
      *
      * Without this filter we'd be re-requesting txs from each of our peers,
      * increasing bandwidth consumption considerably. For instance, with 100
@@ -1384,7 +1394,7 @@ void PeerManagerImpl::PushNodeVersion(CNode& pnode, const Peer& peer)
         nProtocolVersion = gArgs.GetArg("-pushversion", PROTOCOL_VERSION);
     }
 
-    const bool tx_relay = !m_ignore_incoming_txs && !pnode.IsBlockOnlyConn();
+    const bool tx_relay = !m_ignore_incoming_txs && !pnode.IsBlockOnlyConn() && !pnode.IsFeelerConn();
     m_connman.PushMessage(&pnode, CNetMsgMaker(INIT_PROTO_VERSION).Make(NetMsgType::VERSION, nProtocolVersion, my_services, nTime,
                           your_services, addr_you, // Together the pre-version-31402 serialization of CAddress "addrYou" (without nTime)
                           my_services, CService(), // Together the pre-version-31402 serialization of CAddress "addrMe" (without nTime)
@@ -1806,6 +1816,7 @@ bool PeerManagerImpl::MaybePunishNodeForTx(NodeId nodeid, const TxValidationStat
     case TxValidationResult::TX_PREMATURE_SPEND:
     case TxValidationResult::TX_CONFLICT:
     case TxValidationResult::TX_MEMPOOL_POLICY:
+    case TxValidationResult::TX_NO_MEMPOOL:
     // moved from BLOCK
     case TxValidationResult::TX_BAD_SPECIAL:
     case TxValidationResult::TX_CONFLICT_LOCK:
@@ -3029,7 +3040,7 @@ void PeerManagerImpl::ProcessOrphanTx(std::set<uint256>& orphan_work_set)
         const auto [porphanTx, from_peer] = m_orphanage.GetTx(orphanHash);
         if (porphanTx == nullptr) continue;
 
-        const MempoolAcceptResult result = AcceptToMemoryPool(m_chainman.ActiveChainstate(), m_mempool, porphanTx, false /* bypass_limits */);
+        const MempoolAcceptResult result = m_chainman.ProcessTransaction(porphanTx);
         const TxValidationState& state = result.m_state;
 
         if (result.m_result_type == MempoolAcceptResult::ResultType::VALID) {
@@ -3055,7 +3066,6 @@ void PeerManagerImpl::ProcessOrphanTx(std::set<uint256>& orphan_work_set)
             break;
         }
     }
-    m_mempool.check(m_chainman.ActiveChainstate());
 }
 
 bool PeerManagerImpl::PrepareBlockFilterRequest(CNode& node, Peer& peer,
@@ -3307,6 +3317,22 @@ void PeerManagerImpl::ProcessBlock(CNode& node, const std::shared_ptr<const CBlo
 void PeerManagerImpl::ProcessPeerMsgRet(const PeerMsgRet& ret, CNode& pfrom)
 {
     if (!ret) Misbehaving(pfrom.GetId(), ret.error().score, ret.error().message);
+}
+
+void PeerManagerImpl::PostProcessMessage(MessageProcessingResult&& result, NodeId node)
+{
+    if (result.m_error) {
+        Misbehaving(node, result.m_error->score, result.m_error->message);
+    }
+    if (result.m_to_erase) {
+        WITH_LOCK(cs_main, EraseObjectRequest(node, result.m_to_erase.value()));
+    }
+    for (const auto& tx : result.m_transactions) {
+        WITH_LOCK(cs_main, RelayTransaction(tx));
+    }
+    if (result.m_inventory) {
+        RelayInv(result.m_inventory.value(), MIN_PEER_PROTO_VERSION);
+    }
 }
 
 void PeerManagerImpl::ProcessMessage(
@@ -3831,6 +3857,12 @@ void PeerManagerImpl::ProcessMessage(
                     best_block = &inv.hash;
                 }
             } else {
+                if (fBlocksOnly && NetMessageViolatesBlocksOnly(inv.GetCommand())) {
+                    LogPrint(BCLog::NET, "%s (%s) inv sent in violation of protocol, disconnecting peer=%d\n", inv.GetCommand(), inv.hash.ToString(), pfrom.GetId());
+                    pfrom.fDisconnect = true;
+                    return;
+                }
+
                 const bool fAlreadyHave = AlreadyHave(inv);
                 LogPrint(BCLog::NET, "got inv: %s  %s peer=%d\n", inv.ToString(), fAlreadyHave ? "have" : "new", pfrom.GetId());
                 ::g_stats_client->inc(strprintf("message.received.inv_%s", inv.GetCommand()), 1.0f);
@@ -3840,11 +3872,7 @@ void PeerManagerImpl::ProcessMessage(
                 };
 
                 AddKnownInv(*peer, inv.hash);
-                if (fBlocksOnly && NetMessageViolatesBlocksOnly(inv.GetCommand())) {
-                    LogPrint(BCLog::NET, "%s (%s) inv sent in violation of protocol, disconnecting peer=%d\n", inv.GetCommand(), inv.hash.ToString(), pfrom.GetId());
-                    pfrom.fDisconnect = true;
-                    return;
-                } else if (!fAlreadyHave) {
+                if (!fAlreadyHave) {
                     if (fBlocksOnly && inv.type == MSG_ISDLOCK) {
                         if (pfrom.GetCommonVersion() <= ADDRV2_PROTO_VERSION) {
                             // It's ok to receive these invs, we just ignore them
@@ -4195,7 +4223,7 @@ void PeerManagerImpl::ProcessMessage(
             return;
         }
 
-        const MempoolAcceptResult result = AcceptToMemoryPool(m_chainman.ActiveChainstate(), m_mempool, ptx, false /* bypass_limits */);
+        const MempoolAcceptResult result = m_chainman.ProcessTransaction(ptx);
         const TxValidationState& state = result.m_state;
 
         if (result.m_result_type == MempoolAcceptResult::ResultType::VALID) {
@@ -4206,7 +4234,6 @@ void PeerManagerImpl::ProcessMessage(
                 m_cj_ctx->dstxman->AddDSTX(dstx);
             }
 
-            m_mempool.check(m_chainman.ActiveChainstate());
             RelayTransaction(tx.GetHash());
             m_orphanage.AddChildrenToWorkSet(tx, peer->m_orphan_work_set);
 
@@ -4278,8 +4305,8 @@ void PeerManagerImpl::ProcessMessage(
         }
 
         // If a tx has been detected by m_recent_rejects, we will have reached
-        // this point and the tx will have been ignored. Because we haven't run
-        // the tx through AcceptToMemoryPool, we won't have computed a DoS
+        // this point and the tx will have been ignored. Because we haven't
+        // submitted the tx to our mempool, we won't have computed a DoS
         // score for it or determined exactly why we consider it invalid.
         //
         // This means we won't penalize any peer subsequently relaying a DoSy
@@ -4983,12 +5010,23 @@ void PeerManagerImpl::ProcessMessage(
         m_mn_sync.ProcessMessage(pfrom, msg_type, vRecv);
         ProcessPeerMsgRet(m_govman.ProcessMessage(pfrom, m_connman, *this, msg_type, vRecv), pfrom);
         ProcessPeerMsgRet(CMNAuth::ProcessMessage(pfrom, peer->m_their_services, m_connman, m_mn_metaman, m_mn_activeman, m_chainman.ActiveChain(), m_mn_sync, m_dmnman->GetListAtChainTip(), msg_type, vRecv), pfrom);
-        ProcessPeerMsgRet(m_llmq_ctx->quorum_block_processor->ProcessMessage(pfrom, msg_type, vRecv), pfrom);
+        PostProcessMessage(m_llmq_ctx->quorum_block_processor->ProcessMessage(pfrom, msg_type, vRecv), pfrom.GetId());
         ProcessPeerMsgRet(m_llmq_ctx->qdkgsman->ProcessMessage(pfrom, this, is_masternode, msg_type, vRecv), pfrom);
         ProcessPeerMsgRet(m_llmq_ctx->qman->ProcessMessage(pfrom, msg_type, vRecv), pfrom);
         m_llmq_ctx->shareman->ProcessMessage(pfrom, m_sporkman, msg_type, vRecv);
         ProcessPeerMsgRet(m_llmq_ctx->sigman->ProcessMessage(pfrom, msg_type, vRecv), pfrom);
-        ProcessPeerMsgRet(m_llmq_ctx->clhandler->ProcessMessage(pfrom, msg_type, vRecv), pfrom);
+
+        if (msg_type == NetMsgType::CLSIG) {
+            if (llmq::AreChainLocksEnabled(m_sporkman)) {
+                llmq::CChainLockSig clsig;
+                vRecv >> clsig;
+                const uint256& hash = ::SerializeHash(clsig);
+                WITH_LOCK(::cs_main, EraseObjectRequest(pfrom.GetId(), CInv{MSG_CLSIG, hash}));
+                PostProcessMessage(m_llmq_ctx->clhandler->ProcessNewChainLock(pfrom.GetId(), clsig, hash), pfrom.GetId());
+            }
+            return; // CLSIG
+        }
+
         ProcessPeerMsgRet(m_llmq_ctx->isman->ProcessMessage(pfrom, msg_type, vRecv), pfrom);
         return;
     }
@@ -5889,7 +5927,7 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
             // Stalling only triggers when the block download window cannot move. During normal steady state,
             // the download window should be much larger than the to-be-downloaded set of blocks, so disconnection
             // should only happen during initial block download.
-            LogPrintf("Peer=%d is stalling block download, disconnecting\n", pto->GetId());
+            LogPrintf("Peer=%d%s is stalling block download, disconnecting\n", pto->GetId(), fLogIPs ? strprintf(" peeraddr=%s", pto->addr.ToStringAddrPort()) : "");
             pto->fDisconnect = true;
             // Increase timeout for the next peer so that we don't disconnect multiple peers if our own
             // bandwidth is insufficient.
@@ -5908,7 +5946,7 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
             QueuedBlock &queuedBlock = state.vBlocksInFlight.front();
             int nOtherPeersWithValidatedDownloads = m_peers_downloading_from - 1;
             if (current_time > state.m_downloading_since + std::chrono::seconds{consensusParams.nPowTargetSpacing} * (BLOCK_DOWNLOAD_TIMEOUT_BASE + BLOCK_DOWNLOAD_TIMEOUT_PER_PEER * nOtherPeersWithValidatedDownloads)) {
-                LogPrintf("Timeout downloading block %s from peer=%d, disconnecting\n", queuedBlock.pindex->GetBlockHash().ToString(), pto->GetId());
+                LogPrintf("Timeout downloading block %s from peer=%d%s, disconnecting\n", queuedBlock.pindex->GetBlockHash().ToString(), pto->GetId(), fLogIPs ? strprintf(" peeraddr=%s", pto->addr.ToStringAddrPort()) : "");
                 pto->fDisconnect = true;
                 return true;
             }
@@ -5924,11 +5962,11 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
                     // disconnect our sync peer for stalling; we have bigger
                     // problems if we can't get any outbound peers.
                     if (!pto->HasPermission(NetPermissionFlags::NoBan)) {
-                        LogPrintf("Timeout downloading headers from peer=%d, disconnecting\n", pto->GetId());
+                        LogPrintf("Timeout downloading headers from peer=%d%s, disconnecting\n", pto->GetId(), fLogIPs ? strprintf(" peeraddr=%s", pto->addr.ToStringAddrPort()) : "");
                         pto->fDisconnect = true;
                         return true;
                     } else {
-                        LogPrintf("Timeout downloading headers from noban peer=%d, not disconnecting\n", pto->GetId());
+                        LogPrintf("Timeout downloading headers from noban peer=%d%s, not disconnecting\n", pto->GetId(), fLogIPs ? strprintf(" peeraddr=%s", pto->addr.ToStringAddrPort()) : "");
                         // Reset the headers sync state so that we have a
                         // chance to try downloading from a different peer.
                         // Note: this will also result in at least one more

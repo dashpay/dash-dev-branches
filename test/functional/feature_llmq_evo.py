@@ -46,7 +46,7 @@ class TestP2PConn(P2PInterface):
 
 class LLMQEvoNodesTest(DashTestFramework):
     def set_test_params(self):
-        self.set_dash_test_params(5, 4, evo_count=5)
+        self.set_dash_test_params(5, 4, [["-testactivationheight=mn_rr@1200"]] * 5, evo_count=5)
         self.set_dash_llmq_test_params(4, 4)
 
     def run_test(self):
@@ -89,8 +89,7 @@ class LLMQEvoNodesTest(DashTestFramework):
         for i in range(self.evo_count):
             evo_info = self.dynamically_add_masternode(evo=True)
             evo_protxhash_list.append(evo_info.proTxHash)
-            self.nodes[0].generate(8)
-            self.sync_blocks(self.nodes)
+            self.generate(self.nodes[0], 8, sync_fun=lambda: self.sync_blocks())
 
             expectedUpdated.append(evo_info.proTxHash)
             b_i = self.nodes[0].getbestblockhash()
@@ -108,16 +107,15 @@ class LLMQEvoNodesTest(DashTestFramework):
         self.test_evo_protx_are_in_mnlist(evo_protxhash_list)
 
         self.log.info("Test that EvoNodes are paid 4x blocks in a row")
-        self.test_evo_payments(window_analysis=48)
+        self.test_evo_payments(window_analysis=48, mnrr_active=False)
         self.test_masternode_winners()
 
         self.activate_mn_rr()
-        self.log.info("Activated MN RewardReallocation at height:" + str(self.nodes[0].getblockcount()))
+        self.log.info("Activated MN RewardReallocation, current height:" + str(self.nodes[0].getblockcount()))
 
         # Generate a few blocks to make EvoNode/MN analysis on a pure MN RewardReallocation window
         self.bump_mocktime(1)
-        self.nodes[0].generate(4)
-        self.sync_blocks()
+        self.generate(self.nodes[0], 4, sync_fun=lambda: self.sync_blocks())
 
         self.log.info("Test that EvoNodes are paid 1 block in a row after MN RewardReallocation activation")
         self.test_evo_payments(window_analysis=48, mnrr_active=True)
@@ -127,7 +125,7 @@ class LLMQEvoNodesTest(DashTestFramework):
 
         return
 
-    def test_evo_payments(self, window_analysis, mnrr_active=False):
+    def test_evo_payments(self, window_analysis, mnrr_active):
         current_evo = None
         consecutive_payments = 0
         n_payments = 0 if mnrr_active else 4
@@ -167,7 +165,7 @@ class LLMQEvoNodesTest(DashTestFramework):
                 current_evo = None
                 consecutive_payments = 0
 
-            self.nodes[0].generate(1)
+            self.generate(self.nodes[0], 1, sync_fun=self.no_op)
             if i % 8 == 0:
                 self.sync_blocks()
 
@@ -215,8 +213,7 @@ class LLMQEvoNodesTest(DashTestFramework):
         collateral_amount = 4000
         outputs = {collateral_address: collateral_amount, funds_address: 1}
         collateral_txid = self.nodes[0].sendmany("", outputs)
-        self.nodes[0].generate(8)
-        self.sync_all(self.nodes)
+        self.generate(self.nodes[0], 8)
 
         rawtx = self.nodes[0].getrawtransaction(collateral_txid, 1)
         collateral_vout = 0

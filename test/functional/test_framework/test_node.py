@@ -20,6 +20,7 @@ import urllib.parse
 import shlex
 import sys
 import collections
+from pathlib import Path
 
 from .authproxy import JSONRPCException
 from .descriptors import descsum_create
@@ -103,7 +104,7 @@ class TestNode():
             "-debug",
             "-debugexclude=libevent",
             "-debugexclude=leveldb",
-            "-uacomment=testnode%d" % i,
+            "-uacomment=testnode%d" % i,  # required for subversion uniqueness across peers
         ]
         if self.mocktime != 0:
             self.args.append(f"-mocktime={mocktime}")
@@ -317,9 +318,21 @@ class TestNode():
             time.sleep(1.0 / poll_per_s)
         self._raise_assertion_error("Unable to retrieve cookie credentials after {}s".format(self.rpc_timeout))
 
-    def generate(self, nblocks, maxtries=1000000):
+    def generate(self, nblocks, maxtries=1000000, **kwargs):
         self.log.debug("TestNode.generate() dispatches `generate` call to `generatetoaddress`")
-        return self.generatetoaddress(nblocks=nblocks, address=self.get_deterministic_priv_key().address, maxtries=maxtries)
+        return self.generatetoaddress(nblocks=nblocks, address=self.get_deterministic_priv_key().address, maxtries=maxtries, **kwargs)
+
+    def generateblock(self, *args, invalid_call, **kwargs):
+        assert not invalid_call
+        return self.__getattr__('generateblock')(*args, **kwargs)
+
+    def generatetoaddress(self, *args, invalid_call, **kwargs):
+        assert not invalid_call
+        return self.__getattr__('generatetoaddress')(*args, **kwargs)
+
+    def generatetodescriptor(self, *args, invalid_call, **kwargs):
+        assert not invalid_call
+        return self.__getattr__('generatetodescriptor')(*args, **kwargs)
 
     def get_wallet_rpc(self, wallet_name):
         if self.use_cli:
@@ -388,22 +401,31 @@ class TestNode():
     def wait_until_stopped(self, timeout=BITCOIND_PROC_WAIT_TIMEOUT):
         wait_until_helper(self.is_node_stopped, timeout=timeout, timeout_factor=self.timeout_factor)
 
+    @property
+    def chain_path(self) -> Path:
+        return Path(self.datadir) / get_chain_folder(self.datadir, self.chain)
+
+    @property
+    def debug_log_path(self) -> Path:
+        return self.chain_path / 'debug.log'
+
+    def debug_log_bytes(self) -> int:
+        with open(self.debug_log_path, encoding='utf-8') as dl:
+            dl.seek(0, 2)
+            return dl.tell()
+
     @contextlib.contextmanager
     def assert_debug_log(self, expected_msgs, unexpected_msgs=None, timeout=2):
         if unexpected_msgs is None:
             unexpected_msgs = []
         time_end = time.time() + timeout * self.timeout_factor
-        chain = get_chain_folder(self.datadir, self.chain)
-        debug_log = os.path.join(self.datadir, chain, 'debug.log')
-        with open(debug_log, encoding='utf-8') as dl:
-            dl.seek(0, 2)
-            prev_size = dl.tell()
+        prev_size = self.debug_log_bytes()
 
         yield
 
         while True:
             found = True
-            with open(debug_log, encoding='utf-8') as dl:
+            with open(self.debug_log_path, encoding='utf-8') as dl:
                 dl.seek(prev_size)
                 log = dl.read()
             print_log = " - " + "\n - ".join(log.splitlines())
@@ -419,6 +441,42 @@ class TestNode():
                 break
             time.sleep(0.05)
         self._raise_assertion_error('Expected messages "{}" does not partially match log:\n\n{}\n\n'.format(str(expected_msgs), print_log))
+
+    @contextlib.contextmanager
+    def wait_for_debug_log(self, expected_msgs, timeout=60):
+        """
+        Block until we see a particular debug log message fragment or until we exceed the timeout.
+        Return:
+            the number of log lines we encountered when matching
+        """
+        time_end = time.time() + timeout * self.timeout_factor
+        prev_size = self.debug_log_bytes()
+
+        yield
+
+        while True:
+            found = True
+            with open(self.debug_log_path, "rb") as dl:
+                dl.seek(prev_size)
+                log = dl.read()
+
+            for expected_msg in expected_msgs:
+                if expected_msg not in log:
+                    found = False
+
+            if found:
+                return
+
+            if time.time() >= time_end:
+                print_log = " - " + "\n - ".join(log.decode("utf8", errors="replace").splitlines())
+                break
+
+            # No sleep here because we want to detect the message fragment as fast as
+            # possible.
+
+        self._raise_assertion_error(
+            'Expected messages "{}" does not partially match log:\n\n{}\n\n'.format(
+                str(expected_msgs), print_log))
 
     @contextlib.contextmanager
     def profile_with_perf(self, profile_name: str):
@@ -574,7 +632,7 @@ class TestNode():
 
     def add_outbound_p2p_connection(self, p2p_conn, *, p2p_idx, connection_type="outbound-full-relay", **kwargs):
         """Add an outbound p2p connection from node. Must be an
-        "outbound-full-relay", "block-relay-only" or "addr-fetch" connection.
+        "outbound-full-relay", "block-relay-only", "addr-fetch" or "feeler" connection.
 
         This method adds the p2p connection to the self.p2ps list and returns
         the connection to the caller.
@@ -586,11 +644,16 @@ class TestNode():
 
         p2p_conn.peer_accept_connection(connect_cb=addconnection_callback, connect_id=p2p_idx + 1, net=self.chain, timeout_factor=self.timeout_factor, **kwargs)()
 
-        p2p_conn.wait_for_connect()
-        self.p2ps.append(p2p_conn)
+        if connection_type == "feeler":
+            # feeler connections are closed as soon as the node receives a `version` message
+            p2p_conn.wait_until(lambda: p2p_conn.message_count["version"] == 1, check_connected=False)
+            p2p_conn.wait_until(lambda: not p2p_conn.is_connected, check_connected=False)
+        else:
+            p2p_conn.wait_for_connect()
+            self.p2ps.append(p2p_conn)
 
-        p2p_conn.wait_for_verack()
-        p2p_conn.sync_with_ping()
+            p2p_conn.wait_for_verack()
+            p2p_conn.sync_with_ping()
 
         return p2p_conn
 
