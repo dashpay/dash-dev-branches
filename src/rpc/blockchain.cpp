@@ -39,6 +39,7 @@
 #include <sync.h>
 #include <txmempool.h>
 #include <undo.h>
+#include <util/check.h>
 #include <util/strencodings.h>
 #include <util/string.h>
 #include <util/system.h>
@@ -48,6 +49,7 @@
 #include <versionbits.h>
 #include <warnings.h>
 
+#include <evo/assetlocktx.h>
 #include <evo/cbtx.h>
 #include <evo/evodb.h>
 #include <evo/mnhftx.h>
@@ -458,16 +460,16 @@ static RPCHelpMan getdifficulty()
 
 static std::vector<RPCResult> MempoolEntryDescription() { return {
     RPCResult{RPCResult::Type::NUM, "vsize", "virtual transaction size. This can be different from actual serialized size for high-sigop transactions."},
-    RPCResult{RPCResult::Type::STR_AMOUNT, "fee", "transaction fee in " + CURRENCY_UNIT + " (DEPRECATED)"},
-    RPCResult{RPCResult::Type::STR_AMOUNT, "modifiedfee", "transaction fee with fee deltas used for mining priority (DEPRECATED)"},
+    RPCResult{RPCResult::Type::STR_AMOUNT, "fee", /*optional=*/true, "transaction fee in " + CURRENCY_UNIT + " (DEPRECATED)"},
+    RPCResult{RPCResult::Type::STR_AMOUNT, "modifiedfee", /*optional=*/true, "transaction fee with fee deltas used for mining priority (DEPRECATED)"},
     RPCResult{RPCResult::Type::NUM_TIME, "time", "local time transaction entered pool in " + UNIX_EPOCH_TIME},
     RPCResult{RPCResult::Type::NUM, "height", "block height when transaction entered pool"},
     RPCResult{RPCResult::Type::NUM, "descendantcount", "number of in-mempool descendant transactions (including this one)"},
     RPCResult{RPCResult::Type::NUM, "descendantsize", "size of in-mempool descendants (including this one)"},
-    RPCResult{RPCResult::Type::STR_AMOUNT, "descendantfees", "modified fees (see above) of in-mempool descendants (including this one) (DEPRECATED)"},
+    RPCResult{RPCResult::Type::STR_AMOUNT, "descendantfees",  /*optional=*/true, "modified fees (see above) of in-mempool descendants (including this one) (DEPRECATED)"},
     RPCResult{RPCResult::Type::NUM, "ancestorcount", "number of in-mempool ancestor transactions (including this one)"},
     RPCResult{RPCResult::Type::NUM, "ancestorsize", "size of in-mempool ancestors (including this one)"},
-    RPCResult{RPCResult::Type::STR_AMOUNT, "ancestorfees", "modified fees (see above) of in-mempool ancestors (including this one) (DEPRECATED)"},
+    RPCResult{RPCResult::Type::STR_AMOUNT, "ancestorfees", /*optional=*/true, "modified fees (see above) of in-mempool ancestors (including this one) (DEPRECATED)"},
     RPCResult{RPCResult::Type::OBJ, "fees", "",
     {
         RPCResult{RPCResult::Type::STR_AMOUNT, "base", "transaction fee in " + CURRENCY_UNIT},
@@ -1359,12 +1361,10 @@ static RPCHelpMan pruneblockchain()
     }
 
     PruneBlockFilesManual(active_chainstate, height);
-    const CBlockIndex* block = active_chain.Tip();
-    CHECK_NONFATAL(block);
-    while (block->pprev && (block->pprev->nStatus & BLOCK_HAVE_DATA)) {
-        block = block->pprev;
-    }
-    return uint64_t(block->nHeight);
+    const CBlockIndex* block = CHECK_NONFATAL(active_chain.Tip());
+    const CBlockIndex* last_block = GetFirstStoredBlock(block);
+
+    return static_cast<uint64_t>(last_block->nHeight);
 },
     };
 }
@@ -1635,14 +1635,13 @@ static RPCHelpMan verifychain()
     const int check_depth{request.params[1].isNull() ? DEFAULT_CHECKBLOCKS : request.params[1].get_int()};
 
     const NodeContext& node = EnsureAnyNodeContext(request.context);
-    CHECK_NONFATAL(node.evodb);
 
     ChainstateManager& chainman = EnsureChainman(node);
     LOCK(cs_main);
 
     CChainState& active_chainstate = chainman.ActiveChainstate();
     return CVerifyDB().VerifyDB(
-        active_chainstate, Params(), active_chainstate.CoinsTip(), *node.evodb, check_level, check_depth);
+        active_chainstate, Params(), active_chainstate.CoinsTip(), *CHECK_NONFATAL(node.evodb), check_level, check_depth);
 },
     };
 }
@@ -1782,13 +1781,11 @@ RPCHelpMan getblockchaininfo()
 
     LOCK(cs_main);
     CChainState& active_chainstate = chainman.ActiveChainstate();
-    const CBlockIndex* tip = active_chainstate.m_chain.Tip();
 
-    CHECK_NONFATAL(tip);
+    const CBlockIndex* tip = CHECK_NONFATAL(active_chainstate.m_chain.Tip());
     const int height = tip->nHeight;
 
-    CHECK_NONFATAL(node.mnhf_manager);
-    const auto ehfSignals = node.mnhf_manager->GetSignalsStage(tip);
+    const auto ehfSignals = CHECK_NONFATAL(node.mnhf_manager)->GetSignalsStage(tip);
 
     UniValue obj(UniValue::VOBJ);
     if (args.IsArgSet("-devnet")) {
@@ -1808,13 +1805,8 @@ RPCHelpMan getblockchaininfo()
     obj.pushKV("size_on_disk", chainman.m_blockman.CalculateCurrentUsage());
     obj.pushKV("pruned", fPruneMode);
     if (fPruneMode) {
-        const CBlockIndex* block = tip;
-        CHECK_NONFATAL(block);
-        while (block->pprev && (block->pprev->nStatus & BLOCK_HAVE_DATA)) {
-            block = block->pprev;
-        }
-
-        obj.pushKV("pruneheight",        block->nHeight);
+        const CBlockIndex* block = CHECK_NONFATAL(tip);
+        obj.pushKV("pruneheight", GetFirstStoredBlock(block)->nHeight);
 
         // if 0, execution bypasses the whole if block.
         bool automatic_pruning{args.GetArg("-prune", 0) != 1};
@@ -1841,6 +1833,7 @@ RPCHelpMan getblockchaininfo()
     SoftForkDescPushBack(tip, softforks, consensusParams, Consensus::DEPLOYMENT_V19);
     SoftForkDescPushBack(tip, softforks, consensusParams, Consensus::DEPLOYMENT_V20);
     SoftForkDescPushBack(tip, softforks, consensusParams, Consensus::DEPLOYMENT_MN_RR);
+    SoftForkDescPushBack(tip, ehfSignals, softforks, consensusParams, Consensus::DEPLOYMENT_WITHDRAWALS);
     SoftForkDescPushBack(tip, ehfSignals, softforks, consensusParams, Consensus::DEPLOYMENT_TESTDUMMY);
 
     obj.pushKV("softforks", softforks);
@@ -2458,6 +2451,11 @@ static RPCHelpMan getblockstats()
             }
 
             CAmount txfee = tx_total_in - tx_total_out;
+
+            if (tx->IsPlatformTransfer()) {
+                txfee = CHECK_NONFATAL(GetTxPayload<CAssetUnlockPayload>(*tx))->getFee();
+            }
+
             CHECK_NONFATAL(MoneyRange(txfee));
             if (do_medianfee) {
                 fee_array.push_back(txfee);
@@ -2863,10 +2861,8 @@ static RPCHelpMan scantxoutset()
             LOCK(cs_main);
             CChainState& active_chainstate = chainman.ActiveChainstate();
             active_chainstate.ForceFlushStateToDisk();
-            pcursor = active_chainstate.CoinsDB().Cursor();
-            CHECK_NONFATAL(pcursor);
-            tip = active_chainstate.m_chain.Tip();
-            CHECK_NONFATAL(tip);
+            pcursor = CHECK_NONFATAL(active_chainstate.CoinsDB().Cursor());
+            tip = CHECK_NONFATAL(active_chainstate.m_chain.Tip());
         }
         bool res = FindScriptPubKey(g_scan_progress, g_should_abort_scan, count, pcursor.get(), needles, coins, node.rpc_interruption_point);
         result.pushKV("success", res);
@@ -3061,8 +3057,7 @@ UniValue CreateUTXOSnapshot(NodeContext& node, CChainState& chainstate, CAutoFil
         }
 
         pcursor = chainstate.CoinsDB().Cursor();
-        tip = chainstate.m_blockman.LookupBlockIndex(stats.hashBlock);
-        CHECK_NONFATAL(tip);
+        tip = CHECK_NONFATAL(chainstate.m_blockman.LookupBlockIndex(stats.hashBlock));
     }
 
     SnapshotMetadata metadata{tip->GetBlockHash(), stats.coins_count, tip->nChainTx};
