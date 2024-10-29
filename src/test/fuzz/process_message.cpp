@@ -64,7 +64,9 @@ void initialize_process_message()
 {
     Assert(GetNumMsgTypes() == getAllNetMessageTypes().size()); // If this fails, add or remove the message type below
 
-    static const auto testing_setup = MakeNoLogFileContext<const TestingSetup>();
+    static const auto testing_setup = MakeNoLogFileContext<const TestingSetup>(
+            /*chain_name=*/CBaseChainParams::REGTEST,
+            /*extra_args=*/{"-txreconciliation"});
     g_setup = testing_setup.get();
     for (int i = 0; i < 2 * COINBASE_MATURITY; i++) {
         MineBlock(g_setup->m_node, CScript() << OP_TRUE);
@@ -103,7 +105,6 @@ void fuzz_target(FuzzBufferType buffer, const std::string& LIMIT_TO_MESSAGE_TYPE
     }
     g_setup->m_node.peerman->SendMessages(&p2p_node);
     SyncWithValidationInterfaceQueue();
-    LOCK2(::cs_main, g_cs_orphans); // See init.cpp for rationale for implicit locking order requirement
     g_setup->m_node.connman->StopNodes();
 }
 
@@ -175,6 +176,7 @@ FUZZ_TARGET_MSG(sendcmpct);
 FUZZ_TARGET_MSG(senddsq);
 FUZZ_TARGET_MSG(sendheaders);
 FUZZ_TARGET_MSG(sendheaders2);
+FUZZ_TARGET_MSG(sendtxrcncl);
 FUZZ_TARGET_MSG(spork);
 FUZZ_TARGET_MSG(ssc);
 FUZZ_TARGET_MSG(tx);

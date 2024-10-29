@@ -6,11 +6,11 @@
 
 #include <rpc/blockchain.h>
 
-#include <amount.h>
 #include <blockfilter.h>
 #include <chain.h>
 #include <chainparams.h>
 #include <coins.h>
+#include <consensus/amount.h>
 #include <core_io.h>
 #include <consensus/params.h>
 #include <consensus/validation.h>
@@ -2453,7 +2453,9 @@ static RPCHelpMan getblockstats()
             CAmount txfee = tx_total_in - tx_total_out;
 
             if (tx->IsPlatformTransfer()) {
-                txfee = CHECK_NONFATAL(GetTxPayload<CAssetUnlockPayload>(*tx))->getFee();
+                auto payload = GetTxPayload<CAssetUnlockPayload>(*tx);
+                CHECK_NONFATAL(payload);
+                txfee = payload->getFee();
             }
 
             CHECK_NONFATAL(MoneyRange(txfee));
@@ -2903,7 +2905,7 @@ static RPCHelpMan getblockfilter()
         "\nRetrieve a BIP 157 content filter for a particular block.\n",
         {
             {"blockhash", RPCArg::Type::STR, RPCArg::Optional::NO, "The hash of the block"},
-            {"filtertype", RPCArg::Type::STR, RPCArg::Default{"basic"}, "The type name of the filter"},
+            {"filtertype", RPCArg::Type::STR, RPCArg::Default{BlockFilterTypeName(BlockFilterType::BASIC_FILTER)}, "The type name of the filter"},
         },
         RPCResult{
             RPCResult::Type::OBJ, "", "",
@@ -2918,7 +2920,7 @@ static RPCHelpMan getblockfilter()
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
     uint256 block_hash(ParseHashV(request.params[0], "blockhash"));
-    std::string filtertype_name = "basic";
+    std::string filtertype_name = BlockFilterTypeName(BlockFilterType::BASIC_FILTER);
     if (!request.params[1].isNull()) {
         filtertype_name = request.params[1].get_str();
     }

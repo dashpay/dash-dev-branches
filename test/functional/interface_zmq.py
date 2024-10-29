@@ -16,6 +16,7 @@ from test_framework.messages import (
 from test_framework.util import (
     assert_equal,
     assert_raises_rpc_error,
+    p2p_port,
 )
 from test_framework.netutil import test_ipv6_local
 from time import sleep
@@ -102,6 +103,7 @@ class ZMQTest (BitcoinTestFramework):
         # This test isn't testing txn relay/timing, so set whitelist on the
         # peers for instant txn relay. This speeds up the test run time 2-3x.
         self.extra_args = [["-whitelist=noban@127.0.0.1"]] * self.num_nodes
+        self.zmq_port_base = p2p_port(self.num_nodes + 1)
 
     def skip_test_if_missing_module(self):
         self.skip_if_no_py3_zmq()
@@ -133,7 +135,7 @@ class ZMQTest (BitcoinTestFramework):
                 socket.setsockopt(zmq.IPV6, 1)
             subscribers.append(ZMQSubscriber(socket, topic.encode()))
 
-        self.restart_node(0, ["-zmqpub%s=%s" % (topic, address) for topic, address in services] +
+        self.restart_node(0, [f"-zmqpub{topic}={address}" for topic, address in services] +
                              self.extra_args[0])
 
         for i, sub in enumerate(subscribers):
@@ -177,7 +179,7 @@ class ZMQTest (BitcoinTestFramework):
         self.restart_node(0, ["-zmqpubrawtx=foo", "-zmqpubhashtx=bar"])
         self.zmq_context = zmq.Context()
 
-        address = 'tcp://127.0.0.1:28332'
+        address = f"tcp://127.0.0.1:{self.zmq_port_base}"
         subs = self.setup_zmq_test([(topic, address) for topic in ["hashblock", "hashtx", "rawblock", "rawtx"]])
 
         hashblock = subs[0]
@@ -186,7 +188,7 @@ class ZMQTest (BitcoinTestFramework):
         rawtx = subs[3]
 
         num_blocks = 5
-        self.log.info("Generate %(n)d blocks (and %(n)d coinbase txes)" % {"n": num_blocks})
+        self.log.info(f"Generate {num_blocks} blocks (and {num_blocks} coinbase txes)")
         genhashes = self.generatetoaddress(self.nodes[0], num_blocks, ADDRESS_BCRT1_UNSPENDABLE)
 
         for x in range(num_blocks):
@@ -248,7 +250,7 @@ class ZMQTest (BitcoinTestFramework):
             self.log.info("Skipping reorg test because wallet is disabled")
             return
 
-        address = 'tcp://127.0.0.1:28333'
+        address = f"tcp://127.0.0.1:{self.zmq_port_base}"
 
         # Should only notify the tip if a reorg occurs
         hashblock, hashtx = self.setup_zmq_test(
@@ -302,7 +304,7 @@ class ZMQTest (BitcoinTestFramework):
         <32-byte hash>A<8-byte LE uint> : Transactionhash added mempool
         """
         self.log.info("Testing 'sequence' publisher")
-        [seq] = self.setup_zmq_test([("sequence", "tcp://127.0.0.1:28333")])
+        [seq] = self.setup_zmq_test([("sequence", f"tcp://127.0.0.1:{self.zmq_port_base}")])
         self.disconnect_nodes(0, 1)
 
         # Mempool sequence number starts at 1
@@ -435,7 +437,7 @@ class ZMQTest (BitcoinTestFramework):
             return
 
         self.log.info("Testing 'mempool sync' usage of sequence notifier")
-        [seq] = self.setup_zmq_test([("sequence", "tcp://127.0.0.1:28333")])
+        [seq] = self.setup_zmq_test([("sequence", f"tcp://127.0.0.1:{self.zmq_port_base}")])
 
         # In-memory counter, should always start at 1
         next_mempool_seq = self.nodes[0].getrawmempool(mempool_sequence=True)["mempool_sequence"]
@@ -484,7 +486,7 @@ class ZMQTest (BitcoinTestFramework):
             if mempool_sequence is not None:
                 zmq_mem_seq = mempool_sequence
                 if zmq_mem_seq > get_raw_seq:
-                    raise Exception("We somehow jumped mempool sequence numbers! zmq_mem_seq: {} > get_raw_seq: {}".format(zmq_mem_seq, get_raw_seq))
+                    raise Exception(f"We somehow jumped mempool sequence numbers! zmq_mem_seq: {zmq_mem_seq} > get_raw_seq: {get_raw_seq}")
 
         # 4) Moving forward, we apply the delta to our local view
         #    remaining txs(5) + 1 block connect + 1 final tx
@@ -537,8 +539,8 @@ class ZMQTest (BitcoinTestFramework):
         # chain lengths on node0 and node1; for this test we only need node0, so
         # we can disable syncing blocks on the setup)
         subscribers = self.setup_zmq_test([
-            ("hashblock", "tcp://127.0.0.1:28334"),
-            ("hashblock", "tcp://127.0.0.1:28335"),
+            ("hashblock", f"tcp://127.0.0.1:{self.zmq_port_base + 1}"),
+            ("hashblock", f"tcp://127.0.0.1:{self.zmq_port_base + 2}"),
         ], sync_blocks=False)
 
         # Generate 1 block in nodes[0] and receive all notifications
@@ -555,7 +557,7 @@ class ZMQTest (BitcoinTestFramework):
         self.log.info("Testing IPv6")
         # Set up subscriber using IPv6 loopback address
         subscribers = self.setup_zmq_test([
-            ("hashblock", "tcp://[::1]:28332")
+            ("hashblock", f"tcp://[::1]:{self.zmq_port_base}")
         ], ipv6=True)
 
         # Generate 1 block in nodes[0]

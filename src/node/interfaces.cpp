@@ -767,7 +767,7 @@ public:
     bool checkFinalTx(const CTransaction& tx) override
     {
         LOCK(cs_main);
-        return CheckFinalTx(m_node.chainman->ActiveChain().Tip(), tx);
+        return CheckFinalTxAtTip(m_node.chainman->ActiveChain().Tip(), tx);
     }
     bool isInstantSendLockedTx(const uint256& hash) override
     {
@@ -1008,6 +1008,11 @@ public:
             notifications.transactionAddedToMempool(entry.GetSharedTx(), /* nAcceptTime = */ 0, /* mempool_sequence = */ 0);
         }
     }
+    bool hasAssumedValidChain() override
+    {
+        return Assert(m_node.chainman)->IsSnapshotActive();
+    }
+
     NodeContext& m_node;
 };
 } // namespace

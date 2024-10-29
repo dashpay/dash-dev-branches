@@ -5,7 +5,6 @@
 #ifndef BITCOIN_QT_OPTIONSMODEL_H
 #define BITCOIN_QT_OPTIONSMODEL_H
 
-#include <amount.h>
 #include <qt/guiconstants.h>
 
 #include <cstdint>
@@ -67,6 +66,7 @@ public:
         FontWeightBold,       // int
         Language,             // QString
         CoinControlFeatures,  // bool
+        SubFeeFromAmount,     // bool
         KeepChangeAddress,    // bool
         ThreadsScriptVerif,   // int
         Prune,                // bool
@@ -86,6 +86,7 @@ public:
         CoinJoinDenomsHardCap,// int
         CoinJoinMultiSession, // bool
         Listen,               // bool
+        Server,               // bool
         OptionIDRowCount,
     };
 
@@ -105,6 +106,7 @@ public:
     int getDisplayUnit() const { return nDisplayUnit; }
     QString getThirdPartyTxUrls() const { return strThirdPartyTxUrls; }
     bool getCoinControlFeatures() const { return fCoinControlFeatures; }
+    bool getSubFeeFromAmount() const { return m_sub_fee_from_amount; }
     bool getKeepChangeAddress() const { return fKeepChangeAddress; }
     bool getShowAdvancedCJUI() { return fShowAdvancedCJUI; }
     const QString& getOverriddenByCommandLine() { return strOverriddenByCommandLine; }
@@ -132,6 +134,7 @@ private:
     int nDisplayUnit;
     QString strThirdPartyTxUrls;
     bool fCoinControlFeatures;
+    bool m_sub_fee_from_amount;
     bool fKeepChangeAddress;
     bool fShowAdvancedCJUI;
     /* settings that were overridden by command-line */

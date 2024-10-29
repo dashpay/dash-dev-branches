@@ -5,12 +5,12 @@
 #ifndef BITCOIN_TEST_FUZZ_UTIL_H
 #define BITCOIN_TEST_FUZZ_UTIL_H
 
-#include <amount.h>
 #include <arith_uint256.h>
 #include <attributes.h>
 #include <chainparamsbase.h>
 #include <coins.h>
 #include <compat.h>
+#include <consensus/amount.h>
 #include <consensus/consensus.h>
 #include <key.h>
 #include <merkleblock.h>
@@ -24,6 +24,7 @@
 #include <streams.h>
 #include <test/fuzz/FuzzedDataProvider.h>
 #include <test/fuzz/fuzz.h>
+#include <test/fuzz/util/net.h>
 #include <test/util/net.h>
 #include <test/util/setup_common.h>
 #include <txmempool.h>
@@ -295,8 +296,6 @@ template<typename B = uint8_t>
     random_bytes.resize(length);
     return random_bytes;
 }
-
-CNetAddr ConsumeNetAddr(FuzzedDataProvider& fuzzed_data_provider) noexcept;
 
 inline CSubNet ConsumeSubNet(FuzzedDataProvider& fuzzed_data_provider) noexcept
 {

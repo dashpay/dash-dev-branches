@@ -17,6 +17,7 @@ export COMMIT_RANGE
 # check with -r to not have to fetch all the remotes.
 test/lint/git-subtree-check.sh src/crypto/ctaes
 test/lint/git-subtree-check.sh src/secp256k1
+test/lint/git-subtree-check.sh src/minisketch
 test/lint/git-subtree-check.sh src/univalue
 test/lint/git-subtree-check.sh src/leveldb
 test/lint/check-doc.py
@@ -24,7 +25,7 @@ test/lint/lint-all.sh
 
 if [ "$CIRRUS_REPO_FULL_NAME" = "dashpay/dash" ] && [ -n "$CIRRUS_CRON" ]; then
     git log --merges --before="2 days ago" -1 --format='%H' > ./contrib/verify-commits/trusted-sha512-root-commit
-    ${CI_RETRY_EXE}  gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys $(<contrib/verify-commits/trusted-keys) &&
+    ${CI_RETRY_EXE}  gpg --keyserver hkps://keys.openpgp.org --recv-keys $(<contrib/verify-commits/trusted-keys) &&
     ./contrib/verify-commits/verify-commits.py --clean-merge=2;
 fi
 

@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <net_processing.h>
+#include <netaddress.h>
 #include <netmessagemaker.h>
 #include <test/fuzz/util.h>
 #include <test/util/script.h>
@@ -389,28 +390,6 @@ bool ContainsSpentInput(const CTransaction& tx, const CCoinsViewCache& inputs) n
     return false;
 }
 
-CNetAddr ConsumeNetAddr(FuzzedDataProvider& fuzzed_data_provider) noexcept
-{
-    const Network network = fuzzed_data_provider.PickValueInArray({Network::NET_IPV4, Network::NET_IPV6, Network::NET_INTERNAL, Network::NET_ONION});
-    CNetAddr net_addr;
-    if (network == Network::NET_IPV4) {
-        in_addr v4_addr = {};
-        v4_addr.s_addr = fuzzed_data_provider.ConsumeIntegral<uint32_t>();
-        net_addr = CNetAddr{v4_addr};
-    } else if (network == Network::NET_IPV6) {
-        if (fuzzed_data_provider.remaining_bytes() >= 16) {
-            in6_addr v6_addr = {};
-            memcpy(v6_addr.s6_addr, fuzzed_data_provider.ConsumeBytes<uint8_t>(16).data(), 16);
-            net_addr = CNetAddr{v6_addr, fuzzed_data_provider.ConsumeIntegral<uint32_t>()};
-        }
-    } else if (network == Network::NET_INTERNAL) {
-        net_addr.SetInternal(fuzzed_data_provider.ConsumeBytesAsString(32));
-    } else if (network == Network::NET_ONION) {
-        net_addr.SetSpecial(fuzzed_data_provider.ConsumeBytesAsString(32));
-    }
-    return net_addr;
-}
-
 FILE* FuzzedFileProvider::open()
 {
     SetFuzzedErrNo(m_fuzzed_data_provider);
@@ -438,7 +417,7 @@ FILE* FuzzedFileProvider::open()
         [&] {
             mode = "a+";
         });
-#if defined _GNU_SOURCE && !defined __ANDROID__
+#if defined _GNU_SOURCE && (defined(__linux__) || defined(__FreeBSD__))
     const cookie_io_functions_t io_hooks = {
         FuzzedFileProvider::read,
         FuzzedFileProvider::write,

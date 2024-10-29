@@ -12,6 +12,7 @@
 #include <clientversion.h>
 #include <compat/cpuid.h>
 #include <crypto/sha512.h>
+#include <span.h>
 #include <support/cleanse.h>
 #include <util/time.h> // for GetTime()
 #ifdef WIN32
@@ -71,10 +72,10 @@ void RandAddSeedPerfmon(CSHA512& hasher)
 
     // This can take up to 2 seconds, so only do it every 10 minutes.
     // Initialize last_perfmon to 0 seconds, we don't skip the first call.
-    static std::atomic<std::chrono::seconds> last_perfmon{0s};
+    static std::atomic<SteadyClock::time_point> last_perfmon{SteadyClock::time_point{0s}};
     auto last_time = last_perfmon.load();
-    auto current_time = GetTime<std::chrono::seconds>();
-    if (current_time < last_time + std::chrono::minutes{10}) return;
+    auto current_time = SteadyClock::now();
+    if (current_time < last_time + 10min) return;
     last_perfmon = current_time;
 
     std::vector<unsigned char> vData(250000, 0);
@@ -358,10 +359,19 @@ void RandAddStaticEnv(CSHA512& hasher)
     hasher << &hasher << &RandAddStaticEnv << &malloc << &errno << &environ;
 
     // Hostname
+#ifdef WIN32
+    constexpr DWORD max_size = MAX_COMPUTERNAME_LENGTH + 1;
+    char hname[max_size];
+    DWORD size = max_size;
+    if (GetComputerNameA(hname, &size) != 0) {
+        hasher.Write(UCharCast(hname), size);
+    }
+#else
     char hname[256];
     if (gethostname(hname, 256) == 0) {
         hasher.Write((const unsigned char*)hname, strnlen(hname, 256));
     }
+#endif
 
 #if HAVE_DECL_GETIFADDRS && HAVE_DECL_FREEIFADDRS
     // Network interfaces

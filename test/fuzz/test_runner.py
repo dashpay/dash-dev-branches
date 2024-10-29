@@ -10,6 +10,7 @@ import argparse
 import configparser
 import logging
 import os
+import random
 import subprocess
 import sys
 
@@ -19,8 +20,7 @@ def get_fuzz_env(*, target, source_dir):
         'FUZZ': target,
         'UBSAN_OPTIONS':
         f'suppressions={source_dir}/test/sanitizer_suppressions/ubsan:print_stacktrace=1:halt_on_error=1:report_error_type=1',
-        'ASAN_OPTIONS':  # symbolizer disabled due to https://github.com/google/sanitizers/issues/1364#issuecomment-761072085
-        'symbolize=0:detect_stack_use_after_return=1:check_initialization_order=1:strict_init_order=1',
+        "ASAN_OPTIONS": "detect_stack_use_after_return=1:check_initialization_order=1:strict_init_order=1",
     }
 
 
@@ -93,7 +93,10 @@ def main():
         sys.exit(1)
 
     # Build list of tests
-    test_list_all = parse_test_list(fuzz_bin=os.path.join(config["environment"]["BUILDDIR"], 'src', 'test', 'fuzz', 'fuzz'))
+    test_list_all = parse_test_list(
+        fuzz_bin=os.path.join(config["environment"]["BUILDDIR"], 'src', 'test', 'fuzz', 'fuzz'),
+        source_dir=config['environment']['SRCDIR'],
+    )
 
     if not test_list_all:
         logging.error("No fuzz targets found")
@@ -207,9 +210,13 @@ def generate_corpus(*, fuzz_pool, src_dir, build_dir, corpus_dir, targets):
     for target in targets:
         target_corpus_dir = os.path.join(corpus_dir, target)
         os.makedirs(target_corpus_dir, exist_ok=True)
+        use_value_profile = int(random.random() < .3)
         command = [
             os.path.join(build_dir, 'src', 'test', 'fuzz', 'fuzz'),
-            "-runs=100000",
+            "-rss_limit_mb=8000",
+            "-max_total_time=6000",
+            "-reload=0",
+            f"-use_value_profile={use_value_profile}",
             target_corpus_dir,
         ]
         futures.append(fuzz_pool.submit(job, command, target))
@@ -224,7 +231,12 @@ def merge_inputs(*, fuzz_pool, corpus, test_list, src_dir, build_dir, merge_dir)
     for t in test_list:
         args = [
             os.path.join(build_dir, 'src', 'test', 'fuzz', 'fuzz'),
-            '-merge=1',
+            '-rss_limit_mb=8000',
+            '-set_cover_merge=1',
+            # set_cover_merge is used instead of -merge=1 to reduce the overall
+            # size of the qa-assets git repository a bit, but more importantly,
+            # to cut the runtime to iterate over all fuzz inputs [0].
+            # [0] https://github.com/bitcoin-core/qa-assets/issues/130#issuecomment-1761760866
             '-shuffle=0',
             '-prefer_small=1',
             '-use_value_profile=1',  # Also done by oss-fuzz https://github.com/google/oss-fuzz/issues/1406#issuecomment-387790487
@@ -298,11 +310,12 @@ def run_once(*, fuzz_pool, corpus, test_list, src_dir, build_dir, use_valgrind):
             sys.exit(1)
 
 
-def parse_test_list(*, fuzz_bin):
+def parse_test_list(*, fuzz_bin, source_dir):
     test_list_all = subprocess.run(
         fuzz_bin,
         env={
-            'PRINT_ALL_FUZZ_TARGETS_AND_ABORT': ''
+            'PRINT_ALL_FUZZ_TARGETS_AND_ABORT': '',
+            **get_fuzz_env(target="", source_dir=source_dir)
         },
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
