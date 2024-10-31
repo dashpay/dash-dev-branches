@@ -455,6 +455,11 @@ std::optional<std::pair<CBLSSignature, uint32_t>> GetNonNullCoinbaseChainlock(co
         return std::nullopt;
     }
 
+    // There's no CbTx before DIP0003 activation
+    if (!DeploymentActiveAt(*pindex, Params().GetConsensus(), Consensus::DEPLOYMENT_DIP0003)) {
+        return std::nullopt;
+    }
+
     CBlock block;
     if (!ReadBlockFromDisk(block, pindex, Params().GetConsensus())) {
         return std::nullopt;
