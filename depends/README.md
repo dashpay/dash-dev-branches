@@ -47,7 +47,7 @@ The paths are automatically configured and no other options are needed unless ta
 
 #### For macOS cross compilation
 
-    sudo apt-get install curl bsdmainutils cmake libz-dev python3-setuptools libtinfo5 xorriso
+    sudo apt-get install curl bsdmainutils cmake libz-dev python3-setuptools xorriso
 
 Note: You must obtain the macOS SDK before proceeding with a cross-compile.
 Under the depends directory, create a subdirectory named `SDKs`.
@@ -62,7 +62,7 @@ For more information, see [SDK Extraction](../contrib/macdeploy/README.md#sdk-ex
 
 Common linux dependencies:
 
-    sudo apt-get install make automake curl g++-multilib libtool binutils-gold bsdmainutils pkg-config python3 patch bison
+    sudo apt-get install make automake curl g++-multilib libtool binutils bsdmainutils pkg-config python3 patch bison
 
 For linux ARM cross compilation:
 
@@ -103,6 +103,8 @@ The following can be set when running make: `make FOO=bar`
 - `BASE_CACHE`: Built packages will be placed here
 - `SDK_PATH`: Path where SDKs can be found (used by macOS)
 - `FALLBACK_DOWNLOAD_PATH`: If a source file can't be fetched, try here before giving up
+- `C_STANDARD`: Set the C standard version used. Defaults to `c11`.
+- `CXX_STANDARD`: Set the C++ standard version used. Defaults to `c++17`.
 - `NO_QT`: Don't download/build/cache Qt and its dependencies
 - `NO_QR`: Don't download/build/cache packages needed for enabling qrencode
 - `NO_ZMQ`: Don't download/build/cache packages needed for enabling ZeroMQ
@@ -124,7 +126,7 @@ The following can be set when running make: `make FOO=bar`
 - `LOG`: Use file-based logging for individual packages. During a package build its log file
   resides in the `depends` directory, and the log file is printed out automatically in case
   of build error. After successful build log files are moved along with package archives
-- `LTO`: Use LTO when building packages.
+- `LTO`: Enable options needed for LTO. Does not add `-flto` related options to *FLAGS.
 
 If some packages are not built, for example `make NO_WALLET=1`, the appropriate
 options will be passed to Dash Core's configure. In this case, `--disable-wallet`.

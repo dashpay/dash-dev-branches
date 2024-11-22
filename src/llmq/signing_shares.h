@@ -5,25 +5,29 @@
 #ifndef BITCOIN_LLMQ_SIGNING_SHARES_H
 #define BITCOIN_LLMQ_SIGNING_SHARES_H
 
-#include <bls/bls.h>
 #include <llmq/signing.h>
-#include <net.h>
+
+#include <bls/bls.h>
 #include <random.h>
 #include <saltedhasher.h>
 #include <serialize.h>
-#include <threadinterrupt.h>
 #include <sync.h>
+#include <threadinterrupt.h>
 #include <uint256.h>
 
 #include <atomic>
+#include <limits>
+#include <memory>
 #include <optional>
+#include <string>
 #include <thread>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
+class CNode;
+class CConnman;
 class CDeterministicMN;
-class CEvoDB;
-class CScheduler;
 class CSporkManager;
 class PeerManager;
 
@@ -395,7 +399,8 @@ private:
         PendingSignatureData(CQuorumCPtr quorum, const uint256& id, const uint256& msgHash) : quorum(std::move(quorum)), id(id), msgHash(msgHash){}
     };
 
-    std::vector<PendingSignatureData> pendingSigns GUARDED_BY(cs);
+    Mutex cs_pendingSigns;
+    std::vector<PendingSignatureData> pendingSigns GUARDED_BY(cs_pendingSigns);
 
     FastRandomContext rnd GUARDED_BY(cs);
 
@@ -448,9 +453,9 @@ private:
     static bool PreVerifyBatchedSigShares(const CActiveMasternodeManager& mn_activeman, const CQuorumManager& quorum_manager,
                                           const CSigSharesNodeState::SessionInfo& session, const CBatchedSigShares& batchedSigShares, bool& retBan);
 
-    void CollectPendingSigSharesToVerify(size_t maxUniqueSessions,
-            std::unordered_map<NodeId, std::vector<CSigShare>>& retSigShares,
-            std::unordered_map<std::pair<Consensus::LLMQType, uint256>, CQuorumCPtr, StaticSaltedHasher>& retQuorums);
+    bool CollectPendingSigSharesToVerify(
+        size_t maxUniqueSessions, std::unordered_map<NodeId, std::vector<CSigShare>>& retSigShares,
+        std::unordered_map<std::pair<Consensus::LLMQType, uint256>, CQuorumCPtr, StaticSaltedHasher>& retQuorums);
     bool ProcessPendingSigShares(const CConnman& connman);
 
     void ProcessPendingSigShares(const std::vector<CSigShare>& sigSharesToProcess,

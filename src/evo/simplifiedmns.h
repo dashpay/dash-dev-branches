@@ -6,17 +6,21 @@
 #define BITCOIN_EVO_SIMPLIFIEDMNS_H
 
 #include <bls/bls.h>
-#include <evo/deterministicmns.h>
 #include <evo/dmn_types.h>
 #include <merkleblock.h>
 #include <netaddress.h>
 #include <pubkey.h>
+#include <sync.h>
+#include <threadsafety.h>
 
 class UniValue;
 class CBlockIndex;
-class CDeterministicMNList;
 class CDeterministicMN;
+class CDeterministicMNList;
+class CDeterministicMNManager;
 class ChainstateManager;
+
+extern RecursiveMutex cs_main;
 
 namespace llmq {
 class CFinalCommitment;
@@ -166,7 +170,7 @@ public:
 
     bool BuildQuorumsDiff(const CBlockIndex* baseBlockIndex, const CBlockIndex* blockIndex,
                           const llmq::CQuorumBlockProcessor& quorum_block_processor);
-    void BuildQuorumChainlockInfo(const llmq::CQuorumManager& qman, const CBlockIndex* blockIndex);
+    bool BuildQuorumChainlockInfo(const llmq::CQuorumManager& qman, const CBlockIndex* blockIndex);
 
     [[nodiscard]] UniValue ToJson(bool extended = false) const;
 };

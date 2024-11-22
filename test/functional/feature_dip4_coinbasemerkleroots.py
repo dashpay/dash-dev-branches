@@ -45,6 +45,17 @@ class LLMQCoinbaseCommitmentsTest(DashTestFramework):
     def set_test_params(self):
         self.extra_args = [[ f'-testactivationheight=dip0008@{DIP0008_HEIGHT}', "-vbparams=testdummy:999999999999:999999999999" ]] * 4
         self.set_dash_test_params(4, 3, extra_args = self.extra_args)
+
+    def remove_masternode(self, idx):
+        mn = self.mninfo[idx]
+        rawtx = self.nodes[0].createrawtransaction([{"txid": mn.collateral_txid, "vout": mn.collateral_vout}], {self.nodes[0].getnewaddress(): 999.9999})
+        rawtx = self.nodes[0].signrawtransactionwithwallet(rawtx)
+        self.nodes[0].sendrawtransaction(rawtx["hex"])
+        self.generate(self.nodes[0], 1)
+        self.mninfo.remove(mn)
+
+        self.log.info("Removed masternode %d", idx)
+
     def run_test(self):
         # No IS or Chainlocks in this test
         self.bump_mocktime(1)
@@ -204,7 +215,7 @@ class LLMQCoinbaseCommitmentsTest(DashTestFramework):
         cbtx = CCbTx()
         cbtx.deserialize(BytesIO(d.cbTx.vExtraPayload))
 
-        if cbtx.version >= 2:
+        if cbtx.nVersion >= 2:
             hashes = []
             for qc in newQuorumList.values():
                 hashes.append(hash256(qc.serialize()))

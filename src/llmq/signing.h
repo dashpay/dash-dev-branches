@@ -6,14 +6,13 @@
 #define BITCOIN_LLMQ_SIGNING_H
 
 #include <bls/bls.h>
-#include <consensus/params.h>
 #include <gsl/pointers.h>
+#include <llmq/params.h>
 #include <protocol.h>
 #include <random.h>
 #include <saltedhasher.h>
 #include <sync.h>
 #include <threadinterrupt.h>
-#include <univalue.h>
 #include <unordered_lru_cache.h>
 
 #include <unordered_map>
@@ -27,6 +26,7 @@ class CDBWrapper;
 class CInv;
 class CNode;
 class PeerManager;
+class UniValue;
 
 using NodeId = int64_t;
 
@@ -143,8 +143,6 @@ public:
     void CleanupOldVotes(int64_t maxAge);
 
 private:
-    void MigrateRecoveredSigs();
-
     bool ReadRecoveredSig(Consensus::LLMQType llmqType, const uint256& id, CRecoveredSig& ret) const;
     void RemoveRecoveredSig(CDBBatch& batch, Consensus::LLMQType llmqType, const uint256& id, bool deleteHashKey, bool deleteTimeKey);
 };

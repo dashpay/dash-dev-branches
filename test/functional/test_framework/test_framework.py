@@ -48,6 +48,7 @@ from .util import (
     check_json_precision,
     copy_datadir,
     force_finish_mnsync,
+    get_chain_conf_names,
     get_datadir_path,
     initialize_datadir,
     p2p_port,
@@ -610,19 +611,7 @@ class BitcoinTestFramework(metaclass=BitcoinTestMetaClass):
             if entry not in ['chainstate', 'blocks', 'indexes', 'evodb']:
                 os.remove(os.path.join(new_data_dir, self.chain, entry))
 
-        # Translate chain name to config name
-        if self.chain == 'testnet3':
-            chain_name_conf_arg = 'testnet'
-            chain_name_conf_section = 'test'
-            chain_name_conf_arg_value = '1'
-        elif self.chain == 'devnet':
-            chain_name_conf_arg = 'devnet'
-            chain_name_conf_section = 'devnet'
-            chain_name_conf_arg_value = 'devnet1'
-        else:
-            chain_name_conf_arg = self.chain
-            chain_name_conf_section = self.chain
-            chain_name_conf_arg_value = '1'
+        (chain_name_conf_arg, chain_name_conf_arg_value, chain_name_conf_section) = get_chain_conf_names(self.chain)
 
         with open(os.path.join(new_data_dir, "dash.conf"), 'w', encoding='utf8') as f:
             f.write("{}={}\n".format(chain_name_conf_arg, chain_name_conf_arg_value))
@@ -1442,16 +1431,6 @@ class DashTestFramework(BitcoinTestFramework):
 
         self.log.info("Prepared MN %d: collateral_txid=%s, collateral_vout=%d, protxHash=%s" % (idx, txid, collateral_vout, proTxHash))
 
-    def remove_masternode(self, idx):
-        mn = self.mninfo[idx]
-        rawtx = self.nodes[0].createrawtransaction([{"txid": mn.collateral_txid, "vout": mn.collateral_vout}], {self.nodes[0].getnewaddress(): 999.9999})
-        rawtx = self.nodes[0].signrawtransactionwithwallet(rawtx)
-        self.nodes[0].sendrawtransaction(rawtx["hex"])
-        self.generate(self.nodes[0], 1)
-        self.mninfo.remove(mn)
-
-        self.log.info("Removed masternode %d", idx)
-
     def prepare_datadirs(self):
         # stop faucet node so that we can copy the datadir
         self.stop_node(0)
@@ -1472,10 +1451,6 @@ class DashTestFramework(BitcoinTestFramework):
         self.add_nodes(self.mn_count)
         executor = ThreadPoolExecutor(max_workers=20)
 
-        def do_connect(idx):
-            # Connect to the control node only, masternodes should take care of intra-quorum connections themselves
-            self.connect_nodes(self.mninfo[idx].nodeIdx, 0)
-
         jobs = []
 
         # start up nodes in parallel
@@ -1490,9 +1465,9 @@ class DashTestFramework(BitcoinTestFramework):
 
         executor.shutdown()
 
-        # connect nodes
+        # Connect to the control node only, masternodes should take care of intra-quorum connections themselves
         for idx in range(0, self.mn_count):
-            do_connect(idx)
+            self.connect_nodes(self.mninfo[idx].nodeIdx, 0)
 
     def start_masternode(self, mninfo, extra_args=None):
         args = ['-masternodeblsprivkey=%s' % mninfo.keyOperator] + self.extra_args[mninfo.nodeIdx]
@@ -1536,16 +1511,16 @@ class DashTestFramework(BitcoinTestFramework):
 
         # non-masternodes where disconnected from the control node during prepare_datadirs,
         # let's reconnect them back to make sure they receive updates
-        num_simple_nodes = self.num_nodes - self.mn_count - 1
-        for i in range(0, num_simple_nodes):
-            self.connect_nodes(i+1, 0)
+        num_simple_nodes = self.num_nodes - self.mn_count
+        for i in range(1, num_simple_nodes):
+            self.connect_nodes(i, 0)
 
         self.start_masternodes()
 
         self.bump_mocktime(1)
         self.generate(self.nodes[0], 1)
-        for i in range(0, num_simple_nodes):
-            force_finish_mnsync(self.nodes[i + 1])
+        for i in range(1, num_simple_nodes):
+            force_finish_mnsync(self.nodes[i])
 
         # Enable InstantSend (including block filtering) and ChainLocks by default
         self.nodes[0].sporkupdate("SPORK_2_INSTANTSEND_ENABLED", 0)
@@ -1920,7 +1895,7 @@ class DashTestFramework(BitcoinTestFramework):
 
         return new_quorum
 
-    def mine_cycle_quorum(self, llmq_type_name="llmq_test_dip0024", llmq_type=103,  expected_connections=None, expected_members=None, expected_contributions=None, expected_complaints=0, expected_justifications=0, expected_commitments=None, mninfos_online=None, mninfos_valid=None):
+    def mine_cycle_quorum(self, llmq_type_name="llmq_test_dip0024", llmq_type=103,  expected_connections=None, expected_members=None, expected_contributions=None, expected_complaints=0, expected_justifications=0, expected_commitments=None, mninfos_online=None):
         spork21_active = self.nodes[0].spork('show')['SPORK_21_QUORUM_ALL_CONNECTED'] <= 1
         spork23_active = self.nodes[0].spork('show')['SPORK_23_QUORUM_POSE'] <= 1
 
@@ -1934,8 +1909,6 @@ class DashTestFramework(BitcoinTestFramework):
             expected_commitments = self.llmq_size_dip0024
         if mninfos_online is None:
             mninfos_online = self.mninfo.copy()
-        if mninfos_valid is None:
-            mninfos_valid = self.mninfo.copy()
 
         self.log.info("Mining quorum: expected_members=%d, expected_connections=%d, expected_contributions=%d, expected_complaints=%d, expected_justifications=%d, "
                       "expected_commitments=%d" % (expected_members, expected_connections, expected_contributions, expected_complaints,

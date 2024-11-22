@@ -6,15 +6,19 @@
 #define BITCOIN_LLMQ_COMMITMENT_H
 
 #include <bls/bls.h>
-#include <consensus/params.h>
+#include <llmq/params.h>
 #include <primitives/transaction.h>
 #include <util/irange.h>
 #include <util/strencodings.h>
 #include <util/underlying.h>
 
 #include <gsl/pointers.h>
-
 #include <univalue.h>
+
+#include <limits>
+#include <memory>
+#include <string>
+#include <vector>
 
 class CBlockIndex;
 class CDeterministicMNManager;
@@ -30,8 +34,6 @@ namespace llmq
 class CFinalCommitment
 {
 public:
-    static constexpr auto SPECIALTX_TYPE = TRANSACTION_PROVIDER_REGISTER;
-
     static constexpr uint16_t LEGACY_BLS_NON_INDEXED_QUORUM_VERSION = 1;
     static constexpr uint16_t LEGACY_BLS_INDEXED_QUORUM_VERSION = 2;
     static constexpr uint16_t BASIC_BLS_NON_INDEXED_QUORUM_VERSION = 3;

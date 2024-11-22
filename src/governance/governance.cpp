@@ -548,14 +548,10 @@ std::vector<CGovernanceVote> CGovernanceManager::GetCurrentVotes(const uint256& 
         vote_rec_t voteRecord;
         if (!govobj.GetCurrentMNVotes(mnpair.first, voteRecord)) continue;
 
-        for (const auto& voteInstancePair : voteRecord.mapInstances) {
-            int signal = voteInstancePair.first;
-            int outcome = voteInstancePair.second.eOutcome;
-            int64_t nCreationTime = voteInstancePair.second.nCreationTime;
-
-            CGovernanceVote vote = CGovernanceVote(mnpair.first, nParentHash, (vote_signal_enum_t)signal, (vote_outcome_enum_t)outcome);
-            vote.SetTime(nCreationTime);
-
+        for (const auto& [signal, vote_instance] : voteRecord.mapInstances) {
+            CGovernanceVote vote = CGovernanceVote(mnpair.first, nParentHash, (vote_signal_enum_t)signal,
+                                                   vote_instance.eOutcome);
+            vote.SetTime(vote_instance.nCreationTime);
             vecResult.push_back(vote);
         }
     }
@@ -1605,6 +1601,9 @@ void CGovernanceManager::RemoveInvalidVotes()
     std::vector<COutPoint> changedKeyMNs;
     for (const auto& p : diff.updatedMNs) {
         auto oldDmn = lastMNListForVotingKeys->GetMNByInternalId(p.first);
+        // BuildDiff will construct itself with MNs that we already have knowledge
+        // of, meaning that fetch operations should never fail.
+        assert(oldDmn);
         if ((p.second.fields & CDeterministicMNStateDiff::Field_keyIDVoting) && p.second.state.keyIDVoting != oldDmn->pdmnState->keyIDVoting) {
             changedKeyMNs.emplace_back(oldDmn->collateralOutpoint);
         } else if ((p.second.fields & CDeterministicMNStateDiff::Field_pubKeyOperator) && p.second.state.pubKeyOperator != oldDmn->pdmnState->pubKeyOperator) {
@@ -1613,6 +1612,9 @@ void CGovernanceManager::RemoveInvalidVotes()
     }
     for (const auto& id : diff.removedMns) {
         auto oldDmn = lastMNListForVotingKeys->GetMNByInternalId(id);
+        // BuildDiff will construct itself with MNs that we already have knowledge
+        // of, meaning that fetch operations should never fail.
+        assert(oldDmn);
         changedKeyMNs.emplace_back(oldDmn->collateralOutpoint);
     }
 

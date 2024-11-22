@@ -18,6 +18,11 @@
 #include <util/underlying.h>
 #include <validation.h>
 
+static bool IsQuorumDKGEnabled(const CSporkManager& sporkman)
+{
+    return sporkman.IsSporkActive(SPORK_17_QUORUM_DKG_ENABLED);
+}
+
 namespace llmq
 {
 static const std::string DB_VVEC = "qdkg_V";
@@ -42,8 +47,6 @@ CDKGSessionManager::CDKGSessionManager(CBLSWorker& _blsWorker, CChainState& chai
         return;
     }
 
-    MigrateDKG();
-
     const Consensus::Params& consensus_params = Params().GetConsensus();
     for (const auto& params : consensus_params.llmqs) {
         auto session_count = (params.useRotation) ? params.signingActiveQuorumCount : 1;
@@ -57,96 +60,6 @@ CDKGSessionManager::CDKGSessionManager(CBLSWorker& _blsWorker, CChainState& chai
 }
 
 CDKGSessionManager::~CDKGSessionManager() = default;
-
-void CDKGSessionManager::MigrateDKG()
-{
-    if (!db->IsEmpty()) return;
-
-    LogPrint(BCLog::LLMQ, "CDKGSessionManager::%d -- start\n", __func__);
-
-    CDBBatch batch(*db);
-    auto oldDb = std::make_unique<CDBWrapper>(gArgs.GetDataDirNet() / "llmq", 8 << 20);
-    std::unique_ptr<CDBIterator> pcursor(oldDb->NewIterator());
-
-    auto start_vvec = std::make_tuple(DB_VVEC, (Consensus::LLMQType)0, uint256(), uint256());
-    pcursor->Seek(start_vvec);
-
-    while (pcursor->Valid()) {
-        decltype(start_vvec) k;
-        std::vector<CBLSPublicKey> v;
-
-        if (!pcursor->GetKey(k) || std::get<0>(k) != DB_VVEC) {
-            break;
-        }
-        if (!pcursor->GetValue(v)) {
-            break;
-        }
-
-        batch.Write(k, v);
-
-        if (batch.SizeEstimate() >= (1 << 24)) {
-            db->WriteBatch(batch);
-            batch.Clear();
-        }
-
-        pcursor->Next();
-    }
-
-    auto start_contrib = std::make_tuple(DB_SKCONTRIB, (Consensus::LLMQType)0, uint256(), uint256());
-    pcursor->Seek(start_contrib);
-
-    while (pcursor->Valid()) {
-        decltype(start_contrib) k;
-        CBLSSecretKey v;
-
-        if (!pcursor->GetKey(k) || std::get<0>(k) != DB_SKCONTRIB) {
-            break;
-        }
-        if (!pcursor->GetValue(v)) {
-            break;
-        }
-
-        batch.Write(k, v);
-
-        if (batch.SizeEstimate() >= (1 << 24)) {
-            db->WriteBatch(batch);
-            batch.Clear();
-        }
-
-        pcursor->Next();
-    }
-
-    auto start_enc_contrib = std::make_tuple(DB_ENC_CONTRIB, (Consensus::LLMQType)0, uint256(), uint256());
-    pcursor->Seek(start_enc_contrib);
-
-    while (pcursor->Valid()) {
-        decltype(start_enc_contrib) k;
-        CBLSIESMultiRecipientObjects<CBLSSecretKey> v;
-
-        if (!pcursor->GetKey(k) || std::get<0>(k) != DB_ENC_CONTRIB) {
-            break;
-        }
-        if (!pcursor->GetValue(v)) {
-            break;
-        }
-
-        batch.Write(k, v);
-
-        if (batch.SizeEstimate() >= (1 << 24)) {
-            db->WriteBatch(batch);
-            batch.Clear();
-        }
-
-        pcursor->Next();
-    }
-
-    db->WriteBatch(batch);
-    pcursor.reset();
-    oldDb.reset();
-
-    LogPrint(BCLog::LLMQ, "CDKGSessionManager::%d -- done\n", __func__);
-}
-
 void CDKGSessionManager::StartThreads()
 {
     for (auto& it : dkgSessionHandlers) {
@@ -513,11 +426,6 @@ void CDKGSessionManager::CleanupOldContributions() const
             LogPrint(BCLog::LLMQ, "CDKGSessionManager::%s -- removed %lld old entries for llmq type %d\n", __func__, cnt_old, uint8_t(params.type));
         }
     }
-}
-
-bool IsQuorumDKGEnabled(const CSporkManager& sporkman)
-{
-    return sporkman.IsSporkActive(SPORK_17_QUORUM_DKG_ENABLED);
 }
 
 } // namespace llmq
