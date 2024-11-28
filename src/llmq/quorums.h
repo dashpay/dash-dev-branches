@@ -15,6 +15,7 @@
 #include <saltedhasher.h>
 #include <threadinterrupt.h>
 #include <unordered_lru_cache.h>
+#include <util/time.h>
 
 #include <atomic>
 #include <map>
@@ -251,6 +252,10 @@ private:
     mutable std::map<Consensus::LLMQType, unordered_lru_cache<uint256, std::vector<CQuorumCPtr>, StaticSaltedHasher>> scanQuorumsCache GUARDED_BY(cs_scan_quorums);
     mutable Mutex cs_cleanup;
     mutable std::map<Consensus::LLMQType, unordered_lru_cache<uint256, uint256, StaticSaltedHasher>> cleanupQuorumsCache GUARDED_BY(cs_cleanup);
+
+    mutable Mutex cs_quorumBaseBlockIndexCache;
+    // On mainnet, we have around 62 quorums active at any point; let's cache a little more than double that to be safe.
+    mutable unordered_lru_cache<uint256 /*quorum_hash*/, const CBlockIndex* /*pindex*/, StaticSaltedHasher, 128 /*max_size*/> quorumBaseBlockIndexCache;
 
     mutable ctpl::thread_pool workerPool;
     mutable CThreadInterrupt quorumThreadInterrupt;

@@ -271,6 +271,8 @@ struct Peer {
     std::atomic<std::chrono::microseconds> m_ping_start{0us};
     /** Whether a ping has been requested by the user */
     std::atomic<bool> m_ping_queued{false};
+    /** Whether the peer has requested to receive llmq recovered signatures */
+    std::atomic<bool> m_wants_recsigs{false};
 
     struct TxRelay {
         mutable RecursiveMutex m_bloom_filter_mutex;
@@ -366,6 +368,15 @@ struct Peer {
     /** Whether the peer has signaled support for receiving ADDRv2 (BIP155)
      *  messages, indicating a preference to receive ADDRv2 instead of ADDR ones. */
     std::atomic_bool m_wants_addrv2{false};
+
+    enum class WantsDSQ {
+        NONE, // Peer doesn't want DSQs
+        INV, // Peer will be notified of DSQs over Inventory System (see: DSQ_INV_VERSION)
+        ALL, // Peer will be notified of all DSQs, by simply sending them the DSQ
+    };
+
+    std::atomic<WantsDSQ> m_wants_dsq{WantsDSQ::NONE};
+
     /** Whether this peer has already sent us a getaddr message. */
     bool m_getaddr_recvd GUARDED_BY(NetEventsInterface::g_msgproc_mutex){false};
     /** Number of addresses that can be processed from this peer. Start at 1 to
@@ -607,6 +618,8 @@ public:
     void RelayInvFiltered(CInv &inv, const CTransaction &relatedTx, const int minProtoVersion) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
     void RelayInvFiltered(CInv &inv, const uint256 &relatedTxHash, const int minProtoVersion) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
     void RelayTransaction(const uint256& txid) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
+    void RelayRecoveredSig(const uint256& sigHash) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
+    void RelayDSQ(const CCoinJoinQueue& queue) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
     void SetBestHeight(int height) override { m_best_height = height; };
     void Misbehaving(const NodeId pnode, const int howmuch, const std::string& message = "") override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
     void ProcessMessage(CNode& pfrom, const std::string& msg_type, CDataStream& vRecv,
@@ -2276,6 +2289,34 @@ void PeerManagerImpl::RelayInv(CInv &inv, const int minProtoVersion)
     });
 }
 
+void PeerManagerImpl::RelayDSQ(const CCoinJoinQueue& queue)
+{
+    CInv inv{MSG_DSQ, queue.GetHash()};
+    std::vector<NodeId> nodes_send_all;
+    {
+        LOCK(m_peer_mutex);
+        for (const auto& [nodeid, peer] : m_peer_map) {
+            switch (peer->m_wants_dsq) {
+            case Peer::WantsDSQ::NONE:
+                break;
+            case Peer::WantsDSQ::INV:
+                PushInv(*peer, inv);
+                break;
+            case Peer::WantsDSQ::ALL:
+                nodes_send_all.push_back(nodeid);
+                break;
+            }
+        }
+    }
+    for (auto nodeId : nodes_send_all) {
+        m_connman.ForNode(nodeId, [&](CNode* pnode) -> bool {
+            CNetMsgMaker msgMaker(pnode->GetCommonVersion());
+            m_connman.PushMessage(pnode, msgMaker.Make(NetMsgType::DSQUEUE, queue));
+            return true;
+        });
+    }
+}
+
 void PeerManagerImpl::RelayInvFiltered(CInv &inv, const CTransaction& relatedTx, const int minProtoVersion)
 {
     // TODO: Migrate to iteration through m_peer_map
@@ -2328,15 +2369,26 @@ void PeerManagerImpl::RelayInvFiltered(CInv &inv, const uint256& relatedTxHash, 
 
 void PeerManagerImpl::RelayTransaction(const uint256& txid)
 {
+    const CInv inv{m_cj_ctx->dstxman->GetDSTX(txid) ? MSG_DSTX : MSG_TX, txid};
     LOCK(m_peer_mutex);
     for(auto& it : m_peer_map) {
         Peer& peer = *it.second;
         auto tx_relay = peer.GetTxRelay();
         if (!tx_relay) continue;
 
-        const CInv inv{m_cj_ctx->dstxman->GetDSTX(txid) ? MSG_DSTX : MSG_TX, txid};
         PushInv(peer, inv);
     };
+}
+
+void PeerManagerImpl::RelayRecoveredSig(const uint256& sigHash)
+{
+    const CInv inv{MSG_QUORUM_RECOVERED_SIG, sigHash};
+    LOCK(m_peer_mutex);
+    for (const auto& [_, peer] : m_peer_map) {
+        if (peer->m_wants_recsigs) {
+            PushInv(*peer, inv);
+        }
+    }
 }
 
 void PeerManagerImpl::RelayAddress(NodeId originator,
@@ -3664,7 +3716,7 @@ void PeerManagerImpl::ProcessMessage(
 
         // Log succesful connections unconditionally for outbound, but not for inbound as those
         // can be triggered by an attacker at high rate.
-        if (!pfrom.IsInboundConn() || LogAcceptCategory(BCLog::NET)) {
+        if (!pfrom.IsInboundConn() || LogAcceptCategory(BCLog::NET, BCLog::Level::Debug)) {
             LogPrintf("New %s %s peer connected: version: %d, blocks=%d, peer=%d%s\n",
                       pfrom.ConnectionTypeAsString(),
                       TransportTypeAsString(pfrom.m_transport->GetInfo().transport_type),
@@ -3765,19 +3817,19 @@ void PeerManagerImpl::ProcessMessage(
     // from switching announcement protocols after the connection is up.
     if (msg_type == NetMsgType::SENDTXRCNCL) {
         if (!m_txreconciliation) {
-            LogPrint(BCLog::NET, "sendtxrcncl from peer=%d ignored, as our node does not have txreconciliation enabled\n", pfrom.GetId());
+            LogPrintLevel(BCLog::NET, BCLog::Level::Debug, "sendtxrcncl from peer=%d ignored, as our node does not have txreconciliation enabled\n", pfrom.GetId());
             return;
         }
 
         if (pfrom.fSuccessfullyConnected) {
-            LogPrint(BCLog::NET, "sendtxrcncl received after verack from peer=%d; disconnecting\n", pfrom.GetId());
+            LogPrintLevel(BCLog::NET, BCLog::Level::Debug, "sendtxrcncl received after verack from peer=%d; disconnecting\n", pfrom.GetId());
             pfrom.fDisconnect = true;
             return;
         }
 
         // Peer must not offer us reconciliations if we specified no tx relay support in VERSION.
         if (RejectIncomingTxs(pfrom)) {
-            LogPrint(BCLog::NET, "sendtxrcncl received from peer=%d to which we indicated no tx relay; disconnecting\n", pfrom.GetId());
+            LogPrintLevel(BCLog::NET, BCLog::Level::Debug, "sendtxrcncl received from peer=%d to which we indicated no tx relay; disconnecting\n", pfrom.GetId());
             pfrom.fDisconnect = true;
             return;
         }
@@ -3786,7 +3838,7 @@ void PeerManagerImpl::ProcessMessage(
         // This flag might also be false in other cases, but the RejectIncomingTxs check above
         // eliminates them, so that this flag fully represents what we are looking for.
         if (!pfrom.m_relays_txs) {
-            LogPrint(BCLog::NET, "sendtxrcncl received from peer=%d which indicated no tx relay to us; disconnecting\n", pfrom.GetId());
+            LogPrintLevel(BCLog::NET, BCLog::Level::Debug, "sendtxrcncl received from peer=%d which indicated no tx relay to us; disconnecting\n", pfrom.GetId());
             pfrom.fDisconnect = true;
             return;
         }
@@ -3799,16 +3851,16 @@ void PeerManagerImpl::ProcessMessage(
                                                                                      peer_txreconcl_version, remote_salt);
         switch (result) {
         case ReconciliationRegisterResult::NOT_FOUND:
-            LogPrint(BCLog::NET, "Ignore unexpected txreconciliation signal from peer=%d\n", pfrom.GetId());
+            LogPrintLevel(BCLog::NET, BCLog::Level::Debug, "Ignore unexpected txreconciliation signal from peer=%d\n", pfrom.GetId());
             break;
         case ReconciliationRegisterResult::SUCCESS:
             break;
         case ReconciliationRegisterResult::ALREADY_REGISTERED:
-            LogPrint(BCLog::NET, "txreconciliation protocol violation from peer=%d (sendtxrcncl received from already registered peer); disconnecting\n", pfrom.GetId());
+            LogPrintLevel(BCLog::NET, BCLog::Level::Debug, "txreconciliation protocol violation from peer=%d (sendtxrcncl received from already registered peer); disconnecting\n", pfrom.GetId());
             pfrom.fDisconnect = true;
             return;
         case ReconciliationRegisterResult::PROTOCOL_VIOLATION:
-            LogPrint(BCLog::NET, "txreconciliation protocol violation from peer=%d; disconnecting\n", pfrom.GetId());
+            LogPrintLevel(BCLog::NET, BCLog::Level::Debug, "txreconciliation protocol violation from peer=%d; disconnecting\n", pfrom.GetId());
             pfrom.fDisconnect = true;
             return;
         }
@@ -3940,7 +3992,13 @@ void PeerManagerImpl::ProcessMessage(
     {
         bool b;
         vRecv >> b;
-        pfrom.fSendDSQueue = b;
+        if (!b) {
+            peer->m_wants_dsq = Peer::WantsDSQ::NONE;
+        } else if (pfrom.GetCommonVersion() < DSQ_INV_VERSION) {
+            peer->m_wants_dsq = Peer::WantsDSQ::ALL;
+        } else {
+            peer->m_wants_dsq = Peer::WantsDSQ::INV;
+        }
         return;
     }
 
@@ -3948,7 +4006,7 @@ void PeerManagerImpl::ProcessMessage(
     if (msg_type == NetMsgType::QSENDRECSIGS) {
         bool b;
         vRecv >> b;
-        pfrom.fSendRecSigs = b;
+        peer->m_wants_recsigs = b;
         return;
     }
 

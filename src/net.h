@@ -16,6 +16,7 @@
 #include <hash.h>
 #include <i2p.h>
 #include <limitedmap.h>
+#include <logging.h>
 #include <net_permissions.h>
 #include <netaddress.h>
 #include <netbase.h>
@@ -42,6 +43,7 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <list>
 #include <map>
 #include <memory>
 #include <optional>
@@ -976,8 +978,6 @@ public:
     // If true, we will send him CoinJoin queue messages
     std::atomic<bool> fSendDSQueue{false};
 
-    // If true, we will announce/send him plain recovered sigs (usually true for full nodes)
-    std::atomic<bool> fSendRecSigs{false};
     // If true, we will send him all quorum related messages, even if he is not a member of our quorums
     std::atomic<bool> qwatch{false};
 
