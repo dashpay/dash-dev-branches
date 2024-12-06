@@ -232,24 +232,38 @@ static RPCHelpMan getbestblockhash()
 static RPCHelpMan getbestchainlock()
 {
     return RPCHelpMan{"getbestchainlock",
-        "\nReturns information about the best ChainLock. Throws an error if there is no known ChainLock yet.",
-        {},
-        RPCResult{
-            RPCResult::Type::OBJ, "", "",
-            {
-                {RPCResult::Type::STR_HEX, "hash", "The block hash hex-encoded"},
-                {RPCResult::Type::NUM, "height", "The block height or index"},
-                {RPCResult::Type::STR_HEX, "signature", "The ChainLock's BLS signature"},
-                {RPCResult::Type::BOOL, "known_block", "True if the block is known by our node"},
-            }},
+        "\nIf verbose is 0, returns a string that is serialized, hex-encoded data for the best ChainLock.\n"
+        "If verbose is 1, returns information about the best ChainLock.\n"
+        "Throws an error if there is no known ChainLock yet.",
+        {
+            {"verbose", RPCArg::Type::NUM, RPCArg::Default{1}, "0 for hex-encoded data, 1 for a json object"},
+        },
+        {
+            RPCResult{"for verbose = 0",
+                 RPCResult::Type::STR, "data", "The serialized, hex-encoded data for best ChainLock"},
+            RPCResult{"for verbose = 1",
+                RPCResult::Type::OBJ, "", "",
+                {
+                    {RPCResult::Type::STR_HEX, "hash", "The block hash hex-encoded"},
+                    {RPCResult::Type::NUM, "height", "The block height or index"},
+                    {RPCResult::Type::STR_HEX, "signature", "The ChainLock's BLS signature"},
+                    {RPCResult::Type::BOOL, "known_block", "True if the block is known by our node"},
+                }},
+        },
         RPCExamples{
             HelpExampleCli("getbestchainlock", "")
             + HelpExampleRpc("getbestchainlock", "")
         },
     [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
-    UniValue result(UniValue::VOBJ);
-
+    int verbose = 1;
+    if (!request.params[0].isNull()) {
+        if (request.params[0].isBool()) {
+            verbose = request.params[0].get_bool() ? 1 : 0;
+        } else {
+            verbose = request.params[0].get_int();
+        }
+    }
     const NodeContext& node = EnsureAnyNodeContext(request.context);
 
     const LLMQContext& llmq_ctx = EnsureLLMQContext(node);
@@ -257,14 +271,22 @@ static RPCHelpMan getbestchainlock()
     if (clsig.IsNull()) {
         throw JSONRPCError(RPC_INTERNAL_ERROR, "Unable to find any ChainLock");
     }
-    result.pushKV("blockhash", clsig.getBlockHash().GetHex());
-    result.pushKV("height", clsig.getHeight());
-    result.pushKV("signature", clsig.getSig().ToString());
+    if (verbose) {
+        UniValue result(UniValue::VOBJ);
 
-    const ChainstateManager& chainman = EnsureChainman(node);
-    LOCK(cs_main);
-    result.pushKV("known_block", chainman.m_blockman.LookupBlockIndex(clsig.getBlockHash()) != nullptr);
-    return result;
+        result.pushKV("blockhash", clsig.getBlockHash().GetHex());
+        result.pushKV("height", clsig.getHeight());
+        result.pushKV("signature", clsig.getSig().ToString());
+
+        const ChainstateManager& chainman = EnsureChainman(node);
+        LOCK(cs_main);
+        result.pushKV("known_block", chainman.m_blockman.LookupBlockIndex(clsig.getBlockHash()) != nullptr);
+        return result;
+    } else {
+        CDataStream ssTx(SER_NETWORK, PROTOCOL_VERSION);
+        ssTx << clsig;
+        return HexStr(ssTx);
+    }
 },
     };
 }

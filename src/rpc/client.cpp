@@ -112,6 +112,7 @@ static const CRPCConvertParam vRPCConvertParams[] =
     { "getblockheaders", 2, "verbose" },
     { "getchaintxstats", 0, "nblocks" },
     { "getmerkleblocks", 2, "count" },
+    { "getbestchainlock", 0, "verbose" },
     { "gettransaction", 1, "include_watchonly" },
     { "gettransaction", 2, "verbose" },
     { "getrawtransaction", 1, "verbose" },
