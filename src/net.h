@@ -766,7 +766,7 @@ public:
     const std::chrono::seconds m_connected;
     std::atomic<int64_t> nTimeOffset{0};
     std::atomic<int64_t> nLastWarningTime{0};
-    std::atomic<int64_t> nTimeFirstMessageReceived{0};
+    std::atomic<std::chrono::seconds> nTimeFirstMessageReceived{0s};
     std::atomic<bool> fFirstMessageIsMNAUTH{false};
     // Address of this peer
     const CAddress addr;
@@ -1503,12 +1503,12 @@ public:
     bool AddPendingMasternode(const uint256& proTxHash);
     void SetMasternodeQuorumNodes(Consensus::LLMQType llmqType, const uint256& quorumHash, const std::set<uint256>& proTxHashes);
     void SetMasternodeQuorumRelayMembers(Consensus::LLMQType llmqType, const uint256& quorumHash, const std::set<uint256>& proTxHashes);
-    bool HasMasternodeQuorumNodes(Consensus::LLMQType llmqType, const uint256& quorumHash);
-    std::set<uint256> GetMasternodeQuorums(Consensus::LLMQType llmqType);
+    bool HasMasternodeQuorumNodes(Consensus::LLMQType llmqType, const uint256& quorumHash) const;
+    std::set<uint256> GetMasternodeQuorums(Consensus::LLMQType llmqType) const;
     // also returns QWATCH nodes
     std::set<NodeId> GetMasternodeQuorumNodes(Consensus::LLMQType llmqType, const uint256& quorumHash) const;
     void RemoveMasternodeQuorumNodes(Consensus::LLMQType llmqType, const uint256& quorumHash);
-    bool IsMasternodeQuorumNode(const CNode* pnode, const CDeterministicMNList& tip_mn_list);
+    bool IsMasternodeQuorumNode(const CNode* pnode, const CDeterministicMNList& tip_mn_list) const;
     bool IsMasternodeQuorumRelayMember(const uint256& protxHash);
     void AddPendingProbeConnections(const std::set<uint256>& proTxHashes);
 

@@ -848,25 +848,30 @@ static void PeriodicStats(NodeContext& node)
         LogPrintf("%s: GetUTXOStats failed\n", __func__);
     }
 
-    // short version of GetNetworkHashPS(120, -1);
     CBlockIndex *tip = chainman.ActiveChain().Tip();
-    CBlockIndex *pindex = tip;
-    int64_t minTime = pindex->GetBlockTime();
-    int64_t maxTime = minTime;
-    for (int i = 0; i < 120 && pindex->pprev != nullptr; i++) {
-        pindex = pindex->pprev;
-        int64_t time = pindex->GetBlockTime();
-        minTime = std::min(time, minTime);
-        maxTime = std::max(time, maxTime);
-    }
-    arith_uint256 workDiff = tip->nChainWork - pindex->nChainWork;
-    int64_t timeDiff = maxTime - minTime;
-    double nNetworkHashPS = workDiff.getdouble() / timeDiff;
+    double nNetworkHashPS = [&]() {
+        // Short version of GetNetworkHashPS(120, -1);
+        CBlockIndex *pindex = tip;
+        int64_t minTime = pindex->GetBlockTime();
+        int64_t maxTime = minTime;
+        for (int i = 0; i < 120 && pindex->pprev != nullptr; i++) {
+            pindex = pindex->pprev;
+            int64_t time = pindex->GetBlockTime();
+            minTime = std::min(time, minTime);
+            maxTime = std::max(time, maxTime);
+        }
+        if (minTime == maxTime) return 0.0;
+        arith_uint256 workDiff = tip->nChainWork - pindex->nChainWork;
+        int64_t timeDiff = maxTime - minTime;
+        return workDiff.getdouble() / timeDiff;
+    }();
 
-    ::g_stats_client->gaugeDouble("network.hashesPerSecond", nNetworkHashPS);
-    ::g_stats_client->gaugeDouble("network.terahashesPerSecond", nNetworkHashPS / 1e12);
-    ::g_stats_client->gaugeDouble("network.petahashesPerSecond", nNetworkHashPS / 1e15);
-    ::g_stats_client->gaugeDouble("network.exahashesPerSecond", nNetworkHashPS / 1e18);
+    if (nNetworkHashPS > 0.0) {
+        ::g_stats_client->gaugeDouble("network.hashesPerSecond", nNetworkHashPS);
+        ::g_stats_client->gaugeDouble("network.terahashesPerSecond", nNetworkHashPS / 1e12);
+        ::g_stats_client->gaugeDouble("network.petahashesPerSecond", nNetworkHashPS / 1e15);
+        ::g_stats_client->gaugeDouble("network.exahashesPerSecond", nNetworkHashPS / 1e18);
+    }
     // No need for cs_main, we never use null tip here
     ::g_stats_client->gaugeDouble("network.difficulty", (double)GetDifficulty(tip));
 
@@ -1865,7 +1870,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
 
         do {
             bool failed_verification = false;
-            const int64_t load_block_index_start_time = GetTimeMillis();
+            const auto load_block_index_start_time{SteadyClock::now()};
 
             try {
                 LOCK(cs_main);
@@ -1888,7 +1893,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
 
                 // Same logic as above with pblocktree
                 node.dmnman.reset();
-                node.dmnman = std::make_unique<CDeterministicMNManager>(chainman.ActiveChainstate(), *node.connman, *node.evodb);
+                node.dmnman = std::make_unique<CDeterministicMNManager>(chainman.ActiveChainstate(), *node.evodb);
                 node.mempool->ConnectManagers(node.dmnman.get());
 
                 node.cpoolman.reset();
@@ -1902,12 +1907,10 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
                     node.llmq_ctx->Stop();
                 }
                 node.llmq_ctx.reset();
-                node.llmq_ctx = std::make_unique<LLMQContext>(chainman, *node.connman, *node.dmnman, *node.evodb, *node.mn_metaman, *node.mnhf_manager, *node.sporkman,
-                                                              *node.mempool, node.mn_activeman.get(), *node.mn_sync, node.peerman, /* unit_tests = */ false, /* wipe = */ fReset || fReindexChainState);
+                node.llmq_ctx = std::make_unique<LLMQContext>(chainman, *node.dmnman, *node.evodb, *node.mn_metaman, *node.mnhf_manager, *node.sporkman,
+                                                              *node.mempool, node.mn_activeman.get(), *node.mn_sync, /*unit_tests=*/false, /*wipe=*/fReset || fReindexChainState);
                 // Enable CMNHFManager::{Process, Undo}Block
                 node.mnhf_manager->ConnectManagers(node.chainman.get(), node.llmq_ctx->qman.get());
-                // Have to start it early to let VerifyDB check ChainLock signatures in coinbase
-                node.llmq_ctx->Start();
 
                 node.chain_helper.reset();
                 node.chain_helper = std::make_unique<CChainstateHelper>(*node.cpoolman, *node.dmnman, *node.mnhf_manager, *node.govman, *(node.llmq_ctx->quorum_block_processor), *node.chainman,
@@ -2128,7 +2131,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
 
             if (!failed_verification) {
                 fLoaded = true;
-                LogPrintf(" block index %15dms\n", GetTimeMillis() - load_block_index_start_time);
+                LogPrintf(" block index %15dms\n", Ticks<std::chrono::milliseconds>(SteadyClock::now() - load_block_index_start_time));
             }
         } while(false);
 
@@ -2282,6 +2285,8 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
 
     // ********************************************************* Step 10a: schedule Dash-specific tasks
 
+    node.llmq_ctx->Start(*node.connman, *node.peerman);
+
     node.scheduler->scheduleEvery(std::bind(&CNetFulfilledRequestManager::DoMaintenance, std::ref(*node.netfulfilledman)), std::chrono::minutes{1});
     node.scheduler->scheduleEvery(std::bind(&CMasternodeSync::DoMaintenance, std::ref(*node.mn_sync), std::cref(*node.peerman), std::cref(*node.govman)), std::chrono::seconds{1});
     node.scheduler->scheduleEvery(std::bind(&CMasternodeUtils::DoMaintenance, std::ref(*node.connman), std::ref(*node.dmnman), std::ref(*node.mn_sync), std::ref(*node.cj_ctx)), std::chrono::minutes{1});
@@ -2297,7 +2302,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
 #ifdef ENABLE_WALLET
     } else if (!ignores_incoming_txs) {
         node.scheduler->scheduleEvery(std::bind(&CCoinJoinClientQueueManager::DoMaintenance, std::ref(*node.cj_ctx->queueman)), std::chrono::seconds{1});
-        node.scheduler->scheduleEvery(std::bind(&CoinJoinWalletManager::DoMaintenance, std::ref(*node.cj_ctx->walletman)), std::chrono::seconds{1});
+        node.scheduler->scheduleEvery(std::bind(&CoinJoinWalletManager::DoMaintenance, std::ref(*node.cj_ctx->walletman), std::ref(*node.connman)), std::chrono::seconds{1});
 #endif // ENABLE_WALLET
     }
 

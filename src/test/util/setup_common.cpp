@@ -107,16 +107,16 @@ void DashTestSetup(NodeContext& node, const CChainParams& chainparams)
 {
     CChainState& chainstate = Assert(node.chainman)->ActiveChainstate();
 
-    node.dmnman = std::make_unique<CDeterministicMNManager>(chainstate, *node.connman, *node.evodb);
+    node.dmnman = std::make_unique<CDeterministicMNManager>(chainstate, *node.evodb);
     node.mempool->ConnectManagers(node.dmnman.get());
 
     node.cj_ctx = std::make_unique<CJContext>(*node.chainman, *node.connman, *node.dmnman, *node.mn_metaman, *node.mempool,
-                                              /* mn_activeman = */ nullptr, *node.mn_sync, node.peerman, /* relay_txes = */ true);
+                                              /*mn_activeman=*/nullptr, *node.mn_sync, node.peerman, /*relay_txes=*/true);
 #ifdef ENABLE_WALLET
     node.coinjoin_loader = interfaces::MakeCoinJoinLoader(*node.cj_ctx->walletman);
 #endif // ENABLE_WALLET
-    node.llmq_ctx = std::make_unique<LLMQContext>(*node.chainman, *node.connman, *node.dmnman, *node.evodb, *node.mn_metaman, *node.mnhf_manager, *node.sporkman, *node.mempool,
-                                                  /* mn_activeman = */ nullptr, *node.mn_sync, node.peerman, /* unit_tests = */ true, /* wipe = */ false);
+    node.llmq_ctx = std::make_unique<LLMQContext>(*node.chainman, *node.dmnman, *node.evodb, *node.mn_metaman, *node.mnhf_manager, *node.sporkman, *node.mempool,
+                                                  /*mn_activeman=*/nullptr, *node.mn_sync, /*unit_tests=*/true, /*wipe=*/false);
     Assert(node.mnhf_manager)->ConnectManagers(node.chainman.get(), node.llmq_ctx->qman.get());
     node.chain_helper = std::make_unique<CChainstateHelper>(*node.cpoolman, *node.dmnman, *node.mnhf_manager, *node.govman, *(node.llmq_ctx->quorum_block_processor), *node.chainman,
                                                             chainparams.GetConsensus(), *node.mn_sync, *node.sporkman, *(node.llmq_ctx->clhandler), *(node.llmq_ctx->qman));
@@ -354,9 +354,9 @@ TestChainSetup::TestChainSetup(int num_blocks, const std::vector<const char*>& e
             /* TestChainDIP3BeforeActivationSetup */
             {  430, uint256S("0x0bcefaa33fec56cd84d05d0e76cd6a78badcc20f627d91903646de6a07930a14") },
             /* TestChainBRRBeforeActivationSetup */
-            {  497, uint256S("0x23c31820ec5160b7181bfdf328e2b76cd12c9fa4544d892b7f01e74dd6220849") },
+            {  497, uint256S("0x3c71d807d28b9b813434eb0679ec3d5bcf424c20088cf578f3757521c3e3eded") },
             /* TestChainV19BeforeActivationSetup */
-            {  894, uint256S("0x2885cf0fe8fdf29803b6c65002ba2570ff011531d8ea92be312a85d655e00c51") },
+            {  894, uint256S("0x3f031e5cceade15bdfa559ddecb2ccb2b8d17083bdfd871a9d23b17d04b15292") },
         }
     };
 
