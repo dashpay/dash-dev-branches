@@ -241,7 +241,7 @@ static RPCHelpMan getpeerinfo()
         obj.pushKV("masternode", stats.m_masternode_connection);
         if (fStateStats) {
             if (IsDeprecatedRPCEnabled("banscore")) {
-                // banscore is deprecated in v21 for removal in v22
+                // TODO: banscore is deprecated in v21 for removal in v22, maybe impossible due to usages in p2p_quorum_data.py
                 obj.pushKV("banscore", statestats.m_misbehavior_score);
             }
             obj.pushKV("startingheight", statestats.m_starting_height);
@@ -360,7 +360,7 @@ static RPCHelpMan addconnection()
         {
             {"address", RPCArg::Type::STR, RPCArg::Optional::NO, "The IP address and port to attempt connecting to."},
             {"connection_type", RPCArg::Type::STR, RPCArg::Optional::NO, "Type of connection to open (\"outbound-full-relay\", \"block-relay-only\", \"addr-fetch\" or \"feeler\")."},
-            {"v2transport", RPCArg::Type::BOOL, RPCArg::Default{false}, "Attempt to connect using BIP324 v2 transport protocol"},
+            {"v2transport", RPCArg::Type::BOOL, RPCArg::Optional::NO, "Attempt to connect using BIP324 v2 transport protocol"},
         },
         RPCResult{
             RPCResult::Type::OBJ, "", "",
@@ -1126,10 +1126,10 @@ static const CRPCCommand commands[] =
     { "network",             &setban,                  },
     { "network",             &listbanned,              },
     { "network",             &clearbanned,             },
-    { "network",             &cleardiscouraged,        },
     { "network",             &setnetworkactive,        },
     { "network",             &getnodeaddresses,        },
 
+    { "hidden",              &cleardiscouraged,        },
     { "hidden",              &addconnection,           },
     { "hidden",              &addpeeraddress,          },
     { "hidden",              &sendmsgtopeer            },

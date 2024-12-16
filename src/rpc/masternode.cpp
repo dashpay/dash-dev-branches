@@ -38,7 +38,7 @@ static RPCHelpMan masternode_connect()
         "Connect to given masternode\n",
         {
             {"address", RPCArg::Type::STR, RPCArg::Optional::NO, "The address of the masternode to connect"},
-            {"v2transport", RPCArg::Type::BOOL, RPCArg::Default{false}, "Attempt to connect using BIP324 v2 transport protocol"},
+            {"v2transport", RPCArg::Type::BOOL, RPCArg::DefaultHint{"set by -v2transport"}, "Attempt to connect using BIP324 v2 transport protocol"},
         },
         RPCResults{},
         RPCExamples{""},
@@ -51,12 +51,13 @@ static RPCHelpMan masternode_connect()
         throw JSONRPCError(RPC_INTERNAL_ERROR, strprintf("Incorrect masternode address %s", strAddress));
     }
 
-    bool use_v2transport = !request.params[1].isNull() && ParseBoolV(request.params[1], "v2transport");
-
     const NodeContext& node = EnsureAnyNodeContext(request.context);
     CConnman& connman = EnsureConnman(node);
 
-    if (use_v2transport && !(connman.GetLocalServices() & NODE_P2P_V2)) {
+    bool node_v2transport = connman.GetLocalServices() & NODE_P2P_V2;
+    bool use_v2transport = request.params[1].isNull() ? node_v2transport : ParseBoolV(request.params[1], "v2transport");
+
+    if (use_v2transport && !node_v2transport) {
         throw JSONRPCError(RPC_INVALID_PARAMETER, "Error: Adding v2transport connections requires -v2transport init flag to be set.");
     }
 
@@ -133,6 +134,7 @@ static UniValue GetNextMasternodeForPayment(const CChain& active_chain, CDetermi
     return obj;
 }
 
+// TODO: drop it
 static RPCHelpMan masternode_winner()
 {
     return RPCHelpMan{"masternode winner",
@@ -153,6 +155,7 @@ static RPCHelpMan masternode_winner()
     };
 }
 
+// TODO: drop it
 static RPCHelpMan masternode_current()
 {
     return RPCHelpMan{"masternode current",
@@ -226,7 +229,7 @@ static RPCHelpMan masternode_status()
     }
 
     UniValue mnObj(UniValue::VOBJ);
-    // keep compatibility with legacy status for now (might get deprecated/removed later)
+    // keep compatibility with legacy status for now (TODO: get deprecated/removed later)
     mnObj.pushKV("outpoint", node.mn_activeman->GetOutPoint().ToStringShort());
     mnObj.pushKV("service", node.mn_activeman->GetService().ToStringAddrPort());
     auto dmn = CHECK_NONFATAL(node.dmnman)->GetListAtChainTip().GetMN(node.mn_activeman->GetProTxHash());
@@ -749,8 +752,8 @@ static const CRPCCommand commands[] =
     { "dash",               &masternode_status,        },
     { "dash",               &masternode_payments,      },
     { "dash",               &masternode_winners,       },
-    { "dash",               &masternode_current,       },
-    { "dash",               &masternode_winner,        },
+    { "hidden",             &masternode_current,       },
+    { "hidden",             &masternode_winner,        },
 };
 // clang-format on
     for (const auto& command : commands) {
