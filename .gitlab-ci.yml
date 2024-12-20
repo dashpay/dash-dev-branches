@@ -40,26 +40,11 @@ builder-image:
   needs:
     - builder-image
   image: $CI_REGISTRY_IMAGE:builder-$CI_COMMIT_REF_SLUG
-  variables:
-    SDK_URL: https://bitcoincore.org/depends-sources/sdks
-    XCODE_VERSION: "15.0"
-    XCODE_BUILD_ID: 15A240d
   before_script:
-    - echo HOST=$HOST
     - |
-      if [ "$HOST" = "x86_64-apple-darwin" ]; then
-        mkdir -p depends/SDKs
-        mkdir -p depends/sdk-sources
-        OSX_SDK_BASENAME="Xcode-${XCODE_VERSION}-${XCODE_BUILD_ID}-extracted-SDK-with-libcxx-headers.tar.gz"
-        OSX_SDK_PATH="depends/sdk-sources/${OSX_SDK_BASENAME}"
-        if [ ! -f "$OSX_SDK_PATH" ]; then
-          echo "Downloading MacOS SDK"
-          curl --location --fail "${SDK_URL}/${OSX_SDK_BASENAME}" -o "$OSX_SDK_PATH"
-        fi
-        if [ -f "$OSX_SDK_PATH" ]; then
-          echo "Extracting MacOS SDK"
-          tar -C depends/SDKs -xf "$OSX_SDK_PATH"
-        fi
+      echo HOST=${HOST}
+      if [[ "${HOST}" == "x86_64-apple-darwin" ]]; then
+        ./contrib/containers/guix/scripts/setup-sdk
       fi
   script:
     - make -j$(nproc) -C depends HOST=$HOST $DEP_OPTS
@@ -193,13 +178,13 @@ x86_64-w64-mingw32:
   variables:
     HOST: x86_64-w64-mingw32
 
-x86_64-pc-linux-gnu-debug:
+x86_64-pc-linux-gnu_debug:
   extends: .build-depends-template
   variables:
     HOST: x86_64-pc-linux-gnu
     DEP_OPTS: "DEBUG=1"
 
-x86_64-pc-linux-gnu-nowallet:
+x86_64-pc-linux-gnu_nowallet:
   extends:
     - .build-depends-template
     - .skip-in-fast-mode-template
@@ -207,13 +192,13 @@ x86_64-pc-linux-gnu-nowallet:
     HOST: x86_64-pc-linux-gnu
     DEP_OPTS: "NO_WALLET=1"
 
-x86_64-pc-linux-gnu-multiprocess:
+x86_64-pc-linux-gnu_multiprocess:
   extends:
     - .build-depends-template
     - .skip-in-fast-mode-template
   variables:
     HOST: x86_64-pc-linux-gnu
-    DEP_OPTS: "MULTIPROCESS=1"
+    DEP_OPTS: "DEBUG=1 MULTIPROCESS=1"
 
 x86_64-apple-darwin:
   extends:
@@ -243,7 +228,7 @@ win64-build:
 linux64-build:
   extends: .build-template
   needs:
-    - x86_64-pc-linux-gnu-debug
+    - x86_64-pc-linux-gnu_debug
   variables:
     BUILD_TARGET: linux64
 
@@ -252,7 +237,7 @@ linux64_cxx20-build:
     - .build-template
     - .skip-in-fast-mode-template
   needs:
-    - x86_64-pc-linux-gnu-debug
+    - x86_64-pc-linux-gnu_debug
   variables:
     BUILD_TARGET: linux64_cxx20
 
@@ -261,7 +246,7 @@ linux64_sqlite-build:
     - .build-template
     - .skip-in-fast-mode-template
   needs:
-    - x86_64-pc-linux-gnu-debug
+    - x86_64-pc-linux-gnu_debug
   variables:
     BUILD_TARGET: linux64_sqlite
 
@@ -270,7 +255,7 @@ linux64_fuzz-build:
     - .build-template
     - .skip-in-fast-mode-template
   needs:
-    - x86_64-pc-linux-gnu-debug
+    - x86_64-pc-linux-gnu_debug
   variables:
     BUILD_TARGET: linux64_fuzz
 
@@ -279,7 +264,7 @@ linux64_fuzz-build:
 #    - .build-template
 #    - .skip-in-fast-mode-template
 #  needs:
-#    - x86_64-pc-linux-gnu-debug
+#    - x86_64-pc-linux-gnu_debug
 #  variables:
 #    BUILD_TARGET: linux64_asan
 
@@ -288,7 +273,7 @@ linux64_tsan-build:
     - .build-template
     - .skip-in-fast-mode-template
   needs:
-    - x86_64-pc-linux-gnu-debug
+    - x86_64-pc-linux-gnu_debug
   variables:
     BUILD_TARGET: linux64_tsan
 
@@ -297,7 +282,7 @@ linux64_ubsan-build:
     - .build-template
     - .skip-in-fast-mode-template
   needs:
-    - x86_64-pc-linux-gnu-debug
+    - x86_64-pc-linux-gnu_debug
   variables:
     BUILD_TARGET: linux64_ubsan
 
@@ -306,7 +291,7 @@ linux64_nowallet-build:
     - .build-template
     - .skip-in-fast-mode-template
   needs:
-    - x86_64-pc-linux-gnu-nowallet
+    - x86_64-pc-linux-gnu_nowallet
   variables:
     BUILD_TARGET: linux64_nowallet
 
@@ -315,7 +300,7 @@ linux64_multiprocess-build:
     - .build-template
     - .skip-in-fast-mode-template
   needs:
-    - x86_64-pc-linux-gnu-multiprocess
+    - x86_64-pc-linux-gnu_multiprocess
   variables:
     BUILD_TARGET: linux64_multiprocess
 
@@ -324,7 +309,7 @@ linux64_multiprocess-build:
 #    - .build-template
 #    - .skip-in-fast-mode-template
 #  needs:
-#    - x86_64-pc-linux-gnu-debug
+#    - x86_64-pc-linux-gnu_debug
 #  variables:
 #    BUILD_TARGET: linux64_valgrind
 
