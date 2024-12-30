@@ -717,7 +717,7 @@ void CSigSharesManager::ProcessSigShare(PeerManager& peerman, const CSigShare& s
     bool canTryRecovery = false;
 
     // prepare node set for direct-push in case this is our sig share
-    std::set<NodeId> quorumNodes;
+    std::unordered_set<NodeId> quorumNodes;
     if (!IsAllMembersConnectedEnabled(llmqType, m_sporkman) && sigShare.getQuorumMember() == quorum->GetMemberIndex(m_mn_activeman->GetProTxHash())) {
         quorumNodes = connman.GetMasternodeQuorumNodes(sigShare.getLlmqType(), sigShare.getQuorumHash());
     }
@@ -739,16 +739,14 @@ void CSigSharesManager::ProcessSigShare(PeerManager& peerman, const CSigShare& s
         // Update the time we've seen the last sigShare
         timeSeenForSessions[sigShare.GetSignHash()] = GetTime<std::chrono::seconds>().count();
 
-        if (!quorumNodes.empty()) {
-            // don't announce and wait for other nodes to request this share and directly send it to them
-            // there is no way the other nodes know about this share as this is the one created on this node
-            for (auto otherNodeId : quorumNodes) {
-                auto& nodeState = nodeStates[otherNodeId];
-                auto& session = nodeState.GetOrCreateSessionFromShare(sigShare);
-                session.quorum = quorum;
-                session.requested.Set(sigShare.getQuorumMember(), true);
-                session.knows.Set(sigShare.getQuorumMember(), true);
-            }
+        // don't announce and wait for other nodes to request this share and directly send it to them
+        // there is no way the other nodes know about this share as this is the one created on this node
+        for (auto otherNodeId : quorumNodes) {
+            auto& nodeState = nodeStates[otherNodeId];
+            auto& session = nodeState.GetOrCreateSessionFromShare(sigShare);
+            session.quorum = quorum;
+            session.requested.Set(sigShare.getQuorumMember(), true);
+            session.knows.Set(sigShare.getQuorumMember(), true);
         }
 
         size_t sigShareCount = sigShares.CountForSignHash(sigShare.GetSignHash());

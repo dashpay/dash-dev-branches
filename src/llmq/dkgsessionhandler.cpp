@@ -367,24 +367,22 @@ std::set<NodeId> BatchVerifyMessageSigs(CDKGSession& session, const std::vector<
     pubKeys.reserve(messages.size());
     messageHashes.reserve(messages.size());
     bool first = true;
-    for (const auto& p : messages ) {
-        const auto& msg = *p.second;
-
-        auto member = session.GetMember(msg.proTxHash);
+    for (const auto& [nodeId, msg] : messages) {
+        auto member = session.GetMember(msg->proTxHash);
         if (!member) {
             // should not happen as it was verified before
-            ret.emplace(p.first);
+            ret.emplace(nodeId);
             continue;
         }
 
         if (first) {
-            aggSig = msg.sig;
+            aggSig = msg->sig;
         } else {
-            aggSig.AggregateInsecure(msg.sig);
+            aggSig.AggregateInsecure(msg->sig);
         }
         first = false;
 
-        auto msgHash = msg.GetSignHash();
+        auto msgHash = msg->GetSignHash();
         if (!messageHashesSet.emplace(msgHash).second) {
             // can only happen in 2 cases:
             // 1. Someone sent us the same message twice but with differing signature, meaning that at least one of them
@@ -418,16 +416,15 @@ std::set<NodeId> BatchVerifyMessageSigs(CDKGSession& session, const std::vector<
         // different nodes, let's figure out who are the bad ones
     }
 
-    for (const auto& p : messages) {
-        if (ret.count(p.first)) {
+    for (const auto& [nodeId, msg] : messages) {
+        if (ret.count(nodeId)) {
             continue;
         }
 
-        const auto& msg = *p.second;
-        auto member = session.GetMember(msg.proTxHash);
-        bool valid = msg.sig.VerifyInsecure(member->dmn->pdmnState->pubKeyOperator.Get(), msg.GetSignHash());
+        auto member = session.GetMember(msg->proTxHash);
+        bool valid = msg->sig.VerifyInsecure(member->dmn->pdmnState->pubKeyOperator.Get(), msg->GetSignHash());
         if (!valid) {
-            ret.emplace(p.first);
+            ret.emplace(nodeId);
         }
     }
     return ret;
@@ -506,7 +503,6 @@ bool ProcessPendingMessageBatch(const CConnman& connman, CDKGSession& session, C
 
     auto badNodes = BatchVerifyMessageSigs(session, preverifiedMessages);
     if (!badNodes.empty()) {
-        LOCK(cs_main);
         for (auto nodeId : badNodes) {
             LogPrint(BCLog::LLMQ_DKG, "%s -- failed to verify signature, peer=%d\n", __func__, nodeId);
             pendingMessages.Misbehaving(nodeId, 100, peerman);
