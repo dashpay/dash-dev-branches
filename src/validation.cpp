@@ -51,20 +51,14 @@
 #include <validationinterface.h>
 #include <warnings.h>
 
-#include <masternode/payments.h>
-#include <masternode/sync.h>
-
 #include <evo/chainhelper.h>
 #include <evo/deterministicmns.h>
 #include <evo/evodb.h>
 #include <evo/mnhftx.h>
 #include <evo/specialtx.h>
 #include <evo/specialtxman.h>
-#include <governance/governance.h>
-
-#include <llmq/instantsend.h>
 #include <llmq/chainlocks.h>
-
+#include <masternode/payments.h>
 #include <stats/client.h>
 
 #include <algorithm>
@@ -363,7 +357,9 @@ void CChainState::MaybeUpdateMempoolForReorg(
     // previously-confirmed transactions back to the mempool.
     // UpdateTransactionsFromBlock finds descendants of any transactions in
     // the disconnectpool that were added back and cleans up the mempool state.
-    m_mempool->UpdateTransactionsFromBlock(vHashUpdate);
+    const uint64_t ancestor_count_limit = gArgs.GetArg("-limitancestorcount", DEFAULT_ANCESTOR_LIMIT);
+    const uint64_t ancestor_size_limit = gArgs.GetArg("-limitancestorsize", DEFAULT_ANCESTOR_SIZE_LIMIT) * 1000;
+    m_mempool->UpdateTransactionsFromBlock(vHashUpdate, ancestor_size_limit, ancestor_count_limit);
 
     // Predicate to use for filtering transactions in removeForReorg.
     // Checks whether the transaction is still final and, if it spends a coinbase output, mature.
@@ -728,18 +724,18 @@ bool MemPoolAccept::PreChecks(ATMPArgs& args, Workspace& ws)
         return state.Invalid(TxValidationResult::TX_CONFLICT, "txn-already-in-mempool");
     }
 
-    llmq::CInstantSendLockPtr conflictLock = llmq::quorumInstantSendManager->GetConflictingLock(tx);
-    if (conflictLock) {
+    if (auto conflictLockOpt = m_chain_helper.ConflictingISLockIfAny(tx); conflictLockOpt.has_value()) {
+        auto& [_, conflict_txid] = conflictLockOpt.value();
         uint256 hashBlock;
-        CTransactionRef txConflict = GetTransaction(/* block_index */ nullptr, &m_pool, conflictLock->txid, chainparams.GetConsensus(), hashBlock);
+        CTransactionRef txConflict = GetTransaction(/* block_index */ nullptr, &m_pool, conflict_txid, chainparams.GetConsensus(), hashBlock);
         if (txConflict) {
             GetMainSignals().NotifyInstantSendDoubleSpendAttempt(ptx, txConflict);
         }
-        LogPrintf("ERROR: AcceptToMemoryPool : Transaction %s conflicts with locked TX %s\n", hash.ToString(), conflictLock->txid.ToString());
+        LogPrintf("ERROR: AcceptToMemoryPool : Transaction %s conflicts with locked TX %s\n", hash.ToString(), conflict_txid.ToString());
         return state.Invalid(TxValidationResult::TX_CONFLICT_LOCK, "tx-txlock-conflict");
     }
 
-    if (llmq::quorumInstantSendManager->IsWaitingForTx(hash)) {
+    if (m_chain_helper.IsInstantSendWaitingForTx(hash)) {
         m_pool.removeConflicts(tx);
         m_pool.removeProTxConflicts(tx);
     } else {
@@ -1523,13 +1519,9 @@ CChainState::CChainState(CTxMemPool* mempool,
                          ChainstateManager& chainman,
                          CEvoDB& evoDb,
                          const std::unique_ptr<CChainstateHelper>& chain_helper,
-                         const std::unique_ptr<llmq::CChainLocksHandler>& clhandler,
-                         const std::unique_ptr<llmq::CInstantSendManager>& isman,
                          std::optional<uint256> from_snapshot_blockhash)
     : m_mempool(mempool),
       m_chain_helper(chain_helper),
-      m_clhandler(clhandler),
-      m_isman(isman),
       m_evoDb(evoDb),
       m_blockman(blockman),
       m_params(::Params()),
@@ -2146,8 +2138,6 @@ bool CChainState::ConnectBlock(const CBlock& block, BlockValidationState& state,
     assert(*pindex->phashBlock == block_hash);
 
     assert(m_chain_helper);
-    assert(m_clhandler);
-    assert(m_isman);
 
     // Check it again in case a previous version let a bad block in
     // NOTE: We don't currently (re-)invoke ContextualCheckBlock() or
@@ -2172,7 +2162,7 @@ bool CChainState::ConnectBlock(const CBlock& block, BlockValidationState& state,
         return error("%s: Consensus::CheckBlock: %s", __func__, state.ToString());
     }
 
-    if (pindex->pprev && pindex->phashBlock && m_clhandler->HasConflictingChainLock(pindex->nHeight, pindex->GetBlockHash())) {
+    if (pindex->pprev && pindex->phashBlock && m_chain_helper->HasConflictingChainLock(pindex->nHeight, pindex->GetBlockHash())) {
         LogPrintf("ERROR: %s: conflicting with chainlock\n", __func__);
         return state.Invalid(BlockValidationResult::BLOCK_CHAINLOCK, "bad-chainlock");
     }
@@ -2469,21 +2459,21 @@ bool CChainState::ConnectBlock(const CBlock& block, BlockValidationState& state,
 
     // DASH : CHECK TRANSACTIONS FOR INSTANTSEND
 
-    if (m_isman->RejectConflictingBlocks()) {
+    if (m_chain_helper->ShouldInstantSendRejectConflicts()) {
         // Require other nodes to comply, send them some data in case they are missing it.
-        const bool has_chainlock = m_clhandler->HasChainLock(pindex->nHeight, pindex->GetBlockHash());
+        const bool has_chainlock = m_chain_helper->HasChainLock(pindex->nHeight, pindex->GetBlockHash());
         for (const auto& tx : block.vtx) {
             // skip txes that have no inputs
             if (tx->vin.empty()) continue;
-            while (llmq::CInstantSendLockPtr conflictLock = m_isman->GetConflictingLock(*tx)) {
+            while (auto conflictLockOpt = m_chain_helper->ConflictingISLockIfAny(*tx)) {
+                auto [conflict_islock_hash, conflict_txid] = conflictLockOpt.value();
                 if (has_chainlock) {
-                    LogPrint(BCLog::ALL, "ConnectBlock(DASH): chain-locked transaction %s overrides islock %s\n",
-                            tx->GetHash().ToString(), ::SerializeHash(*conflictLock).ToString());
-                    m_isman->RemoveConflictingLock(::SerializeHash(*conflictLock), *conflictLock);
+                    LogPrint(BCLog::ALL, "ConnectBlock(DASH): chain-locked transaction %s overrides islock %s\n", tx->GetHash().ToString(), conflict_islock_hash.ToString());
+                    m_chain_helper->RemoveConflictingISLockByTx(*tx);
                 } else {
                     // The node which relayed this should switch to correct chain.
                     // TODO: relay instantsend data/proof.
-                    LogPrintf("ERROR: ConnectBlock(DASH): transaction %s conflicts with transaction lock %s\n", tx->GetHash().ToString(), conflictLock->txid.ToString());
+                    LogPrintf("ERROR: ConnectBlock(DASH): transaction %s conflicts with transaction lock %s\n", tx->GetHash().ToString(), conflict_txid.ToString());
                     return state.Invalid(BlockValidationResult::BLOCK_CHAINLOCK, "conflict-tx-lock");
                 }
             }
@@ -2511,7 +2501,7 @@ bool CChainState::ConnectBlock(const CBlock& block, BlockValidationState& state,
     int64_t nTime5_3 = GetTimeMicros(); nTimeCreditPool += nTime5_3 - nTime5_2;
     LogPrint(BCLog::BENCHMARK, "      - CheckCreditPoolDiffForBlock: %.2fms [%.2fs (%.2fms/blk)]\n", MILLI * (nTime5_3 - nTime5_2), nTimeCreditPool * MICRO, nTimeCreditPool * MILLI / nBlocksTotal);
 
-    const bool check_superblock = m_clhandler->GetBestChainLock().getHeight() < pindex->nHeight;
+    const bool check_superblock = m_chain_helper->GetBestChainLockHeight() < pindex->nHeight;
 
     if (!m_chain_helper->mn_payments->IsBlockValueValid(block, pindex->nHeight, blockSubsidy + feeReward, strError, check_superblock)) {
         // NOTE: Do not punish, the node might be missing governance data
@@ -3695,7 +3685,7 @@ bool CChainState::MarkConflictingBlock(BlockValidationState& state, CBlockIndex 
     return true;
 }
 
-void CChainState::ResetBlockFailureFlags(CBlockIndex *pindex) {
+void CChainState::ResetBlockFailureFlags(CBlockIndex *pindex, bool ignore_chainlocks) {
     AssertLockHeld(cs_main);
 
     if (!pindex) {
@@ -3714,9 +3704,14 @@ void CChainState::ResetBlockFailureFlags(CBlockIndex *pindex) {
     for (auto& [_, block_index] : m_blockman.m_block_index) {
         if (!block_index.IsValid() && block_index.GetAncestor(nHeight) == pindex) {
             block_index.nStatus &= ~BLOCK_FAILED_MASK;
+            if (ignore_chainlocks) {
+                block_index.nStatus &= ~BLOCK_CONFLICT_CHAINLOCK;
+            }
             m_blockman.m_dirty_blockindex.insert(&block_index);
-            if (block_index.IsValid(BLOCK_VALID_TRANSACTIONS) && !(block_index.nStatus & BLOCK_CONFLICT_CHAINLOCK) && block_index.HaveTxsDownloaded() && setBlockIndexCandidates.value_comp()(m_chain.Tip(), &block_index)) {
-                setBlockIndexCandidates.insert(&block_index);
+            if (block_index.IsValid(BLOCK_VALID_TRANSACTIONS) && block_index.HaveTxsDownloaded() && setBlockIndexCandidates.value_comp()(m_chain.Tip(), &block_index)) {
+                if (ignore_chainlocks || !(block_index.nStatus & BLOCK_CONFLICT_CHAINLOCK)) {
+                    setBlockIndexCandidates.insert(&block_index);
+                }
             }
             if (&block_index == m_chainman.m_best_invalid) {
                 // Reset invalid block marker if it was pointing to one of those.
@@ -3728,11 +3723,16 @@ void CChainState::ResetBlockFailureFlags(CBlockIndex *pindex) {
 
     // Remove the invalidity flag from all ancestors too.
     while (pindex != nullptr) {
-        if (pindex->nStatus & BLOCK_FAILED_MASK) {
+        if (pindex->nStatus & (BLOCK_FAILED_MASK | BLOCK_CONFLICT_CHAINLOCK)) {
             pindex->nStatus &= ~BLOCK_FAILED_MASK;
+            if (ignore_chainlocks) {
+                pindex->nStatus &= ~BLOCK_CONFLICT_CHAINLOCK;
+            }
             m_blockman.m_dirty_blockindex.insert(pindex);
-            if (pindex->IsValid(BLOCK_VALID_TRANSACTIONS) && !(pindex->nStatus & BLOCK_CONFLICT_CHAINLOCK) && pindex->HaveTxsDownloaded() && setBlockIndexCandidates.value_comp()(m_chain.Tip(), pindex)) {
-                setBlockIndexCandidates.insert(pindex);
+            if (pindex->IsValid(BLOCK_VALID_TRANSACTIONS) && pindex->HaveTxsDownloaded() && setBlockIndexCandidates.value_comp()(m_chain.Tip(), pindex)) {
+                if (ignore_chainlocks || !(pindex->nStatus & BLOCK_CONFLICT_CHAINLOCK)) {
+                    setBlockIndexCandidates.insert(pindex);
+                }
             }
             if (pindex == m_chainman.m_best_invalid) {
                 // Reset invalid block marker if it was pointing to one of those.
@@ -4121,7 +4121,7 @@ bool ChainstateManager::AcceptBlockHeader(const CBlockHeader& block, BlockValida
             }
         }
 
-        if (llmq::chainLocksHandler->HasConflictingChainLock(pindexPrev->nHeight + 1, hash)) {
+        if (ActiveChainstate().m_chain_helper->HasConflictingChainLock(pindexPrev->nHeight + 1, hash)) {
             if (miSelf == m_blockman.m_block_index.end()) {
                 m_blockman.AddToBlockIndex(block, hash, m_best_header, BLOCK_CONFLICT_CHAINLOCK);
             }
@@ -4327,6 +4327,9 @@ bool TestBlockValidity(BlockValidationState& state,
     AssertLockHeld(cs_main);
     assert(pindexPrev && pindexPrev == chainstate.m_chain.Tip());
 
+    // TODO: instead restoring bls_legacy_scheme better to keep it unchanged
+    // Moreover, current implementation is working incorrent if current function
+    // will return value too early due to error: old value won't be restored
     auto bls_legacy_scheme = bls::bls_legacy_scheme.load();
 
     uint256 hash = block.GetHash();
@@ -5491,8 +5494,6 @@ std::vector<CChainState*> ChainstateManager::GetAll()
 CChainState& ChainstateManager::InitializeChainstate(CTxMemPool* mempool,
                                                      CEvoDB& evoDb,
                                                      const std::unique_ptr<CChainstateHelper>& chain_helper,
-                                                     const std::unique_ptr<llmq::CChainLocksHandler>& clhandler,
-                                                     const std::unique_ptr<llmq::CInstantSendManager>& isman,
                                                      const std::optional<uint256>& snapshot_blockhash)
 {
     AssertLockHeld(::cs_main);
@@ -5504,7 +5505,7 @@ CChainState& ChainstateManager::InitializeChainstate(CTxMemPool* mempool,
         throw std::logic_error("should not be overwriting a chainstate");
     }
 
-    to_modify.reset(new CChainState(mempool, m_blockman, *this, evoDb, chain_helper, clhandler, isman, snapshot_blockhash));
+    to_modify.reset(new CChainState(mempool, m_blockman, *this, evoDb, chain_helper, snapshot_blockhash));
 
     // Snapshot chainstates and initial IBD chaintates always become active.
     if (is_snapshot || (!is_snapshot && !m_active_chainstate)) {
@@ -5577,8 +5578,6 @@ bool ChainstateManager::ActivateSnapshot(
             /* mempool */ nullptr, m_blockman, *this,
             this->ActiveChainstate().m_evoDb,
             this->ActiveChainstate().m_chain_helper,
-            this->ActiveChainstate().m_clhandler,
-            this->ActiveChainstate().m_isman,
             base_blockhash
         )
     );

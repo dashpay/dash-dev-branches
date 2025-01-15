@@ -71,45 +71,36 @@
 #include <util/threadnames.h>
 #include <util/translation.h>
 #include <validation.h>
-
 #include <validationinterface.h>
+#include <walletinitinterface.h>
 
-#include <masternode/node.h>
+#include <bls/bls.h>
 #include <coinjoin/coinjoin.h>
 #include <coinjoin/context.h>
-#ifdef ENABLE_WALLET
-#include <coinjoin/client.h>
-#include <coinjoin/options.h>
-#endif // ENABLE_WALLET
 #include <coinjoin/server.h>
 #include <dsnotificationinterface.h>
+#include <evo/deterministicmns.h>
+#include <evo/evodb.h>
+#include <evo/mnhftx.h>
 #include <flat-database.h>
 #include <governance/governance.h>
+#include <llmq/context.h>
+#include <llmq/dkgsessionmgr.h>
+#include <llmq/options.h>
+#include <llmq/signing.h>
 #include <masternode/meta.h>
+#include <masternode/node.h>
 #include <masternode/sync.h>
 #include <masternode/utils.h>
 #include <messagesigner.h>
 #include <netfulfilledman.h>
 #include <spork.h>
-#include <walletinitinterface.h>
-
-#include <evo/evodb.h>
-#include <evo/chainhelper.h>
-#include <evo/creditpool.h>
-#include <evo/deterministicmns.h>
-#include <evo/mnhftx.h>
-#include <llmq/blockprocessor.h>
-#include <llmq/chainlocks.h>
-#include <llmq/context.h>
-#include <llmq/instantsend.h>
-#include <llmq/quorums.h>
-#include <llmq/dkgsessionmgr.h>
-#include <llmq/options.h>
-#include <llmq/signing.h>
-#include <llmq/snapshot.h>
-#include <llmq/signing_shares.h>
-
 #include <stats/client.h>
+
+#ifdef ENABLE_WALLET
+#include <coinjoin/client.h>
+#include <coinjoin/options.h>
+#endif // ENABLE_WALLET
 
 #include <algorithm>
 #include <condition_variable>
@@ -123,8 +114,6 @@
 #include <string>
 #include <thread>
 #include <vector>
-
-#include <bls/bls.h>
 
 #ifndef WIN32
 #include <attributes.h>
@@ -335,8 +324,8 @@ void PrepareShutdown(NodeContext& node)
                 chainstate->ResetCoinsViews();
             }
         }
-        DashChainstateSetupClose(node.chain_helper, node.cpoolman, node.dmnman, node.mnhf_manager,
-                                 llmq::quorumSnapshotManager, node.llmq_ctx, Assert(node.mempool.get()));
+        DashChainstateSetupClose(node.chain_helper, node.cpoolman, node.dmnman, node.mnhf_manager, node.llmq_ctx,
+                                 Assert(node.mempool.get()));
         node.mnhf_manager.reset();
         node.evodb.reset();
     }
@@ -716,7 +705,7 @@ void SetupServerArgs(ArgsManager& argsman)
     argsman.AddArg("-sporkkey=<privatekey>", "Set the private key to be used for signing spork messages.", ArgsManager::ALLOW_ANY | ArgsManager::SENSITIVE, OptionsCategory::DEBUG_TEST);
     argsman.AddArg("-uacomment=<cmt>", "Append comment to the user agent string", ArgsManager::ALLOW_ANY, OptionsCategory::DEBUG_TEST);
 
-    SetupChainParamsBaseOptions(argsman);
+    SetupChainParamsOptions(argsman);
 
     argsman.AddArg("-llmq-data-recovery=<n>", strprintf("Enable automated quorum data recovery (default: %u)", llmq::DEFAULT_ENABLE_QUORUM_DATA_RECOVERY), ArgsManager::ALLOW_ANY, OptionsCategory::MASTERNODE);
     argsman.AddArg("-llmq-qvvec-sync=<quorum_name>:<mode>", strprintf("Defines from which LLMQ type the masternode should sync quorum verification vectors. Can be used multiple times with different LLMQ types. <mode>: %d (sync always from all quorums of the type defined by <quorum_name>), %d (sync from all quorums of the type defined by <quorum_name> if a member of any of the quorums)", (int32_t)llmq::QvvecSyncMode::Always, (int32_t)llmq::QvvecSyncMode::OnlyIfTypeMember), ArgsManager::ALLOW_ANY, OptionsCategory::MASTERNODE);
@@ -1858,9 +1847,6 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
                                 node.dmnman,
                                 node.evodb,
                                 node.mnhf_manager,
-                                llmq::chainLocksHandler,
-                                llmq::quorumInstantSendManager,
-                                llmq::quorumSnapshotManager,
                                 node.llmq_ctx,
                                 Assert(node.mempool.get()),
                                 fPruneMode,
@@ -2035,7 +2021,8 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     // ********************************************************* Step 7c: Setup CoinJoin
 
     node.cj_ctx = std::make_unique<CJContext>(chainman, *node.connman, *node.dmnman, *node.mn_metaman, *node.mempool,
-                                              node.mn_activeman.get(), *node.mn_sync, node.peerman, !ignores_incoming_txs);
+                                              node.mn_activeman.get(), *node.mn_sync, *node.llmq_ctx->isman, node.peerman,
+                                              !ignores_incoming_txs);
 
 #ifdef ENABLE_WALLET
     node.coinjoin_loader = interfaces::MakeCoinJoinLoader(*node.cj_ctx->walletman);

@@ -6,13 +6,17 @@
 #define BITCOIN_LLMQ_DKGSESSIONMGR_H
 
 #include <bls/bls.h>
-#include <bls/bls_ies.h>
 #include <bls/bls_worker.h>
 #include <llmq/dkgsessionhandler.h>
 #include <net_types.h>
 
 #include <map>
 #include <memory>
+
+template <class T>
+class CBLSIESMultiRecipientObjects;
+template <class T>
+class CBLSIESEncryptedObject;
 
 class CActiveMasternodeManager;
 class CBlockIndex;
@@ -32,6 +36,7 @@ class UniValue;
 
 namespace llmq
 {
+class CQuorumSnapshotManager;
 
 class CDKGSessionManager
 {
@@ -45,6 +50,7 @@ private:
     CDeterministicMNManager& m_dmnman;
     CDKGDebugManager& dkgDebugManager;
     CQuorumBlockProcessor& quorumBlockProcessor;
+    CQuorumSnapshotManager& m_qsnapman;
     const CSporkManager& spork_manager;
 
     //TODO name struct instead of std::pair
@@ -72,8 +78,9 @@ private:
 public:
     CDKGSessionManager(CBLSWorker& _blsWorker, CChainState& chainstate, CDeterministicMNManager& dmnman,
                        CDKGDebugManager& _dkgDebugManager, CMasternodeMetaMan& mn_metaman,
-                       CQuorumBlockProcessor& _quorumBlockProcessor, const CActiveMasternodeManager* const mn_activeman,
-                       const CSporkManager& sporkman, bool unitTests, bool fWipe);
+                       CQuorumBlockProcessor& _quorumBlockProcessor, CQuorumSnapshotManager& qsnapman,
+                       const CActiveMasternodeManager* const mn_activeman, const CSporkManager& sporkman,
+                       bool unitTests, bool fWipe);
     ~CDKGSessionManager();
 
     void StartThreads(CConnman& connman, PeerManager& peerman);

@@ -22,6 +22,8 @@
 #include <evo/deterministicmns.h>
 #include <evo/providertx.h>
 #include <evo/specialtx.h>
+#include <llmq/context.h>
+#include <llmq/instantsend.h>
 
 #include <boost/test/unit_test.hpp>
 
@@ -132,7 +134,7 @@ static CMutableTransaction CreateProUpServTx(const CChain& active_chain, const C
     tx.nType = TRANSACTION_PROVIDER_UPDATE_SERVICE;
     FundTransaction(active_chain, tx, utxos, GetScriptForDestination(PKHash(coinbaseKey.GetPubKey())), 1 * COIN, coinbaseKey);
     proTx.inputsHash = CalcTxInputsHash(CTransaction(tx));
-    proTx.sig = operatorKey.Sign(::SerializeHash(proTx));
+    proTx.sig = operatorKey.Sign(::SerializeHash(proTx), bls::bls_legacy_scheme);
     SetTxPayload(tx, proTx);
     SignTransaction(mempool, tx, coinbaseKey);
 
@@ -171,7 +173,7 @@ static CMutableTransaction CreateProUpRevTx(const CChain& active_chain, const CT
     tx.nType = TRANSACTION_PROVIDER_UPDATE_REVOKE;
     FundTransaction(active_chain, tx, utxos, GetScriptForDestination(PKHash(coinbaseKey.GetPubKey())), 1 * COIN, coinbaseKey);
     proTx.inputsHash = CalcTxInputsHash(CTransaction(tx));
-    proTx.sig = operatorKey.Sign(::SerializeHash(proTx));
+    proTx.sig = operatorKey.Sign(::SerializeHash(proTx), bls::bls_legacy_scheme);
     SetTxPayload(tx, proTx);
     SignTransaction(mempool, tx, coinbaseKey);
 
@@ -229,7 +231,7 @@ static bool CheckTransactionSignature(const CTxMemPool& mempool, const CMutableT
         BOOST_REQUIRE(txFrom);
 
         CAmount amount = txFrom->vout[txin.prevout.n].nValue;
-        if (!VerifyScript(txin.scriptSig, txFrom->vout[txin.prevout.n].scriptPubKey, STANDARD_SCRIPT_VERIFY_FLAGS, MutableTransactionSignatureChecker(&tx, i, amount))) {
+        if (!VerifyScript(txin.scriptSig, txFrom->vout[txin.prevout.n].scriptPubKey, STANDARD_SCRIPT_VERIFY_FLAGS, MutableTransactionSignatureChecker(&tx, i, amount, MissingDataBehavior::ASSERT_FAIL))) {
             return false;
         }
     }
@@ -653,7 +655,7 @@ void FuncTestMempoolReorg(TestChainSetup& setup)
 
     CTxMemPool testPool;
     if (setup.m_node.dmnman) {
-        testPool.ConnectManagers(setup.m_node.dmnman.get());
+        testPool.ConnectManagers(setup.m_node.dmnman.get(), setup.m_node.llmq_ctx->isman.get());
     }
     TestMemPoolEntryHelper entry;
     LOCK2(cs_main, testPool.cs);
@@ -727,7 +729,7 @@ void FuncTestMempoolDualProregtx(TestChainSetup& setup)
 
     CTxMemPool testPool;
     if (setup.m_node.dmnman) {
-        testPool.ConnectManagers(setup.m_node.dmnman.get());
+        testPool.ConnectManagers(setup.m_node.dmnman.get(), setup.m_node.llmq_ctx->isman.get());
     }
     TestMemPoolEntryHelper entry;
     LOCK2(cs_main, testPool.cs);
@@ -858,7 +860,7 @@ struct TestChainV19Setup : public TestChainV19BeforeActivationSetup {
 
 // 5 blocks earlier
 TestChainV19BeforeActivationSetup::TestChainV19BeforeActivationSetup() :
-    TestChainSetup(894)
+    TestChainSetup(494, {"-testactivationheight=v19@500"})
 {
     bool v19_active{DeploymentActiveAfter(m_node.chainman->ActiveChain().Tip(), Params().GetConsensus(),
                                           Consensus::DEPLOYMENT_V19)};

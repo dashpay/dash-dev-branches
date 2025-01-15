@@ -43,7 +43,7 @@ class CChain;
 class CChainState;
 extern RecursiveMutex cs_main;
 
-// Forward declation for CBLSLazyPublicKey:
+// Forward declaration for CBLSLazyPublicKey:
 template<typename T> class CBLSLazyWrapper;
 class CBLSPublicKey;
 using CBLSLazyPublicKey = CBLSLazyWrapper<CBLSPublicKey>;
@@ -319,6 +319,10 @@ struct ancestor_score {};
 class CBlockPolicyEstimator;
 class CDeterministicMNManager;
 
+namespace llmq {
+class CInstantSendManager;
+};
+
 /**
  * Information about a mempool transaction.
  */
@@ -430,6 +434,7 @@ protected:
     std::atomic<unsigned int> nTransactionsUpdated{0}; //!< Used by getblocktemplate to trigger CreateNewBlock() invocation
     CBlockPolicyEstimator* const minerPolicyEstimator;
     CDeterministicMNManager* m_dmnman{nullptr};
+    llmq::CInstantSendManager* m_isman{nullptr};
 
     uint64_t totalTxSize GUARDED_BY(cs);      //!< sum of all mempool tx' byte sizes
     CAmount m_total_fee GUARDED_BY(cs);       //!< sum of all mempool tx's fees (NOT modified fee)
@@ -579,19 +584,19 @@ public:
     explicit CTxMemPool(CBlockPolicyEstimator* estimator = nullptr, int check_ratio = 0);
 
     /**
-     * Set CDeterministicMNManager pointer.
+     * Set CDeterministicMNManager and CInstantSendManager pointers.
      *
      * Separated from constructor as it's initialized after CTxMemPool
      * is created. Required for ProTx processing.
      */
-    void ConnectManagers(gsl::not_null<CDeterministicMNManager*> dmnman);
+    void ConnectManagers(gsl::not_null<CDeterministicMNManager*> dmnman, gsl::not_null<llmq::CInstantSendManager*> isman);
 
     /**
-     * Reset CDeterministicMNManager pointer.
+     * Reset CDeterministicMNManager and CInstantSendManager pointers.
      *
-     * @pre Must be called before CDeterministicMNManager is destroyed.
+     * @pre Must be called before CDeterministicMNManager and CInstantSendManager are destroyed.
      */
-    void DisconnectManagers() { m_dmnman = nullptr; }
+    void DisconnectManagers() { m_dmnman = nullptr; m_isman = nullptr; }
 
     /**
      * If sanity-checking is turned on, check makes sure the pool is
@@ -675,16 +680,25 @@ public:
      */
     void RemoveStaged(setEntries& stage, bool updateDescendants, MemPoolRemovalReason reason) EXCLUSIVE_LOCKS_REQUIRED(cs);
 
-    /** When adding transactions from a disconnected block back to the mempool,
-     *  new mempool entries may have children in the mempool (which is generally
-     *  not the case when otherwise adding transactions).
-     *  UpdateTransactionsFromBlock() will find child transactions and update the
-     *  descendant state for each transaction in vHashesToUpdate (excluding any
-     *  child transactions present in vHashesToUpdate, which are already accounted
-     *  for).  Note: vHashesToUpdate should be the set of transactions from the
-     *  disconnected block that have been accepted back into the mempool.
+    /** UpdateTransactionsFromBlock is called when adding transactions from a
+     * disconnected block back to the mempool, new mempool entries may have
+     * children in the mempool (which is generally not the case when otherwise
+     * adding transactions).
+     *  @post updated descendant state for descendants of each transaction in
+     *        vHashesToUpdate (excluding any child transactions present in
+     *        vHashesToUpdate, which are already accounted for). Updated state
+     *        includes add fee/size information for such descendants to the
+     *        parent and updated ancestor state to include the parent.
+     *
+     * @param[in] vHashesToUpdate          The set of txids from the
+     *     disconnected block that have been accepted back into the mempool.
+     * @param[in] ancestor_size_limit      The maximum allowed size in virtual
+     *     bytes of an entry and its ancestors
+     * @param[in] ancestor_count_limit     The maximum allowed number of
+     *     transactions including the entry and its ancestors.
      */
-    void UpdateTransactionsFromBlock(const std::vector<uint256>& vHashesToUpdate) EXCLUSIVE_LOCKS_REQUIRED(cs, cs_main) LOCKS_EXCLUDED(m_epoch);
+    void UpdateTransactionsFromBlock(const std::vector<uint256>& vHashesToUpdate,
+            uint64_t ancestor_size_limit, uint64_t ancestor_count_limit) EXCLUSIVE_LOCKS_REQUIRED(cs, cs_main) LOCKS_EXCLUDED(m_epoch);
 
     /** Try to calculate all in-mempool ancestors of entry.
      *  (these are all calculated including the tx itself)
@@ -739,7 +753,10 @@ public:
       */
     void TrimToSize(size_t sizelimit, std::vector<COutPoint>* pvNoSpendsRemaining = nullptr) EXCLUSIVE_LOCKS_REQUIRED(cs);
 
-    /** Expire all transaction (and their dependencies) in the mempool older than time. Return the number of removed transactions. */
+    /** Expire all transaction (and their dependencies) in the mempool older than time. Return the number of removed transactions.
+     * @pre Caller must ensure that CInstantSendManager exists and has been set using
+     *      ConnectManagers() for InstantSend awareness
+    */
     int Expire(std::chrono::seconds time) EXCLUSIVE_LOCKS_REQUIRED(cs);
 
     /**
@@ -828,19 +845,38 @@ private:
     /** UpdateForDescendants is used by UpdateTransactionsFromBlock to update
      *  the descendants for a single transaction that has been added to the
      *  mempool but may have child transactions in the mempool, eg during a
-     *  chain reorg.  setExclude is the set of descendant transactions in the
-     *  mempool that must not be accounted for (because any descendants in
-     *  setExclude were added to the mempool after the transaction being
-     *  updated and hence their state is already reflected in the parent
-     *  state).
+     *  chain reorg.
      *
-     *  cachedDescendants will be updated with the descendants of the transaction
-     *  being updated, so that future invocations don't need to walk the
-     *  same transaction again, if encountered in another transaction chain.
+     * @pre CTxMemPool::m_children is correct for the given tx and all
+     *      descendants.
+     * @pre cachedDescendants is an accurate cache where each entry has all
+     *      descendants of the corresponding key, including those that should
+     *      be removed for violation of ancestor limits.
+     * @post if updateIt has any non-excluded descendants, cachedDescendants has
+     *       a new cache line for updateIt.
+     * @post descendants_to_remove has a new entry for any descendant which exceeded
+     *       ancestor limits relative to updateIt.
+     *
+     * @param[in] updateIt the entry to update for its descendants
+     * @param[in,out] cachedDescendants a cache where each line corresponds to all
+     *     descendants. It will be updated with the descendants of the transaction
+     *     being updated, so that future invocations don't need to walk the same
+     *     transaction again, if encountered in another transaction chain.
+     * @param[in] setExclude the set of descendant transactions in the mempool
+     *     that must not be accounted for (because any descendants in setExclude
+     *     were added to the mempool after the transaction being updated and hence
+     *     their state is already reflected in the parent state).
+     * @param[out] descendants_to_remove Populated with the txids of entries that
+     *     exceed ancestor limits. It's the responsibility of the caller to
+     *     removeRecursive them.
+     * @param[in] ancestor_size_limit the max number of ancestral bytes allowed
+     *     for any descendant
+     * @param[in] ancestor_count_limit the max number of ancestor transactions
+     *     allowed for any descendant
      */
-    void UpdateForDescendants(txiter updateIt,
-            cacheMap &cachedDescendants,
-            const std::set<uint256> &setExclude) EXCLUSIVE_LOCKS_REQUIRED(cs);
+    void UpdateForDescendants(txiter updateIt, cacheMap& cachedDescendants,
+                              const std::set<uint256>& setExclude, std::set<uint256>& descendants_to_remove,
+                              uint64_t ancestor_size_limit, uint64_t ancestor_count_limit) EXCLUSIVE_LOCKS_REQUIRED(cs);
     /** Update ancestors of hash to add/remove it as a descendant transaction. */
     void UpdateAncestorsOf(bool add, txiter hash, setEntries &setAncestors) EXCLUSIVE_LOCKS_REQUIRED(cs);
     /** Set ancestor state for an entry */

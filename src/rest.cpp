@@ -132,6 +132,27 @@ static ChainstateManager* GetChainman(const CoreContext& context, HTTPRequest* r
     return node_context->chainman.get();
 }
 
+/**
+ * Get the node context LLMQContext.
+ *
+ * @param[in]  req The HTTP request, whose status code will be set if node
+ *                 context LLMQContext is not found.
+ * @returns        Pointer to the LLMQContext or nullptr if none found.
+ */
+static LLMQContext* GetLLMQContext(const CoreContext& context, HTTPRequest* req)
+{
+    auto node_context = GetContext<NodeContext>(context);
+    if (!node_context || !node_context->llmq_ctx) {
+        RESTERR(req, HTTP_INTERNAL_SERVER_ERROR,
+                strprintf("%s:%d (%s)\n"
+                          "Internal bug detected: LLMQ context not found!\n"
+                          "You may report this issue here: %s\n",
+                          __FILE__, __LINE__, __func__, PACKAGE_BUGREPORT));
+        return nullptr;
+    }
+    return node_context->llmq_ctx.get();
+}
+
 static RetFormat ParseDataFormat(std::string& param, const std::string& strReq)
 {
     const std::string::size_type pos = strReq.rfind('.');
@@ -194,7 +215,7 @@ static bool rest_headers(const CoreContext& context,
 
     const auto parsed_count{ToIntegral<size_t>(path[0])};
     if (!parsed_count.has_value() || *parsed_count < 1 || *parsed_count > MAX_REST_HEADERS_RESULTS) {
-        return RESTERR(req, HTTP_BAD_REQUEST, strprintf("Header count out of acceptable range (1-%u): %s",  MAX_REST_HEADERS_RESULTS, path[0]));
+        return RESTERR(req, HTTP_BAD_REQUEST, strprintf("Header count is invalid or out of acceptable range (1-%u): %s", MAX_REST_HEADERS_RESULTS, path[0]));
     }
 
     std::string hashStr = path[1];
@@ -247,9 +268,12 @@ static bool rest_headers(const CoreContext& context,
         return true;
     }
     case RetFormat::JSON: {
+        const LLMQContext* llmq_ctx = GetLLMQContext(context, req);
+        if (!llmq_ctx) return false;
+
         UniValue jsonHeaders(UniValue::VARR);
         for (const CBlockIndex *pindex : headers) {
-            jsonHeaders.push_back(blockheaderToJSON(tip, pindex, *llmq::chainLocksHandler));
+            jsonHeaders.push_back(blockheaderToJSON(tip, pindex, *llmq_ctx->clhandler));
         }
         std::string strJSON = jsonHeaders.write() + "\n";
         req->WriteHeader("Content-Type", "application/json");
@@ -317,7 +341,10 @@ static bool rest_block(const CoreContext& context,
     }
 
     case RetFormat::JSON: {
-        UniValue objBlock = blockToJSON(chainman.m_blockman, block, tip, pblockindex, *llmq::chainLocksHandler, *llmq::quorumInstantSendManager, showTxDetails);
+        const LLMQContext* llmq_ctx = GetLLMQContext(context, req);
+        if (!llmq_ctx) return false;
+
+        UniValue objBlock = blockToJSON(chainman.m_blockman, block, tip, pblockindex, *llmq_ctx->clhandler, *llmq_ctx->isman, showTxDetails);
         std::string strJSON = objBlock.write() + "\n";
         req->WriteHeader("Content-Type", "application/json");
         req->WriteReply(HTTP_OK, strJSON);
@@ -340,11 +367,10 @@ static bool rest_block_notxdetails(const CoreContext& context, HTTPRequest* req,
     return rest_block(context, req, strURIPart, false);
 }
 
-
 static bool rest_filter_header(const CoreContext& context, HTTPRequest* req, const std::string& strURIPart)
 {
-    if (!CheckWarmup(req))
-        return false;
+    if (!CheckWarmup(req)) return false;
+
     std::string param;
     const RetFormat rf = ParseDataFormat(param, strURIPart);
 
@@ -370,10 +396,10 @@ static bool rest_filter_header(const CoreContext& context, HTTPRequest* req, con
 
     const auto parsed_count{ToIntegral<size_t>(uri_parts[1])};
     if (!parsed_count.has_value() || *parsed_count < 1 || *parsed_count > MAX_REST_HEADERS_RESULTS) {
-        return RESTERR(req, HTTP_BAD_REQUEST, strprintf("Header count out of acceptable range (1-%u): %s",  MAX_REST_HEADERS_RESULTS, uri_parts[1]));
+        return RESTERR(req, HTTP_BAD_REQUEST, strprintf("Header count is invalid or out of acceptable range (1-%u): %s", MAX_REST_HEADERS_RESULTS, uri_parts[1]));
     }
 
-    std::vector<const CBlockIndex *> headers;
+    std::vector<const CBlockIndex*> headers;
     headers.reserve(*parsed_count);
     {
         ChainstateManager* maybe_chainman = GetChainman(context, req);
@@ -394,7 +420,7 @@ static bool rest_filter_header(const CoreContext& context, HTTPRequest* req, con
 
     std::vector<uint256> filter_headers;
     filter_headers.reserve(*parsed_count);
-    for (const CBlockIndex *pindex : headers) {
+    for (const CBlockIndex* pindex : headers) {
         uint256 filter_header;
         if (!index->LookupFilterHeader(pindex, filter_header)) {
             std::string errmsg = "Filter not found.";
@@ -412,7 +438,7 @@ static bool rest_filter_header(const CoreContext& context, HTTPRequest* req, con
 
     switch (rf) {
     case RetFormat::BINARY: {
-        CDataStream ssHeader(SER_NETWORK, PROTOCOL_VERSION);
+        CDataStream ssHeader{SER_NETWORK, PROTOCOL_VERSION};
         for (const uint256& header : filter_headers) {
             ssHeader << header;
         }
@@ -423,7 +449,7 @@ static bool rest_filter_header(const CoreContext& context, HTTPRequest* req, con
         return true;
     }
     case RetFormat::HEX: {
-        CDataStream ssHeader(SER_NETWORK, PROTOCOL_VERSION);
+        CDataStream ssHeader{SER_NETWORK, PROTOCOL_VERSION};
         for (const uint256& header : filter_headers) {
             ssHeader << header;
         }
@@ -452,8 +478,8 @@ static bool rest_filter_header(const CoreContext& context, HTTPRequest* req, con
 
 static bool rest_block_filter(const CoreContext& context, HTTPRequest* req, const std::string& strURIPart)
 {
-    if (!CheckWarmup(req))
-        return false;
+    if (!CheckWarmup(req)) return false;
+
     std::string param;
     const RetFormat rf = ParseDataFormat(param, strURIPart);
 
@@ -511,7 +537,7 @@ static bool rest_block_filter(const CoreContext& context, HTTPRequest* req, cons
 
     switch (rf) {
     case RetFormat::BINARY: {
-        CDataStream ssResp(SER_NETWORK, PROTOCOL_VERSION);
+        CDataStream ssResp{SER_NETWORK, PROTOCOL_VERSION};
         ssResp << filter;
 
         std::string binaryResp = ssResp.str();
@@ -520,7 +546,7 @@ static bool rest_block_filter(const CoreContext& context, HTTPRequest* req, cons
         return true;
     }
     case RetFormat::HEX: {
-        CDataStream ssResp(SER_NETWORK, PROTOCOL_VERSION);
+        CDataStream ssResp{SER_NETWORK, PROTOCOL_VERSION};
         ssResp << filter;
 
         std::string strHex = HexStr(ssResp) + "\n";
@@ -580,7 +606,10 @@ static bool rest_mempool_info(const CoreContext& context, HTTPRequest* req, cons
 
     switch (rf) {
     case RetFormat::JSON: {
-        UniValue mempoolInfoObject = MempoolInfoToJSON(*mempool, *llmq::quorumInstantSendManager);
+        const LLMQContext* llmq_ctx = GetLLMQContext(context, req);
+        if (!llmq_ctx) return false;
+
+        UniValue mempoolInfoObject = MempoolInfoToJSON(*mempool, *llmq_ctx->isman);
 
         std::string strJSON = mempoolInfoObject.write() + "\n";
         req->WriteHeader("Content-Type", "application/json");
@@ -603,7 +632,10 @@ static bool rest_mempool_contents(const CoreContext& context, HTTPRequest* req, 
 
     switch (rf) {
     case RetFormat::JSON: {
-        UniValue mempoolObject = MempoolToJSON(*mempool, llmq::quorumInstantSendManager.get(), true);
+        const LLMQContext* llmq_ctx = GetLLMQContext(context, req);
+        if (!llmq_ctx) return false;
+
+        UniValue mempoolObject = MempoolToJSON(*mempool, llmq_ctx->isman.get(), true);
 
         std::string strJSON = mempoolObject.write() + "\n";
         req->WriteHeader("Content-Type", "application/json");
