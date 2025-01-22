@@ -211,7 +211,7 @@ static void Checksum(Span<const uint8_t> addr_pubkey, uint8_t (&checksum)[CHECKS
 
 bool CNetAddr::SetSpecial(const std::string& addr)
 {
-    if (!ValidAsCString(addr)) {
+    if (!ContainsNoNUL(addr)) {
         return false;
     }
 
@@ -235,17 +235,16 @@ bool CNetAddr::SetTor(const std::string& addr)
         return false;
     }
 
-    bool invalid;
-    const auto& input = DecodeBase32(addr.substr(0, addr.size() - suffix_len).c_str(), &invalid);
+    auto input = DecodeBase32(std::string_view{addr}.substr(0, addr.size() - suffix_len));
 
-    if (invalid) {
+    if (!input) {
         return false;
     }
 
-    if (input.size() == torv3::TOTAL_LEN) {
-        Span<const uint8_t> input_pubkey{input.data(), ADDR_TORV3_SIZE};
-        Span<const uint8_t> input_checksum{input.data() + ADDR_TORV3_SIZE, torv3::CHECKSUM_LEN};
-        Span<const uint8_t> input_version{input.data() + ADDR_TORV3_SIZE + torv3::CHECKSUM_LEN, sizeof(torv3::VERSION)};
+    if (input->size() == torv3::TOTAL_LEN) {
+        Span<const uint8_t> input_pubkey{input->data(), ADDR_TORV3_SIZE};
+        Span<const uint8_t> input_checksum{input->data() + ADDR_TORV3_SIZE, torv3::CHECKSUM_LEN};
+        Span<const uint8_t> input_version{input->data() + ADDR_TORV3_SIZE + torv3::CHECKSUM_LEN, sizeof(torv3::VERSION)};
 
         if (input_version != torv3::VERSION) {
             return false;
@@ -281,15 +280,14 @@ bool CNetAddr::SetI2P(const std::string& addr)
     // can decode it.
     const std::string b32_padded = addr.substr(0, b32_len) + "====";
 
-    bool invalid;
-    const auto& address_bytes = DecodeBase32(b32_padded.c_str(), &invalid);
+    auto address_bytes = DecodeBase32(b32_padded);
 
-    if (invalid || address_bytes.size() != ADDR_I2P_SIZE) {
+    if (!address_bytes || address_bytes->size() != ADDR_I2P_SIZE) {
         return false;
     }
 
     m_net = NET_I2P;
-    m_addr.assign(address_bytes.begin(), address_bytes.end());
+    m_addr.assign(address_bytes->begin(), address_bytes->end());
 
     return true;
 }
@@ -732,14 +730,6 @@ std::vector<unsigned char> CNetAddr::GetAddrBytes() const
     return std::vector<unsigned char>(m_addr.begin(), m_addr.end());
 }
 
-uint64_t CNetAddr::GetHash() const
-{
-    uint256 hash = Hash(m_addr);
-    uint64_t nRet;
-    memcpy(&nRet, &hash, sizeof(nRet));
-    return nRet;
-}
-
 // private extensions to enum Network, only returned by GetExtNetwork,
 // and only used in GetReachabilityFrom
 static const int NET_TEREDO = NET_MAX;
@@ -1106,29 +1096,6 @@ std::string CSubNet::ToString() const
 bool CSubNet::IsValid() const
 {
     return valid;
-}
-
-bool CSubNet::SanityCheck() const
-{
-    switch (network.m_net) {
-    case NET_IPV4:
-    case NET_IPV6:
-        break;
-    case NET_ONION:
-    case NET_I2P:
-    case NET_CJDNS:
-        return true;
-    case NET_INTERNAL:
-    case NET_UNROUTABLE:
-    case NET_MAX:
-        return false;
-    }
-
-    for (size_t x = 0; x < network.m_addr.size(); ++x) {
-        if (network.m_addr[x] & ~netmask[x]) return false;
-    }
-
-    return true;
 }
 
 bool operator==(const CSubNet& a, const CSubNet& b)

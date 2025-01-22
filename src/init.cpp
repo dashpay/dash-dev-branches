@@ -66,6 +66,7 @@
 #include <util/moneystr.h>
 #include <util/strencodings.h>
 #include <util/string.h>
+#include <util/syserror.h>
 #include <util/system.h>
 #include <util/thread.h>
 #include <util/threadnames.h>
@@ -165,7 +166,7 @@ static fs::path GetPidFile(const ArgsManager& args)
 #endif
         return true;
     } else {
-        return InitError(strprintf(_("Unable to create the PID file '%s': %s"), fs::PathToString(GetPidFile(args)), std::strerror(errno)));
+        return InitError(strprintf(_("Unable to create the PID file '%s': %s"), fs::PathToString(GetPidFile(args)), SysErrorString(errno)));
     }
 }
 
@@ -566,6 +567,8 @@ void SetupServerArgs(ArgsManager& argsman)
     argsman.AddArg("-txreconciliation", strprintf("Enable transaction reconciliations per BIP 330 (default: %d)", DEFAULT_TXRECONCILIATION_ENABLE), ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::CONNECTION);
     argsman.AddArg("-peertimeout=<n>", strprintf("Specify a p2p connection timeout delay in seconds. After connecting to a peer, wait this amount of time before considering disconnection based on inactivity (minimum: 1, default: %d)", DEFAULT_PEER_CONNECT_TIMEOUT), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-permitbaremultisig", strprintf("Relay non-P2SH multisig (default: %u)", DEFAULT_PERMIT_BAREMULTISIG), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
+    // TODO: remove the sentence "Nodes not using ... incoming connections." once the changes from
+    // https://github.com/bitcoin/bitcoin/pull/23542 have become widespread.
     argsman.AddArg("-port=<port>", strprintf("Listen for connections on <port>. Nodes not using the default ports (default: %u, testnet: %u, regtest: %u) are unlikely to get incoming connections. Not relevant for I2P (see doc/i2p.md).", defaultChainParams->GetDefaultPort(), testnetChainParams->GetDefaultPort(), regtestChainParams->GetDefaultPort()), ArgsManager::ALLOW_ANY | ArgsManager::NETWORK_ONLY, OptionsCategory::CONNECTION);
     argsman.AddArg("-proxy=<ip:port>", "Connect through SOCKS5 proxy, set -noproxy to disable (default: disabled)", ArgsManager::ALLOW_ANY | ArgsManager::DISALLOW_ELISION, OptionsCategory::CONNECTION);
     argsman.AddArg("-proxyrandomize", strprintf("Randomize credentials for every proxy connection. This enables Tor stream isolation (default: %u)", DEFAULT_PROXYRANDOMIZE), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
@@ -1833,48 +1836,48 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
 
         uiInterface.InitMessage(_("Loading block index…").translated);
         const auto load_block_index_start_time{SteadyClock::now()};
-        std::optional<ChainstateLoadingError> rv;
+        std::optional<ChainstateLoadingError> maybe_load_error;
         try {
-            rv = LoadChainstate(fReset,
-                                chainman,
-                                *node.govman,
-                                *node.mn_metaman,
-                                *node.mn_sync,
-                                *node.sporkman,
-                                node.mn_activeman,
-                                node.chain_helper,
-                                node.cpoolman,
-                                node.dmnman,
-                                node.evodb,
-                                node.mnhf_manager,
-                                node.llmq_ctx,
-                                Assert(node.mempool.get()),
-                                fPruneMode,
-                                args.GetBoolArg("-addressindex", DEFAULT_ADDRESSINDEX),
-                                is_governance_enabled,
-                                args.GetBoolArg("-spentindex", DEFAULT_SPENTINDEX),
-                                args.GetBoolArg("-timestampindex", DEFAULT_TIMESTAMPINDEX),
-                                args.GetBoolArg("-txindex", DEFAULT_TXINDEX),
-                                chainparams.GetConsensus(),
-                                chainparams.NetworkIDString(),
-                                fReindexChainState,
-                                cache_sizes.block_tree_db,
-                                cache_sizes.coins_db,
-                                cache_sizes.coins,
-                                /*block_tree_db_in_memory=*/false,
-                                /*coins_db_in_memory=*/false,
-                                ShutdownRequested,
-                                []() {
-                                    uiInterface.ThreadSafeMessageBox(
-                                        _("Error reading from database, shutting down."),
-                                        "", CClientUIInterface::MSG_ERROR);
-                                });
+            maybe_load_error = LoadChainstate(fReset,
+                                              chainman,
+                                              *node.govman,
+                                              *node.mn_metaman,
+                                              *node.mn_sync,
+                                              *node.sporkman,
+                                              node.mn_activeman,
+                                              node.chain_helper,
+                                              node.cpoolman,
+                                              node.dmnman,
+                                              node.evodb,
+                                              node.mnhf_manager,
+                                              node.llmq_ctx,
+                                              Assert(node.mempool.get()),
+                                              fPruneMode,
+                                              args.GetBoolArg("-addressindex", DEFAULT_ADDRESSINDEX),
+                                              is_governance_enabled,
+                                              args.GetBoolArg("-spentindex", DEFAULT_SPENTINDEX),
+                                              args.GetBoolArg("-timestampindex", DEFAULT_TIMESTAMPINDEX),
+                                              args.GetBoolArg("-txindex", DEFAULT_TXINDEX),
+                                              chainparams.GetConsensus(),
+                                              chainparams.NetworkIDString(),
+                                              fReindexChainState,
+                                              cache_sizes.block_tree_db,
+                                              cache_sizes.coins_db,
+                                              cache_sizes.coins,
+                                              /*block_tree_db_in_memory=*/false,
+                                              /*coins_db_in_memory=*/false,
+                                              /*shutdown_requested=*/ShutdownRequested,
+                                              /*coins_error_cb=*/[]() {
+                                                  uiInterface.ThreadSafeMessageBox(
+                                                      _("Error reading from database, shutting down."),
+                                                      "", CClientUIInterface::MSG_ERROR);
+                                              });
         } catch (const std::exception& e) {
             LogPrintf("%s\n", e.what());
-            rv = ChainstateLoadingError::ERROR_GENERIC_BLOCKDB_OPEN_FAILED;
+            maybe_load_error = ChainstateLoadingError::ERROR_GENERIC_BLOCKDB_OPEN_FAILED;
         }
-        if (rv.has_value()) {
-            switch (rv.value()) {
+        if (maybe_load_error.has_value()) {
+            switch (maybe_load_error.value()) {
             case ChainstateLoadingError::ERROR_LOADING_BLOCK_DB:
                 strLoadError = _("Error loading block database");
                 break;
@@ -1930,7 +1933,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
             LogPrintf("%s: timestamp index %s\n", __func__, fTimestampIndex ? "enabled" : "disabled");
             LogPrintf("%s: spent index %s\n", __func__, fSpentIndex ? "enabled" : "disabled");
 
-            std::optional<ChainstateLoadVerifyError> rv2;
+            std::optional<ChainstateLoadVerifyError> maybe_verify_error;
             try {
                 uiInterface.InitMessage(_("Verifying blocks…").translated);
                 auto check_blocks = args.GetArg("-checkblocks", DEFAULT_CHECKBLOCKS);
@@ -1938,23 +1941,23 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
                     LogPrintf("Prune: pruned datadir may not have more than %d blocks; only checking available blocks\n",
                               MIN_BLOCKS_TO_KEEP);
                 }
-                rv2 = VerifyLoadedChainstate(chainman,
-                                             *Assert(node.evodb.get()),
-                                             fReset,
-                                             fReindexChainState,
-                                             chainparams.GetConsensus(),
-                                             check_blocks,
-                                             args.GetArg("-checklevel", DEFAULT_CHECKLEVEL),
-                                             static_cast<int64_t(*)()>(GetTime),
-                                             [](bool bls_state) {
-                                                LogPrintf("%s: bls_legacy_scheme=%d\n", __func__, bls_state);
-                                             });
+                maybe_verify_error = VerifyLoadedChainstate(chainman,
+                                                            *Assert(node.evodb.get()),
+                                                            fReset,
+                                                            fReindexChainState,
+                                                            chainparams.GetConsensus(),
+                                                            check_blocks,
+                                                            args.GetArg("-checklevel", DEFAULT_CHECKLEVEL),
+                                                            /*get_unix_time_seconds=*/static_cast<int64_t(*)()>(GetTime),
+                                                            [](bool bls_state) {
+                                                                LogPrintf("%s: bls_legacy_scheme=%d\n", __func__, bls_state);
+                                                            });
             } catch (const std::exception& e) {
                 LogPrintf("%s\n", e.what());
-                rv2 = ChainstateLoadVerifyError::ERROR_GENERIC_FAILURE;
+                maybe_verify_error = ChainstateLoadVerifyError::ERROR_GENERIC_FAILURE;
             }
-            if (rv2.has_value()) {
-                switch (rv2.value()) {
+            if (maybe_verify_error.has_value()) {
+                switch (maybe_verify_error.value()) {
                 case ChainstateLoadVerifyError::ERROR_BLOCK_FROM_FUTURE:
                     strLoadError = _("The block database contains a block which appears to be from the future. "
                                      "This may be due to your computer's date and time being set incorrectly. "
@@ -2270,6 +2273,14 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     const uint16_t default_bind_port =
         static_cast<uint16_t>(args.GetArg("-port", Params().GetDefaultPort()));
 
+    const auto BadPortWarning = [](const char* prefix, uint16_t port) {
+        return strprintf(_("%s request to listen on port %u. This port is considered \"bad\" and "
+                           "thus it is unlikely that any Dash Core peers connect to it. See "
+                           "doc/p2p-bad-ports.md for details and a full list."),
+                         prefix,
+                         port);
+    };
+
     for (const std::string& bind_arg : args.GetArgs("-bind")) {
         std::optional<CService> bind_addr;
         const size_t index = bind_arg.rfind('=');
@@ -2277,6 +2288,9 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
             bind_addr = Lookup(bind_arg, default_bind_port, /*fAllowLookup=*/false);
             if (bind_addr.has_value()) {
                 connOptions.vBinds.push_back(bind_addr.value());
+                if (IsBadPort(bind_addr.value().GetPort())) {
+                    InitWarning(BadPortWarning("-bind", bind_addr.value().GetPort()));
+                }
                 continue;
             }
         } else {
@@ -2303,6 +2317,15 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     // If the user did not specify -bind= or -whitebind= then we bind
     // on any address - 0.0.0.0 (IPv4) and :: (IPv6).
     connOptions.bind_on_any = args.GetArgs("-bind").empty() && args.GetArgs("-whitebind").empty();
+
+    // Emit a warning if a bad port is given to -port= but only if -bind and -whitebind are not
+    // given, because if they are, then -port= is ignored.
+    if (connOptions.bind_on_any && args.IsArgSet("-port")) {
+        const uint16_t port_arg = args.GetArg("-port", 0);
+        if (IsBadPort(port_arg)) {
+            InitWarning(BadPortWarning("-port", port_arg));
+        }
+    }
 
     CService onion_service_target;
     if (!connOptions.onion_binds.empty()) {

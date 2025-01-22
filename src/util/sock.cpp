@@ -7,6 +7,7 @@
 #include <threadinterrupt.h>
 #include <tinyformat.h>
 #include <util/sock.h>
+#include <util/syserror.h>
 #include <util/system.h>
 #include <util/time.h>
 
@@ -125,6 +126,34 @@ int Sock::GetSockName(sockaddr* name, socklen_t* name_len) const
     return getsockname(m_socket, name, name_len);
 }
 
+bool Sock::SetNonBlocking() const
+{
+#ifdef WIN32
+    u_long on{1};
+    if (ioctlsocket(m_socket, FIONBIO, &on) == SOCKET_ERROR) {
+        return false;
+    }
+#else
+    const int flags{fcntl(m_socket, F_GETFL, 0)};
+    if (flags == SOCKET_ERROR) {
+        return false;
+    }
+    if (fcntl(m_socket, F_SETFL, flags | O_NONBLOCK) == SOCKET_ERROR) {
+        return false;
+    }
+#endif
+    return true;
+}
+
+bool Sock::IsSelectable() const
+{
+#if defined(USE_POLL) || defined(WIN32)
+    return true;
+#else
+    return m_socket < FD_SETSIZE;
+#endif
+}
+
 bool Sock::Wait(std::chrono::milliseconds timeout, Event requested, Event* occurred) const
 {
 #ifdef USE_POLL
@@ -154,7 +183,7 @@ bool Sock::Wait(std::chrono::milliseconds timeout, Event requested, Event* occur
 
     return true;
 #else
-    if (!IsSelectableSocket(m_socket)) {
+    if (!IsSelectable()) {
         return false;
     }
 
@@ -359,19 +388,8 @@ std::string NetworkErrorString(int err)
 #else
 std::string NetworkErrorString(int err)
 {
-    char buf[256];
-    buf[0] = 0;
-    /* Too bad there are two incompatible implementations of the
-     * thread-safe strerror. */
-    const char *s;
-#ifdef STRERROR_R_CHAR_P /* GNU variant can return a pointer outside the passed buffer */
-    s = strerror_r(err, buf, sizeof(buf));
-#else /* POSIX variant always returns message in buffer */
-    s = buf;
-    if (strerror_r(err, buf, sizeof(buf)))
-        buf[0] = 0;
-#endif
-    return strprintf("%s (%d)", s, err);
+    // On BSD sockets implementations, NetworkErrorString is the same as SysErrorString.
+    return SysErrorString(err);
 }
 #endif
 
