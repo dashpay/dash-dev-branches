@@ -11,7 +11,7 @@
 #include <key.h>
 #include <util/system.h>
 #include <node/caches.h>
-#include <node/context.h>
+#include <node/context.h> // IWYU pragma: export
 #include <pubkey.h>
 #include <random.h>
 #include <txmempool.h>
@@ -90,10 +90,6 @@ void DashChainstateSetup(ChainstateManager& chainman,
                          bool fReindexChainState,
                          const Consensus::Params& consensus_params);
 void DashChainstateSetupClose(NodeContext& node);
-
-/** Initialize Dash-specific components after chainstate initialization */
-void DashPostChainstateSetup(NodeContext& node);
-void DashPostChainstateSetupClose(NodeContext& node);
 
 /** Basic testing setup.
  * This just configures logging, data dir and chain parameters.

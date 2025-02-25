@@ -13,6 +13,7 @@
 #include <fs.h>
 #include <init.h>
 #include <interfaces/handler.h>
+#include <interfaces/init.h>
 #include <interfaces/node.h>
 #include <net.h>
 #include <node/context.h>
@@ -57,6 +58,7 @@
 #include <QThread>
 #include <QTimer>
 #include <QTranslator>
+#include <QWindow>
 
 #if defined(QT_STATIC)
 #include <QtPlugin>
@@ -68,6 +70,8 @@ Q_IMPORT_PLUGIN(QWindowsVistaStylePlugin);
 #elif defined(QT_QPA_PLATFORM_COCOA)
 Q_IMPORT_PLUGIN(QCocoaIntegrationPlugin);
 Q_IMPORT_PLUGIN(QMacStylePlugin);
+#elif defined(QT_QPA_PLATFORM_ANDROID)
+Q_IMPORT_PLUGIN(QAndroidPlatformIntegrationPlugin)
 #endif
 #endif
 
@@ -253,6 +257,8 @@ void BitcoinApplication::createOptionsModel(bool resetSettings)
 void BitcoinApplication::createWindow(const NetworkStyle *networkStyle)
 {
     window = new BitcoinGUI(node(), networkStyle, nullptr);
+    connect(window, &BitcoinGUI::quitRequested, this, &BitcoinApplication::requestShutdown);
+
     pollShutdownTimer = new QTimer(window);
     connect(pollShutdownTimer, &QTimer::timeout, window, &BitcoinGUI::detectShutdown);
 }
@@ -267,10 +273,10 @@ void BitcoinApplication::createSplashScreen(const NetworkStyle *networkStyle)
     connect(this, &BitcoinApplication::requestedShutdown, m_splash, &QWidget::close);
 }
 
-void BitcoinApplication::setNode(interfaces::Node& node)
+void BitcoinApplication::createNode(interfaces::Init& init)
 {
     assert(!m_node);
-    m_node = &node;
+    m_node = init.makeNode();
     if (optionsModel) optionsModel->setNode(*m_node);
     if (m_splash) m_splash->setNode(*m_node);
 }
@@ -287,7 +293,7 @@ void BitcoinApplication::startThread()
 
     /*  communication to and from thread */
     connect(&m_executor.value(), &InitExecutor::initializeResult, this, &BitcoinApplication::initializeResult);
-    connect(&m_executor.value(), &InitExecutor::shutdownResult, this, &BitcoinApplication::shutdownResult);
+    connect(&m_executor.value(), &InitExecutor::shutdownResult, this, &QCoreApplication::quit);
     connect(&m_executor.value(), &InitExecutor::runawayException, this, &BitcoinApplication::handleRunawayException);
     connect(this, &BitcoinApplication::requestedInitialize, &m_executor.value(), &InitExecutor::initialize);
     connect(this, &BitcoinApplication::requestedShutdown, &m_executor.value(), &InitExecutor::shutdown);
@@ -318,13 +324,17 @@ void BitcoinApplication::requestInitialize()
 
 void BitcoinApplication::requestShutdown()
 {
+    for (const auto w : QGuiApplication::topLevelWindows()) {
+        w->hide();
+    }
+
     // Show a simple window indicating shutdown status
     // Do this first as some of the steps may take some time below,
     // for example the RPC console may still be executing a command.
     shutdownWindow.reset(ShutdownWindow::showShutdownWindow(window));
 
     qDebug() << __func__ << ": Requesting shutdown";
-    window->hide();
+
     // Must disconnect node signals otherwise current thread can deadlock since
     // no event loop is running.
     window->unsubscribeFromCoreSignals();
@@ -404,13 +414,8 @@ void BitcoinApplication::initializeResult(bool success, interfaces::BlockAndHead
         pollShutdownTimer->start(SHUTDOWN_POLLING_DELAY);
     } else {
         Q_EMIT splashFinished(); // Make sure splash screen doesn't stick around during shutdown
-        quit(); // Exit first main loop invocation
+        requestShutdown();
     }
-}
-
-void BitcoinApplication::shutdownResult()
-{
-    quit(); // Exit second main loop invocation after shutdown finished
 }
 
 void BitcoinApplication::handleRunawayException(const QString &message)
@@ -476,11 +481,13 @@ int GuiMain(int argc, char* argv[])
     util::WinCmdLineArgs winArgs;
     std::tie(argc, argv) = winArgs.get();
 #endif
-    SetupEnvironment();
-    util::ThreadSetInternalName("main");
 
     NodeContext node_context;
-    std::unique_ptr<interfaces::Node> node = interfaces::MakeNode(&node_context);
+    int unused_exit_status;
+    std::unique_ptr<interfaces::Init> init = interfaces::MakeNodeInit(node_context, argc, argv, unused_exit_status);
+
+    SetupEnvironment();
+    util::ThreadSetInternalName("main");
 
     // Subscribe to global signals from core
     boost::signals2::scoped_connection handler_message_box = ::uiInterface.ThreadSafeMessageBox_connect(noui_ThreadSafeMessageBox);
@@ -502,7 +509,6 @@ int GuiMain(int argc, char* argv[])
 
     /// 2. Parse command-line options. We do this after qt in order to show an error if there are problems parsing these
     // Command-line options take precedence:
-    node_context.args = &gArgs;
     SetupServerArgs(gArgs);
     SetupUIArgs(gArgs);
     std::string error;
@@ -530,7 +536,7 @@ int GuiMain(int argc, char* argv[])
     if (gArgs.IsArgSet("-printcrashinfo")) {
         auto crashInfo = GetCrashInfoStrFromSerializedStr(gArgs.GetArg("-printcrashinfo", ""));
         std::cout << crashInfo << std::endl;
-        QMessageBox::critical(0, PACKAGE_NAME, QString::fromStdString(crashInfo));
+        QMessageBox::critical(nullptr, PACKAGE_NAME, QString::fromStdString(crashInfo));
         return EXIT_SUCCESS;
     }
 
@@ -628,7 +634,7 @@ int GuiMain(int argc, char* argv[])
     GUIUtil::LogQtInfo();
     // Load custom application fonts and setup font management
     if (!GUIUtil::loadFonts()) {
-        QMessageBox::critical(0, PACKAGE_NAME,
+        QMessageBox::critical(nullptr, PACKAGE_NAME,
                               QObject::tr("Error: Failed to load application fonts."));
         return EXIT_FAILURE;
     }
@@ -641,7 +647,7 @@ int GuiMain(int argc, char* argv[])
         try {
             family = GUIUtil::fontFamilyFromString(strFamily);
         } catch (const std::exception& e) {
-            QMessageBox::critical(0, PACKAGE_NAME,
+            QMessageBox::critical(nullptr, PACKAGE_NAME,
                                   QObject::tr("Error: Specified font-family invalid. Valid values: %1.").arg("SystemDefault, Montserrat"));
             return EXIT_FAILURE;
         }
@@ -650,8 +656,8 @@ int GuiMain(int argc, char* argv[])
     // Validate/set normal font weight
     if (gArgs.IsArgSet("-font-weight-normal")) {
         QFont::Weight weight;
-        if (!GUIUtil::weightFromArg(gArgs.GetArg("-font-weight-normal", GUIUtil::weightToArg(GUIUtil::getFontWeightNormal())), weight)) {
-            QMessageBox::critical(0, PACKAGE_NAME,
+        if (!GUIUtil::weightFromArg(gArgs.GetIntArg("-font-weight-normal", GUIUtil::weightToArg(GUIUtil::getFontWeightNormal())), weight)) {
+            QMessageBox::critical(nullptr, PACKAGE_NAME,
                                   QObject::tr("Error: Specified font-weight-normal invalid. Valid range %1 to %2.").arg(0).arg(8));
             return EXIT_FAILURE;
         }
@@ -660,8 +666,8 @@ int GuiMain(int argc, char* argv[])
     // Validate/set bold font weight
     if (gArgs.IsArgSet("-font-weight-bold")) {
         QFont::Weight weight;
-        if (!GUIUtil::weightFromArg(gArgs.GetArg("-font-weight-bold", GUIUtil::weightToArg(GUIUtil::getFontWeightBold())), weight)) {
-            QMessageBox::critical(0, PACKAGE_NAME,
+        if (!GUIUtil::weightFromArg(gArgs.GetIntArg("-font-weight-bold", GUIUtil::weightToArg(GUIUtil::getFontWeightBold())), weight)) {
+            QMessageBox::critical(nullptr, PACKAGE_NAME,
                                   QObject::tr("Error: Specified font-weight-bold invalid. Valid range %1 to %2.").arg(0).arg(8));
             return EXIT_FAILURE;
         }
@@ -670,9 +676,9 @@ int GuiMain(int argc, char* argv[])
     // Validate/set font scale
     if (gArgs.IsArgSet("-font-scale")) {
         const int nScaleMin = -100, nScaleMax = 100;
-        int nScale = gArgs.GetArg("-font-scale", GUIUtil::getFontScale());
+        int nScale = gArgs.GetIntArg("-font-scale", GUIUtil::getFontScale());
         if (nScale < nScaleMin || nScale > nScaleMax) {
-            QMessageBox::critical(0, PACKAGE_NAME,
+            QMessageBox::critical(nullptr, PACKAGE_NAME,
                                   QObject::tr("Error: Specified font-scale invalid. Valid range %1 to %2.").arg(nScaleMin).arg(nScaleMax));
             return EXIT_FAILURE;
         }
@@ -686,7 +692,7 @@ int GuiMain(int argc, char* argv[])
         QString strFile;
 
         if (!fs::is_directory(customDir)) {
-            QMessageBox::critical(0, PACKAGE_NAME,
+            QMessageBox::critical(nullptr, PACKAGE_NAME,
                                   QObject::tr("Error: Invalid -custom-css-dir path.") + "\n\n" + strCustomDir);
             return EXIT_FAILURE;
         }
@@ -706,7 +712,7 @@ int GuiMain(int argc, char* argv[])
             for (const auto& strMissingFile : vecRequiredFiles) {
                 strMissingFiles += strMissingFile + "\n";
             }
-            QMessageBox::critical(0, PACKAGE_NAME,
+            QMessageBox::critical(nullptr, PACKAGE_NAME,
                                   QObject::tr("Error: %1 CSS file(s) missing in -custom-css-dir path.").arg(vecRequiredFiles.size()) + "\n\n" + strMissingFiles);
             return EXIT_FAILURE;
         }
@@ -715,7 +721,7 @@ int GuiMain(int argc, char* argv[])
     }
     // Validate -debug-ui
     if (gArgs.GetBoolArg("-debug-ui", false)) {
-        QMessageBox::warning(0, PACKAGE_NAME,
+        QMessageBox::warning(nullptr, PACKAGE_NAME,
                                 "Warning: UI debug mode (-debug-ui) enabled" + QString(gArgs.IsArgSet("-custom-css-dir") ? "." : " without a custom css directory set with -custom-css-dir."));
     }
 
@@ -727,7 +733,7 @@ int GuiMain(int argc, char* argv[])
     if (gArgs.GetBoolArg("-splash", DEFAULT_SPLASHSCREEN) && !gArgs.GetBoolArg("-min", false))
         app.createSplashScreen(networkStyle.data());
 
-    app.setNode(*node);
+    app.createNode(*init);
 
     int rv = EXIT_SUCCESS;
     try
@@ -741,8 +747,6 @@ int GuiMain(int argc, char* argv[])
 #if defined(Q_OS_WIN)
             WinShutdownMonitor::registerShutdownBlockReason(QObject::tr("%1 didn't yet exit safely…").arg(PACKAGE_NAME), (HWND)app.getMainWinId());
 #endif
-            app.exec();
-            app.requestShutdown();
             app.exec();
             rv = app.getReturnValue();
         } else {

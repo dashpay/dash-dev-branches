@@ -42,7 +42,7 @@
 #include <txmempool.h>
 #include <uint256.h>
 #include <undo.h>
-#include <util/check.h> // For NDEBUG compile time check
+#include <util/check.h>
 #include <util/hasher.h>
 #include <util/strencodings.h>
 #include <util/trace.h>
@@ -357,8 +357,8 @@ void CChainState::MaybeUpdateMempoolForReorg(
     // previously-confirmed transactions back to the mempool.
     // UpdateTransactionsFromBlock finds descendants of any transactions in
     // the disconnectpool that were added back and cleans up the mempool state.
-    const uint64_t ancestor_count_limit = gArgs.GetArg("-limitancestorcount", DEFAULT_ANCESTOR_LIMIT);
-    const uint64_t ancestor_size_limit = gArgs.GetArg("-limitancestorsize", DEFAULT_ANCESTOR_SIZE_LIMIT) * 1000;
+    const uint64_t ancestor_count_limit = gArgs.GetIntArg("-limitancestorcount", DEFAULT_ANCESTOR_LIMIT);
+    const uint64_t ancestor_size_limit = gArgs.GetIntArg("-limitancestorsize", DEFAULT_ANCESTOR_SIZE_LIMIT) * 1000;
     m_mempool->UpdateTransactionsFromBlock(vHashUpdate, ancestor_size_limit, ancestor_count_limit);
 
     // Predicate to use for filtering transactions in removeForReorg.
@@ -414,8 +414,8 @@ void CChainState::MaybeUpdateMempoolForReorg(
     LimitMempoolSize(
         *m_mempool,
         this->CoinsTip(),
-        gArgs.GetArg("-maxmempool", DEFAULT_MAX_MEMPOOL_SIZE) * 1000000,
-        std::chrono::hours{gArgs.GetArg("-mempoolexpiry", DEFAULT_MEMPOOL_EXPIRY)});
+        gArgs.GetIntArg("-maxmempool", DEFAULT_MAX_MEMPOOL_SIZE) * 1000000,
+        std::chrono::hours{gArgs.GetIntArg("-mempoolexpiry", DEFAULT_MEMPOOL_EXPIRY)});
 }
 
 /**
@@ -457,7 +457,7 @@ static bool CheckInputsFromMempoolAndCache(const CTransaction& tx, TxValidationS
     }
 
     // Call CheckInputScripts() to cache signature and script validity against current tip consensus rules.
-    return CheckInputScripts(tx, state, view, flags, /* cacheSigStore = */ true, /* cacheFullSciptStore = */ true, txdata);
+    return CheckInputScripts(tx, state, view, flags, /* cacheSigStore = */ true, /* cacheFullScriptStore = */ true, txdata);
 }
 
 namespace {
@@ -471,10 +471,10 @@ public:
         m_viewmempool(&active_chainstate.CoinsTip(), m_pool),
         m_active_chainstate(active_chainstate),
         m_chain_helper(active_chainstate.ChainHelper()),
-        m_limit_ancestors(gArgs.GetArg("-limitancestorcount", DEFAULT_ANCESTOR_LIMIT)),
-        m_limit_ancestor_size(gArgs.GetArg("-limitancestorsize", DEFAULT_ANCESTOR_SIZE_LIMIT)*1000),
-        m_limit_descendants(gArgs.GetArg("-limitdescendantcount", DEFAULT_DESCENDANT_LIMIT)),
-        m_limit_descendant_size(gArgs.GetArg("-limitdescendantsize", DEFAULT_DESCENDANT_SIZE_LIMIT)*1000) {
+        m_limit_ancestors(gArgs.GetIntArg("-limitancestorcount", DEFAULT_ANCESTOR_LIMIT)),
+        m_limit_ancestor_size(gArgs.GetIntArg("-limitancestorsize", DEFAULT_ANCESTOR_SIZE_LIMIT)*1000),
+        m_limit_descendants(gArgs.GetIntArg("-limitdescendantcount", DEFAULT_DESCENDANT_LIMIT)),
+        m_limit_descendant_size(gArgs.GetIntArg("-limitdescendantsize", DEFAULT_DESCENDANT_SIZE_LIMIT)*1000) {
     }
 
     // We put the arguments we're handed into a struct, so we can pass them
@@ -637,7 +637,7 @@ private:
     {
         AssertLockHeld(::cs_main);
         AssertLockHeld(m_pool.cs);
-        CAmount mempoolRejectFee = m_pool.GetMinFee(gArgs.GetArg("-maxmempool", DEFAULT_MAX_MEMPOOL_SIZE) * 1000000).GetFee(package_size);
+        CAmount mempoolRejectFee = m_pool.GetMinFee(gArgs.GetIntArg("-maxmempool", DEFAULT_MAX_MEMPOOL_SIZE) * 1000000).GetFee(package_size);
         if (mempoolRejectFee > 0 && package_fee < mempoolRejectFee) {
             return state.Invalid(TxValidationResult::TX_MEMPOOL_POLICY, "mempool min fee not met", strprintf("%d < %d", package_fee, mempoolRejectFee));
         }
@@ -992,7 +992,7 @@ bool MemPoolAccept::Finalize(const ATMPArgs& args, Workspace& ws)
     // in the package. LimitMempoolSize() should be called at the very end to make sure the mempool
     // is still within limits and package submission happens atomically.
     if (!args.m_package_submission && !bypass_limits) {
-        LimitMempoolSize(m_pool, m_active_chainstate.CoinsTip(), gArgs.GetArg("-maxmempool", DEFAULT_MAX_MEMPOOL_SIZE) * 1000000, std::chrono::hours{gArgs.GetArg("-mempoolexpiry", DEFAULT_MEMPOOL_EXPIRY)});
+        LimitMempoolSize(m_pool, m_active_chainstate.CoinsTip(), gArgs.GetIntArg("-maxmempool", DEFAULT_MAX_MEMPOOL_SIZE) * 1000000, std::chrono::hours{gArgs.GetIntArg("-mempoolexpiry", DEFAULT_MEMPOOL_EXPIRY)});
         if (!m_pool.exists(hash))
             return state.Invalid(TxValidationResult::TX_MEMPOOL_POLICY, "mempool full");
     }
@@ -1018,6 +1018,7 @@ bool MemPoolAccept::SubmitPackage(const ATMPArgs& args, std::vector<Workspace>& 
         if (!ConsensusScriptChecks(args, ws)) {
             results.emplace(ws.m_ptx->GetHash(), MempoolAcceptResult::Failure(ws.m_state));
             // Since PolicyScriptChecks() passed, this should never fail.
+            Assume(false);
             all_submitted = false;
             package_state.Invalid(PackageValidationResult::PCKG_MEMPOOL_ERROR,
                                   strprintf("BUG! PolicyScriptChecks succeeded but ConsensusScriptChecks failed: %s",
@@ -1032,6 +1033,7 @@ bool MemPoolAccept::SubmitPackage(const ATMPArgs& args, std::vector<Workspace>& 
                                              m_limit_descendant_size, unused_err_string)) {
             results.emplace(ws.m_ptx->GetHash(), MempoolAcceptResult::Failure(ws.m_state));
             // Since PreChecks() and PackageMempoolChecks() both enforce limits, this should never fail.
+            Assume(false);
             all_submitted = false;
             package_state.Invalid(PackageValidationResult::PCKG_MEMPOOL_ERROR,
                                   strprintf("BUG! Mempool ancestors or descendants were underestimated: %s",
@@ -1045,6 +1047,7 @@ bool MemPoolAccept::SubmitPackage(const ATMPArgs& args, std::vector<Workspace>& 
         if (!Finalize(args, ws)) {
             results.emplace(ws.m_ptx->GetHash(), MempoolAcceptResult::Failure(ws.m_state));
             // Since LimitMempoolSize() won't be called, this should never fail.
+            Assume(false);
             all_submitted = false;
             package_state.Invalid(PackageValidationResult::PCKG_MEMPOOL_ERROR,
                                   strprintf("BUG! Adding to mempool failed: %s", ws.m_ptx->GetHash().ToString()));
@@ -1054,8 +1057,8 @@ bool MemPoolAccept::SubmitPackage(const ATMPArgs& args, std::vector<Workspace>& 
     // It may or may not be the case that all the transactions made it into the mempool. Regardless,
     // make sure we haven't exceeded max mempool size.
     LimitMempoolSize(m_pool, m_active_chainstate.CoinsTip(),
-                     gArgs.GetArg("-maxmempool", DEFAULT_MAX_MEMPOOL_SIZE) * 1000000,
-                     std::chrono::hours{gArgs.GetArg("-mempoolexpiry", DEFAULT_MEMPOOL_EXPIRY)});
+                     gArgs.GetIntArg("-maxmempool", DEFAULT_MAX_MEMPOOL_SIZE) * 1000000,
+                     std::chrono::hours{gArgs.GetIntArg("-mempoolexpiry", DEFAULT_MEMPOOL_EXPIRY)});
 
     // Find the wtxids of the transactions that made it into the mempool. Allow partial submission,
     // but don't report success unless they all made it into the mempool.
@@ -1707,7 +1710,7 @@ void InitScriptExecutionCache() {
     g_scriptExecutionCacheHasher.Write(nonce.begin(), 32);
     // nMaxCacheSize is unsigned. If -maxsigcachesize is set to zero,
     // setup_bytes creates the minimum possible cache (2 elements).
-    size_t nMaxCacheSize = std::min(std::max((int64_t)0, gArgs.GetArg("-maxsigcachesize", DEFAULT_MAX_SIG_CACHE_SIZE) / 2), MAX_MAX_SIG_CACHE_SIZE) * ((size_t) 1 << 20);
+    size_t nMaxCacheSize = std::min(std::max((int64_t)0, gArgs.GetIntArg("-maxsigcachesize", DEFAULT_MAX_SIG_CACHE_SIZE) / 2), MAX_MAX_SIG_CACHE_SIZE) * ((size_t) 1 << 20);
     size_t nElems = g_scriptExecutionCache.setup_bytes(nMaxCacheSize);
     LogPrintf("Using %zu MiB out of %zu/2 requested for script execution cache, able to store %zu elements\n",
             (nElems*sizeof(uint256)) >>20, (nMaxCacheSize*2)>>20, nElems);
@@ -2598,7 +2601,7 @@ CoinsCacheSizeState CChainState::GetCoinsCacheSizeState()
     AssertLockHeld(::cs_main);
     return this->GetCoinsCacheSizeState(
         m_coinstip_cache_size_bytes,
-        gArgs.GetArg("-maxmempool", DEFAULT_MAX_MEMPOOL_SIZE) * 1000000);
+        gArgs.GetIntArg("-maxmempool", DEFAULT_MAX_MEMPOOL_SIZE) * 1000000);
 }
 
 CoinsCacheSizeState CChainState::GetCoinsCacheSizeState(
@@ -3307,7 +3310,7 @@ bool CChainState::ActivateBestChain(BlockValidationState& state, std::shared_ptr
 
     CBlockIndex *pindexMostWork = nullptr;
     CBlockIndex *pindexNewTip = nullptr;
-    int nStopAtHeight = gArgs.GetArg("-stopatheight", DEFAULT_STOPATHEIGHT);
+    int nStopAtHeight = gArgs.GetIntArg("-stopatheight", DEFAULT_STOPATHEIGHT);
     do {
         // Block until the validation queue drains. This should largely
         // never happen in normal operation, however may happen during
@@ -4060,14 +4063,14 @@ bool ChainstateManager::AcceptBlockHeader(const CBlockHeader& block, BlockValida
         CBlockIndex* pindexPrev = nullptr;
         BlockMap::iterator mi{m_blockman.m_block_index.find(block.hashPrevBlock)};
         if (mi == m_blockman.m_block_index.end()) {
-            LogPrint(BCLog::VALIDATION, "%s: %s prev block not found\n", __func__, hash.ToString());
+            LogPrint(BCLog::VALIDATION, "header %s has prev block not found: %s\n", hash.ToString(), block.hashPrevBlock.ToString());
             return state.Invalid(BlockValidationResult::BLOCK_MISSING_PREV, "prev-blk-not-found");
         }
         pindexPrev = &((*mi).second);
         assert(pindexPrev);
 
         if (pindexPrev->nStatus & BLOCK_FAILED_MASK) {
-            LogPrint(BCLog::VALIDATION, "%s: %s prev block invalid\n", __func__, hash.ToString());
+            LogPrint(BCLog::VALIDATION, "header %s has prev block invalid: %s\n", hash.ToString(), block.hashPrevBlock.ToString());
             return state.Invalid(BlockValidationResult::BLOCK_INVALID_PREV, "bad-prevblk");
         }
 
@@ -4115,7 +4118,7 @@ bool ChainstateManager::AcceptBlockHeader(const CBlockHeader& block, BlockValida
                         m_blockman.m_dirty_blockindex.insert(invalid_walk);
                         invalid_walk = invalid_walk->pprev;
                     }
-                    LogPrint(BCLog::VALIDATION, "%s: %s prev block invalid\n", __func__, hash.ToString());
+                    LogPrint(BCLog::VALIDATION, "header %s has prev block invalid: %s\n", hash.ToString(), block.hashPrevBlock.ToString());
                     return state.Invalid(BlockValidationResult::BLOCK_INVALID_PREV, "bad-prevblk");
                 }
             }
@@ -4453,7 +4456,8 @@ bool CVerifyDB::VerifyDB(
     int nGoodTransactions = 0;
     BlockValidationState state;
     int reportDone = 0;
-    LogPrintf("[0%%]..."); /* Continued */
+    bool skipped_l3_checks{false};
+    LogPrintf("Verification progress: 0%%\n");
 
     const bool is_snapshot_cs{chainstate.m_from_snapshot_blockhash};
 
@@ -4461,7 +4465,7 @@ bool CVerifyDB::VerifyDB(
         const int percentageDone = std::max(1, std::min(99, (int)(((double)(chainstate.m_chain.Height() - pindex->nHeight)) / (double)nCheckDepth * (nCheckLevel >= 4 ? 50 : 100))));
         if (reportDone < percentageDone / 10) {
             // report every 10% step
-            LogPrintf("[%d%%]...", percentageDone); /* Continued */
+            LogPrintf("Verification progress: %d%%\n", percentageDone);
             reportDone = percentageDone / 10;
         }
         uiInterface.ShowProgress(_("Verifying blocks…").translated, percentageDone, false);
@@ -4496,17 +4500,21 @@ bool CVerifyDB::VerifyDB(
         // check level 3: check for inconsistencies during memory-only disconnect of tip blocks
         size_t curr_coins_usage = coins.DynamicMemoryUsage() + chainstate.CoinsTip().DynamicMemoryUsage();
 
-        if (nCheckLevel >= 3 && curr_coins_usage <= chainstate.m_coinstip_cache_size_bytes) {
-            assert(coins.GetBestBlock() == pindex->GetBlockHash());
-            DisconnectResult res = chainstate.DisconnectBlock(block, pindex, coins);
-            if (res == DISCONNECT_FAILED) {
-                return error("VerifyDB(): *** irrecoverable inconsistency in block data at %d, hash=%s", pindex->nHeight, pindex->GetBlockHash().ToString());
-            }
-            if (res == DISCONNECT_UNCLEAN) {
-                nGoodTransactions = 0;
-                pindexFailure = pindex;
+        if (nCheckLevel >= 3) {
+            if (curr_coins_usage <= chainstate.m_coinstip_cache_size_bytes) {
+                assert(coins.GetBestBlock() == pindex->GetBlockHash());
+                DisconnectResult res = chainstate.DisconnectBlock(block, pindex, coins);
+                if (res == DISCONNECT_FAILED) {
+                    return error("VerifyDB(): *** irrecoverable inconsistency in block data at %d, hash=%s", pindex->nHeight, pindex->GetBlockHash().ToString());
+                }
+                if (res == DISCONNECT_UNCLEAN) {
+                    nGoodTransactions = 0;
+                    pindexFailure = pindex;
+                } else {
+                    nGoodTransactions += block.vtx.size();
+                }
             } else {
-                nGoodTransactions += block.vtx.size();
+                skipped_l3_checks = true;
             }
         }
         if (ShutdownRequested()) return true;
@@ -4514,17 +4522,19 @@ bool CVerifyDB::VerifyDB(
     if (pindexFailure) {
         return error("VerifyDB(): *** coin database inconsistencies found (last %i blocks, %i good transactions before that)\n", chainstate.m_chain.Height() - pindexFailure->nHeight + 1, nGoodTransactions);
     }
-
+    if (skipped_l3_checks) {
+        LogPrintf("Skipped verification of level >=3 (insufficient database cache size). Consider increasing -dbcache.\n");
+    }
     // store block count as we move pindex at check level >= 4
     int block_count = chainstate.m_chain.Height() - pindex->nHeight;
 
     // check level 4: try reconnecting blocks
-    if (nCheckLevel >= 4) {
+    if (nCheckLevel >= 4 && !skipped_l3_checks) {
         while (pindex != chainstate.m_chain.Tip()) {
             const int percentageDone = std::max(1, std::min(99, 100 - (int)(((double)(chainstate.m_chain.Height() - pindex->nHeight)) / (double)nCheckDepth * 50)));
             if (reportDone < percentageDone / 10) {
                 // report every 10% step
-                LogPrintf("[%d%%]...", percentageDone); /* Continued */
+                LogPrintf("Verification progress: %d%%\n", percentageDone);
                 reportDone = percentageDone / 10;
             }
             uiInterface.ShowProgress(_("Verifying blocks…").translated, percentageDone, false);
@@ -4538,8 +4548,7 @@ bool CVerifyDB::VerifyDB(
         }
     }
 
-    LogPrintf("[DONE].\n");
-    LogPrintf("No coin database inconsistencies in last %i blocks (%i transactions)\n", block_count, nGoodTransactions);
+    LogPrintf("Verification: No coin database inconsistencies in last %i blocks (%i transactions)\n", block_count, nGoodTransactions);
 
     return true;
 }
@@ -5309,7 +5318,7 @@ static const uint64_t MEMPOOL_DUMP_VERSION = 1;
 
 bool LoadMempool(CTxMemPool& pool, CChainState& active_chainstate, FopenFn mockable_fopen_function)
 {
-    int64_t nExpiryTimeout = gArgs.GetArg("-mempoolexpiry", DEFAULT_MEMPOOL_EXPIRY) * 60 * 60;
+    int64_t nExpiryTimeout = gArgs.GetIntArg("-mempoolexpiry", DEFAULT_MEMPOOL_EXPIRY) * 60 * 60;
     FILE* filestr{mockable_fopen_function(gArgs.GetDataDirNet() / "mempool.dat", "rb")};
     CAutoFile file(filestr, SER_DISK, CLIENT_VERSION);
     if (file.IsNull()) {

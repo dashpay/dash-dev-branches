@@ -63,6 +63,7 @@
 
 #ifdef ENABLE_WALLET
 #include <interfaces/coinjoin.h>
+#include <interfaces/wallet.h>
 #endif // ENABLE_WALLET
 
 #include <stdexcept>
@@ -118,24 +119,6 @@ void DashChainstateSetupClose(NodeContext& node)
                              Assert(node.mempool.get()));
 }
 
-void DashPostChainstateSetup(NodeContext& node)
-{
-    node.cj_ctx = std::make_unique<CJContext>(*node.chainman, *node.connman, *node.dmnman, *node.mn_metaman, *node.mempool,
-                                              /*mn_activeman=*/nullptr, *node.mn_sync, *node.llmq_ctx->isman, node.peerman,
-                                              /*relay_txes=*/true);
-#ifdef ENABLE_WALLET
-    node.coinjoin_loader = interfaces::MakeCoinJoinLoader(*node.cj_ctx->walletman);
-#endif // ENABLE_WALLET
-}
-
-void DashPostChainstateSetupClose(NodeContext& node)
-{
-#ifdef ENABLE_WALLET
-    node.coinjoin_loader.reset();
-#endif // ENABLE_WALLET
-    node.cj_ctx.reset();
-}
-
 BasicTestingSetup::BasicTestingSetup(const std::string& chainName, const std::vector<const char*>& extra_args)
     : m_path_root{fs::temp_directory_path() / "test_common_" PACKAGE_NAME / g_insecure_rand_ctx_temp_path.rand256().ToString()},
       m_args{}
@@ -189,13 +172,9 @@ BasicTestingSetup::BasicTestingSetup(const std::string& chainName, const std::ve
     m_node.netgroupman = std::make_unique<NetGroupManager>(/*asmap=*/std::vector<bool>());
     m_node.addrman = std::make_unique<AddrMan>(*m_node.netgroupman,
                                                /*deterministic=*/false,
-                                               m_node.args->GetArg("-checkaddrman", 0));
+                                               m_node.args->GetIntArg("-checkaddrman", 0));
     m_node.connman = std::make_unique<CConnman>(0x1337, 0x1337, *m_node.addrman, *m_node.netgroupman); // Deterministic randomness for tests.
 
-    // while g_wallet_init_interface is init here at very early stage
-    // we can't get rid of unique_ptr from wallet/context.h
-    // TODO: remove unique_ptr from wallet/context.h after bitcoin/bitcoin#22219
-    g_wallet_init_interface.Construct(m_node);
     fCheckBlockIndex = true;
     m_node.evodb = std::make_unique<CEvoDB>(1 << 20, true, true);
     m_node.mnhf_manager = std::make_unique<CMNHFManager>(*m_node.evodb);
@@ -313,10 +292,10 @@ TestingSetup::TestingSetup(const std::string& chainName, const std::vector<const
         *Assert(m_node.chainman),
         *Assert(m_node.evodb.get()),
         fReindex.load(),
-        m_args.GetArg("-reindex-chainstate", false),
+        m_args.GetBoolArg("-reindex-chainstate", false),
         chainparams.GetConsensus(),
-        m_args.GetArg("-checkblocks", DEFAULT_CHECKBLOCKS),
-        m_args.GetArg("-checklevel", DEFAULT_CHECKLEVEL),
+        m_args.GetIntArg("-checkblocks", DEFAULT_CHECKBLOCKS),
+        m_args.GetIntArg("-checklevel", DEFAULT_CHECKLEVEL),
         /*get_unix_time_seconds=*/static_cast<int64_t(*)()>(GetTime),
         [](bool bls_state) {
             LogPrintf("%s: bls_legacy_scheme=%d\n", __func__, bls_state);
@@ -334,7 +313,20 @@ TestingSetup::TestingSetup(const std::string& chainName, const std::vector<const
         m_node.connman->Init(options);
     }
 
-    DashPostChainstateSetup(m_node);
+    m_node.cj_ctx = std::make_unique<CJContext>(*m_node.chainman, *m_node.connman, *m_node.dmnman, *m_node.mn_metaman, *m_node.mempool,
+                                                /*mn_activeman=*/nullptr, *m_node.mn_sync, *m_node.llmq_ctx->isman, m_node.peerman,
+                                                /*relay_txes=*/true);
+
+#ifdef ENABLE_WALLET
+    // WalletInit::Construct()-like logic needed for wallet tests that run on
+    // TestingSetup and its children (e.g. TestChain100Setup) instead of
+    // WalletTestingSetup
+    m_node.coinjoin_loader = interfaces::MakeCoinJoinLoader(m_node);
+
+    auto wallet_loader = interfaces::MakeWalletLoader(*m_node.chain, *m_node.args, *m_node.coinjoin_loader);
+    m_node.wallet_loader = wallet_loader.get();
+    m_node.chain_clients.emplace_back(std::move(wallet_loader));
+#endif // ENABLE_WALLET
 
     BlockValidationState state;
     if (!m_node.chainman->ActiveChainstate().ActivateBestChain(state)) {
@@ -344,7 +336,15 @@ TestingSetup::TestingSetup(const std::string& chainName, const std::vector<const
 
 TestingSetup::~TestingSetup()
 {
-    DashPostChainstateSetupClose(m_node);
+#ifdef ENABLE_WALLET
+    for (auto& client : m_node.chain_clients) {
+        client.reset();
+    }
+    m_node.wallet_loader = nullptr;
+
+    m_node.coinjoin_loader.reset();
+#endif // ENABLE_WALLET
+    m_node.cj_ctx.reset();
 
     // Interrupt() and PrepareShutdown() routines
     if (m_node.llmq_ctx) {

@@ -59,8 +59,8 @@ if [ -n "$DPKG_ADD_ARCH" ]; then
 fi
 
 if [[ $DOCKER_NAME_TAG == centos* ]]; then
-  ${CI_RETRY_EXE} DOCKER_EXEC yum -y install epel-release
-  ${CI_RETRY_EXE} DOCKER_EXEC yum -y install "$DOCKER_PACKAGES" "$PACKAGES"
+  DOCKER_EXEC yum -y install epel-release
+  DOCKER_EXEC yum -y install "$DOCKER_PACKAGES" "$PACKAGES"
 elif [ "$CI_USE_APT_INSTALL" != "no" ]; then
   ${CI_RETRY_EXE} DOCKER_EXEC apt-get update
   ${CI_RETRY_EXE} DOCKER_EXEC apt-get install --no-install-recommends --no-upgrade -y "$PACKAGES" "$DOCKER_PACKAGES"
@@ -85,7 +85,11 @@ if [ "$RUN_FUZZ_TESTS" = "true" ] || [ "$RUN_UNIT_TESTS" = "true" ] || [ "$RUN_U
   if [ ! -d "${DIR_QA_ASSETS}" ]; then
     DOCKER_EXEC git clone --depth=1 https://github.com/bitcoin-core/qa-assets "${DIR_QA_ASSETS}"
   fi
-
+  (
+    DOCKER_EXEC cd "${DIR_QA_ASSETS}"
+    DOCKER_EXEC echo "Using qa-assets repo from commit ..."
+    DOCKER_EXEC git log -1
+  )
   export DIR_FUZZ_IN=${DIR_QA_ASSETS}/fuzz_seed_corpus/
 fi
 

@@ -78,14 +78,13 @@ void WalletFrame::setClientModel(ClientModel *_clientModel)
     }
 }
 
-bool WalletFrame::addWallet(WalletModel* walletModel, WalletView* walletView)
+bool WalletFrame::addView(WalletView* walletView)
 {
-    if (!clientModel || !walletModel) return false;
+    if (!clientModel) return false;
 
-    if (mapWalletViews.count(walletModel) > 0) return false;
+    if (mapWalletViews.count(walletView->getWalletModel()) > 0) return false;
 
     walletView->setClientModel(clientModel);
-    walletView->setWalletModel(walletModel);
     walletView->showOutOfSyncWarning(bOutOfSync);
 
     WalletView* current_wallet_view = currentWalletView();
@@ -96,7 +95,7 @@ bool WalletFrame::addWallet(WalletModel* walletModel, WalletView* walletView)
     }
 
     walletStack->addWidget(walletView);
-    mapWalletViews[walletModel] = walletView;
+    mapWalletViews[walletView->getWalletModel()] = walletView;
 
     return true;
 }
@@ -269,7 +268,15 @@ void WalletFrame::gotoLoadPSBT(bool from_clipboard)
             return;
         }
         std::ifstream in{filename.toLocal8Bit().data(), std::ios::binary};
-        data.assign(std::istream_iterator<unsigned char>{in}, {});
+        data.assign(std::istreambuf_iterator<char>{in}, {});
+
+        // Some psbt files may be base64 strings in the file rather than binary data
+        std::string b64_str{data.begin(), data.end()};
+        b64_str.erase(b64_str.find_last_not_of(" \t\n\r\f\v") + 1); // Trim trailing whitespace
+        auto b64_dec = DecodeBase64(b64_str);
+        if (b64_dec.has_value()) {
+            data = b64_dec.value();
+        }
     }
 
     std::string error;
@@ -279,10 +286,9 @@ void WalletFrame::gotoLoadPSBT(bool from_clipboard)
         return;
     }
 
-    PSBTOperationsDialog* dlg = new PSBTOperationsDialog(this, currentWalletModel(), clientModel);
+    auto dlg = new PSBTOperationsDialog(this, currentWalletModel(), clientModel);
     dlg->openWithPSBT(psbtx);
-    dlg->setAttribute(Qt::WA_DeleteOnClose);
-    dlg->exec();
+    GUIUtil::ShowModalDialogAndDeleteOnClose(dlg);
 }
 
 void WalletFrame::encryptWallet()

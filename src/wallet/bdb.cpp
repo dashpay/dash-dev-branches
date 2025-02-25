@@ -25,6 +25,10 @@
 #endif
 
 namespace {
+Span<const std::byte> SpanFromDbt(const BerkeleyBatch::SafeDbt& dbt)
+{
+    return {reinterpret_cast<const std::byte*>(dbt.get_data()), dbt.get_size()};
+}
 
 //! Make sure database has a unique fileid within the environment. If it
 //! doesn't, throw an error. BDB caches do not work properly when more than one
@@ -384,7 +388,7 @@ void BerkeleyBatch::Flush()
         nMinutes = 1;
 
     if (env) { // env is nullptr for dummy databases (i.e. in tests). Don't actually flush if env is nullptr so we don't segfault
-        env->dbenv->txn_checkpoint(nMinutes ? gArgs.GetArg("-dblogsize", DEFAULT_WALLET_DBLOGSIZE) * 1024 : 0, nMinutes, 0);
+        env->dbenv->txn_checkpoint(nMinutes ? gArgs.GetIntArg("-dblogsize", DEFAULT_WALLET_DBLOGSIZE) * 1024 : 0, nMinutes, 0);
     }
 }
 
@@ -689,10 +693,10 @@ bool BerkeleyBatch::ReadAtCursor(CDataStream& ssKey, CDataStream& ssValue, bool&
     // Convert to streams
     ssKey.SetType(SER_DISK);
     ssKey.clear();
-    ssKey.write({BytePtr(datKey.get_data()), datKey.get_size()});
+    ssKey.write(SpanFromDbt(datKey));
     ssValue.SetType(SER_DISK);
     ssValue.clear();
-    ssValue.write({BytePtr(datValue.get_data()), datValue.get_size()});
+    ssValue.write(SpanFromDbt(datValue));
     return true;
 }
 
@@ -764,7 +768,8 @@ bool BerkeleyBatch::ReadKey(CDataStream&& key, CDataStream& value)
     SafeDbt datValue;
     int ret = pdb->get(activeTxn, datKey, datValue, 0);
     if (ret == 0 && datValue.get_data() != nullptr) {
-        value.write({BytePtr(datValue.get_data()), datValue.get_size()});
+        value.clear();
+        value.write(SpanFromDbt(datValue));
         return true;
     }
     return false;

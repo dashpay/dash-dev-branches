@@ -43,6 +43,7 @@ class QAbstractItemView;
 class QAction;
 class QButtonGroup;
 class QDateTime;
+class QDialog;
 class QFont;
 class QKeySequence;
 class QLineEdit;
@@ -190,6 +191,14 @@ namespace GUIUtil
      * Determine default data directory for operating system.
      */
     QString getDefaultDataDirectory();
+
+    /**
+     * Extract first suffix from filter pattern "Description (*.foo)" or "Description (*.foo *.bar ...).
+     *
+     * @param[in] filter Filter specification such as "Comma Separated Files (*.csv)"
+     * @return QString
+     */
+    QString ExtractFirstSuffixFromFilter(const QString& filter);
 
     /** Get save filename, mimics QFileDialog::getSaveFileName, except that it appends a default suffix
         when no suffix is provided by the user.
@@ -600,6 +609,11 @@ namespace GUIUtil
             },
             type);
     }
+
+    /**
+     * Shows a QDialog instance asynchronously, and deletes it on close.
+     */
+    void ShowModalDialogAndDeleteOnClose(QDialog* dialog);
 
 } // namespace GUIUtil
 

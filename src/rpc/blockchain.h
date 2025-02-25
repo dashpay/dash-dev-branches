@@ -6,7 +6,7 @@
 #define BITCOIN_RPC_BLOCKCHAIN_H
 
 #include <consensus/amount.h>
-#include <core_io.h>
+#include <fs.h>
 #include <streams.h>
 #include <sync.h>
 #include <validation.h>
@@ -48,13 +48,15 @@ UniValue blockheaderToJSON(const CBlockIndex* tip, const CBlockIndex* blockindex
 /** Used by getblockstats to get feerates at different percentiles by weight  */
 void CalculatePercentilesBySize(CAmount result[NUM_GETBLOCKSTATS_PERCENTILES], std::vector<std::pair<CAmount, int64_t>>& scores, int64_t total_size);
 
-void ScriptPubKeyToUniv(const CScript& scriptPubKey, UniValue& out, bool fIncludeHex);
-void TxToUniv(const CTransaction& tx, const uint256& hashBlock, UniValue& entry, bool include_hex = true, const CTxUndo* txundo = nullptr, const CSpentIndexTxInfo* ptxSpentInfo = nullptr);
-
 /**
  * Helper to create UTXO snapshots given a chainstate and a file handle.
  * @return a UniValue map containing metadata about the snapshot.
  */
-UniValue CreateUTXOSnapshot(NodeContext& node, CChainState& chainstate, CAutoFile& afile);
+UniValue CreateUTXOSnapshot(
+    NodeContext& node,
+    CChainState& chainstate,
+    CAutoFile& afile,
+    const fs::path& path,
+    const fs::path& tmppath);
 
 #endif // BITCOIN_RPC_BLOCKCHAIN_H

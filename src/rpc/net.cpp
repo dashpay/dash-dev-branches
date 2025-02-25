@@ -106,10 +106,10 @@ static RPCHelpMan getpeerinfo()
                     {
                     {RPCResult::Type::NUM, "id", "Peer index"},
                     {RPCResult::Type::STR, "addr", "(host:port) The IP address and port of the peer"},
-                    {RPCResult::Type::STR, "addrbind", "(ip:port) Bind address of the connection to the peer"},
-                    {RPCResult::Type::STR, "addrlocal", "(ip:port) Local address as reported by the peer"},
+                    {RPCResult::Type::STR, "addrbind", /* optional */ true, "(ip:port) Bind address of the connection to the peer"},
+                    {RPCResult::Type::STR, "addrlocal", /* optional */ true, "(ip:port) Local address as reported by the peer"},
                     {RPCResult::Type::STR, "network", "Network (" + Join(GetNetworkNames(/* append_unroutable */ true), ", ") + ")"},
-                    {RPCResult::Type::STR, "mapped_as", "The AS in the BGP route to the peer used for diversifying peer selection"},
+                    {RPCResult::Type::STR, "mapped_as", /* optional */ true, "The AS in the BGP route to the peer used for diversifying peer selection"},
                     {RPCResult::Type::STR_HEX, "services", "The services offered"},
                     {RPCResult::Type::ARR, "servicesnames", "the services offered, in human-readable form",
                     {
@@ -130,9 +130,9 @@ static RPCHelpMan getpeerinfo()
                     {RPCResult::Type::NUM, "bytesrecv", "The total bytes received"},
                     {RPCResult::Type::NUM_TIME, "conntime", "The " + UNIX_EPOCH_TIME + " of the connection"},
                     {RPCResult::Type::NUM, "timeoffset", "The time offset in seconds"},
-                    {RPCResult::Type::NUM, "pingtime", "ping time (if available)"},
-                    {RPCResult::Type::NUM, "minping", "minimum observed ping time (if any at all)"},
-                    {RPCResult::Type::NUM, "pingwait", "ping wait (if non-zero)"},
+                    {RPCResult::Type::NUM, "pingtime", /* optional */ true, "ping time (if available)"},
+                    {RPCResult::Type::NUM, "minping", /* optional */ true, "minimum observed ping time (if any at all)"},
+                    {RPCResult::Type::NUM, "pingwait", /* optional */ true, "ping wait (if non-zero)"},
                     {RPCResult::Type::NUM, "version", "The peer version, such as 70001"},
                     {RPCResult::Type::STR, "subver", "The string version"},
                     {RPCResult::Type::BOOL, "inbound", "Inbound (true) or Outbound (false)"},
@@ -222,13 +222,13 @@ static RPCHelpMan getpeerinfo()
         obj.pushKV("conntime", count_seconds(stats.m_connected));
         obj.pushKV("timeoffset", stats.nTimeOffset);
         if (stats.m_last_ping_time > 0us) {
-            obj.pushKV("pingtime", CountSecondsDouble(stats.m_last_ping_time));
+            obj.pushKV("pingtime", Ticks<SecondsDouble>(stats.m_last_ping_time));
         }
         if (stats.m_min_ping_time < std::chrono::microseconds::max()) {
-            obj.pushKV("minping", CountSecondsDouble(stats.m_min_ping_time));
+            obj.pushKV("minping", Ticks<SecondsDouble>(stats.m_min_ping_time));
         }
         if (fStateStats && statestats.m_ping_wait > 0s) {
-            obj.pushKV("pingwait", CountSecondsDouble(statestats.m_ping_wait));
+            obj.pushKV("pingwait", Ticks<SecondsDouble>(statestats.m_ping_wait));
         }
         obj.pushKV("version", stats.nVersion);
         // Use the sanitized form of subver here, to avoid tricksy remote peers from

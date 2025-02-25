@@ -25,7 +25,7 @@ void initialize_transaction()
     SelectParams(CBaseChainParams::REGTEST);
 }
 
-FUZZ_TARGET_INIT(transaction, initialize_transaction)
+FUZZ_TARGET(transaction, .init = initialize_transaction)
 {
     CDataStream ds(buffer, SER_NETWORK, INIT_PROTO_VERSION);
     try {
@@ -94,6 +94,6 @@ FUZZ_TARGET_INIT(transaction, initialize_transaction)
     (void)AreInputsStandard(tx, coins_view_cache);
 
     UniValue u(UniValue::VOBJ);
-    TxToUniv(tx, /* hashBlock */ uint256::ZERO, /* include_addresses */ true, u);
-    TxToUniv(tx, /* hashBlock */ uint256::ONE, /* include_addresses */ false, u);
+    TxToUniv(tx, /* hashBlock */ uint256::ZERO, u);
+    TxToUniv(tx, /* hashBlock */ uint256::ONE, u);
 }

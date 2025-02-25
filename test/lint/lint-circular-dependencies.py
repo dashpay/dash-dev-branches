@@ -6,7 +6,6 @@
 #
 # Check for circular dependencies
 
-import glob
 import os
 import re
 import subprocess
@@ -23,6 +22,10 @@ EXPECTED_CIRCULAR_DEPENDENCIES = (
     "wallet/fees -> wallet/wallet -> wallet/fees",
     "wallet/wallet -> wallet/walletdb -> wallet/wallet",
     "node/coinstats -> validation -> node/coinstats",
+    # Temporary circular dependencies that allow wallet.h/wallet.cpp to be
+    # split up in a MOVEONLY commit. These are removed in #21206.
+    "wallet/receive -> wallet/wallet -> wallet/receive",
+    "wallet/spend -> wallet/wallet -> wallet/spend",
     # Dash
     "banman -> common/bloom -> evo/assetlocktx -> llmq/quorums -> net -> banman",
     "banman -> common/bloom -> evo/assetlocktx -> llmq/signing -> net_processing -> banman",
@@ -85,7 +88,6 @@ EXPECTED_CIRCULAR_DEPENDENCIES = (
     "qt/guiutil -> qt/optionsdialog -> qt/guiutil",
     "qt/guiutil -> qt/optionsdialog -> qt/optionsmodel -> qt/guiutil",
     "qt/guiutil -> qt/qvalidatedlineedit -> qt/guiutil",
-    "rpc/blockchain -> rpc/server -> rpc/blockchain"
 )
 
 CODE_DIR = "src"
@@ -94,17 +96,14 @@ CODE_DIR = "src"
 def main():
     circular_dependencies = []
     exit_code = 0
-    os.chdir(
-        CODE_DIR
-    )  # We change dir before globbing since glob.glob's root_dir option is only available in Python 3.10
 
-    # Using glob.glob since subprocess.run's globbing won't work without shell=True
-    files = []
-    for path in ["*", "*/*", "*/*/*"]:
-        for extension in ["h", "cpp"]:
-            files.extend(glob.glob(f"{path}.{extension}"))
+    os.chdir(CODE_DIR)
+    files = subprocess.check_output(
+        ['git', 'ls-files', '--', '*.h', '*.cpp'],
+        universal_newlines=True,
+    ).splitlines()
 
-    command = ["python3", "../contrib/devtools/circular-dependencies.py", *files]
+    command = [sys.executable, "../contrib/devtools/circular-dependencies.py", *files]
     dependencies_output = subprocess.run(
         command,
         stdout=subprocess.PIPE,

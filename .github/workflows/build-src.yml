@@ -1,0 +1,114 @@
+name: Build source
+
+on:
+  workflow_call:
+    inputs:
+      build-target:
+        description: "Target name as defined by inputs.sh"
+        required: true
+        type: string
+      container-path:
+        description: "Path to built container at registry"
+        required: true
+        type: string
+      depends-key:
+        description: "Key needed to access cached depends"
+        required: true
+        type: string
+    outputs:
+      key:
+        description: "Key needed for restoring artifacts bundle"
+        value: ${{ jobs.build-src.outputs.key }}
+
+jobs:
+  build-src:
+    name: Build source
+    runs-on: ubuntu-24.04
+    outputs:
+      key:  ${{ steps.bundle.outputs.key }}
+    container:
+      image: ${{ inputs.container-path }}
+      options: --user root
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 50
+
+      - name: Initial setup
+        id: setup
+        run: |
+          git config --global --add safe.directory "$PWD"
+          git fetch -fu origin develop:develop
+          BUILD_TARGET="${{ inputs.build-target }}"
+          source ./ci/dash/matrix.sh
+          echo "HOST=${HOST}" >> $GITHUB_OUTPUT
+          echo "PR_BASE_SHA=${{ github.event.pull_request.base.sha || '' }}" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: Restore SDKs cache
+        uses: actions/cache/restore@v4
+        if: inputs.build-target == 'mac'
+        with:
+          path: |
+            depends/SDKs
+          key: depends-sdks-${{ hashFiles('depends/hosts/darwin.mk') }}
+          fail-on-cache-miss: true
+
+      - name: Restore depends cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            depends/built
+            depends/${{ steps.setup.outputs.HOST }}
+          key: ${{ inputs.depends-key }}
+          fail-on-cache-miss: true
+
+      - name: Manage ccache
+        uses: actions/cache@v4
+        with:
+          path: |
+            /cache
+          key: ccache-${{ hashFiles('contrib/containers/ci/Dockerfile', 'depends/packages/*') }}-${{ inputs.build-target }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ hashFiles('contrib/containers/ci/Dockerfile', 'depends/packages/*') }}-${{ inputs.build-target }}-
+
+      - name: Build source
+        run: |
+          CCACHE_SIZE="400M"
+          CACHE_DIR="/cache"
+          mkdir /output
+          BASE_OUTDIR="/output"
+          BUILD_TARGET="${{ inputs.build-target }}"
+          source ./ci/dash/matrix.sh
+          ./ci/dash/build_src.sh
+          ccache -X 9
+          ccache -c
+        shell: bash
+
+      - name: Run unit tests
+        run: |
+          BASE_OUTDIR="/output"
+          BUILD_TARGET="${{ inputs.build-target }}"
+          source ./ci/dash/matrix.sh
+          ./ci/dash/test_unittests.sh
+        shell: bash
+
+      - name: Bundle artifacts
+        id: bundle
+        run: |
+          export BUILD_TARGET="${{ inputs.build-target }}"
+          export BUNDLE_KEY="build-${BUILD_TARGET}-$(git rev-parse --short=8 HEAD)"
+          ./ci/dash/bundle-artifacts.sh create
+          echo "key=${BUNDLE_KEY}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.bundle.outputs.key }}
+          path: |
+            ${{ steps.bundle.outputs.key }}.tar.zst
+          compression-level: 0
+          overwrite: true
+          retention-days: 3

@@ -468,7 +468,7 @@ bool LegacyScriptPubKeyMan::AddHDChainSingle(const CHDChain& chain)
     return AddHDChain(batch, chain);
 }
 
-bool LegacyScriptPubKeyMan::GetDecryptedHDChain(CHDChain& hdChainRet)
+bool LegacyScriptPubKeyMan::GetDecryptedHDChain(CHDChain& hdChainRet) const
 {
     LOCK(cs_KeyStore);
 
@@ -760,8 +760,6 @@ TransactionError LegacyScriptPubKeyMan::FillPSBT(PartiallySignedTransaction& psb
             // There's no UTXO so we can just skip this now
             continue;
         }
-        SignatureData sigdata;
-        input.FillSignatureData(sigdata);
         SignPSBTInput(HidingSigningProvider(this, !sign, !bip32derivs), psbtx, i, &txdata, sighash_type, nullptr, finalize);
 
         bool signed_one = PSBTInputSigned(input);
@@ -1430,7 +1428,7 @@ bool LegacyScriptPubKeyMan::TopUpInner(unsigned int kpSize)
         if (kpSize > 0)
             nTargetSize = kpSize;
         else
-            nTargetSize = std::max(gArgs.GetArg("-keypool", DEFAULT_KEYPOOL_SIZE), (int64_t) 0);
+            nTargetSize = std::max(gArgs.GetIntArg("-keypool", DEFAULT_KEYPOOL_SIZE), (int64_t) 0);
 
         // count amount of available keys (internal, external)
         // make sure the keypool of external and internal keys fits the user selected target (-keypool)
@@ -1928,7 +1926,7 @@ bool DescriptorScriptPubKeyMan::TopUp(unsigned int size)
     if (size > 0) {
         target_size = size;
     } else {
-        target_size = std::max(gArgs.GetArg("-keypool", DEFAULT_KEYPOOL_SIZE), (int64_t) 1);
+        target_size = std::max(gArgs.GetIntArg("-keypool", DEFAULT_KEYPOOL_SIZE), (int64_t) 1);
     }
 
     // Calculate the new range_end
@@ -2258,8 +2256,6 @@ TransactionError DescriptorScriptPubKeyMan::FillPSBT(PartiallySignedTransaction&
             // There's no UTXO so we can just skip this now
             continue;
         }
-        SignatureData sigdata;
-        input.FillSignatureData(sigdata);
 
         std::unique_ptr<FlatSigningProvider> keys = std::make_unique<FlatSigningProvider>();
         std::unique_ptr<FlatSigningProvider> script_keys = GetSigningProvider(script, sign);

@@ -86,6 +86,9 @@ public:
     //! Abort a rescan.
     virtual void abortRescan() = 0;
 
+    //! Lock masternode collaterals
+    virtual void autoLockMasternodeCollaterals() = 0;
+
     //! Back up wallet.
     virtual bool backupWallet(const std::string& filename) = 0;
 
@@ -222,12 +225,6 @@ public:
 
     //! Get anonymizable balance.
     virtual CAmount getAnonymizableBalance(bool fSkipDenominated, bool fSkipUnconfirmed) = 0;
-
-    //! Get anonymized balance.
-    virtual CAmount getAnonymizedBalance() = 0;
-
-    //! Get denominated balance.
-    virtual CAmount getDenominatedBalance(bool unconfirmed) = 0;
 
     //! Get normalized anonymized balance.
     virtual CAmount getNormalizedAnonymizedBalance() = 0;
@@ -388,6 +385,8 @@ struct WalletBalances
     CAmount watch_only_balance = 0;
     CAmount unconfirmed_watch_only_balance = 0;
     CAmount immature_watch_only_balance = 0;
+    CAmount denominated_untrusted_pending = 0;
+    CAmount denominated_trusted = 0;
 
     bool balanceChanged(const WalletBalances& prev) const
     {
@@ -448,7 +447,7 @@ std::unique_ptr<Wallet> MakeWallet(const std::shared_ptr<CWallet>& wallet);
 
 //! Return implementation of ChainClient interface for a wallet loader. This
 //! function will be undefined in builds where ENABLE_WALLET is false.
-std::unique_ptr<WalletLoader> MakeWalletLoader(Chain& chain, const std::unique_ptr<CoinJoin::Loader>& coinjoin_loader, ArgsManager& args);
+std::unique_ptr<WalletLoader> MakeWalletLoader(Chain& chain, ArgsManager& args, CoinJoin::Loader& coinjoin_loader);
 
 } // namespace interfaces
 

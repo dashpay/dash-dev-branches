@@ -81,7 +81,7 @@ static void SetupCliArgs(ArgsManager& argsman)
     argsman.AddArg("-datadir=<dir>", "Specify data directory", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-generate", strprintf("Generate blocks immediately, equivalent to RPC getnewaddress followed by RPC generatetoaddress. Optional positional integer arguments are number of blocks to generate (default: %s) and maximum iterations to try (default: %s), equivalent to RPC generatetoaddress nblocks and maxtries arguments. Example: dash-cli -generate 4 1000", DEFAULT_NBLOCKS, DEFAULT_MAX_TRIES), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-addrinfo", "Get the number of addresses known to the node, per network and total, after filtering for quality and recency. The total number of addresses known to the node may be higher.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
-    argsman.AddArg("-getinfo", "Get general information from the remote server. Note that unlike server-side RPC calls, the results of -getinfo is the result of multiple non-atomic requests. Some entries in the result may represent results from different states (e.g. wallet balance may be as of a different block from the chain state reported)", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
+    argsman.AddArg("-getinfo", "Get general information from the remote server. Note that unlike server-side RPC calls, the output of -getinfo is the result of multiple non-atomic requests. Some entries in the output may represent results from different states (e.g. wallet balance may be as of a different block from the chain state reported)", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-netinfo", "Get network peer connection information from the remote server. An optional integer argument from 0 to 4 can be passed for different peers listings (default: 0). Pass \"help\" for detailed help documentation.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
 
     argsman.AddArg("-color=<when>", strprintf("Color setting for CLI output (default: %s). Valid values: always, auto (add color codes when standard output is connected to a terminal and OS is not WIN32), never.", DEFAULT_COLOR_SETTING), ArgsManager::ALLOW_STRING, OptionsCategory::OPTIONS);
@@ -556,7 +556,7 @@ public:
                     peer.is_outbound ? "out" : "in",
                     ConnectionTypeForNetinfo(peer.conn_type),
                     peer.network,
-                    peer.transport_protocol_type.rfind('v', 0) == 0 ? peer.transport_protocol_type[1] : ' ',
+                    peer.transport_protocol_type.starts_with('v') == 0 ? peer.transport_protocol_type[1] : ' ',
                     PingTimeToString(peer.min_ping),
                     PingTimeToString(peer.ping),
                     peer.last_send ? ToString(time_now - peer.last_send) : "",
@@ -753,7 +753,7 @@ static UniValue CallRPC(BaseRequestHandler* rh, const std::string& strMethod, co
     //     3. default port for chain
     uint16_t port{BaseParams().RPCPort()};
     SplitHostPort(gArgs.GetArg("-rpcconnect", DEFAULT_RPCCONNECT), port, host);
-    port = static_cast<uint16_t>(gArgs.GetArg("-rpcport", port));
+    port = static_cast<uint16_t>(gArgs.GetIntArg("-rpcport", port));
 
     // Obtain event base
     raii_event_base base = obtain_event_base();
@@ -763,7 +763,7 @@ static UniValue CallRPC(BaseRequestHandler* rh, const std::string& strMethod, co
 
     // Set connection timeout
     {
-        const int timeout = gArgs.GetArg("-rpcclienttimeout", DEFAULT_HTTP_CLIENT_TIMEOUT);
+        const int timeout = gArgs.GetIntArg("-rpcclienttimeout", DEFAULT_HTTP_CLIENT_TIMEOUT);
         if (timeout > 0) {
             evhttp_connection_set_timeout(evcon.get(), timeout);
         } else {
@@ -873,7 +873,7 @@ static UniValue ConnectAndCallRPC(BaseRequestHandler* rh, const std::string& str
     UniValue response(UniValue::VOBJ);
     // Execute and handle connection failures with -rpcwait.
     const bool fWait = gArgs.GetBoolArg("-rpcwait", false);
-    const int timeout = gArgs.GetArg("-rpcwaittimeout", DEFAULT_WAIT_CLIENT_TIMEOUT);
+    const int timeout = gArgs.GetIntArg("-rpcwaittimeout", DEFAULT_WAIT_CLIENT_TIMEOUT);
     const auto deadline{std::chrono::steady_clock::now() + 1s * timeout};
 
     do {

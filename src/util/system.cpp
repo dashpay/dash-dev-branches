@@ -54,13 +54,6 @@
 
 #else
 
-#ifdef _MSC_VER
-#pragma warning(disable:4786)
-#pragma warning(disable:4804)
-#pragma warning(disable:4805)
-#pragma warning(disable:4717)
-#endif
-
 #include <codecvt>
 
 #include <io.h> /* for _commit */
@@ -627,10 +620,10 @@ bool ArgsManager::IsArgNegated(const std::string& strArg) const
 std::string ArgsManager::GetArg(const std::string& strArg, const std::string& strDefault) const
 {
     const util::SettingsValue value = GetSetting(strArg);
-    return value.isNull() ? strDefault : value.isFalse() ? "0" : value.isTrue() ? "1" : value.get_str();
+    return value.isNull() ? strDefault : value.isFalse() ? "0" : value.isTrue() ? "1" : value.isNum() ? value.getValStr() : value.get_str();
 }
 
-int64_t ArgsManager::GetArg(const std::string& strArg, int64_t nDefault) const
+int64_t ArgsManager::GetIntArg(const std::string& strArg, int64_t nDefault) const
 {
     const util::SettingsValue value = GetSetting(strArg);
     return value.isNull() ? nDefault : value.isFalse() ? 0 : value.isTrue() ? 1 : value.isNum() ? value.get_int64() : LocaleIndependentAtoi<int64_t>(value.get_str());
@@ -928,6 +921,20 @@ static bool GetConfigOptions(std::istream& stream, const std::string& filepath, 
     return true;
 }
 
+bool IsConfSupported(KeyInfo& key, std::string& error) {
+    if (key.name == "conf") {
+        error = "conf cannot be set in the configuration file; use includeconf= if you want to include additional config files";
+        return false;
+    }
+    if (key.name == "reindex") {
+        // reindex can be set in a config file but it is strongly discouraged as this will cause the node to reindex on
+        // every restart. Allow the config but throw a warning
+        LogPrintf("Warning: reindex=1 is set in the configuration file, which will significantly slow down startup. Consider removing or commenting out this option for better performance, unless there is currently a condition which makes rebuilding the indexes necessary\n");
+        return true;
+    }
+    return true;
+}
+
 bool ArgsManager::ReadConfigStream(std::istream& stream, const std::string& filepath, std::string& error, bool ignore_invalid_keys)
 {
     LOCK(cs_args);
@@ -938,6 +945,7 @@ bool ArgsManager::ReadConfigStream(std::istream& stream, const std::string& file
     for (const std::pair<std::string, std::string>& option : options) {
         KeyInfo key = InterpretKey(option.first);
         std::optional<unsigned int> flags = GetArgFlags('-' + key.name);
+        if (!IsConfSupported(key, error)) return false;
         if (flags) {
             std::optional<util::SettingsValue> value = InterpretValue(key, &option.second, *flags, error);
             if (!value) {
@@ -1140,20 +1148,9 @@ std::vector<util::SettingsValue> ArgsManager::GetSettingsList(const std::string&
 
 bool RenameOver(fs::path src, fs::path dest)
 {
-#ifdef __MINGW64__
-    // This is a workaround for a bug in libstdc++ which
-    // implements std::filesystem::rename with _wrename function.
-    // This bug has been fixed in upstream:
-    //  - GCC 10.3: 8dd1c1085587c9f8a21bb5e588dfe1e8cdbba79e
-    //  - GCC 11.1: 1dfd95f0a0ca1d9e6cbc00e6cbfd1fa20a98f312
-    // For more details see the commits mentioned above.
-    return MoveFileExW(src.wstring().c_str(), dest.wstring().c_str(),
-                       MOVEFILE_REPLACE_EXISTING) != 0;
-#else
     std::error_code error;
     fs::rename(src, dest, error);
     return !error;
-#endif
 }
 
 /**

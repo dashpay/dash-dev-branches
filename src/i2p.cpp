@@ -354,7 +354,7 @@ Binary Session::MyDestination() const
 
     uint16_t cert_len;
     memcpy(&cert_len, &m_private_key.at(CERT_LEN_POS), sizeof(cert_len));
-    cert_len = be16toh(cert_len);
+    cert_len = be16toh_internal(cert_len);
 
     const size_t dest_len = DEST_LEN_BASE + cert_len;
 
@@ -444,7 +444,7 @@ void Session::Disconnect()
             Log("Destroying SAM session %s", m_session_id);
         }
     }
-    m_control_sock->Reset();
+    m_control_sock = std::make_unique<Sock>(INVALID_SOCKET);
     m_session_id.clear();
 }
 } // namespace sam

@@ -20,7 +20,6 @@
 #include <script/descriptor.h>
 #include <util/bip32.h>
 #include <util/fees.h>
-#include <util/message.h> // For MessageSign()
 #include <util/moneystr.h>
 #include <util/string.h>
 #include <util/system.h>
@@ -31,6 +30,7 @@
 #include <wallet/context.h>
 #include <wallet/load.h>
 #include <wallet/rpcwallet.h>
+#include <wallet/rpc/util.h>
 #include <wallet/scriptpubkeyman.h>
 #include <wallet/wallet.h>
 #include <wallet/walletdb.h>
@@ -49,35 +49,6 @@
 
 using interfaces::FoundBlock;
 
-static const std::string WALLET_ENDPOINT_BASE = "/wallet/";
-
-static inline bool GetAvoidReuseFlag(const CWallet& wallet, const UniValue& param) {
-    bool can_avoid_reuse = wallet.IsWalletFlagSet(WALLET_FLAG_AVOID_REUSE);
-    bool avoid_reuse = param.isNull() ? can_avoid_reuse : param.get_bool();
-
-    if (avoid_reuse && !can_avoid_reuse) {
-        throw JSONRPCError(RPC_WALLET_ERROR, "wallet does not have the \"avoid reuse\" feature enabled");
-    }
-
-    return avoid_reuse;
-}
-
-
-/** Used by RPC commands that have an include_watchonly parameter.
- *  We default to true for watchonly wallets if include_watchonly isn't
- *  explicitly set.
- */
-static bool ParseIncludeWatchonly(const UniValue& include_watchonly, const CWallet& wallet)
-{
-    if (include_watchonly.isNull()) {
-        // if include_watchonly isn't explicitly set, then check if we have a watchonly wallet
-        return wallet.IsWalletFlagSet(WALLET_FLAG_DISABLE_PRIVATE_KEYS);
-    }
-
-    // otherwise return whatever include_watchonly was set to
-    return include_watchonly.get_bool();
-}
-
 
 /** Checks if a CKey is in the given CWallet compressed or otherwise*/
 bool HaveKey(const SigningProvider& wallet, const CKey& key)
@@ -85,69 +56,6 @@ bool HaveKey(const SigningProvider& wallet, const CKey& key)
     CKey key2;
     key2.Set(key.begin(), key.end(), !key.IsCompressed());
     return wallet.HaveKey(key.GetPubKey().GetID()) || wallet.HaveKey(key2.GetPubKey().GetID());
-}
-
-bool GetWalletNameFromJSONRPCRequest(const JSONRPCRequest& request, std::string& wallet_name)
-{
-    if (URL_DECODE && request.URI.substr(0, WALLET_ENDPOINT_BASE.size()) == WALLET_ENDPOINT_BASE) {
-        // wallet endpoint was used
-        wallet_name = URL_DECODE(request.URI.substr(WALLET_ENDPOINT_BASE.size()));
-        return true;
-    }
-    return false;
-}
-
-std::shared_ptr<CWallet> GetWalletForJSONRPCRequest(const JSONRPCRequest& request)
-{
-    CHECK_NONFATAL(request.mode == JSONRPCRequest::EXECUTE);
-
-    std::string wallet_name;
-    if (GetWalletNameFromJSONRPCRequest(request, wallet_name)) {
-        std::shared_ptr<CWallet> pwallet = GetWallet(wallet_name);
-        if (!pwallet) throw JSONRPCError(RPC_WALLET_NOT_FOUND, "Requested wallet does not exist or is not loaded");
-        return pwallet;
-    }
-
-    std::vector<std::shared_ptr<CWallet>> wallets = GetWallets();
-    if (wallets.size() == 1) {
-        return wallets[0];
-    }
-
-    if (wallets.empty()) {
-        throw JSONRPCError(
-            RPC_WALLET_NOT_FOUND, "No wallet is loaded. Load a wallet using loadwallet or create a new one with createwallet. (Note: A default wallet is no longer automatically created)");
-    }
-    throw JSONRPCError(RPC_WALLET_NOT_SPECIFIED,
-        "Wallet file not specified (must request wallet RPC through /wallet/<filename> uri-path).");
-}
-
-void EnsureWalletIsUnlocked(const CWallet& wallet)
-{
-    if (wallet.IsLocked()) {
-        throw JSONRPCError(RPC_WALLET_UNLOCK_NEEDED, "Error: Please enter the wallet passphrase with walletpassphrase first.");
-    }
-}
-
-// also_create should only be set to true only when the RPC is expected to add things to a blank wallet and make it no longer blank
-LegacyScriptPubKeyMan& EnsureLegacyScriptPubKeyMan(CWallet& wallet, bool also_create)
-{
-    LegacyScriptPubKeyMan* spk_man = wallet.GetLegacyScriptPubKeyMan();
-    if (!spk_man && also_create) {
-        spk_man = wallet.GetOrCreateLegacyScriptPubKeyMan();
-    }
-    if (!spk_man) {
-        throw JSONRPCError(RPC_WALLET_ERROR, "This type of wallet does not support this command");
-    }
-    return *spk_man;
-}
-
-WalletContext& EnsureWalletContext(const CoreContext& context)
-{
-    auto* wallet_context = GetContext<WalletContext>(context);
-    if (!wallet_context) {
-        throw JSONRPCError(RPC_INTERNAL_ERROR, "Wallet context not found");
-    }
-    return *wallet_context;
 }
 
 static void WalletTxToJSON(interfaces::Chain& chain, const CWalletTx& wtx, UniValue& entry)
@@ -188,15 +96,6 @@ static void WalletTxToJSON(interfaces::Chain& chain, const CWalletTx& wtx, UniVa
 
     for (const std::pair<const std::string, std::string>& item : wtx.mapValue)
         entry.pushKV(item.first, item.second);
-}
-
-
-static std::string LabelFromValue(const UniValue& value)
-{
-    std::string label = value.get_str();
-    if (label == "*")
-        throw JSONRPCError(RPC_WALLET_INVALID_LABEL_NAME, "Invalid label name");
-    return label;
 }
 
 /**
@@ -446,7 +345,7 @@ static RPCHelpMan sendtoaddress()
                         RPCResult::Type::OBJ, "", "",
                         {
                             {RPCResult::Type::STR_HEX, "txid", "The transaction id."},
-                            {RPCResult::Type::STR, "fee reason", "The transaction fee reason."}
+                            {RPCResult::Type::STR, "fee_reason", "The transaction fee reason."}
                         },
                     },
                 },
@@ -561,7 +460,7 @@ static RPCHelpMan listaddressgroupings()
         },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
-    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
+    const std::shared_ptr<const CWallet> pwallet = GetWalletForJSONRPCRequest(request);
     if (!pwallet) return NullUniValue;
 
     // Make sure the results are valid at least up to the most recent block
@@ -615,7 +514,7 @@ static RPCHelpMan listaddressbalances()
         },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
-    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
+    const std::shared_ptr<const CWallet> pwallet = GetWalletForJSONRPCRequest(request);
     if (!pwallet) return NullUniValue;
 
     LOCK(pwallet->cs_wallet);
@@ -638,62 +537,6 @@ static RPCHelpMan listaddressbalances()
     };
 }
 
-static RPCHelpMan signmessage()
-{
-    return RPCHelpMan{"signmessage",
-        "\nSign a message with the private key of an address" +
-                HELP_REQUIRING_PASSPHRASE,
-        {
-            {"address", RPCArg::Type::STR, RPCArg::Optional::NO, "The Dash address to use for the private key."},
-            {"message", RPCArg::Type::STR, RPCArg::Optional::NO, "The message to create a signature of."},
-        },
-        RPCResult{
-            RPCResult::Type::STR, "signature", "The signature of the message encoded in base 64"
-        },
-        RPCExamples{
-    "\nUnlock the wallet for 30 seconds\n"
-    + HelpExampleCli("walletpassphrase", "\"mypassphrase\" 30") +
-    "\nCreate the signature\n"
-    + HelpExampleCli("signmessage", "\"" + EXAMPLE_ADDRESS[0] + "\" \"my message\"") +
-    "\nVerify the signature\n"
-    + HelpExampleCli("verifymessage", "\"" + EXAMPLE_ADDRESS[0] + "\" \"signature\" \"my message\"") +
-    "\nAs a JSON-RPC call\n"
-    + HelpExampleRpc("signmessage", "\"" + EXAMPLE_ADDRESS[0] + "\", \"my message\"")
-        },
-        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
-{
-    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
-    if (!pwallet) return NullUniValue;
-
-    LOCK(pwallet->cs_wallet);
-
-    EnsureWalletIsUnlocked(*pwallet);
-
-    std::string strAddress = request.params[0].get_str();
-    std::string strMessage = request.params[1].get_str();
-
-    CTxDestination dest = DecodeDestination(strAddress);
-    if (!IsValidDestination(dest)) {
-        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid address");
-    }
-
-    const PKHash *pkhash = std::get_if<PKHash>(&dest);
-    if (!pkhash) {
-        throw JSONRPCError(RPC_TYPE_ERROR, "Address does not refer to key");
-    }
-
-    std::string signature;
-    SigningResult err = pwallet->SignMessage(strMessage, *pkhash, signature);
-    if (err == SigningResult::SIGNING_FAILED) {
-        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, SigningResultString(err));
-    } else if (err != SigningResult::OK){
-        throw JSONRPCError(RPC_WALLET_ERROR, SigningResultString(err));
-    }
-
-    return signature;
-},
-    };
-}
 
 static CAmount GetReceived(const CWallet& wallet, const UniValue& params, bool by_label) EXCLUSIVE_LOCKS_REQUIRED(wallet.cs_wallet)
 {
@@ -767,7 +610,7 @@ static RPCHelpMan getreceivedbyaddress()
         },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
-    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
+    const std::shared_ptr<const CWallet> pwallet = GetWalletForJSONRPCRequest(request);
     if (!pwallet) return NullUniValue;
 
     // Make sure the results are valid at least up to the most recent block
@@ -806,7 +649,7 @@ static RPCHelpMan getreceivedbylabel()
         },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
-    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
+    const std::shared_ptr<const CWallet> pwallet = GetWalletForJSONRPCRequest(request);
     if (!pwallet) return NullUniValue;
 
     // Make sure the results are valid at least up to the most recent block
@@ -847,7 +690,7 @@ static RPCHelpMan getbalance()
         },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
-    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
+    const std::shared_ptr<const CWallet> pwallet = GetWalletForJSONRPCRequest(request);
     if (!pwallet) return NullUniValue;
 
     // Make sure the results are valid at least up to the most recent block
@@ -891,7 +734,7 @@ static RPCHelpMan getunconfirmedbalance()
         RPCExamples{""},
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
-    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
+    const std::shared_ptr<const CWallet> pwallet = GetWalletForJSONRPCRequest(request);
     if (!pwallet) return NullUniValue;
 
     // Make sure the results are valid at least up to the most recent block
@@ -947,7 +790,7 @@ static RPCHelpMan sendmany()
                         {
                             {RPCResult::Type::STR_HEX, "txid", "The transaction id for the send. Only 1 transaction is created regardless of\n"
                 "the number of addresses."},
-                            {RPCResult::Type::STR, "fee reason", "The transaction fee reason."}
+                            {RPCResult::Type::STR, "fee_reason", "The transaction fee reason."}
                         },
                     },
                 },
@@ -1256,7 +1099,7 @@ static RPCHelpMan listreceivedbyaddress()
             {
                 {RPCResult::Type::OBJ, "", "",
                  {
-                     {RPCResult::Type::BOOL, "involvesWatchonly", "Only returns true if imported addresses were involved in transaction"},
+                     {RPCResult::Type::BOOL, "involvesWatchonly", /* optional */ true, "Only returns true if imported addresses were involved in transaction"},
                      {RPCResult::Type::STR, "address", "The receiving address"},
                      {RPCResult::Type::STR_AMOUNT, "amount", "The total amount in " + CURRENCY_UNIT + " received by the address"},
                      {RPCResult::Type::NUM, "confirmations", "The number of confirmations of the most recent transaction included.\n"
@@ -1278,7 +1121,7 @@ static RPCHelpMan listreceivedbyaddress()
         },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
-    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
+    const std::shared_ptr<const CWallet> pwallet = GetWalletForJSONRPCRequest(request);
     if (!pwallet) return NullUniValue;
 
     // Make sure the results are valid at least up to the most recent block
@@ -1307,7 +1150,7 @@ static RPCHelpMan listreceivedbylabel()
             {
                 {RPCResult::Type::OBJ, "", "",
                  {
-                     {RPCResult::Type::BOOL, "involvesWatchonly", "Only returns true if imported addresses were involved in transaction"},
+                    {RPCResult::Type::BOOL, "involvesWatchonly", /* optional */ true, "Only returns true if imported addresses were involved in transaction"},
                      {RPCResult::Type::STR_AMOUNT, "amount", "The total amount received by addresses with this label"},
                      {RPCResult::Type::NUM, "confirmations", "The number of confirmations of the most recent transaction included"},
                      {RPCResult::Type::STR, "label", "The label of the receiving address. The default label is \"\""},
@@ -1321,7 +1164,7 @@ static RPCHelpMan listreceivedbylabel()
         },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
-    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
+    const std::shared_ptr<const CWallet> pwallet = GetWalletForJSONRPCRequest(request);
     if (!pwallet) return NullUniValue;
 
     // Make sure the results are valid at least up to the most recent block
@@ -1444,18 +1287,18 @@ static const std::vector<RPCResult> TransactionDescriptionString()
             {RPCResult::Type::BOOL, "instantlock", "Current transaction lock state. Available for 'send' and 'receive' category of transactions"},
             {RPCResult::Type::BOOL, "instantlock-internal", "Current internal transaction lock state. Available for 'send' and 'receive' category of transactions"},
             {RPCResult::Type::BOOL, "chainlock", "The state of the corresponding block ChainLock"},
-            {RPCResult::Type::BOOL, "trusted", "Whether we consider the outputs of this unconfirmed transaction safe to spend."},
-            {RPCResult::Type::STR_HEX, "blockhash", "The block hash containing the transaction. Available for 'send' and 'receive'\n"
+            {RPCResult::Type::BOOL, "trusted", /* optional */ true, "Whether we consider the outputs of this unconfirmed transaction safe to spend."},
+            {RPCResult::Type::STR_HEX, "blockhash", /* optional */ true, "The block hash containing the transaction. Available for 'send' and 'receive'\n"
                                                    "category of transactions."},
-            {RPCResult::Type::STR_HEX, "blockheight", "The block height containing the transaction."},
-            {RPCResult::Type::NUM, "blockindex", "The index of the transaction in the block that includes it. Available for 'send' and 'receive'\n"
+            {RPCResult::Type::STR_HEX, "blockheight", /* optional */ true, "The block height containing the transaction."},
+            {RPCResult::Type::NUM, "blockindex", /* optional */ true, "The index of the transaction in the block that includes it. Available for 'send' and 'receive'\n"
                                                 "category of transactions."},
-            {RPCResult::Type::NUM_TIME, "blocktime", "The block time expressed in " + UNIX_EPOCH_TIME + "."},
+            {RPCResult::Type::NUM_TIME, "blocktime", /* optional */ true, "The block time expressed in " + UNIX_EPOCH_TIME + "."},
             {RPCResult::Type::STR_HEX, "txid", "The transaction id. Available for 'send' and 'receive' category of transactions."},
             {RPCResult::Type::NUM_TIME, "time", "The transaction time expressed in " + UNIX_EPOCH_TIME + "."},
             {RPCResult::Type::NUM_TIME, "timereceived", "The time received expressed in " + UNIX_EPOCH_TIME + ". Available \n"
                                                "for 'send' and 'receive' category of transactions."},
-            {RPCResult::Type::STR, "comment", "If a comment is associated with the transaction."}};
+            {RPCResult::Type::STR, "comment", /* optional */ "If a comment is associated with the transaction."}};
 }
 
 static RPCHelpMan listtransactions()
@@ -1475,7 +1318,7 @@ static RPCHelpMan listtransactions()
             {
                 {RPCResult::Type::OBJ, "", "", Cat(Cat<std::vector<RPCResult>>(
                     {
-                        {RPCResult::Type::BOOL, "involvesWatchonly", "Only returns true if imported addresses were involved in transaction"},
+                        {RPCResult::Type::BOOL, "involvesWatchonly", /* optional */ true, "Only returns true if imported addresses were involved in transaction"},
                         {RPCResult::Type::STR, "address", "The Dash address of the transaction. Not present for\n"
                               "move transactions (category = move)."},
                         {RPCResult::Type::STR, "category", "The transaction category.\n"
@@ -1488,14 +1331,14 @@ static RPCHelpMan listtransactions()
                             "\"platform-transfer\"     Platform Transfer transactions received.\n"},
                         {RPCResult::Type::STR_AMOUNT, "amount", "The amount in " + CURRENCY_UNIT + ". This is negative for the 'send' category, and is positive\n"
                              "for all other categories"},
-                        {RPCResult::Type::STR, "label", "A comment for the address/transaction, if any"},
+                        {RPCResult::Type::STR, "label", /* optional */ true, "A comment for the address/transaction, if any"},
                         {RPCResult::Type::NUM, "vout", "the vout value"},
-                        {RPCResult::Type::STR_AMOUNT, "fee", "The amount of the fee in " + CURRENCY_UNIT + ". This is negative and only available for the\n"
+                        {RPCResult::Type::STR_AMOUNT, "fee", /* optional */ true, "The amount of the fee in " + CURRENCY_UNIT + ". This is negative and only available for the\n"
                             "'send' category of transactions."},
                     },
                     TransactionDescriptionString()),
                     {
-                       {RPCResult::Type::BOOL, "abandoned", "'true' if the transaction has been abandoned (inputs are respendable). Only available for the \n"
+                       {RPCResult::Type::BOOL, "abandoned", /* optional */ true, "'true' if the transaction has been abandoned (inputs are respendable). Only available for the \n"
                                                             "'send' category of transactions."},
                     })},
             }
@@ -1510,7 +1353,7 @@ static RPCHelpMan listtransactions()
         },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
-    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
+    const std::shared_ptr<const CWallet> pwallet = GetWalletForJSONRPCRequest(request);
     if (!pwallet) return NullUniValue;
 
     // Make sure the results are valid at least up to the most recent block
@@ -1592,7 +1435,7 @@ static RPCHelpMan listsinceblock()
                 {
                     {RPCResult::Type::OBJ, "", "", Cat(Cat<std::vector<RPCResult>>(
                     {
-                        {RPCResult::Type::BOOL, "involvesWatchonly", "Only returns true if imported addresses were involved in transaction"},
+                        {RPCResult::Type::BOOL, "involvesWatchonly", /* optional */ true, "Only returns true if imported addresses were involved in transaction"},
                         {RPCResult::Type::STR, "address", "The Dash address of the transaction."},
                         {RPCResult::Type::STR, "category", "The transaction category.\n"
                             "\"send\"                  Transactions sent.\n"
@@ -1605,16 +1448,16 @@ static RPCHelpMan listsinceblock()
                         {RPCResult::Type::STR_AMOUNT, "amount", "The amount in " + CURRENCY_UNIT + ". This is negative for the 'send' category, and is positive\n"
                             "for all other categories"},
                         {RPCResult::Type::NUM, "vout", "the vout value"},
-                        {RPCResult::Type::NUM, "fee", "The amount of the fee in " + CURRENCY_UNIT + ". This is negative and only available for the 'send' category of transactions."},
+                        {RPCResult::Type::NUM, "fee", /* optional */ true, "The amount of the fee in " + CURRENCY_UNIT + ". This is negative and only available for the 'send' category of transactions."},
                     },
                     TransactionDescriptionString()),
                     {
-                        {RPCResult::Type::BOOL, "abandoned", "'true' if the transaction has been abandoned (inputs are respendable). Only available for the 'send' category of transactions."},
-                        {RPCResult::Type::STR, "label", "A comment for the address/transaction, if any."},
+                        {RPCResult::Type::BOOL, "abandoned", /* optional */ true, "'true' if the transaction has been abandoned (inputs are respendable). Only available for the 'send' category of transactions."},
+                        {RPCResult::Type::STR, "label", /* optional */ true, "A comment for the address/transaction, if any."},
                         {RPCResult::Type::STR, "to", "If a comment to is associated with the transaction."},
                     })},
                 }},
-                {RPCResult::Type::ARR, "removed", "<structure is the same as \"transactions\" above, only present if include_removed=true>\n"
+                {RPCResult::Type::ARR, "removed", /* optional */ true, "<structure is the same as \"transactions\" above, only present if include_removed=true>\n"
                     "Note: transactions that were re-added in the active chain will appear as-is in this array, and may thus have a positive confirmation count."
                 , {{RPCResult::Type::ELISION, "", ""},}},
                 {RPCResult::Type::STR_HEX, "lastblockhash", "The hash of the block (target_confirmations-1) from the best block on the main chain, or the genesis hash if the referenced block does not exist yet. This is typically used to feed back into listsinceblock the next time you call it. So you would generally use a target_confirmations of say 6, so you will be continually re-notified of transactions until they've reached 6 confirmations plus any new ones."}
@@ -1627,7 +1470,7 @@ static RPCHelpMan listsinceblock()
         },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
-    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
+    const std::shared_ptr<const CWallet> pwallet = GetWalletForJSONRPCRequest(request);
     if (!pwallet) return NullUniValue;
 
     const CWallet& wallet = *pwallet;
@@ -1725,7 +1568,7 @@ static RPCHelpMan gettransaction()
             RPCResult::Type::OBJ, "", "", Cat(Cat<std::vector<RPCResult>>(
                 {
                     {RPCResult::Type::STR_AMOUNT, "amount", "The amount in " + CURRENCY_UNIT},
-                    {RPCResult::Type::STR_AMOUNT, "fee", "The amount of the fee in " + CURRENCY_UNIT + ". This is negative and only available for the\n"
+                    {RPCResult::Type::STR_AMOUNT, "fee", /* optional */ true, "The amount of the fee in " + CURRENCY_UNIT + ". This is negative and only available for the\n"
                                                                                                        "'send' category of transactions."},
                 },
                 TransactionDescriptionString()),
@@ -1734,8 +1577,8 @@ static RPCHelpMan gettransaction()
                         {
                             {RPCResult::Type::OBJ, "", "",
                                 {
-                                    {RPCResult::Type::BOOL, "involvesWatchonly", "Only returns true if imported addresses were involved in transaction"},
-                                    {RPCResult::Type::STR, "address", "The Dash address involved in the transaction."},
+                                    {RPCResult::Type::BOOL, "involvesWatchonly", /* optional */ true, "Only returns true if imported addresses were involved in transaction"},
+                                    {RPCResult::Type::STR, "address", /* optional */ true, "The Dash address involved in the transaction."},
                                     {RPCResult::Type::STR, "category", "The transaction category.\n"
                                         "\"send\"                  Transactions sent.\n"
                                         "\"coinjoin\"              Transactions sent using CoinJoin funds.\n"
@@ -1745,11 +1588,11 @@ static RPCHelpMan gettransaction()
                                         "\"orphan\"                Orphaned coinbase transactions received.\n"
                                         "\"platform-transfer\"     Platform Transfer transactions received.\n"},
                                     {RPCResult::Type::STR_AMOUNT, "amount", "The amount in " + CURRENCY_UNIT},
-                                    {RPCResult::Type::STR, "label", "A comment for the address/transaction, if any"},
+                                    {RPCResult::Type::STR, "label", /* optional */ true, "A comment for the address/transaction, if any"},
                                     {RPCResult::Type::NUM, "vout", "the vout value"},
-                                    {RPCResult::Type::STR_AMOUNT, "fee", "The amount of the fee in " + CURRENCY_UNIT + ". This is negative and only available for the \n"
+                                    {RPCResult::Type::STR_AMOUNT, "fee", /* optional */ true, "The amount of the fee in " + CURRENCY_UNIT + ". This is negative and only available for the \n"
                                                                                                                        "'send' category of transactions."},
-                                    {RPCResult::Type::BOOL, "abandoned", "'true' if the transaction has been abandoned (inputs are respendable). Only available for the \n"
+                                    {RPCResult::Type::BOOL, "abandoned", /* optional */ true, "'true' if the transaction has been abandoned (inputs are respendable). Only available for the \n"
                                                                          "'send' category of transactions."},
                             }},
                     }},
@@ -1767,7 +1610,7 @@ static RPCHelpMan gettransaction()
         },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
-    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
+    const std::shared_ptr<const CWallet> pwallet = GetWalletForJSONRPCRequest(request);
     if (!pwallet) return NullUniValue;
 
     // Make sure the results are valid at least up to the most recent block
@@ -1813,7 +1656,7 @@ static RPCHelpMan gettransaction()
 
     if (verbose) {
         UniValue decoded(UniValue::VOBJ);
-        TxToUniv(*wtx.tx, uint256(), pwallet->chain().rpcEnableDeprecated("addresses"), decoded, false);
+        TxToUniv(*wtx.tx, uint256(), decoded, false);
         entry.pushKV("decoded", decoded);
     }
 
@@ -1878,7 +1721,7 @@ static RPCHelpMan backupwallet()
         },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
-    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
+    const std::shared_ptr<const CWallet> pwallet = GetWalletForJSONRPCRequest(request);
     if (!pwallet) return NullUniValue;
 
     // Make sure the results are valid at least up to the most recent block
@@ -2366,7 +2209,7 @@ static RPCHelpMan listlockunspent()
         },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
-    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
+    const std::shared_ptr<const CWallet> pwallet = GetWalletForJSONRPCRequest(request);
     if (!pwallet) return NullUniValue;
 
     LOCK(pwallet->cs_wallet);
@@ -2441,7 +2284,7 @@ static RPCHelpMan setcoinjoinrounds()
         },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
-    std::shared_ptr<CWallet> const wallet = GetWalletForJSONRPCRequest(request);
+    const std::shared_ptr<const CWallet> wallet = GetWalletForJSONRPCRequest(request);
     if (!wallet) return NullUniValue;
 
     int nRounds = request.params[0].get_int();
@@ -2472,7 +2315,7 @@ static RPCHelpMan setcoinjoinamount()
         },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
-    std::shared_ptr<CWallet> const wallet = GetWalletForJSONRPCRequest(request);
+    const std::shared_ptr<const CWallet> wallet = GetWalletForJSONRPCRequest(request);
     if (!wallet) return NullUniValue;
 
     int nAmount = request.params[0].get_int();
@@ -2500,10 +2343,10 @@ static RPCHelpMan getbalances()
                                 {RPCResult::Type::STR_AMOUNT, "trusted", " trusted balance (outputs created by the wallet or confirmed outputs)"},
                                 {RPCResult::Type::STR_AMOUNT, "untrusted_pending", " untrusted pending balance (outputs created by others that are in the mempool)"},
                                 {RPCResult::Type::STR_AMOUNT, "immature", " balance from immature coinbase outputs"},
-                                {RPCResult::Type::STR_AMOUNT, "used", "(only present if avoid_reuse is set) balance from coins sent to addresses that were previously spent from (potentially privacy violating)"},
+                                {RPCResult::Type::STR_AMOUNT, "used", /* optional */ true, "(only present if avoid_reuse is set) balance from coins sent to addresses that were previously spent from (potentially privacy violating)"},
                                 {RPCResult::Type::STR_AMOUNT, "coinjoin", " CoinJoin balance (outputs with enough rounds created by the wallet via mixing)"},
                         }},
-                        {RPCResult::Type::OBJ, "watchonly", "watchonly balances (not present if wallet does not watch anything)",
+                        {RPCResult::Type::OBJ, "watchonly", /* optional */ true, "watchonly balances (not present if wallet does not watch anything)",
                             {
                                 {RPCResult::Type::STR_AMOUNT, "trusted", " trusted balance (outputs created by the wallet or confirmed outputs)"},
                                 {RPCResult::Type::STR_AMOUNT, "untrusted_pending", " untrusted pending balance (outputs created by others that are in the mempool)"},
@@ -2517,9 +2360,9 @@ static RPCHelpMan getbalances()
                 },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
-    std::shared_ptr<CWallet> const rpc_wallet = GetWalletForJSONRPCRequest(request);
+    const std::shared_ptr<const CWallet> rpc_wallet = GetWalletForJSONRPCRequest(request);
     if (!rpc_wallet) return NullUniValue;
-    CWallet& wallet = *rpc_wallet;
+    const CWallet& wallet = *rpc_wallet;
 
     // Make sure the results are valid at least up to the most recent block
     // the user could have gotten from another RPC command prior to now
@@ -2573,9 +2416,9 @@ static RPCHelpMan getwalletinfo()
                             {RPCResult::Type::NUM, "immature_balance", "DEPRECATED. Identical to getbalances().mine.immature"},
                             {RPCResult::Type::NUM, "txcount", "the total number of transactions in the wallet"},
                             {RPCResult::Type::NUM_TIME, "timefirstkey", "the " + UNIX_EPOCH_TIME + " of the oldest known key in the wallet"},
-                            {RPCResult::Type::NUM_TIME, "keypoololdest", "the " + UNIX_EPOCH_TIME + " of the oldest pre-generated key in the key pool. Legacy wallets only"},
+                            {RPCResult::Type::NUM_TIME, "keypoololdest", /* optional */ true, "the " + UNIX_EPOCH_TIME + " of the oldest pre-generated key in the key pool. Legacy wallets only"},
                             {RPCResult::Type::NUM, "keypoolsize", "how many new keys are pre-generated (only counts external keys)"},
-                            {RPCResult::Type::NUM, "keypoolsize_hd_internal", "how many new keys are pre-generated for internal use (used for change outputs, only appears if the wallet is using this feature, otherwise external keys are used)"},
+                            {RPCResult::Type::NUM, "keypoolsize_hd_internal", /* optional */ true, "how many new keys are pre-generated for internal use (used for change outputs, only appears if the wallet is using this feature, otherwise external keys are used)"},
                             {RPCResult::Type::NUM, "keys_left", "how many new keys are left since last automatic backup"},
                             {RPCResult::Type::NUM_TIME, "unlocked_until", /* optional */ true, "the " + UNIX_EPOCH_TIME + " until which the wallet is unlocked for transfers, or 0 if the wallet is locked (only present for passphrase-encrypted wallets)"},
                             {RPCResult::Type::STR_AMOUNT, "paytxfee", "the transaction fee configuration, set in " + CURRENCY_UNIT + "/kB"},
@@ -2606,7 +2449,7 @@ static RPCHelpMan getwalletinfo()
                 },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
-    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
+    const std::shared_ptr<const CWallet> pwallet = GetWalletForJSONRPCRequest(request);
     if (!pwallet) return NullUniValue;
 
     // Make sure the results are valid at least up to the most recent block
@@ -2904,7 +2747,7 @@ static RPCHelpMan loadwallet()
     bilingual_str error;
     std::vector<bilingual_str> warnings;
     std::optional<bool> load_on_start = request.params[1].isNull() ? std::nullopt : std::optional<bool>(request.params[1].get_bool());
-    std::shared_ptr<CWallet> const wallet = LoadWallet(*context.chain, *context.m_coinjoin_loader, name, load_on_start, options, status, error, warnings);
+    std::shared_ptr<CWallet> const wallet = LoadWallet(*context.chain, *context.coinjoin_loader, name, load_on_start, options, status, error, warnings);
 
     HandleWalletError(wallet, status, error);
 
@@ -3060,7 +2903,7 @@ static RPCHelpMan createwallet()
     options.create_passphrase = passphrase;
     bilingual_str error;
     std::optional<bool> load_on_start = request.params[6].isNull() ? std::nullopt : std::optional<bool>(request.params[6].get_bool());
-    std::shared_ptr<CWallet> wallet = CreateWallet(*context.chain, *context.m_coinjoin_loader, request.params[0].get_str(), load_on_start, options, status, error, warnings);
+    const std::shared_ptr<CWallet> wallet = CreateWallet(*context.chain, *context.coinjoin_loader, request.params[0].get_str(), load_on_start, options, status, error, warnings);
     if (!wallet) {
         RPCErrorCode code = status == DatabaseStatus::FAILED_ENCRYPT ? RPC_WALLET_ENCRYPTION_FAILED : RPC_WALLET_ERROR;
         throw JSONRPCError(code, error.original);
@@ -3114,7 +2957,7 @@ static RPCHelpMan restorewallet()
     bilingual_str error;
     std::vector<bilingual_str> warnings;
 
-    const std::shared_ptr<CWallet> wallet = RestoreWallet(*context.chain, *context.m_coinjoin_loader, backup_file, wallet_name, load_on_start, status, error, warnings);
+    const std::shared_ptr<CWallet> wallet = RestoreWallet(*context.chain, *context.coinjoin_loader, backup_file, wallet_name, load_on_start, status, error, warnings);
 
     HandleWalletError(wallet, status, error);
 
@@ -3213,15 +3056,18 @@ static RPCHelpMan listunspent()
                 {
                     {RPCResult::Type::STR_HEX, "txid", "the transaction id"},
                     {RPCResult::Type::NUM, "vout", "the vout value"},
-                    {RPCResult::Type::STR, "address", "the Dash address"},
-                    {RPCResult::Type::STR, "label", "The associated label, or \"\" for the default label"},
+                    {RPCResult::Type::STR, "address", /* optional */ "the Dash address"},
+                    {RPCResult::Type::STR, "label", /* optional */ "The associated label, or \"\" for the default label"},
                     {RPCResult::Type::STR, "scriptPubKey", "the script key"},
                     {RPCResult::Type::STR_AMOUNT, "amount", "the transaction output amount in " + CURRENCY_UNIT},
                     {RPCResult::Type::NUM, "confirmations", "The number of confirmations"},
-                    {RPCResult::Type::STR_HEX, "redeemScript", "The redeemScript if scriptPubKey is P2SH"},
+                    {RPCResult::Type::NUM, "ancestorcount", /* optional */ true, "The number of in-mempool ancestor transactions, including this one (if transaction is in the mempool)"},
+                    {RPCResult::Type::NUM, "ancestorsize", /* optional */ true, "The virtual transaction size of in-mempool ancestors, including this one (if transaction is in the mempool)"},
+                    {RPCResult::Type::STR_AMOUNT, "ancestorfees", /* optional */ true, "The total fees of in-mempool ancestors (including this one) with fee deltas used for mining priority in " + CURRENCY_ATOM + " (if transaction is in the mempool)"},
+                    {RPCResult::Type::STR_HEX, "redeemScript", /* optional */ true, "The redeemScript if scriptPubKey is P2SH"},
                     {RPCResult::Type::BOOL, "spendable", "Whether we have the private keys to spend this output"},
                     {RPCResult::Type::BOOL, "solvable", "Whether we know how to spend this output, ignoring the lack of keys"},
-                    {RPCResult::Type::STR, "desc", "(only when solvable) A descriptor for spending this output"},
+                    {RPCResult::Type::STR, "desc", /* optional */ true, "(only when solvable) A descriptor for spending this output"},
                     {RPCResult::Type::BOOL, "reused", /* optional*/ true, "(only present if avoid_reuse is set) Whether this output is reused/dirty (sent to an address that was previously spent from)"},
                     {RPCResult::Type::BOOL, "safe", "Whether this output is considered safe to spend. Unconfirmed transactions"
                                                     "from outside keys and unconfirmed replacement transactions are considered unsafe\n"
@@ -3238,7 +3084,7 @@ static RPCHelpMan listunspent()
         },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
-    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
+    const std::shared_ptr<const CWallet> pwallet = GetWalletForJSONRPCRequest(request);
     if (!pwallet) return NullUniValue;
 
     int nMinDepth = 1;
@@ -3379,6 +3225,16 @@ static RPCHelpMan listunspent()
         entry.pushKV("scriptPubKey", HexStr(scriptPubKey));
         entry.pushKV("amount", ValueFromAmount(out.tx->tx->vout[out.i].nValue));
         entry.pushKV("confirmations", out.nDepth);
+        if (!out.nDepth) {
+            size_t ancestor_count, descendant_count, ancestor_size;
+            CAmount ancestor_fees;
+            pwallet->chain().getTransactionAncestry(out.tx->GetHash(), ancestor_count, descendant_count, &ancestor_size, &ancestor_fees);
+            if (ancestor_count) {
+                entry.pushKV("ancestorcount", uint64_t(ancestor_count));
+                entry.pushKV("ancestorsize", uint64_t(ancestor_size));
+                entry.pushKV("ancestorfees", uint64_t(ancestor_fees));
+            }
+        }
         entry.pushKV("spendable", out.fSpendable);
         entry.pushKV("solvable", out.fSolvable);
         if (out.fSolvable) {
@@ -3666,10 +3522,9 @@ RPCHelpMan signrawtransactionwithwallet()
         },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
-
     RPCTypeCheck(request.params, {UniValue::VSTR, UniValue::VARR, UniValue::VSTR}, true);
 
-    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
+    const std::shared_ptr<const CWallet> pwallet = GetWalletForJSONRPCRequest(request);
     if (!pwallet) return NullUniValue;
 
     CMutableTransaction mtx;
@@ -3980,7 +3835,7 @@ RPCHelpMan getaddressinfo()
         },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
-    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
+    const std::shared_ptr<const CWallet> pwallet = GetWalletForJSONRPCRequest(request);
     if (!pwallet) return NullUniValue;
 
     LOCK(pwallet->cs_wallet);
@@ -4090,7 +3945,7 @@ static RPCHelpMan getaddressesbylabel()
         },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
-    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
+    const std::shared_ptr<const CWallet> pwallet = GetWalletForJSONRPCRequest(request);
     if (!pwallet) return NullUniValue;
 
     LOCK(pwallet->cs_wallet);
@@ -4151,7 +4006,7 @@ static RPCHelpMan listlabels()
         },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
-    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
+    const std::shared_ptr<const CWallet> pwallet = GetWalletForJSONRPCRequest(request);
     if (!pwallet) return NullUniValue;
 
     LOCK(pwallet->cs_wallet);
@@ -4247,9 +4102,9 @@ static RPCHelpMan send()
             RPCResult::Type::OBJ, "", "",
                 {
                     {RPCResult::Type::BOOL, "complete", "If the transaction has a complete set of signatures"},
-                    {RPCResult::Type::STR_HEX, "txid", "The transaction id for the send. Only 1 transaction is created regardless of the number of addresses."},
-                    {RPCResult::Type::STR_HEX, "hex", "If add_to_wallet is false, the hex-encoded raw transaction with signature(s)"},
-                    {RPCResult::Type::STR, "psbt", "If more signatures are needed, or if add_to_wallet is false, the base64-encoded (partially) signed transaction"}
+                    {RPCResult::Type::STR_HEX, "txid", /* optional */ true, "The transaction id for the send. Only 1 transaction is created regardless of the number of addresses."},
+                    {RPCResult::Type::STR_HEX, "hex", /* optional */ true, "If add_to_wallet is false, the hex-encoded raw transaction with signature(s)"},
+                    {RPCResult::Type::STR, "psbt", /* optional */ true, "If more signatures are needed, or if add_to_wallet is false, the base64-encoded (partially) signed transaction"}
                 }
         },
         RPCExamples{""
@@ -4483,7 +4338,7 @@ RPCHelpMan walletprocesspsbt()
 {
     RPCTypeCheck(request.params, {UniValue::VSTR});
 
-    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
+    const std::shared_ptr<const CWallet> pwallet = GetWalletForJSONRPCRequest(request);
     if (!pwallet) return NullUniValue;
 
     const CWallet& wallet{*pwallet};
@@ -4731,6 +4586,7 @@ RPCHelpMan removeprunedfunds();
 RPCHelpMan importmulti();
 RPCHelpMan importdescriptors();
 RPCHelpMan listdescriptors();
+RPCHelpMan signmessage();
 RPCHelpMan dumphdinfo();
 RPCHelpMan importelectrumwallet();
 

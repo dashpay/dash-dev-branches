@@ -35,7 +35,7 @@
 #include <index/txindex.h>
 #include <txmempool.h>
 #include <txorphanage.h>
-#include <util/check.h> // For NDEBUG compile time check
+#include <util/check.h>
 #include <util/system.h>
 #include <util/strencodings.h>
 #include <util/trace.h>
@@ -1453,7 +1453,7 @@ void PeerManagerImpl::PushNodeVersion(CNode& pnode, const Peer& peer)
 
     int nProtocolVersion = PROTOCOL_VERSION;
     if (params.NetworkIDString() != CBaseChainParams::MAIN && gArgs.IsArgSet("-pushversion")) {
-        nProtocolVersion = gArgs.GetArg("-pushversion", PROTOCOL_VERSION);
+        nProtocolVersion = gArgs.GetIntArg("-pushversion", PROTOCOL_VERSION);
     }
 
     const bool tx_relay{!RejectIncomingTxs(pnode)};
@@ -1764,7 +1764,7 @@ bool PeerManagerImpl::GetNodeStateStats(NodeId nodeid, CNodeStateStats& stats) c
 
 void PeerManagerImpl::AddToCompactExtraTransactions(const CTransactionRef& tx) EXCLUSIVE_LOCKS_REQUIRED(g_cs_orphans)
 {
-    size_t max_extra_txn = gArgs.GetArg("-blockreconstructionextratxn", DEFAULT_BLOCK_RECONSTRUCTION_EXTRA_TXN);
+    size_t max_extra_txn = gArgs.GetIntArg("-blockreconstructionextratxn", DEFAULT_BLOCK_RECONSTRUCTION_EXTRA_TXN);
     if (max_extra_txn <= 0)
         return;
     if (!vExtraTxnForCompact.size())
@@ -3546,6 +3546,9 @@ void PeerManagerImpl::ProcessMessage(
         vRecv >> addrMe;
         if (!pfrom.IsInboundConn())
         {
+            // Overwrites potentially existing services. In contrast to this,
+            // unvalidated services received via gossip relay in ADDR/ADDRV2
+            // messages are only ever added but cannot replace existing ones.
             m_addrman.SetServices(pfrom.addr, nServices);
         }
         if (pfrom.ExpectServicesFromConn() && !HasAllDesirableServiceFlags(nServices))
@@ -3986,7 +3989,7 @@ void PeerManagerImpl::ProcessMessage(
         if (peer->m_addr_token_bucket < MAX_ADDR_PROCESSING_TOKEN_BUCKET) {
             // Don't increment bucket if it's already full
             const auto time_diff = std::max(current_time - peer->m_addr_token_timestamp, 0us);
-            const double increment = CountSecondsDouble(time_diff) * MAX_ADDR_RATE_PER_SECOND;
+            const double increment = Ticks<SecondsDouble>(time_diff) * MAX_ADDR_RATE_PER_SECOND;
             peer->m_addr_token_bucket = std::min<double>(peer->m_addr_token_bucket + increment, MAX_ADDR_PROCESSING_TOKEN_BUCKET);
         }
         peer->m_addr_token_timestamp = current_time;
@@ -4539,7 +4542,7 @@ void PeerManagerImpl::ProcessMessage(
                 }
 
                 // DoS prevention: do not allow m_orphans to grow unbounded (see CVE-2012-3789)
-                unsigned int nMaxOrphanTxSize = (unsigned int)std::max((int64_t)0, gArgs.GetArg("-maxorphantxsize", DEFAULT_MAX_ORPHAN_TRANSACTIONS_SIZE)) * 1000000;
+                unsigned int nMaxOrphanTxSize = (unsigned int)std::max((int64_t)0, gArgs.GetIntArg("-maxorphantxsize", DEFAULT_MAX_ORPHAN_TRANSACTIONS_SIZE)) * 1000000;
                 unsigned int nEvicted = m_orphanage.LimitOrphans(nMaxOrphanTxSize);
                 if (nEvicted > 0) {
                     LogPrint(BCLog::MEMPOOL, "orphanage overflow, removed %u tx\n", nEvicted);
@@ -4763,7 +4766,7 @@ void PeerManagerImpl::ProcessMessage(
             // the peer if the header turns out to be for an invalid block.
             // Note that if a peer tries to build on an invalid chain, that
             // will be detected and the peer will be disconnected/discouraged.
-            return ProcessHeadersMessage(pfrom, *peer, {cmpctblock.header}, /*punish_duplicate_invalid=*/true);
+            return ProcessHeadersMessage(pfrom, *peer, {cmpctblock.header}, /*via_compact_block=*/true);
         }
 
         if (fBlockReconstructed) {

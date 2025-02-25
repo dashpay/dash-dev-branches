@@ -77,21 +77,8 @@ case $host in
   ;;
 esac
 
-AC_ARG_ENABLE([c++20],
-  [AS_HELP_STRING([--enable-c++20],
-  [enable compilation in c++20 mode (disabled by default)])],
-  [use_cxx20=$enableval],
-  [use_cxx20=no])
-
-dnl Require C++17 compiler (no GNU extensions)
-if test "$use_cxx20" = "no"; then
-  AX_CXX_COMPILE_STDCXX([17], [noext], [mandatory])
-else
-  AX_CXX_COMPILE_STDCXX([20], [noext], [mandatory])
-fi
-
-dnl check if additional link flags are required for std::filesystem
-CHECK_FILESYSTEM
+dnl Require C++20 compiler (no GNU extensions)
+AX_CXX_COMPILE_STDCXX([20], [noext], [mandatory])
 
 dnl Unless the user specified OBJCXX, force it to be the same as CXX. This ensures
 dnl that we get the same -std flags for both.
@@ -335,7 +322,7 @@ AC_ARG_ENABLE([gprof],
 dnl Turn warnings into errors
 AC_ARG_ENABLE([werror],
     [AS_HELP_STRING([--enable-werror],
-                    [Treat certain compiler warnings as errors (default is no)])],
+                    [Treat compiler warnings as errors (default is no)])],
     [enable_werror=$enableval],
     [enable_werror=no])
 
@@ -463,35 +450,22 @@ if test "x$enable_werror" = "xyes"; then
   if test "x$CXXFLAG_WERROR" = "x"; then
     AC_MSG_ERROR("enable-werror set but -Werror is not usable")
   fi
-  AX_CHECK_COMPILE_FLAG([-Werror=reorder],[ERROR_CXXFLAGS="$ERROR_CXXFLAGS -Werror=reorder"],,[[$CXXFLAG_WERROR]])
-  AX_CHECK_COMPILE_FLAG([-Werror=gnu],[ERROR_CXXFLAGS="$ERROR_CXXFLAGS -Werror=gnu"],,[[$CXXFLAG_WERROR]])
-  AX_CHECK_COMPILE_FLAG([-Werror=vla],[ERROR_CXXFLAGS="$ERROR_CXXFLAGS -Werror=vla"],,[[$CXXFLAG_WERROR]])
-  AX_CHECK_COMPILE_FLAG([-Werror=shadow-field],[ERROR_CXXFLAGS="$ERROR_CXXFLAGS -Werror=shadow-field"],,[[$CXXFLAG_WERROR]])
-  AX_CHECK_COMPILE_FLAG([-Werror=switch],[ERROR_CXXFLAGS="$ERROR_CXXFLAGS -Werror=switch"],,[[$CXXFLAG_WERROR]])
-  AX_CHECK_COMPILE_FLAG([-Werror=thread-safety],[ERROR_CXXFLAGS="$ERROR_CXXFLAGS -Werror=thread-safety"],,[[$CXXFLAG_WERROR]])
-  AX_CHECK_COMPILE_FLAG([-Werror=range-loop-analysis],[ERROR_CXXFLAGS="$ERROR_CXXFLAGS -Werror=range-loop-analysis"],,[[$CXXFLAG_WERROR]])
-  AX_CHECK_COMPILE_FLAG([-Werror=unused-variable],[ERROR_CXXFLAGS="$ERROR_CXXFLAGS -Werror=unused-variable"],,[[$CXXFLAG_WERROR]])
-  AX_CHECK_COMPILE_FLAG([-Werror=date-time],[ERROR_CXXFLAGS="$ERROR_CXXFLAGS -Werror=date-time"],,[[$CXXFLAG_WERROR]])
+  ERROR_CXXFLAGS=$CXXFLAG_WERROR
 
   dnl -Wreturn-type is broken in GCC for MinGW-w64.
   dnl https://sourceforge.net/p/mingw-w64/bugs/306/
-  AX_CHECK_COMPILE_FLAG([-Werror=return-type], [ERROR_CXXFLAGS="$ERROR_CXXFLAGS -Werror=return-type"], [], [$CXXFLAG_WERROR],
+  AX_CHECK_COMPILE_FLAG([-Werror=return-type], [], [ERROR_CXXFLAGS="$ERROR_CXXFLAGS -Wno-error=return-type"], [$CXXFLAG_WERROR],
                         [AC_LANG_SOURCE([[#include <cassert>
                                           int f(){ assert(false); }]])])
-
-  AX_CHECK_COMPILE_FLAG([-Werror=conditional-uninitialized],[ERROR_CXXFLAGS="$ERROR_CXXFLAGS -Werror=conditional-uninitialized"],,[[$CXXFLAG_WERROR]])
-  AX_CHECK_COMPILE_FLAG([-Werror=sign-compare],[ERROR_CXXFLAGS="$ERROR_CXXFLAGS -Werror=sign-compare"],,[[$CXXFLAG_WERROR]])
-  dnl -Wsuggest-override is broken with GCC before 9.2
-  dnl https://gcc.gnu.org/bugzilla/show_bug.cgi?id=78010
-  AX_CHECK_COMPILE_FLAG([-Werror=suggest-override],[ERROR_CXXFLAGS="$ERROR_CXXFLAGS -Werror=suggest-override"],,[[$CXXFLAG_WERROR]],
-                        [AC_LANG_SOURCE([[struct A { virtual void f(); }; struct B : A { void f() final; };]])])
-  AX_CHECK_COMPILE_FLAG([-Werror=unreachable-code-loop-increment],[ERROR_CXXFLAGS="$ERROR_CXXFLAGS -Werror=unreachable-code-loop-increment"],,[[$CXXFLAG_WERROR]])
-  AX_CHECK_COMPILE_FLAG([-Werror=mismatched-tags], [ERROR_CXXFLAGS="$ERROR_CXXFLAGS -Werror=mismatched-tags"], [], [$CXXFLAG_WERROR])
-  AX_CHECK_COMPILE_FLAG([-Werror=implicit-fallthrough], [ERROR_CXXFLAGS="$ERROR_CXXFLAGS -Werror=implicit-fallthrough"], [], [$CXXFLAG_WERROR])
-
-  if test x$suppress_external_warnings != xno ; then
-    AX_CHECK_COMPILE_FLAG([-Werror=documentation],[ERROR_CXXFLAGS="$ERROR_CXXFLAGS -Werror=documentation"],,[[$CXXFLAG_WERROR]])
-  fi
+  dnl -Wstringop-overread is broken in GCC 11.
+  AC_COMPILE_IFELSE(
+    [AC_LANG_PROGRAM([[]],
+         [[#if __GNUC__ == 11
+           #error -Wstringop-overread is broken in GCC 11
+           #endif
+          ]])],
+    [],
+    [ERROR_CXXFLAGS="$ERROR_CXXFLAGS -Wno-stringop-overread"])
 fi
 
 if test "x$CXXFLAGS_overridden" = "xno"; then
@@ -500,6 +474,7 @@ if test "x$CXXFLAGS_overridden" = "xno"; then
   AX_CHECK_COMPILE_FLAG([-Wgnu],[WARN_CXXFLAGS="$WARN_CXXFLAGS -Wgnu"],,[[$CXXFLAG_WERROR]])
   dnl some compilers will ignore -Wformat-security without -Wformat, so just combine the two here.
   AX_CHECK_COMPILE_FLAG([-Wformat -Wformat-security],[WARN_CXXFLAGS="$WARN_CXXFLAGS -Wformat -Wformat-security"],,[[$CXXFLAG_WERROR]])
+  AX_CHECK_COMPILE_FLAG([-Wreorder],[WARN_CXXFLAGS="$WARN_CXXFLAGS -Wreorder"],,[[$CXXFLAG_WERROR]])
   AX_CHECK_COMPILE_FLAG([-Wvla],[WARN_CXXFLAGS="$WARN_CXXFLAGS -Wvla"],,[[$CXXFLAG_WERROR]])
   AX_CHECK_COMPILE_FLAG([-Wshadow-field],[WARN_CXXFLAGS="$WARN_CXXFLAGS -Wshadow-field"],,[[$CXXFLAG_WERROR]])
   AX_CHECK_COMPILE_FLAG([-Wthread-safety],[WARN_CXXFLAGS="$WARN_CXXFLAGS -Wthread-safety"],,[[$CXXFLAG_WERROR]])
@@ -512,6 +487,8 @@ if test "x$CXXFLAGS_overridden" = "xno"; then
   AX_CHECK_COMPILE_FLAG([-Wduplicated-cond],[WARN_CXXFLAGS="$WARN_CXXFLAGS -Wduplicated-cond"],,[[$CXXFLAG_WERROR]])
   AX_CHECK_COMPILE_FLAG([-Wlogical-op],[WARN_CXXFLAGS="$WARN_CXXFLAGS -Wlogical-op"],,[[$CXXFLAG_WERROR]])
   AX_CHECK_COMPILE_FLAG([-Woverloaded-virtual],[WARN_CXXFLAGS="$WARN_CXXFLAGS -Woverloaded-virtual"],,[[$CXXFLAG_WERROR]])
+  dnl -Wsuggest-override is broken with GCC before 9.2
+  dnl https://gcc.gnu.org/bugzilla/show_bug.cgi?id=78010
   AX_CHECK_COMPILE_FLAG([-Wsuggest-override],[WARN_CXXFLAGS="$WARN_CXXFLAGS -Wsuggest-override"],,[[$CXXFLAG_WERROR]],
                         [AC_LANG_SOURCE([[struct A { virtual void f(); }; struct B : A { void f() final; };]])])
   AX_CHECK_COMPILE_FLAG([-Wunreachable-code-loop-increment],[WARN_CXXFLAGS="$WARN_CXXFLAGS -Wunreachable-code-loop-increment"],,[[$CXXFLAG_WERROR]])
@@ -1051,7 +1028,7 @@ if test x$TARGET_OS = xdarwin; then
   AX_CHECK_LINK_FLAG([[-Wl,-fixup_chains]], [HARDENED_LDFLAGS="$HARDENED_LDFLAGS -Wl,-fixup_chains"], [], [[$LDFLAG_WERROR]])
 fi
 
-AC_CHECK_HEADERS([endian.h sys/endian.h byteswap.h stdio.h stdlib.h unistd.h strings.h sys/types.h sys/stat.h sys/select.h sys/prctl.h sys/sysctl.h vm/vm_param.h sys/vmmeter.h sys/resources.h])
+AC_CHECK_HEADERS([sys/select.h sys/prctl.h sys/sysctl.h vm/vm_param.h sys/vmmeter.h sys/resources.h])
 
 AC_CHECK_DECLS([getifaddrs, freeifaddrs],[CHECK_SOCKET],,
     [#include <sys/types.h>
@@ -1065,18 +1042,6 @@ AC_CHECK_DECLS([setsid])
 AC_CHECK_DECLS([pipe2])
 
 AC_CHECK_FUNCS([timingsafe_bcmp])
-
-AC_CHECK_DECLS([le16toh, le32toh, le64toh, htole16, htole32, htole64, be16toh, be32toh, be64toh, htobe16, htobe32, htobe64],,,
-		[#if HAVE_ENDIAN_H
-                 #include <endian.h>
-                 #elif HAVE_SYS_ENDIAN_H
-                 #include <sys/endian.h>
-                 #endif])
-
-AC_CHECK_DECLS([bswap_16, bswap_32, bswap_64],,,
-		[#if HAVE_BYTESWAP_H
-                 #include <byteswap.h>
-                 #endif])
 
 dnl Check for mallopt(M_ARENA_MAX) (to set glibc arenas)
 AC_MSG_CHECKING(for mallopt M_ARENA_MAX)
@@ -1363,22 +1328,6 @@ if test "x$enable_fuzz" = "xyes"; then
   enable_fuzz_binary=yes
 
   AX_CHECK_PREPROC_FLAG([-DABORT_ON_FAILED_ASSUME],[[DEBUG_CPPFLAGS="$DEBUG_CPPFLAGS -DABORT_ON_FAILED_ASSUME"]],,[[$CXXFLAG_WERROR]])
-
-  AC_MSG_CHECKING([whether main function is needed for fuzz binary])
-  AX_CHECK_LINK_FLAG(
-    [[-fsanitize=$use_sanitizers]],
-    [AC_MSG_RESULT([no])],
-    [AC_MSG_RESULT([yes])
-     CORE_CPPFLAGS="$CORE_CPPFLAGS -DPROVIDE_FUZZ_MAIN_FUNCTION"],
-    [],
-    [AC_LANG_PROGRAM([[
-      #include <cstdint>
-      #include <cstddef>
-      extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) { return 0; }
-      /* comment to remove the main function ...
-     ]],[[
-      */ int not_main() {
-     ]])])
 else
     BITCOIN_QT_INIT
 
@@ -1392,8 +1341,23 @@ else
       QT_DBUS_INCLUDES=SUPPRESS_WARNINGS($QT_DBUS_INCLUDES)
       QT_TEST_INCLUDES=SUPPRESS_WARNINGS($QT_TEST_INCLUDES)
     fi
+fi
 
-    CORE_CPPFLAGS="$CORE_CPPFLAGS -DPROVIDE_FUZZ_MAIN_FUNCTION"
+if test x$enable_fuzz_binary = xyes; then
+  AC_MSG_CHECKING([whether main function is needed for fuzz binary])
+  AX_CHECK_LINK_FLAG(
+    [],
+    [AC_MSG_RESULT([no])],
+    [AC_MSG_RESULT([yes]); CORE_CPPFLAGS="$CORE_CPPFLAGS -DPROVIDE_FUZZ_MAIN_FUNCTION"],
+    [$SANITIZER_LDFLAGS],
+    [AC_LANG_PROGRAM([[
+      #include <cstdint>
+      #include <cstddef>
+      extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) { return 0; }
+      /* comment to remove the main function ...
+     ]],[[
+      */ int not_main() {
+     ]])])
 fi
 
 if test x$enable_wallet != xno; then
@@ -1817,10 +1781,6 @@ if test x$build_bitcoin_wallet$build_bitcoin_cli$build_bitcoin_tx$build_bitcoind
   AC_MSG_ERROR([No targets! Please specify at least one of: --with-utils --with-libs --with-daemon --with-gui --enable-bench or --enable-tests])
 fi
 
-if test x$enable_fuzz_binary = xyes; then
-  CHECK_RUNTIME_LIB
-fi
-
 AM_CONDITIONAL([TARGET_DARWIN], [test x$TARGET_OS = xdarwin])
 AM_CONDITIONAL([BUILD_DARWIN], [test x$BUILD_OS = xdarwin])
 AM_CONDITIONAL([TARGET_LINUX], [test x$TARGET_OS = xlinux])
@@ -1932,6 +1892,8 @@ AC_CONFIG_LINKS([contrib/devtools/test-security-check.py:contrib/devtools/test-s
 AC_CONFIG_LINKS([contrib/devtools/symbol-check.py:contrib/devtools/symbol-check.py])
 AC_CONFIG_LINKS([contrib/devtools/test-symbol-check.py:contrib/devtools/test-symbol-check.py])
 AC_CONFIG_LINKS([contrib/filter-lcov.py:contrib/filter-lcov.py])
+AC_CONFIG_LINKS([src/.bear-tidy-config:src/.bear-tidy-config])
+AC_CONFIG_LINKS([src/.clang-tidy:src/.clang-tidy])
 AC_CONFIG_LINKS([test/functional/test_runner.py:test/functional/test_runner.py])
 AC_CONFIG_LINKS([test/fuzz/test_runner.py:test/fuzz/test_runner.py])
 AC_CONFIG_LINKS([test/util/test_runner.py:test/util/test_runner.py])

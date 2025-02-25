@@ -262,9 +262,26 @@ void OptionsModel::Init(bool resetSettings)
 
     if (!settings.contains("fListen"))
         settings.setValue("fListen", DEFAULT_LISTEN);
-    if (!gArgs.SoftSetBoolArg("-listen", settings.value("fListen").toBool())) {
+    const bool listen{settings.value("fListen").toBool()};
+    if (!gArgs.SoftSetBoolArg("-listen", listen)) {
         addOverriddenOption("-listen");
-    } else if (!settings.value("fListen").toBool()) {
+    } else if (!listen) {
+        // We successfully set -listen=0, thus mimic the logic from InitParameterInteraction():
+        // "parameter interaction: -listen=0 -> setting -listenonion=0".
+        //
+        // Both -listen and -listenonion default to true.
+        //
+        // The call order is:
+        //
+        // InitParameterInteraction()
+        //     would set -listenonion=0 if it sees -listen=0, but for bitcoin-qt with
+        //     fListen=false -listen is 1 at this point
+        //
+        // OptionsModel::Init()
+        //     (this method) can flip -listen from 1 to 0 if fListen=false
+        //
+        // AppInitParameterInteraction()
+        //     raises an error if -listen=0 and -listenonion=1
         gArgs.SoftSetBoolArg("-listenonion", false);
     }
 
@@ -402,7 +419,7 @@ void OptionsModel::SetPruneEnabled(bool prune, bool force)
     if (!gArgs.SoftSetArg("-prune", prune_val)) {
         addOverriddenOption("-prune");
     }
-    if (gArgs.GetArg("-prune", 0) > 0) {
+    if (gArgs.GetIntArg("-prune", 0) > 0) {
         gArgs.SoftSetBoolArg("-disablegovernance", true);
         gArgs.SoftSetBoolArg("-txindex", false);
     }

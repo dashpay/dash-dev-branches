@@ -10,16 +10,21 @@ env:
   CCACHE_DIR: "/tmp/ccache_dir"
 
 # https://cirrus-ci.org/guide/tips-and-tricks/#sharing-configuration-between-tasks
-base_template: &BASE_TEMPLATE
+filter_template: &FILTER_TEMPLATE
   skip: $CIRRUS_REPO_FULL_NAME == "bitcoin-core/gui" && $CIRRUS_PR == ""  # No need to run on the read-only mirror, unless it is a PR. https://cirrus-ci.org/guide/writing-tasks/#conditional-task-execution
+  stateful: false  # https://cirrus-ci.org/guide/writing-tasks/#stateful-tasks
+
+base_template: &BASE_TEMPLATE
+  << : *FILTER_TEMPLATE
   merge_base_script:
-    - if [ "$CIRRUS_PR" = "" ]; then exit 0; fi
+    # Unconditionally install git (used in fingerprint_script) and set the
+    # default git author name (used in verify-commits.py)
     - bash -c "$PACKAGE_MANAGER_INSTALL git"
-    - git fetch $CIRRUS_REPO_CLONE_URL $CIRRUS_BASE_BRANCH
     - git config --global user.email "ci@ci.ci"
     - git config --global user.name "ci"
+    - if [ "$CIRRUS_PR" = "" ]; then exit 0; fi
+    - git fetch $CIRRUS_REPO_CLONE_URL $CIRRUS_BASE_BRANCH
     - git merge FETCH_HEAD  # Merge base to detect silent merge conflicts
-  stateful: false  # https://cirrus-ci.org/guide/writing-tasks/#stateful-tasks
 
 global_task_template: &GLOBAL_TASK_TEMPLATE
   << : *BASE_TEMPLATE
@@ -45,24 +50,25 @@ compute_credits_template: &CREDITS_TEMPLATE
   # Only use credits for pull requests to the main repo
   use_compute_credits: $CIRRUS_REPO_FULL_NAME == 'dashpay/dash' && $CIRRUS_PR != ""
 
-
 task:
-  name: 'lint [bionic]'
+  name: 'lint [bookworm]'
   << : *BASE_TEMPLATE
   container:
-    image: ubuntu:bionic  # For python 3.6, oldest supported version according to doc/dependencies.md
+    image: debian:bookworm
     cpu: 1
     memory: 1G
   # For faster CI feedback, immediately schedule the linters
   << : *CREDITS_TEMPLATE
+  python_cache:
+    folder: "/tmp/python"
+    fingerprint_script: cat .python-version /etc/os-release
   lint_script:
     - ./ci/lint_run_all.sh
-
 task:
-  name: 'ARM [unit tests, no functional tests] [buster]'
+  name: 'ARM [unit tests, no functional tests] [bullseye]'
   << : *GLOBAL_TASK_TEMPLATE
   arm_container:
-    image: debian:buster
+    image: debian:bullseye
     cpu: 2
     memory: 8G
   env:
@@ -78,10 +84,10 @@ task:
     FILE_ENV: "./ci/test/00_setup_env_win64.sh"
 
 task:
-  name: '32-bit + dash [gui] [CentOS 8]'
+  name: '32-bit + dash [gui] [CentOS 9]'
   << : *GLOBAL_TASK_TEMPLATE
   container:
-    image: centos:8
+    image: centos:9
   env:
     PACKAGE_MANAGER_INSTALL: "yum install -y"
     FILE_ENV: "./ci/test/00_setup_env_i686_centos.sh"

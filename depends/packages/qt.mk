@@ -19,12 +19,13 @@ $(package)_patches += no_warnings_for_symbols.patch
 $(package)_patches += rcc_hardcode_timestamp.patch
 $(package)_patches += duplicate_lcqpafonts.patch
 $(package)_patches += guix_cross_lib_path.patch
-$(package)_patches += fast_fixed_dtoa_no_optimize.patch
 $(package)_patches += fix-macos-linker.patch
 $(package)_patches += memory_resource.patch
 $(package)_patches += clang_18_libpng.patch
 $(package)_patches += utc_from_string_no_optimize.patch
 $(package)_patches += windows_lto.patch
+$(package)_patches += darwin_no_libm.patch
+$(package)_patches += zlib-timebits64.patch
 
 $(package)_qttranslations_file_name=qttranslations-$($(package)_suffix)
 $(package)_qttranslations_sha256_hash=5b94d1a11b566908622fcca2f8b799744d2f8a68da20be4caa5953ed63b10489
@@ -42,7 +43,7 @@ $(package)_config_opts_release += -silent
 $(package)_config_opts_debug = -debug
 $(package)_config_opts_debug += -optimized-tools
 $(package)_config_opts += -bindir $(build_prefix)/bin
-$(package)_config_opts += -c++std c++17
+$(package)_config_opts += -c++std c++2a
 $(package)_config_opts += -confirm-license
 $(package)_config_opts += -hostprefix $(build_prefix)
 $(package)_config_opts += -no-compile-examples
@@ -254,9 +255,10 @@ define $(package)_preprocess_cmds
   patch -p1 -i $($(package)_patch_dir)/rcc_hardcode_timestamp.patch && \
   patch -p1 -i $($(package)_patch_dir)/duplicate_lcqpafonts.patch && \
   patch -p1 -i $($(package)_patch_dir)/utc_from_string_no_optimize.patch && \
-  patch -p1 -i $($(package)_patch_dir)/fast_fixed_dtoa_no_optimize.patch && \
   patch -p1 -i $($(package)_patch_dir)/guix_cross_lib_path.patch && \
   patch -p1 -i $($(package)_patch_dir)/windows_lto.patch && \
+  patch -p1 -i $($(package)_patch_dir)/darwin_no_libm.patch && \
+  patch -p1 -i $($(package)_patch_dir)/zlib-timebits64.patch && \
   mkdir -p qtbase/mkspecs/macx-clang-linux &&\
   cp -f qtbase/mkspecs/macx-clang/qplatformdefs.h qtbase/mkspecs/macx-clang-linux/ &&\
   cp -f $($(package)_patch_dir)/mac-qmake.conf qtbase/mkspecs/macx-clang-linux/qmake.conf && \

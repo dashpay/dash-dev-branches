@@ -6,6 +6,8 @@
 #include <chainparams.h>
 #include <init.h>
 #include <interfaces/chain.h>
+#include <interfaces/coinjoin.h>
+#include <interfaces/init.h>
 #include <interfaces/wallet.h>
 #include <net.h>
 #include <node/context.h>
@@ -45,8 +47,8 @@ public:
     void Construct(NodeContext& node) const override;
 
     // Dash Specific Wallet Init
-    void AutoLockMasternodeCollaterals() const override;
-    void InitCoinJoinSettings(const CoinJoinWalletManager& cjwalletman) const override;
+    void AutoLockMasternodeCollaterals(interfaces::WalletLoader& wallet_loader) const override;
+    void InitCoinJoinSettings(interfaces::CoinJoin::Loader& coinjoin_loader, interfaces::WalletLoader& wallet_loader) const override;
     bool InitAutoBackup() const override;
 };
 
@@ -146,7 +148,7 @@ bool WalletInit::ParameterInteraction() const
         return InitError(Untranslated("-zapwallettxes has been removed. If you are attempting to remove a stuck transaction from your wallet, please use abandontransaction instead."));
     }
 
-    int rescan_mode = gArgs.GetArg("-rescan", 0);
+    int rescan_mode = gArgs.GetIntArg("-rescan", 0);
     if (rescan_mode < 0 || rescan_mode > 2) {
         LogPrintf("%s: Warning: incorrect -rescan mode, falling back to default value.\n", __func__);
         InitWarning(_("Incorrect -rescan mode, falling back to default value"));
@@ -169,11 +171,11 @@ bool WalletInit::ParameterInteraction() const
         gArgs.ForceRemoveArg("mnemonicpassphrase");
     }
 
-    if (gArgs.GetArg("-coinjoindenomshardcap", DEFAULT_COINJOIN_DENOMS_HARDCAP) < gArgs.GetArg("-coinjoindenomsgoal", DEFAULT_COINJOIN_DENOMS_GOAL)) {
+    if (gArgs.GetIntArg("-coinjoindenomshardcap", DEFAULT_COINJOIN_DENOMS_HARDCAP) < gArgs.GetIntArg("-coinjoindenomsgoal", DEFAULT_COINJOIN_DENOMS_GOAL)) {
         return InitError(strprintf(_("%s can't be lower than %s"), "-coinjoindenomshardcap", "-coinjoindenomsgoal"));
     }
 
-    if (CMnemonic::Generate(gArgs.GetArg("-mnemonicbits", CHDChain::DEFAULT_MNEMONIC_BITS)) == SecureString()) {
+    if (CMnemonic::Generate(gArgs.GetIntArg("-mnemonicbits", CHDChain::DEFAULT_MNEMONIC_BITS)) == SecureString()) {
         return InitError(strprintf(_("Invalid '%s'. Allowed values: 128, 160, 192, 224, 256."), "-mnemonicbits"));
     }
 
@@ -187,34 +189,37 @@ void WalletInit::Construct(NodeContext& node) const
         LogPrintf("Wallet disabled!\n");
         return;
     }
-    auto wallet_loader = interfaces::MakeWalletLoader(*node.chain, node.coinjoin_loader, args);
+    node.coinjoin_loader = node.init->makeCoinJoinLoader();
+    auto wallet_loader = node.init->makeWalletLoader(*node.chain, *node.coinjoin_loader);
     node.wallet_loader = wallet_loader.get();
     node.chain_clients.emplace_back(std::move(wallet_loader));
 }
 
 
-void WalletInit::AutoLockMasternodeCollaterals() const
+void WalletInit::AutoLockMasternodeCollaterals(interfaces::WalletLoader& wallet_loader) const
 {
     // we can't do this before DIP3 is fully initialized
-    for (const auto& pwallet : GetWallets()) {
-        pwallet->AutoLockMasternodeCollaterals();
+    for (const auto& wallet : wallet_loader.getWallets()) {
+        wallet->autoLockMasternodeCollaterals();
     }
 }
 
-void WalletInit::InitCoinJoinSettings(const CoinJoinWalletManager& cjwalletman) const
+void WalletInit::InitCoinJoinSettings(interfaces::CoinJoin::Loader& coinjoin_loader, interfaces::WalletLoader& wallet_loader) const
 {
-    CCoinJoinClientOptions::SetEnabled(!GetWallets().empty() ? gArgs.GetBoolArg("-enablecoinjoin", true) : false);
+    const auto& wallets{wallet_loader.getWallets()};
+    CCoinJoinClientOptions::SetEnabled(!wallets.empty() ? gArgs.GetBoolArg("-enablecoinjoin", true) : false);
     if (!CCoinJoinClientOptions::IsEnabled()) {
         return;
     }
     bool fAutoStart = gArgs.GetBoolArg("-coinjoinautostart", DEFAULT_COINJOIN_AUTOSTART);
-    for (auto& pwallet : GetWallets()) {
-        auto manager = cjwalletman.Get(pwallet->GetName());
-        assert(manager != nullptr);
-        if (pwallet->IsLocked()) {
-            manager->StopMixing();
+    for (auto& wallet : wallets) {
+        auto manager = Assert(coinjoin_loader.GetClient(wallet->getWalletName()));
+        if (wallet->isLocked(/*fForMixing=*/false)) {
+            manager->stopMixing();
+            LogPrintf("CoinJoin: Mixing stopped for locked wallet \"%s\"\n", wallet->getWalletName());
         } else if (fAutoStart) {
-            manager->StartMixing();
+            manager->startMixing();
+            LogPrintf("CoinJoin: Automatic mixing started for wallet \"%s\"\n", wallet->getWalletName());
         }
     }
     LogPrintf("CoinJoin: autostart=%d, multisession=%d," /* Continued */

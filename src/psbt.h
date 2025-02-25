@@ -151,7 +151,7 @@ void SerializeHDKeypath(Stream& s, KeyOriginInfo hd_keypath)
 template<typename Stream>
 void SerializeHDKeypaths(Stream& s, const std::map<CPubKey, KeyOriginInfo>& hd_keypaths, CompactSizeWriter type)
 {
-    for (auto keypath_pair : hd_keypaths) {
+    for (const auto& keypath_pair : hd_keypaths) {
         if (!keypath_pair.first.IsValid()) {
             throw std::ios_base::failure("Invalid CPubKey being serialized");
         }
@@ -192,7 +192,7 @@ struct PSBTInput
 
         if (final_script_sig.empty()) {
             // Write any partial signatures
-            for (auto sig_pair : partial_sigs) {
+            for (const auto& sig_pair : partial_sigs) {
                 SerializeToVector(s, CompactSizeWriter(PSBT_IN_PARTIAL_SIG), Span{sig_pair.second.first});
                 s << sig_pair.second.second;
             }

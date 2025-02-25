@@ -27,7 +27,7 @@ std::string GetArgumentName(const std::string& name)
     return name.substr(0, idx);
 }
 
-FUZZ_TARGET_INIT(system, initialize_system)
+FUZZ_TARGET(system, .init = initialize_system)
 {
     FuzzedDataProvider fuzzed_data_provider(buffer.data(), buffer.size());
     ArgsManager args_manager{};
@@ -102,7 +102,7 @@ FUZZ_TARGET_INIT(system, initialize_system)
     const int64_t i64 = fuzzed_data_provider.ConsumeIntegral<int64_t>();
     const bool b = fuzzed_data_provider.ConsumeBool();
 
-    (void)args_manager.GetArg(s1, i64);
+    (void)args_manager.GetIntArg(s1, i64);
     (void)args_manager.GetArg(s1, s2);
     (void)args_manager.GetArgFlags(s1);
     (void)args_manager.GetArgs(s1);

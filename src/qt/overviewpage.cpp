@@ -208,6 +208,7 @@ void OverviewPage::setPrivacy(bool privacy)
     m_privacy = privacy;
     if (m_balances.balance != -1) {
         setBalance(m_balances);
+        coinJoinStatus(true);
     }
 
     ui->listTransactions->setVisible(!m_privacy);
@@ -299,6 +300,8 @@ void OverviewPage::setClientModel(ClientModel *model)
         // Show warning, for example if this is a prerelease version
         connect(model, &ClientModel::alertsChanged, this, &OverviewPage::updateAlerts);
         updateAlerts(model->getStatusBarWarnings());
+        // explicitly update CoinJoin frame and transaction list to reflect actual settings
+        updateAdvancedCJUI(model->getOptionsModel()->getShowAdvancedCJUI());
     }
 }
 
@@ -322,13 +325,10 @@ void OverviewPage::setWalletModel(WalletModel *model)
             updateWatchOnlyLabels(showWatchOnly && !walletModel->wallet().privateKeysDisabled());
         });
 
-        // explicitly update PS frame and transaction list to reflect actual settings
-        updateAdvancedCJUI(model->getOptionsModel()->getShowAdvancedCJUI());
-
         connect(model->getOptionsModel(), &OptionsModel::coinJoinRoundsChanged, this, &OverviewPage::updateCoinJoinProgress);
         connect(model->getOptionsModel(), &OptionsModel::coinJoinAmountChanged, this, &OverviewPage::updateCoinJoinProgress);
         connect(model->getOptionsModel(), &OptionsModel::AdvancedCJUIChanged, this, &OverviewPage::updateAdvancedCJUI);
-        connect(model->getOptionsModel(), &OptionsModel::coinJoinEnabledChanged, [=]() {
+        connect(model->getOptionsModel(), &OptionsModel::coinJoinEnabledChanged, [this]() {
             coinJoinStatus(true);
         });
 
@@ -402,7 +402,10 @@ void OverviewPage::updateCoinJoinProgress()
 
     if(nMaxToAnonymize == 0) return;
 
-    if (nMaxToAnonymize >= clientModel->coinJoinOptions().getAmount() * COIN) {
+    if (m_privacy) {
+        strAmountAndRounds = "#### " + BitcoinUnits::name(nDisplayUnit) + " / " + tr("%n Rounds", "", 0);
+        ui->labelAmountRounds->setToolTip("");
+    } else if (nMaxToAnonymize >= clientModel->coinJoinOptions().getAmount() * COIN) {
         ui->labelAmountRounds->setToolTip(tr("Found enough compatible inputs to mix %1")
                                           .arg(strCoinJoinAmount));
         strCoinJoinAmount = strCoinJoinAmount.remove(strCoinJoinAmount.indexOf("."), BitcoinUnits::decimals(nDisplayUnit) + 1);
@@ -423,13 +426,12 @@ void OverviewPage::updateCoinJoinProgress()
 
     if (!fShowAdvancedCJUI) return;
 
-    CAmount nDenominatedConfirmedBalance;
-    CAmount nDenominatedUnconfirmedBalance;
+    const interfaces::WalletBalances balances = walletModel->wallet().getBalances();
+    CAmount nDenominatedConfirmedBalance = balances.denominated_trusted;
+    CAmount nDenominatedUnconfirmedBalance = balances.denominated_untrusted_pending;
     CAmount nNormalizedAnonymizedBalance;
     float nAverageAnonymizedRounds;
 
-    nDenominatedConfirmedBalance = walletModel->wallet().getDenominatedBalance(false);
-    nDenominatedUnconfirmedBalance = walletModel->wallet().getDenominatedBalance(true);
     nNormalizedAnonymizedBalance = walletModel->wallet().getNormalizedAnonymizedBalance();
     nAverageAnonymizedRounds = walletModel->wallet().getAverageAnonymizedRounds();
 
@@ -660,7 +662,7 @@ void OverviewPage::coinJoinStatus(bool fForce)
 
     setWidgetsVisible(true);
 
-    ui->labelSubmittedDenom->setText(QString(walletModel->coinJoin()->getSessionDenoms().c_str()));
+    ui->labelSubmittedDenom->setText(m_privacy ? "####" : QString(walletModel->coinJoin()->getSessionDenoms().c_str()));
 }
 
 void OverviewPage::toggleCoinJoin(){

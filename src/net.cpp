@@ -134,9 +134,6 @@ static const uint64_t SELECT_TIMEOUT_MILLISECONDS = 500;
 
 const std::string NET_MESSAGE_TYPE_OTHER = "*other*";
 
-constexpr const CConnman::CFullyConnectedOnly CConnman::FullyConnectedOnly;
-constexpr const CConnman::CAllNodes CConnman::AllNodes;
-
 static const uint64_t RANDOMIZER_ID_NETGROUP = 0x6c0edd8036ef4036ULL; // SHA256("netgroup")[0:8]
 static const uint64_t RANDOMIZER_ID_LOCALHOSTNONCE = 0xd93e69e2bbfa5735ULL; // SHA256("localhostnonce")[0:8]
 static const uint64_t RANDOMIZER_ID_ADDRCACHE = 0x1cf2e4ddd306dda9ULL; // SHA256("addrcache")[0:8]
@@ -187,7 +184,7 @@ uint16_t GetListenPort()
     }
 
     // Otherwise, if -port= is provided, use that. Otherwise use the default port.
-    return static_cast<uint16_t>(gArgs.GetArg("-port", Params().GetDefaultPort()));
+    return static_cast<uint16_t>(gArgs.GetIntArg("-port", Params().GetDefaultPort()));
 }
 
 // find 'best' local address for a particular peer
@@ -1119,16 +1116,9 @@ constexpr std::array<std::string_view, 256> V2ShortIDs() {
     static_assert(std::size(V2_DASH_IDS) <= 128);
 
     std::array<std::string_view, 256> ret{};
-    for (size_t idx{0}; idx < std::size(ret); idx++) {
-        if (idx < 128 && idx < std::size(V2_BITCOIN_IDS)) {
-            ret[idx] = V2_BITCOIN_IDS[idx];
-        } else if (idx >= 128 && idx - 128 < std::size(V2_DASH_IDS)) {
-            ret[idx] = V2_DASH_IDS[idx - 128];
-        } else {
-            ret[idx] = "";
-        }
-    }
-
+    std::fill(ret.begin(), ret.end(), "");
+    std::copy(V2_BITCOIN_IDS.begin(), V2_BITCOIN_IDS.end(), ret.begin());
+    std::copy(V2_DASH_IDS.begin(), V2_DASH_IDS.end(), ret.begin() + 128);
     return ret;
 }
 
@@ -1644,7 +1634,7 @@ std::optional<std::string> V2Transport::GetMessageType(Span<const uint8_t>& cont
     }
     // Strip message type bytes of contents.
     contents = contents.subspan(CMessageHeader::COMMAND_SIZE);
-    return {std::move(ret)};
+    return ret;
 }
 
 CNetMessage V2Transport::GetReceivedMessage(std::chrono::microseconds time, bool& reject_message) noexcept
@@ -2247,7 +2237,9 @@ void CConnman::DisconnectNodes()
                         .grant = std::move(pnode->grantOutbound),
                         .destination = pnode->m_dest,
                         .conn_type = pnode->m_conn_type,
-                        .use_v2transport = false});
+                        .use_v2transport = false,
+                        .masternode_connection = pnode->m_masternode_connection,
+                        .masternode_probe_connection = pnode->m_masternode_probe_connection});
                     LogPrint(BCLog::NET, "retrying with v1 transport protocol for peer=%d\n", pnode->GetId());
                 }
 
@@ -2336,7 +2328,7 @@ void CConnman::CalculateNumConnectionsChangedStats()
     }
     mapRecvBytesMsgStats[NET_MESSAGE_TYPE_OTHER] = 0;
     mapSentBytesMsgStats[NET_MESSAGE_TYPE_OTHER] = 0;
-    const NodesSnapshot snap{*this, /* filter = */ CConnman::FullyConnectedOnly};
+    const NodesSnapshot snap{*this, /* cond = */ CConnman::FullyConnectedOnly};
     for (auto pnode : snap.Nodes()) {
         WITH_LOCK(pnode->cs_vRecv, pnode->UpdateRecvMapWithStats(mapRecvBytesMsgStats));
         WITH_LOCK(pnode->cs_vSend, pnode->UpdateSentMapWithStats(mapSentBytesMsgStats));
@@ -2705,7 +2697,7 @@ void CConnman::SocketHandler(CMasternodeSync& mn_sync)
     }();
 
     {
-        const NodesSnapshot snap{*this, /* filter = */ CConnman::AllNodes, /* shuffle = */ false};
+        const NodesSnapshot snap{*this, /* cond = */ CConnman::AllNodes, /* shuffle = */ false};
 
         // Check for the readiness of the already connected sockets and the
         // listening sockets in one call ("readiness" as in poll(2) or
@@ -3977,7 +3969,7 @@ void CConnman::ThreadMessageHandler()
         // Randomize the order in which we process messages from/to our peers.
         // This prevents attacks in which an attacker exploits having multiple
         // consecutive connections in the m_nodes list.
-        const NodesSnapshot snap{*this, /* filter = */ CConnman::AllNodes, /* shuffle = */ true};
+        const NodesSnapshot snap{*this, /* cond = */ CConnman::AllNodes, /* shuffle = */ true};
 
         for (CNode* pnode : snap.Nodes()) {
             if (pnode->fDisconnect)
@@ -5171,7 +5163,9 @@ void CConnman::PerformReconnections()
                               std::move(item.grant),
                               item.destination.empty() ? nullptr : item.destination.c_str(),
                               item.conn_type,
-                              item.use_v2transport);
+                              item.use_v2transport,
+                              item.masternode_connection ? MasternodeConn::IsConnection : MasternodeConn::IsNotConnection,
+                              item.masternode_probe_connection ? MasternodeProbeConn::IsConnection : MasternodeProbeConn::IsNotConnection);
     }
 }
 
