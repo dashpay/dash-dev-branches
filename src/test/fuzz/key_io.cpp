@@ -1,4 +1,4 @@
-// Copyright (c) 2020 The Bitcoin Core developers
+// Copyright (c) 2020-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -40,7 +40,7 @@ FUZZ_TARGET(key_io, .init = initialize_key_io)
 
     const CTxDestination tx_destination = DecodeDestination(random_string);
     (void)DescribeAddress(tx_destination);
-    (void)GetKeyForDestination(/* store */ {}, tx_destination);
+    (void)GetKeyForDestination(/*store=*/{}, tx_destination);
     (void)GetScriptForDestination(tx_destination);
     (void)IsValidDestination(tx_destination);
 

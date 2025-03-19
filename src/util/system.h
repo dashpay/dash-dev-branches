@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2020 The Bitcoin Core developers
+// Copyright (c) 2009-2021 The Bitcoin Core developers
 // Copyright (c) 2014-2025 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
@@ -185,10 +185,10 @@ public:
      */
     enum Flags : uint32_t {
         ALLOW_ANY = 0x01,         //!< disable validation
-        ALLOW_BOOL = 0x02,        //!< unimplemented, draft implementation in #16545
-        ALLOW_INT = 0x04,         //!< unimplemented, draft implementation in #16545
-        ALLOW_STRING = 0x08,      //!< unimplemented, draft implementation in #16545
-        ALLOW_LIST = 0x10,        //!< unimplemented, draft implementation in #16545
+        // ALLOW_BOOL = 0x02,     //!< unimplemented, draft implementation in #16545
+        // ALLOW_INT = 0x04,      //!< unimplemented, draft implementation in #16545
+        // ALLOW_STRING = 0x08,   //!< unimplemented, draft implementation in #16545
+        // ALLOW_LIST = 0x10,     //!< unimplemented, draft implementation in #16545
         DISALLOW_NEGATION = 0x20, //!< disallow -nofoo syntax
         DISALLOW_ELISION = 0x40,  //!< disallow -foo syntax that doesn't assign any value
 

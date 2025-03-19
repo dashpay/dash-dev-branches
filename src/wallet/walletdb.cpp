@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2020 The Bitcoin Core developers
+// Copyright (c) 2009-2021 The Bitcoin Core developers
 // Copyright (c) 2014-2025 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
@@ -1186,9 +1186,9 @@ std::unique_ptr<WalletDatabase> CreateDummyWalletDatabase()
 /** Return object for accessing temporary in-memory database. */
 std::unique_ptr<WalletDatabase> CreateMockWalletDatabase()
 {
-#ifdef USE_BDB
-    return std::make_unique<BerkeleyDatabase>(std::make_shared<BerkeleyEnvironment>(), "");
-#elif defined(USE_SQLITE)
+#ifdef USE_SQLITE
     return std::make_unique<SQLiteDatabase>("", "", true);
+#elif defined(USE_BDB)
+    return std::make_unique<BerkeleyDatabase>(std::make_shared<BerkeleyEnvironment>(), "");
 #endif
 }

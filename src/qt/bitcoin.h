@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2020 The Bitcoin Core developers
+// Copyright (c) 2011-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -86,7 +86,6 @@ Q_SIGNALS:
     void requestedInitialize();
     void requestedRestart(QStringList args);
     void requestedShutdown();
-    void splashFinished();
     void windowShown(BitcoinGUI* window);
 
 protected:

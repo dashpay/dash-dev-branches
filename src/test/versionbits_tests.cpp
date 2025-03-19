@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2020 The Bitcoin Core developers
+// Copyright (c) 2014-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -424,7 +424,7 @@ BOOST_AUTO_TEST_CASE(versionbits_computeblockversion)
 {
     // check that any deployment on any chain can conceivably reach both
     // ACTIVE and FAILED states in roughly the way we expect
-    for (const auto& chain_name : {CBaseChainParams::MAIN, CBaseChainParams::TESTNET, /*CBaseChainParams::SIGNET,*/ CBaseChainParams::DEVNET, CBaseChainParams::REGTEST}) {
+    for (const auto& chain_name : {CBaseChainParams::MAIN, CBaseChainParams::TESTNET, /*CBaseChainParams::SIGNET,=*/CBaseChainParams::DEVNET, CBaseChainParams::REGTEST}) {
         if (chain_name == CBaseChainParams::DEVNET) gArgs.SoftSetBoolArg("-devnet", true);
         const auto chainParams = CreateChainParams(*m_node.args, chain_name);
         if (chain_name == CBaseChainParams::DEVNET) gArgs.ForceRemoveArg("devnet");

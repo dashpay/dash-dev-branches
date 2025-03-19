@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2020 The Bitcoin Core developers
+// Copyright (c) 2009-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -148,28 +148,9 @@ public:
      * @param[in]  type Serialization Type
      * @param[in]  version Serialization Version (including any flags)
      * @param[in]  data Referenced byte vector to overwrite/append
-     * @param[in]  pos Starting position. Vector index where reads should start.
      */
-    SpanReader(int type, int version, Span<const unsigned char> data, size_t pos)
-        : m_type(type), m_version(version), m_data(data)
-    {
-        if (pos > m_data.size()) {
-            throw std::ios_base::failure("SpanReader(...): end of data (pos > m_data.size())");
-        }
-        data = data.subspan(pos);
-    }
-
-    /**
-     * (other params same as above)
-     * @param[in]  args  A list of items to deserialize starting at pos.
-     */
-    template <typename... Args>
-    SpanReader(int type, int version, Span<const unsigned char> data, size_t pos,
-                  Args&&... args)
-        : SpanReader(type, version, data, pos)
-    {
-        ::UnserializeMany(*this, std::forward<Args>(args)...);
-    }
+    SpanReader(int type, int version, Span<const unsigned char> data)
+        : m_type(type), m_version(version), m_data(data) {}
 
     template<typename T>
     SpanReader& operator>>(T&& obj)

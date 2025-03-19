@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2020 The Bitcoin Core developers
+// Copyright (c) 2009-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -5390,7 +5390,7 @@ bool PeerManagerImpl::ProcessMessages(CNode* pfrom, std::atomic<bool>& interrupt
     );
 
     if (gArgs.GetBoolArg("-capturemessages", false)) {
-        CaptureMessage(pfrom->addr, msg.m_type, MakeUCharSpan(msg.m_recv), /* is_incoming */ true);
+        CaptureMessage(pfrom->addr, msg.m_type, MakeUCharSpan(msg.m_recv), /*is_incoming=*/true);
     }
 
     msg.SetVersion(pfrom->GetCommonVersion());

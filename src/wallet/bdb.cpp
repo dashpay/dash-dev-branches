@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2020 The Bitcoin Core developers
+// Copyright (c) 2009-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -145,7 +145,7 @@ bool BerkeleyEnvironment::Open(bilingual_str& err)
     fs::path pathIn = fs::PathFromString(strPath);
     TryCreateDirectories(pathIn);
     if (!LockDirectory(pathIn, ".walletlock")) {
-        LogPrintf("Cannot obtain a lock on wallet directory %s. Another instance of Dash Core may be using it.\n", strPath);
+        LogPrintf("Cannot obtain a lock on wallet directory %s. Another instance may be using it.\n", strPath);
         err = strprintf(_("Error initializing wallet database environment %s!"), fs::quoted(fs::PathToString(Directory())));
         return false;
     }

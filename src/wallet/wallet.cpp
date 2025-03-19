@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2020 The Bitcoin Core developers
+// Copyright (c) 2009-2021 The Bitcoin Core developers
 // Copyright (c) 2014-2025 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
@@ -1257,7 +1257,7 @@ void CWallet::SyncTransaction(const CTransactionRef& ptx, CWalletTx::Confirmatio
 
 void CWallet::transactionAddedToMempool(const CTransactionRef& tx, int64_t nAcceptTime, uint64_t mempool_sequence) {
     LOCK(cs_wallet);
-    CWalletTx::Confirmation confirm(CWalletTx::Status::UNCONFIRMED, /* block_height */ 0, {}, /* nIndex */ 0);
+    CWalletTx::Confirmation confirm(CWalletTx::Status::UNCONFIRMED, /*block_height=*/ 0, {}, /*block_index=*/ 0);
     WalletBatch batch(GetDatabase());
     SyncTransaction(tx, confirm, batch);
 
@@ -1304,7 +1304,7 @@ void CWallet::transactionRemovedFromMempool(const CTransactionRef& tx, MemPoolRe
         // https://github.com/bitcoin-core/bitcoin-devwiki/wiki/Wallet-Transaction-Conflict-Tracking
         LOCK(cs_wallet);
         WalletBatch batch(GetDatabase());
-        SyncTransaction(tx, {CWalletTx::Status::UNCONFIRMED, /* block height */ 0, /* block hash */ {}, /* index */ 0}, batch);
+        SyncTransaction(tx, {CWalletTx::Status::UNCONFIRMED, /*block_height=*/0, /*block_hash=*/{}, /*block_index=*/0}, batch);
     }
 }
 
@@ -1338,7 +1338,7 @@ void CWallet::blockDisconnected(const CBlock& block, int height)
     m_last_block_processed = block.hashPrevBlock;
     WalletBatch batch(GetDatabase());
     for (const CTransactionRef& ptx : block.vtx) {
-        SyncTransaction(ptx, {CWalletTx::Status::UNCONFIRMED, /* block height */ 0, /* block hash */ {}, /* index */ 0}, batch);
+        SyncTransaction(ptx, {CWalletTx::Status::UNCONFIRMED, /*block_height=*/0, /*block_hash=*/{}, /*block_index=*/0}, batch);
     }
 
     // reset cache to make sure no longer mature coins are excluded
@@ -2875,15 +2875,18 @@ bool CWallet::GetNewChangeDestination(CTxDestination& dest,  bilingual_str& erro
     return true;
 }
 
-int64_t CWallet::GetOldestKeyPoolTime() const
+std::optional<int64_t> CWallet::GetOldestKeyPoolTime() const
 {
     LOCK(cs_wallet);
-    int64_t oldestKey = std::numeric_limits<int64_t>::max();
-    for (const auto& spk_man_pair : m_spk_managers) {
-        oldestKey = std::min(oldestKey, spk_man_pair.second->GetOldestKeyPoolTime());
+    if (m_spk_managers.empty()) {
+        return std::nullopt;
     }
 
-    return oldestKey;
+    std::optional<int64_t> oldest_key{std::numeric_limits<int64_t>::max()};
+    for (const auto& spk_man_pair : m_spk_managers) {
+        oldest_key = std::min(oldest_key, spk_man_pair.second->GetOldestKeyPoolTime());
+    }
+    return oldest_key;
 }
 
 void CWallet::MarkDestinationsDirty(const std::set<CTxDestination>& destinations) {

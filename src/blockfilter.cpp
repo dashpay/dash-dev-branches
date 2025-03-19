@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2020 The Bitcoin Core developers
+// Copyright (c) 2018-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -50,7 +50,7 @@ GCSFilter::GCSFilter(const Params& params)
 GCSFilter::GCSFilter(const Params& params, std::vector<unsigned char> encoded_filter, bool skip_decode_check)
     : m_params(params), m_encoded(std::move(encoded_filter))
 {
-    SpanReader stream{GCS_SER_TYPE, GCS_SER_VERSION, m_encoded, 0};
+    SpanReader stream{GCS_SER_TYPE, GCS_SER_VERSION, m_encoded};
 
     uint64_t N = ReadCompactSize(stream);
     m_N = static_cast<uint32_t>(N);
@@ -104,7 +104,7 @@ GCSFilter::GCSFilter(const Params& params, const ElementSet& elements)
 
 bool GCSFilter::MatchInternal(const uint64_t* element_hashes, size_t size) const
 {
-    SpanReader stream{GCS_SER_TYPE, GCS_SER_VERSION, m_encoded, 0};
+    SpanReader stream{GCS_SER_TYPE, GCS_SER_VERSION, m_encoded};
 
     // Seek forward by size of N
     uint64_t N = ReadCompactSize(stream);

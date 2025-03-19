@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2020 The Bitcoin Core developers
+// Copyright (c) 2016-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -45,7 +45,7 @@ static void BlockToJsonVerbose(benchmark::Bench& bench)
     TestBlockAndIndex data;
     const LLMQContext& llmq_ctx = *data.testing_setup->m_node.llmq_ctx;
     bench.run([&] {
-        auto univalue = blockToJSON(data.testing_setup->m_node.chainman->m_blockman, data.block, &data.blockindex, &data.blockindex, *llmq_ctx.clhandler, *llmq_ctx.isman, /*verbose*/ true);
+        auto univalue = blockToJSON(data.testing_setup->m_node.chainman->m_blockman, data.block, &data.blockindex, &data.blockindex, *llmq_ctx.clhandler, *llmq_ctx.isman, TxVerbosity::SHOW_DETAILS_AND_PREVOUT);
         ankerl::nanobench::doNotOptimizeAway(univalue);
     });
 }
@@ -56,7 +56,7 @@ static void BlockToJsonVerboseWrite(benchmark::Bench& bench)
 {
     TestBlockAndIndex data;
     const LLMQContext& llmq_ctx = *data.testing_setup->m_node.llmq_ctx;
-    auto univalue = blockToJSON(data.testing_setup->m_node.chainman->m_blockman, data.block, &data.blockindex, &data.blockindex, *llmq_ctx.clhandler, *llmq_ctx.isman, /*verbose*/ true);
+    auto univalue = blockToJSON(data.testing_setup->m_node.chainman->m_blockman, data.block, &data.blockindex, &data.blockindex, *llmq_ctx.clhandler, *llmq_ctx.isman, TxVerbosity::SHOW_DETAILS_AND_PREVOUT);
     bench.run([&] {
         auto str = univalue.write();
         ankerl::nanobench::doNotOptimizeAway(str);

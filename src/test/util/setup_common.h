@@ -1,4 +1,4 @@
-// Copyright (c) 2015-2020 The Bitcoin Core developers
+// Copyright (c) 2015-2021 The Bitcoin Core developers
 // Copyright (c) 2014-2024 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
@@ -69,7 +69,7 @@ void Seed(FastRandomContext& ctx);
 static inline void SeedInsecureRand(SeedRand seed = SeedRand::SEED)
 {
     if (seed == SeedRand::ZEROS) {
-        g_insecure_rand_ctx = FastRandomContext(/* deterministic */ true);
+        g_insecure_rand_ctx = FastRandomContext(/*fDeterministic=*/true);
     } else {
         Seed(g_insecure_rand_ctx);
     }

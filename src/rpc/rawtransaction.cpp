@@ -1,5 +1,5 @@
 // Copyright (c) 2010 Satoshi Nakamoto
-// Copyright (c) 2009-2020 The Bitcoin Core developers
+// Copyright (c) 2009-2021 The Bitcoin Core developers
 // Copyright (c) 2014-2025 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
@@ -96,7 +96,7 @@ void TxToJSON(const CTransaction& tx, const uint256 hashBlock, const  CTxMemPool
         txSpentInfoPtr = &txSpentInfo;
     }
 
-    TxToUniv(tx, uint256(), entry, true, 0, /* txundo = */ nullptr, txSpentInfoPtr);
+    TxToUniv(tx, uint256(), entry, true, 0, /* txundo = */ nullptr, TxVerbosity::SHOW_DETAILS, txSpentInfoPtr);
 
     bool chainLock = false;
     if (!hashBlock.IsNull()) {
@@ -120,6 +120,41 @@ void TxToJSON(const CTransaction& tx, const uint256 hashBlock, const  CTxMemPool
     entry.pushKV("instantlock", fLocked || chainLock);
     entry.pushKV("instantlock_internal", fLocked);
     entry.pushKV("chainlock", chainLock);
+}
+
+static std::vector<RPCArg> CreateTxDoc()
+{
+    return {
+        {"inputs", RPCArg::Type::ARR, RPCArg::Optional::NO, "The inputs",
+            {
+                {"", RPCArg::Type::OBJ, RPCArg::Optional::OMITTED, "",
+                    {
+                        {"txid", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "The transaction id"},
+                        {"vout", RPCArg::Type::NUM, RPCArg::Optional::NO, "The output number"},
+                        {"sequence", RPCArg::Type::NUM, RPCArg::DefaultHint{"depends on the value of the 'locktime' argument"}, "The sequence number"},
+                    },
+                },
+            },
+        },
+        {"outputs", RPCArg::Type::ARR, RPCArg::Optional::NO, "The outputs (key-value pairs), where none of the keys are duplicated.\n"
+                "That is, each address can only appear once and there can only be one 'data' object.\n"
+                "For compatibility reasons, a dictionary, which holds the key-value pairs directly, is also\n"
+                "                             accepted as second parameter.",
+            {
+                {"", RPCArg::Type::OBJ_USER_KEYS, RPCArg::Optional::OMITTED, "",
+                    {
+                        {"address", RPCArg::Type::AMOUNT, RPCArg::Optional::NO, "A key-value pair. The key (string) is the Dash address, the value (float or string) is the amount in " + CURRENCY_UNIT},
+                    },
+                },
+                {"", RPCArg::Type::OBJ, RPCArg::Optional::OMITTED, "",
+                    {
+                        {"data", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "A key-value pair. The key must be \"data\", the value is hex-encoded data"},
+                    },
+                },
+            },
+        },
+        {"locktime", RPCArg::Type::NUM, RPCArg::Default{0}, "Raw locktime. Non-0 value also locktime-activates inputs"},
+    };
 }
 
 static RPCHelpMan getrawtransaction()
@@ -664,37 +699,7 @@ static RPCHelpMan createrawtransaction()
         "Returns hex-encoded raw transaction.\n"
         "Note that the transaction's inputs are not signed, and\n"
         "it is not stored in the wallet or transmitted to the network.\n",
-        {
-            {"inputs", RPCArg::Type::ARR, RPCArg::Optional::NO, "The inputs",
-                {
-                    {"", RPCArg::Type::OBJ, RPCArg::Optional::OMITTED, "",
-                        {
-                            {"txid", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "The transaction id"},
-                            {"vout", RPCArg::Type::NUM, RPCArg::Optional::NO, "The output number"},
-                            {"sequence", RPCArg::Type::NUM, RPCArg::DefaultHint{"depends on the value of the 'locktime' argument"}, "The sequence number"},
-                        },
-                        },
-                },
-                },
-            {"outputs", RPCArg::Type::ARR, RPCArg::Optional::NO, "The outputs (key-value pairs), where none of the keys are duplicated.\n"
-                    "That is, each address can only appear once and there can only be one 'data' object.\n"
-                    "For compatibility reasons, a dictionary, which holds the key-value pairs directly, is also\n"
-                    "                             accepted as second parameter.",
-                {
-                    {"", RPCArg::Type::OBJ_USER_KEYS, RPCArg::Optional::OMITTED, "",
-                        {
-                            {"address", RPCArg::Type::AMOUNT, RPCArg::Optional::NO, "A key-value pair. The key (string) is the Dash address, the value (float or string) is the amount in " + CURRENCY_UNIT},
-                        },
-                        },
-                    {"", RPCArg::Type::OBJ, RPCArg::Optional::OMITTED, "",
-                        {
-                            {"data", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "A key-value pair. The key must be \"data\", the value is hex-encoded data"},
-                        },
-                        },
-                },
-                },
-            {"locktime", RPCArg::Type::NUM, RPCArg::Default{0}, "Raw locktime. Non-0 value also locktime-activates inputs"},
-        },
+        CreateTxDoc(),
         RPCResult{
             RPCResult::Type::STR_HEX, "transaction", "hex string of the transaction"
         },
@@ -1748,37 +1753,7 @@ static RPCHelpMan createpsbt()
     return RPCHelpMan{"createpsbt",
         "\nCreates a transaction in the Partially Signed Transaction format.\n"
         "Implements the Creator role.\n",
-        {
-            {"inputs", RPCArg::Type::ARR, RPCArg::Optional::NO, "The json objects",
-                {
-                    {"", RPCArg::Type::OBJ, RPCArg::Optional::OMITTED, "",
-                        {
-                            {"txid", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "The transaction id"},
-                            {"vout", RPCArg::Type::NUM, RPCArg::Optional::NO, "The output number"},
-                            {"sequence", RPCArg::Type::NUM, RPCArg::DefaultHint{"depends on the value of the 'locktime' argument"}, "The sequence number"},
-                        },
-                        },
-                },
-                },
-            {"outputs", RPCArg::Type::ARR, RPCArg::Optional::NO, "The with outputs (key-value pairs), where none of the keys are duplicated.\n"
-                    "That is, each address can only appear once and there can only be one 'data' object.\n"
-                    "For compatibility reasons, a dictionary, which holds the key-value pairs directly, is also\n"
-                    "                             accepted as second parameter.",
-                {
-                    {"", RPCArg::Type::OBJ_USER_KEYS, RPCArg::Optional::OMITTED, "",
-                        {
-                            {"address", RPCArg::Type::AMOUNT, RPCArg::Optional::NO, "A key-value pair. The key (string) is the Dash address, the value (float or string) is the amount in " + CURRENCY_UNIT},
-                        },
-                        },
-                    {"", RPCArg::Type::OBJ, RPCArg::Optional::OMITTED, "",
-                        {
-                            {"data", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "A key-value pair. The key must be \"data\", the value is hex-encoded data"},
-                        },
-                        },
-                },
-                },
-            {"locktime", RPCArg::Type::NUM, RPCArg::Default{0}, "Raw locktime. Non-0 value also locktime-activates inputs"},
-        },
+        CreateTxDoc(),
         RPCResult{
             RPCResult::Type::STR, "", "The resulting raw transaction (base64-encoded string)"
         },

@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2020 The Bitcoin Core developers
+// Copyright (c) 2017-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -72,13 +72,18 @@ static void add_coin(std::vector<COutput>& coins, CWallet& wallet, const CAmount
         // so stop vin being empty, and cache a non-zero Debit to fake out IsFromMe()
         tx.vin.resize(1);
     }
-    CWalletTx* wtx = wallet.AddToWallet(MakeTransactionRef(std::move(tx)), /* confirm= */ {});
+    uint256 txid = tx.GetHash();
+
+    LOCK(wallet.cs_wallet);
+    auto ret = wallet.mapWallet.emplace(std::piecewise_construct, std::forward_as_tuple(txid), std::forward_as_tuple(&wallet, MakeTransactionRef(std::move(tx))));
+    assert(ret.second);
+    CWalletTx& wtx = (*ret.first).second;
     if (fIsFromMe)
     {
-        wtx->m_amounts[CWalletTx::DEBIT].Set(ISMINE_SPENDABLE, 1);
-        wtx->m_is_cache_empty = false;
+        wtx.m_amounts[CWalletTx::DEBIT].Set(ISMINE_SPENDABLE, 1);
+        wtx.m_is_cache_empty = false;
     }
-    COutput output(wtx, nInput, nAge, true /* spendable */, true /* solvable */, true /* safe */);
+    COutput output(&wtx, nInput, nAge, true /* spendable */, true /* solvable */, true /* safe */);
     coins.push_back(output);
 }
 
@@ -134,7 +139,7 @@ inline std::vector<OutputGroup>& KnapsackGroupOutputs(const std::vector<COutput>
                                               /* long_term_feerate= */ CFeeRate(0), /* discard_feerate= */ CFeeRate(0),
                                               /* tx_noinputs_size= */ 0, /* avoid_partial= */ false);
     static std::vector<OutputGroup> static_groups;
-    static_groups = wallet.GroupOutputs(coins, coin_selection_params, filter, /* positive_only */false);
+    static_groups = wallet.GroupOutputs(coins, coin_selection_params, filter, /*positive_only=*/false);
     return static_groups;
 }
 
@@ -734,7 +739,7 @@ BOOST_AUTO_TEST_CASE(waste_test)
     add_coin(1 * COIN, 1, selection, fee, fee);
     add_coin(2 * COIN, 2, selection, fee, fee);
     const CAmount exact_target{in_amt - fee * 2};
-    BOOST_CHECK_EQUAL(0, GetSelectionWaste(selection, /* change_cost */ 0, exact_target));
+    BOOST_CHECK_EQUAL(0, GetSelectionWaste(selection, /*change_cost=*/0, exact_target));
     selection.clear();
 
     // No Waste when (fee - long_term_fee) == (-cost_of_change), and no excess

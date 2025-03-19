@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2020 The Bitcoin Core developers
+// Copyright (c) 2009-2021 The Bitcoin Core developers
 // Copyright (c) 2014-2025 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
@@ -2710,7 +2710,7 @@ bool CChainState::FlushStateToDisk(
         fDoFullFlush = (mode == FlushStateMode::ALWAYS) || fCacheLarge || fCacheCritical || fEvoDbCacheCritical || fPeriodicFlush || fFlushForPrune;
         // Write blocks and block index to disk.
         if (fDoFullFlush || fPeriodicWrite) {
-            // Depend on nMinDiskSpace to ensure we can write block index
+            // Ensure we can write block index
             if (!CheckDiskSpace(gArgs.GetBlocksDirPath())) {
                 return AbortNode(state, "Disk space is too low!", _("Disk space is too low!"));
             }

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2020 The Bitcoin Core developers
+// Copyright (c) 2012-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -704,7 +704,7 @@ BOOST_FIXTURE_TEST_CASE(wallet_descriptor_test, BasicTestingSetup)
     vw << (int32_t)0;
     vw << (int32_t)1;
 
-    SpanReader vr{0, 0, malformed_record, 0};
+    SpanReader vr{0, 0, malformed_record};
     WalletDescriptor w_desc;
     BOOST_CHECK_EXCEPTION(vr >> w_desc, std::ios_base::failure, malformed_descriptor);
 }

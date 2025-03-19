@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2020 The Bitcoin Core developers
+// Copyright (c) 2009-2021 The Bitcoin Core developers
 // Copyright (c) 2014-2025 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
@@ -682,7 +682,6 @@ void ArgsManager::AddArg(const std::string& name, const std::string& help, unsig
 
     LOCK(cs_args);
     std::map<std::string, Arg>& arg_map = m_available_args[cat];
-    if ((flags & (ALLOW_ANY | ALLOW_BOOL)) == 0) flags |= DISALLOW_NEGATION; // Temporary, removed in next scripted-diff
     auto ret = arg_map.emplace(arg_name, Arg{name.substr(eq_index, name.size() - eq_index), help, flags});
     assert(ret.second); // Make sure an insertion actually happened
 

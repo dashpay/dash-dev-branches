@@ -1,4 +1,4 @@
-// Copyright (c) 2019-2020 The Bitcoin Core developers
+// Copyright (c) 2019-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -94,6 +94,9 @@ FUZZ_TARGET(transaction, .init = initialize_transaction)
     (void)AreInputsStandard(tx, coins_view_cache);
 
     UniValue u(UniValue::VOBJ);
-    TxToUniv(tx, /* hashBlock */ uint256::ZERO, u);
-    TxToUniv(tx, /* hashBlock */ uint256::ONE, u);
+    TxToUniv(tx, /*hashBlock=*/uint256::ZERO, u);
+    TxToUniv(tx, /*hashBlock=*/uint256::ONE, u);
+
+//    TxToUniv(tx, /*hashBlock=*/uint256::ZERO, /*include_addresses=*/true, u);
+//    TxToUniv(tx, /*hashBlock=*/uint256::ONE, /*include_addresses=*/false, u);
 }

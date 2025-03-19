@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2016-2020 The Bitcoin Core developers
+# Copyright (c) 2016-2021 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Test various net timeouts.
@@ -96,7 +96,7 @@ class TimeoutsTest(BitcoinTestFramework):
             ]
 
         with self.nodes[0].assert_debug_log(expected_msgs=expected_timeout_logs):
-            self.mock_forward(3)
+            self.mock_forward(5)
             no_verack_node.wait_for_disconnect(timeout=2)
             no_version_node.wait_for_disconnect(timeout=1)
             no_send_node.wait_for_disconnect(timeout=1)

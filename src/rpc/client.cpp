@@ -1,5 +1,5 @@
 // Copyright (c) 2010 Satoshi Nakamoto
-// Copyright (c) 2009-2020 The Bitcoin Core developers
+// Copyright (c) 2009-2021 The Bitcoin Core developers
 // Copyright (c) 2014-2025 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
@@ -50,17 +50,21 @@ static const CRPCConvertParam vRPCConvertParams[] =
     { "sethdseed", 0, "newkeypool" },
     { "getreceivedbyaddress", 1, "minconf" },
     { "getreceivedbyaddress", 2, "addlocked" },
+    { "getreceivedbyaddress", 3, "include_immature_coinbase" },
     { "getreceivedbylabel", 1, "minconf" },
     { "getreceivedbylabel", 2, "addlocked" },
+    { "getreceivedbylabel", 3, "include_immature_coinbase" },
     { "listaddressbalances", 0, "minamount" },
     { "listreceivedbyaddress", 0, "minconf" },
     { "listreceivedbyaddress", 1, "addlocked" },
     { "listreceivedbyaddress", 2, "include_empty" },
     { "listreceivedbyaddress", 3, "include_watchonly" },
+    { "listreceivedbyaddress", 5, "include_immature_coinbase" },
     { "listreceivedbylabel", 0, "minconf" },
     { "listreceivedbylabel", 1, "addlocked" },
     { "listreceivedbylabel", 2, "include_empty" },
     { "listreceivedbylabel", 3, "include_watchonly" },
+    { "listreceivedbylabel", 4, "include_immature_coinbase" },
     { "getassetunlockstatuses", 0, "indexes" },
     { "getassetunlockstatuses", 1, "height" },
     { "getbalance", 1, "minconf" },

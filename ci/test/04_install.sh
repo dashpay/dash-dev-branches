@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Copyright (c) 2018-2020 The Bitcoin Core developers
+# Copyright (c) 2018-2021 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -35,6 +35,7 @@ if [ -z "$DANGER_RUN_CI_ON_HOST" ]; then
   echo "Creating $DOCKER_NAME_TAG container to run in"
   ${CI_RETRY_EXE} docker pull "$DOCKER_NAME_TAG"
 
+  # shellcheck disable=SC2086
   DOCKER_ID=$(docker run $DOCKER_ADMIN -idt \
                   --mount type=bind,src=$BASE_ROOT_DIR,dst=/ro_base,readonly \
                   --mount type=bind,src=$CCACHE_DIR,dst=$CCACHE_DIR \

@@ -33,7 +33,6 @@ Versions and PRs are relevant to Bitcoin's core if not mentioned other.
 * [`BIP 111`](https://github.com/bitcoin/bips/blob/master/bip-0111.mediawiki): `NODE_BLOOM` service bit added, and enforced for all peer versions as of **v0.13.0** ([PR #6579](https://github.com/bitcoin/bitcoin/pull/6579) and [PR #6641](https://github.com/bitcoin/bitcoin/pull/6641)).
 * [`BIP 112`](https://github.com/bitcoin/bips/blob/master/bip-0112.mediawiki): The CHECKSEQUENCEVERIFY opcode has been implemented since **v0.12.1** ([PR #7524](https://github.com/bitcoin/bitcoin/pull/7524)), and has been *buried* since **v0.19.0** ([PR #16060](https://github.com/bitcoin/bitcoin/pull/16060)).
 * [`BIP 113`](https://github.com/bitcoin/bips/blob/master/bip-0113.mediawiki): Median time past lock-time calculations have been implemented since **v0.12.1** ([PR #6566](https://github.com/bitcoin/bitcoin/pull/6566)) and have been activated since *block 419328*.
-* [`BIP 125`](https://github.com/bitcoin/bips/blob/master/bip-0125.mediawiki): Opt-in full replace-by-fee signaling honoured in mempool and mining as of **v0.12.0** ([PR 6871](https://github.com/bitcoin/bitcoin/pull/6871)).
 * [`BIP 130`](https://github.com/bitcoin/bips/blob/master/bip-0130.mediawiki): direct headers announcement is negotiated with peer versions `>=70012` as of **v0.12.0** ([PR 6494](https://github.com/bitcoin/bitcoin/pull/6494)).
 * [`BIP 147`](https://github.com/bitcoin/bips/blob/master/bip-0147.mediawiki): NULLDUMMY softfork as of **v0.13.1** ([PR 8636](https://github.com/bitcoin/bitcoin/pull/8636) and [PR 8937](https://github.com/bitcoin/bitcoin/pull/8937)), *buried* since **v0.19.0** ([PR #16060](https://github.com/bitcoin/bitcoin/pull/16060)).
 * [`BIP 152`](https://github.com/bitcoin/bips/blob/master/bip-0152.mediawiki): Compact block transfer and related optimizations are used as of **v0.13.0** ([PR 8068](https://github.com/bitcoin/bitcoin/pull/8068)).
@@ -43,3 +42,11 @@ Versions and PRs are relevant to Bitcoin's core if not mentioned other.
 * [`BIP 174`](https://github.com/bitcoin/bips/blob/master/bip-0174.mediawiki): RPCs to operate on Partially Signed Bitcoin Transactions (PSBT) are present as of **v18.0** ([PR 13557](https://github.com/bitcoin/bitcoin/pull/13557)).
 * [`BIP 324`](https://github.com/bitcoin/bips/blob/master/bip-0324.mediawiki): The v2 transport protocol specified by BIP324 and the associated `NODE_P2P_V2` service bit are supported as of **v22.0**, but off by default ([PR 28331](https://github.com/bitcoin/bitcoin/pull/28331)). On by default as of **v22.1** ([PR 29347](https://github.com/bitcoin/bitcoin/pull/29347)).
 * [`BIP 339`](https://github.com/bitcoin/bips/blob/master/bip-0339.mediawiki): Relay of transactions by wtxid is supported as of **v0.21.0** ([PR 18044](https://github.com/bitcoin/bitcoin/pull/18044)).
+* [`BIP 380`](https://github.com/bitcoin/bips/blob/master/bip-0380.mediawiki)
+  [`381`](https://github.com/bitcoin/bips/blob/master/bip-0381.mediawiki)
+  [`382`](https://github.com/bitcoin/bips/blob/master/bip-0382.mediawiki)
+  [`383`](https://github.com/bitcoin/bips/blob/master/bip-0383.mediawiki)
+  [`384`](https://github.com/bitcoin/bips/blob/master/bip-0384.mediawiki)
+  [`385`](https://github.com/bitcoin/bips/blob/master/bip-0385.mediawiki):
+  Output Script Descriptors, and most of Script Expressions are implemented as of **v0.17.0** ([PR 13697](https://github.com/bitcoin/bitcoin/pull/13697)).
+* [`BIP 386`](https://github.com/bitcoin/bips/blob/master/bip-0386.mediawiki): tr() Output Script Descriptors are implemented as of **v22.0** ([PR 22051](https://github.com/bitcoin/bitcoin/pull/22051)).
