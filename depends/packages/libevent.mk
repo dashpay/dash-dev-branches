@@ -21,7 +21,7 @@ define $(package)_set_vars
   $(package)_cppflags_mingw32=-D_WIN32_WINNT=0x0601
 
   ifeq ($(NO_HARDEN),)
-  $(package)_cppflags+=-D_FORTIFY_SOURCE=3
+  $(package)_cppflags += -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3
   endif
 endef
 
