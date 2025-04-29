@@ -14,18 +14,13 @@
 class BlockValidationState;
 class CBlock;
 class CBlockIndex;
-class CCoinsViewCache;
-class CDeterministicMNManager;
 class TxValidationState;
+class CSimplifiedMNList;
 
 namespace llmq {
 class CChainLocksHandler;
 class CQuorumBlockProcessor;
-class CQuorumSnapshotManager;
 }// namespace llmq
-
-// Forward declaration from core_io to get rid of circular dependency
-UniValue ValueFromAmount(const CAmount amount);
 
 // coinbase transaction
 class CCbTx
@@ -65,34 +60,16 @@ public:
 
     std::string ToString() const;
 
-    [[nodiscard]] UniValue ToJson() const
-    {
-        UniValue obj;
-        obj.setObject();
-        obj.pushKV("version", (int)nVersion);
-        obj.pushKV("height", nHeight);
-        obj.pushKV("merkleRootMNList", merkleRootMNList.ToString());
-        if (nVersion >= Version::MERKLE_ROOT_QUORUMS) {
-            obj.pushKV("merkleRootQuorums", merkleRootQuorums.ToString());
-            if (nVersion >= Version::CLSIG_AND_BALANCE) {
-                obj.pushKV("bestCLHeightDiff", static_cast<int>(bestCLHeightDiff));
-                obj.pushKV("bestCLSignature", bestCLSignature.ToString());
-                obj.pushKV("creditPoolBalance", ValueFromAmount(creditPoolBalance));
-            }
-        }
-        return obj;
-    }
+    [[nodiscard]] UniValue ToJson() const;
 };
 template<> struct is_serializable_enum<CCbTx::Version> : std::true_type {};
 
 bool CheckCbTx(const CTransaction& tx, const CBlockIndex* pindexPrev, TxValidationState& state);
 
-bool CheckCbTxMerkleRoots(const CBlock& block, const CBlockIndex* pindex, CDeterministicMNManager& dmnman,
-                          llmq::CQuorumSnapshotManager& qsnapman, const llmq::CQuorumBlockProcessor& quorum_block_processor,
-                          BlockValidationState& state, const CCoinsViewCache& view);
-bool CalcCbTxMerkleRootMNList(const CBlock& block, const CBlockIndex* pindexPrev, uint256& merkleRootRet,
-                              BlockValidationState& state, CDeterministicMNManager& dmnman,
-                              llmq::CQuorumSnapshotManager& qsnapman, const CCoinsViewCache& view);
+bool CheckCbTxMerkleRoots(const CBlock& block, const CBlockIndex* pindex,
+                          const llmq::CQuorumBlockProcessor& quorum_block_processor, CSimplifiedMNList&& sml,
+                          BlockValidationState& state);
+bool CalcCbTxMerkleRootMNList(uint256& merkleRootRet, CSimplifiedMNList&& sml, BlockValidationState& state);
 bool CalcCbTxMerkleRootQuorums(const CBlock& block, const CBlockIndex* pindexPrev,
                                const llmq::CQuorumBlockProcessor& quorum_block_processor, uint256& merkleRootRet,
                                BlockValidationState& state);

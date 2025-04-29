@@ -26,6 +26,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import List
 from .address import ADDRESS_BCRT1_P2SH_OP_TRUE
 from .authproxy import JSONRPCException
+from test_framework.masternodes import check_banned, check_punished
 from test_framework.blocktools import TIME_GENESIS_BLOCK
 from . import coverage
 from .messages import (
@@ -1206,7 +1207,7 @@ class DashTestFramework(BitcoinTestFramework):
         self.quorum_data_request_expiration_timeout = 360
 
 
-    def activate_by_name(self, name, expected_activation_height=None):
+    def activate_by_name(self, name, expected_activation_height=None, slow_mode=True):
         assert not softfork_active(self.nodes[0], name)
         self.log.info("Wait for " + name + " activation")
 
@@ -1217,7 +1218,7 @@ class DashTestFramework(BitcoinTestFramework):
         self.wait_for_sporks_same()
 
         # mine blocks in batches
-        batch_size = 50
+        batch_size = 50 if not slow_mode else 10
         if expected_activation_height is not None:
             height = self.nodes[0].getblockcount()
             assert height < expected_activation_height
@@ -1259,6 +1260,7 @@ class DashTestFramework(BitcoinTestFramework):
         for i in range(0, self.num_nodes):
             self.extra_args[i].append("-llmqtestparams=%d:%d" % (self.llmq_size, self.llmq_threshold))
             self.extra_args[i].append("-llmqtestinstantsendparams=%d:%d" % (self.llmq_size, self.llmq_threshold))
+            self.extra_args[i].append("-llmqtestplatformparams=%d:%d" % (self.llmq_size, self.llmq_threshold))
 
     def create_simple_node(self, extra_args=None):
         idx = len(self.nodes)
@@ -1267,7 +1269,6 @@ class DashTestFramework(BitcoinTestFramework):
         for i in range(0, idx):
             self.connect_nodes(i, idx)
 
-    # TODO: to let creating Evo Nodes without instant-send available
     def dynamically_add_masternode(self, evo=False, rnd=None, should_be_rejected=False):
         mn_idx = len(self.nodes)
 
@@ -1904,6 +1905,10 @@ class DashTestFramework(BitcoinTestFramework):
         self.generate(self.nodes[0], 8, sync_fun=lambda: self.sync_blocks(nodes))
 
         self.log.info("New quorum: height=%d, quorumHash=%s, quorumIndex=%d, minedBlock=%s" % (quorum_info["height"], new_quorum, quorum_info["quorumIndex"], quorum_info["minedBlock"]))
+
+        for mn in mninfos_valid:
+            assert not check_punished(self.nodes[0], mn)
+            assert not check_banned(self.nodes[0], mn)
 
         return new_quorum
 

@@ -2,6 +2,7 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
+#include <evo/chainhelper.h>
 #include <evo/deterministicmns.h>
 #include <evo/dmn_types.h>
 #include <evo/dmnstate.h>
@@ -13,15 +14,15 @@
 
 #include <base58.h>
 #include <chainparams.h>
+#include <coins.h>
 #include <consensus/validation.h>
 #include <deploymentstatus.h>
-#include <script/standard.h>
-#include <validation.h>
-#include <validationinterface.h>
-#include <univalue.h>
 #include <messagesigner.h>
-#include <uint256.h>
+#include <script/standard.h>
 #include <stats/client.h>
+#include <uint256.h>
+#include <univalue.h>
+#include <validationinterface.h>
 
 #include <optional>
 #include <memory>
@@ -51,8 +52,7 @@ UniValue CDeterministicMN::ToJson() const
     obj.pushKV("collateralHash", collateralOutpoint.hash.ToString());
     obj.pushKV("collateralIndex", (int)collateralOutpoint.n);
 
-    uint256 tmpHashBlock;
-    CTransactionRef collateralTx = GetTransaction(/* block_index */ nullptr,  /* mempool */ nullptr, collateralOutpoint.hash, Params().GetConsensus(), tmpHashBlock);
+    auto [collateralTx, _] = GetTransactionBlock(collateralOutpoint.hash);
     if (collateralTx) {
         CTxDestination dest;
         if (ExtractDestination(collateralTx->vout[collateralOutpoint.n].scriptPubKey, dest)) {
@@ -600,7 +600,7 @@ void CDeterministicMNList::RemoveMN(const uint256& proTxHash)
 
 bool CDeterministicMNManager::ProcessBlock(const CBlock& block, gsl::not_null<const CBlockIndex*> pindex,
                                            BlockValidationState& state, const CCoinsViewCache& view,
-                                           llmq::CQuorumSnapshotManager& qsnapman, bool fJustCheck,
+                                           llmq::CQuorumSnapshotManager& qsnapman, const CDeterministicMNList& newList,
                                            std::optional<MNListUpdates>& updatesRet)
 {
     AssertLockHeld(cs_main);
@@ -610,23 +610,12 @@ bool CDeterministicMNManager::ProcessBlock(const CBlock& block, gsl::not_null<co
         return true;
     }
 
-    CDeterministicMNList oldList, newList;
+    CDeterministicMNList oldList;
     CDeterministicMNListDiff diff;
 
     int nHeight = pindex->nHeight;
 
     try {
-        if (!BuildNewListFromBlock(block, pindex->pprev, state, view, newList, qsnapman, true)) {
-            // pass the state returned by the function above
-            return false;
-        }
-
-        if (fJustCheck) {
-            return true;
-        }
-
-        newList.SetBlockHash(pindex->GetBlockHash());
-
         LOCK(cs);
 
         oldList = GetListForBlockInternal(pindex->pprev);
@@ -960,10 +949,7 @@ bool CDeterministicMNManager::BuildNewListFromBlock(const CBlock& block, gsl::no
 
     // The payee for the current block was determined by the previous block's list, but it might have disappeared in the
     // current block. We still pay that MN one last time, however.
-    if (payee && newList.HasMN(payee->proTxHash)) {
-        auto dmn = newList.GetMN(payee->proTxHash);
-        // HasMN has reported that GetMN should succeed, enforce that.
-        assert(dmn);
+    if (auto dmn = payee ? newList.GetMN(payee->proTxHash) : nullptr) {
         auto newState = std::make_shared<CDeterministicMNState>(*dmn->pdmnState);
         newState->nLastPaidHeight = nHeight;
         // Starting from v19 and until MNRewardReallocation, EvoNodes will be paid 4 blocks in a row
