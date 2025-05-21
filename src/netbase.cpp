@@ -639,10 +639,7 @@ std::unique_ptr<Sock> ConnectDirectly(const CService& dest, bool manual_connecti
 
 std::unique_ptr<Sock> Proxy::Connect() const
 {
-    if (!IsValid()) {
-        LogPrintf("Cannot connect to invalid Proxy\n");
-        return {};
-    }
+    if (!IsValid()) return {};
 
     if (!m_is_unix_socket) return ConnectDirectly(proxy, /*manual_connection=*/true);
 
@@ -663,7 +660,6 @@ std::unique_ptr<Sock> Proxy::Connect() const
     socklen_t len = sizeof(addrun);
 
     if(!ConnectToSocket(*sock, (struct sockaddr*)&addrun, len, path, /*manual_connection=*/true)) {
-        LogPrintf("Cannot connect to socket for %s\n", path);
         return {};
     }
 
@@ -749,10 +745,12 @@ std::unique_ptr<Sock> ConnectThroughProxy(const Proxy& proxy,
     return sock;
 }
 
-bool LookupSubNet(const std::string& subnet_str, CSubNet& subnet_out)
+CSubNet LookupSubNet(const std::string& subnet_str)
 {
+    CSubNet subnet;
+    assert(!subnet.IsValid());
     if (!ContainsNoNUL(subnet_str)) {
-        return false;
+        return subnet;
     }
 
     const size_t slash_pos{subnet_str.find_last_of('/')};
@@ -766,23 +764,21 @@ bool LookupSubNet(const std::string& subnet_str, CSubNet& subnet_out)
             uint8_t netmask;
             if (ParseUInt8(netmask_str, &netmask)) {
                 // Valid number; assume CIDR variable-length subnet masking.
-                subnet_out = CSubNet{addr.value(), netmask};
-                return subnet_out.IsValid();
+                subnet = CSubNet{addr.value(), netmask};
             } else {
                 // Invalid number; try full netmask syntax. Never allow lookup for netmask.
                 const std::optional<CNetAddr> full_netmask{LookupHost(netmask_str, /*fAllowLookup=*/false)};
                 if (full_netmask.has_value()) {
-                    subnet_out = CSubNet{addr.value(), full_netmask.value()};
-                    return subnet_out.IsValid();
+                    subnet = CSubNet{addr.value(), full_netmask.value()};
                 }
             }
         } else {
             // Single IP subnet (<ipv4>/32 or <ipv6>/128).
-            subnet_out = CSubNet{addr.value()};
-            return subnet_out.IsValid();
+            subnet = CSubNet{addr.value()};
         }
     }
-    return false;
+
+    return subnet;
 }
 
 void InterruptSocks5(bool interrupt)
