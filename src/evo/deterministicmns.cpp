@@ -69,7 +69,7 @@ bool CDeterministicMNList::IsMNValid(const uint256& proTxHash) const
     if (p == nullptr) {
         return false;
     }
-    return IsMNValid(**p);
+    return !(*p)->pdmnState->IsBanned();
 }
 
 bool CDeterministicMNList::IsMNPoSeBanned(const uint256& proTxHash) const
@@ -78,17 +78,7 @@ bool CDeterministicMNList::IsMNPoSeBanned(const uint256& proTxHash) const
     if (p == nullptr) {
         return false;
     }
-    return IsMNPoSeBanned(**p);
-}
-
-bool CDeterministicMNList::IsMNValid(const CDeterministicMN& dmn)
-{
-    return !IsMNPoSeBanned(dmn);
-}
-
-bool CDeterministicMNList::IsMNPoSeBanned(const CDeterministicMN& dmn)
-{
-    return dmn.pdmnState->IsBanned();
+    return (*p)->pdmnState->IsBanned();
 }
 
 CDeterministicMNCPtr CDeterministicMNList::GetMN(const uint256& proTxHash) const
@@ -103,7 +93,7 @@ CDeterministicMNCPtr CDeterministicMNList::GetMN(const uint256& proTxHash) const
 CDeterministicMNCPtr CDeterministicMNList::GetValidMN(const uint256& proTxHash) const
 {
     auto dmn = GetMN(proTxHash);
-    if (dmn && !IsMNValid(*dmn)) {
+    if (dmn && dmn->pdmnState->IsBanned()) {
         return nullptr;
     }
     return dmn;
@@ -127,7 +117,7 @@ CDeterministicMNCPtr CDeterministicMNList::GetMNByCollateral(const COutPoint& co
 CDeterministicMNCPtr CDeterministicMNList::GetValidMNByCollateral(const COutPoint& collateralOutpoint) const
 {
     auto dmn = GetMNByCollateral(collateralOutpoint);
-    if (dmn && !IsMNValid(*dmn)) {
+    if (dmn && dmn->pdmnState->IsBanned()) {
         return nullptr;
     }
     return dmn;
@@ -423,31 +413,28 @@ CDeterministicMNListDiff CDeterministicMNList::BuildDiff(const CDeterministicMNL
     return diffRet;
 }
 
-CDeterministicMNList CDeterministicMNList::ApplyDiff(gsl::not_null<const CBlockIndex*> pindex, const CDeterministicMNListDiff& diff) const
+void CDeterministicMNList::ApplyDiff(gsl::not_null<const CBlockIndex*> pindex, const CDeterministicMNListDiff& diff)
 {
-    CDeterministicMNList result = *this;
-    result.blockHash = pindex->GetBlockHash();
-    result.nHeight = pindex->nHeight;
+    blockHash = pindex->GetBlockHash();
+    nHeight = pindex->nHeight;
 
     for (const auto& id : diff.removedMns) {
-        auto dmn = result.GetMNByInternalId(id);
+        auto dmn = GetMNByInternalId(id);
         if (!dmn) {
             throw std::runtime_error(strprintf("%s: can't find a removed masternode, id=%d", __func__, id));
         }
-        result.RemoveMN(dmn->proTxHash);
+        RemoveMN(dmn->proTxHash);
     }
     for (const auto& dmn : diff.addedMNs) {
-        result.AddMN(dmn);
+        AddMN(dmn);
     }
     for (const auto& p : diff.updatedMNs) {
-        auto dmn = result.GetMNByInternalId(p.first);
+        auto dmn = GetMNByInternalId(p.first);
         if (!dmn) {
             throw std::runtime_error(strprintf("%s: can't find an updated masternode, id=%d", __func__, p.first));
         }
-        result.UpdateMN(*dmn, p.second);
+        UpdateMN(*dmn, p.second);
     }
-
-    return result;
 }
 
 void CDeterministicMNList::AddMN(const CDeterministicMNCPtr& dmn, bool fBumpTotalCount)
@@ -708,7 +695,8 @@ bool CDeterministicMNManager::UndoBlock(gsl::not_null<const CBlockIndex*> pindex
         mnListDiffsCache.erase(blockHash);
     }
     if (diff.HasChanges()) {
-        CDeterministicMNList curList{prevList.ApplyDiff(pindex, diff)};
+        CDeterministicMNList curList{prevList};
+        curList.ApplyDiff(pindex, diff);
 
         auto inversedDiff{curList.BuildDiff(prevList)};
         updatesRet = {curList, prevList, inversedDiff};
@@ -1096,12 +1084,7 @@ CDeterministicMNList CDeterministicMNManager::GetListForBlockInternal(gsl::not_n
 
     for (const auto& diffIndex : listDiffIndexes) {
         const auto& diff = mnListDiffsCache.at(diffIndex->GetBlockHash());
-        if (diff.HasChanges()) {
-            snapshot = snapshot.ApplyDiff(diffIndex, diff);
-        } else {
-            snapshot.SetBlockHash(diffIndex->GetBlockHash());
-            snapshot.SetHeight(diffIndex->nHeight);
-        }
+        snapshot.ApplyDiff(diffIndex, diff);
     }
 
     if (tipIndex) {
