@@ -247,7 +247,7 @@ def satoshi_round(amount):
     return Decimal(amount).quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)
 
 
-def wait_until_helper(predicate, *, attempts=float('inf'), timeout=float('inf'), sleep=0.5, timeout_factor=1.0, lock=None, do_assert=True, allow_exception=False):
+def wait_until_helper(predicate, *, attempts=float('inf'), timeout=float('inf'), sleep=0.05, timeout_factor=1.0, lock=None, do_assert=True, allow_exception=False):
     """Sleep until the predicate resolves to be True.
 
     Warning: Note that this method is not recommended to be used in tests as it is
@@ -642,7 +642,7 @@ def mine_large_block(test_framework, mini_wallet, node):
     from .messages import COIN
     fee = 100 * int(node.getnetworkinfo()["relayfee"] * COIN)
     for _ in range(14):
-        tx = mini_wallet.create_self_transfer(from_node=node, fee_rate=0, mempool_valid=False)['tx']
+        tx = mini_wallet.create_self_transfer(fee_rate=0)['tx']
         tx.vout[0].nValue -= fee
         tx.vout.extend(txouts)
         mini_wallet.sendrawtransaction(from_node=node, tx_hex=tx.serialize().hex())
