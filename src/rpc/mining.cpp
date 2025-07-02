@@ -52,6 +52,11 @@
 #include <memory>
 #include <stdint.h>
 
+using node::BlockAssembler;
+using node::CBlockTemplate;
+using node::NodeContext;
+using node::UpdateTime;
+
 /**
  * Return average network hashes per second based on the last 'lookup' blocks,
  * or from the last difficulty change if 'lookup' is nonpositive.
@@ -727,14 +732,19 @@ static RPCHelpMan getblocktemplate()
         throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid mode");
 
     const CConnman& connman = EnsureConnman(node);
-    CHECK_NONFATAL(node.sporkman);
-    if (connman.GetNodeCount(ConnectionDirection::Both) == 0)
-        throw JSONRPCError(RPC_CLIENT_NOT_CONNECTED, PACKAGE_NAME " is not connected!");
 
-    if (active_chainstate.IsInitialBlockDownload())
-        throw JSONRPCError(RPC_CLIENT_IN_INITIAL_DOWNLOAD, PACKAGE_NAME " is in initial sync and waiting for blocks...");
+    if (!Params().IsTestChain()) {
+        if (connman.GetNodeCount(ConnectionDirection::Both) == 0) {
+            throw JSONRPCError(RPC_CLIENT_NOT_CONNECTED, PACKAGE_NAME " is not connected!");
+        }
+
+        if (active_chainstate.IsInitialBlockDownload()) {
+            throw JSONRPCError(RPC_CLIENT_IN_INITIAL_DOWNLOAD, PACKAGE_NAME " is in initial sync and waiting for blocks...");
+        }
+    }
 
     // next bock is a superblock and we need governance info to correctly construct it
+    CHECK_NONFATAL(node.sporkman);
     if (AreSuperblocksEnabled(*node.sporkman)
         && !node.mn_sync->IsSynced()
         && CSuperblock::IsValidBlockHeight(active_chain.Height() + 1))
