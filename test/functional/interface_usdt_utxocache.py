@@ -177,7 +177,7 @@ class UTXOCacheTracepointTest(BitcoinTestFramework):
         ctx = USDT(path=str(self.options.bitcoind))
         ctx.enable_probe(probe="utxocache:uncache",
                          fn_name="trace_utxocache_uncache")
-        bpf = BPF(text=utxocache_changes_program, usdt_contexts=[ctx], debug=0)
+        bpf = BPF(text=utxocache_changes_program, usdt_contexts=[ctx], debug=0, cflags=["-Wno-error=implicit-function-declaration"])
 
         # The handle_* function is a ctypes callback function called from C. When
         # we assert in the handle_* function, the AssertError doesn't propagate
@@ -190,13 +190,16 @@ class UTXOCacheTracepointTest(BitcoinTestFramework):
             nonlocal handle_uncache_succeeds
             event = ctypes.cast(data, ctypes.POINTER(UTXOCacheChange)).contents
             self.log.info(f"handle_utxocache_uncache(): {event}")
-            assert_equal(block_1_coinbase_txid, bytes(event.txid[::-1]).hex())
-            assert_equal(0, event.index)  # prevout index
-            assert_equal(EARLY_BLOCK_HEIGHT, event.height)
-            assert_equal(500 * COIN, event.value)
-            assert_equal(True, event.is_coinbase)
-
-            handle_uncache_succeeds += 1
+            try:
+                assert_equal(block_1_coinbase_txid, bytes(event.txid[::-1]).hex())
+                assert_equal(0, event.index)  # prevout index
+                assert_equal(EARLY_BLOCK_HEIGHT, event.height)
+                assert_equal(50 * COIN, event.value)
+                assert_equal(True, event.is_coinbase)
+            except AssertionError:
+                self.log.exception("Assertion failed")
+            else:
+                handle_uncache_succeeds += 1
 
         bpf["utxocache_uncache"].open_perf_buffer(handle_utxocache_uncache)
 
@@ -243,7 +246,7 @@ class UTXOCacheTracepointTest(BitcoinTestFramework):
         ctx.enable_probe(probe="utxocache:add", fn_name="trace_utxocache_add")
         ctx.enable_probe(probe="utxocache:spent",
                          fn_name="trace_utxocache_spent")
-        bpf = BPF(text=utxocache_changes_program, usdt_contexts=[ctx], debug=0)
+        bpf = BPF(text=utxocache_changes_program, usdt_contexts=[ctx], debug=0, cflags=["-Wno-error=implicit-function-declaration"])
 
         # The handle_* function is a ctypes callback function called from C. When
         # we assert in the handle_* function, the AssertError doesn't propagate
@@ -262,24 +265,32 @@ class UTXOCacheTracepointTest(BitcoinTestFramework):
             event = ctypes.cast(data, ctypes.POINTER(UTXOCacheChange)).contents
             self.log.info(f"handle_utxocache_add(): {event}")
             add = expected_utxocache_adds.pop(0)
-            assert_equal(add["txid"], bytes(event.txid[::-1]).hex())
-            assert_equal(add["index"], event.index)
-            assert_equal(add["height"], event.height)
-            assert_equal(add["value"], event.value)
-            assert_equal(add["is_coinbase"], event.is_coinbase)
-            handle_add_succeeds += 1
+            try:
+                assert_equal(add["txid"], bytes(event.txid[::-1]).hex())
+                assert_equal(add["index"], event.index)
+                assert_equal(add["height"], event.height)
+                assert_equal(add["value"], event.value)
+                assert_equal(add["is_coinbase"], event.is_coinbase)
+            except AssertionError:
+                self.log.exception("Assertion failed")
+            else:
+                handle_add_succeeds += 1
 
         def handle_utxocache_spent(_, data, __):
             nonlocal handle_spent_succeeds
             event = ctypes.cast(data, ctypes.POINTER(UTXOCacheChange)).contents
             self.log.info(f"handle_utxocache_spent(): {event}")
             spent = expected_utxocache_spents.pop(0)
-            assert_equal(spent["txid"], bytes(event.txid[::-1]).hex())
-            assert_equal(spent["index"], event.index)
-            assert_equal(spent["height"], event.height)
-            assert_equal(spent["value"], event.value)
-            assert_equal(spent["is_coinbase"], event.is_coinbase)
-            handle_spent_succeeds += 1
+            try:
+                assert_equal(spent["txid"], bytes(event.txid[::-1]).hex())
+                assert_equal(spent["index"], event.index)
+                assert_equal(spent["height"], event.height)
+                assert_equal(spent["value"], event.value)
+                assert_equal(spent["is_coinbase"], event.is_coinbase)
+            except AssertionError:
+                self.log.exception("Assertion failed")
+            else:
+                handle_spent_succeeds += 1
 
         bpf["utxocache_add"].open_perf_buffer(handle_utxocache_add)
         bpf["utxocache_spent"].open_perf_buffer(handle_utxocache_spent)
@@ -338,7 +349,7 @@ class UTXOCacheTracepointTest(BitcoinTestFramework):
         ctx = USDT(path=str(self.options.bitcoind))
         ctx.enable_probe(probe="utxocache:flush",
                          fn_name="trace_utxocache_flush")
-        bpf = BPF(text=utxocache_flushes_program, usdt_contexts=[ctx], debug=0)
+        bpf = BPF(text=utxocache_flushes_program, usdt_contexts=[ctx], debug=0, cflags=["-Wno-error=implicit-function-declaration"])
 
         # The handle_* function is a ctypes callback function called from C. When
         # we assert in the handle_* function, the AssertError doesn't propagate
@@ -364,7 +375,7 @@ class UTXOCacheTracepointTest(BitcoinTestFramework):
         bpf["utxocache_flush"].open_perf_buffer(handle_utxocache_flush)
 
         self.log.info("stop the node to flush the UTXO cache")
-        UTXOS_IN_CACHE = 104  # might need to be changed if the eariler tests are modified
+        UTXOS_IN_CACHE = 104  # might need to be changed if the earlier tests are modified
         # A node shutdown causes two flushes. One that flushes UTXOS_IN_CACHE
         # UTXOs and one that flushes 0 UTXOs. Normally the 0-UTXO-flush is the
         # second flush, however it can happen that the order changes.
