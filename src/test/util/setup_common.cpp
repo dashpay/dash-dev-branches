@@ -48,12 +48,14 @@
 #include <bls/bls.h>
 #include <coinjoin/context.h>
 #include <evo/cbtx.h>
+#include <evo/chainhelper.h>
 #include <evo/creditpool.h>
 #include <evo/deterministicmns.h>
 #include <evo/evodb.h>
 #include <evo/mnhftx.h>
 #include <evo/simplifiedmns.h>
 #include <evo/specialtx.h>
+#include <evo/specialtxman.h>
 #include <flat-database.h>
 #include <governance/governance.h>
 #include <llmq/context.h>
@@ -189,6 +191,15 @@ BasicTestingSetup::BasicTestingSetup(const std::string& chainName, const std::ve
     m_node.addrman = std::make_unique<AddrMan>(*m_node.netgroupman,
                                                /*deterministic=*/false,
                                                m_node.args->GetIntArg("-checkaddrman", 0));
+
+    std::string sem_str = m_args.GetArg("-socketevents", DEFAULT_SOCKETEVENTS);
+    ::g_socket_events_mode = SEMFromString(sem_str);
+    if (::g_socket_events_mode == SocketEventsMode::Unknown) {
+        throw std::runtime_error(
+            strprintf("Invalid -socketevents ('%s') specified. Only these modes are supported: %s",
+                      sem_str, GetSupportedSocketEventsStr()));
+    }
+
     m_node.connman = std::make_unique<CConnman>(0x1337, 0x1337, *m_node.addrman, *m_node.netgroupman); // Deterministic randomness for tests.
 
     fCheckBlockIndex = true;
@@ -209,6 +220,7 @@ BasicTestingSetup::~BasicTestingSetup()
     m_node.cpoolman.reset();
     m_node.mnhf_manager.reset();
     m_node.evodb.reset();
+    ::g_socket_events_mode = SocketEventsMode::Unknown;
     m_node.connman.reset();
     m_node.addrman.reset();
     m_node.netgroupman.reset();
@@ -326,6 +338,7 @@ TestingSetup::TestingSetup(const std::string& chainName, const std::vector<const
     {
         CConnman::Options options;
         options.m_msgproc = m_node.peerman.get();
+        options.socketEventsMode = ::g_socket_events_mode;
         m_node.connman->Init(options);
     }
 
@@ -503,7 +516,7 @@ CBlock TestChainSetup::CreateBlock(
         Assert(cbTx.has_value());
         BlockValidationState state;
         CDeterministicMNList mn_list;
-        if (!m_node.dmnman->BuildNewListFromBlock(block, chainstate.m_chain.Tip(), state, chainstate.CoinsTip(), mn_list, *m_node.llmq_ctx->qsnapman, true)) {
+        if (!chainstate.ChainHelper().special_tx->BuildNewListFromBlock(block, chainstate.m_chain.Tip(), chainstate.CoinsTip(), true, state, mn_list)) {
             Assert(false);
         }
         if (!CalcCbTxMerkleRootMNList(cbTx->merkleRootMNList, CSimplifiedMNList(mn_list), state)) {
