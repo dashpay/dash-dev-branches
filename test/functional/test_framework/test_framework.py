@@ -23,7 +23,7 @@ import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from typing import List, Optional
+from typing import List, Optional, Union
 from .address import ADDRESS_BCRT1_P2SH_OP_TRUE
 from .authproxy import JSONRPCException
 from test_framework.masternodes import check_banned, check_punished
@@ -123,6 +123,7 @@ class BitcoinTestFramework(metaclass=BitcoinTestMetaClass):
         self.setup_clean_chain: bool = False
         self.disable_mocktime: bool = False
         self.nodes: List[TestNode] = []
+        self.extra_args = None
         self.network_thread = None
         self.mocktime = 0
         self.rpc_timeout = 60  # Wait for up to 60 seconds for the RPC server to respond
@@ -448,10 +449,7 @@ class BitcoinTestFramework(metaclass=BitcoinTestMetaClass):
         """Override this method to customize test node setup"""
 
         """If this method is updated - backport changes to  DashTestFramework.setup_nodes"""
-        extra_args = [[]] * self.num_nodes
-        if hasattr(self, "extra_args"):
-            extra_args = self.extra_args
-        self.add_nodes(self.num_nodes, extra_args)
+        self.add_nodes(self.num_nodes, self.extra_args)
         self.start_nodes()
         if self.requires_wallet:
             self.import_deterministic_coinbase_privkeys()
@@ -1216,7 +1214,7 @@ class MasternodeInfo:
         return test.nodes[self.nodeIdx]
 
     def register(self, node: TestNode, submit: bool, collateral_txid: Optional[str] = None, collateral_vout: Optional[int] = None,
-                 ipAndPort: Optional[str] = None, ownerAddr: Optional[str] = None, pubKeyOperator: Optional[str] = None, votingAddr: Optional[str] = None,
+                 coreP2PAddrs: Union[str, List[str], None] = None, ownerAddr: Optional[str] = None, pubKeyOperator: Optional[str] = None, votingAddr: Optional[str] = None,
                  operator_reward: Optional[int] = None, rewards_address: Optional[str] = None, fundsAddr: Optional[str] = None,
                  platform_node_id: Optional[str] = None, platform_p2p_port: Optional[int] = None, platform_http_port: Optional[int] = None,
                  expected_assert_code: Optional[int] = None, expected_assert_msg: Optional[str] = None) -> Optional[str]:
@@ -1236,7 +1234,7 @@ class MasternodeInfo:
         args = [
             collateral_txid or self.collateral_txid,
             collateral_vout or self.collateral_vout,
-            ipAndPort or f'127.0.0.1:{self.nodePort}',
+            coreP2PAddrs or [f'127.0.0.1:{self.nodePort}'],
             ownerAddr or self.ownerAddr,
             pubKeyOperator or self.pubKeyOperator,
             votingAddr or self.votingAddr,
@@ -1271,7 +1269,7 @@ class MasternodeInfo:
 
         return ret
 
-    def register_fund(self, node: TestNode, submit: bool, collateral_address: Optional[str] = None, ipAndPort: Optional[str] = None,
+    def register_fund(self, node: TestNode, submit: bool, collateral_address: Optional[str] = None, coreP2PAddrs: Union[str, List[str], None] = None,
                       ownerAddr: Optional[str] = None, pubKeyOperator: Optional[str] = None, votingAddr: Optional[str] = None,
                       operator_reward: Optional[int] = None, rewards_address: Optional[str] = None, fundsAddr: Optional[str] = None,
                       platform_node_id: Optional[str] = None, platform_p2p_port: Optional[int] = None, platform_http_port: Optional[int] = None,
@@ -1299,7 +1297,7 @@ class MasternodeInfo:
         # Common arguments shared between regular masternodes and EvoNodes
         args = [
             collateral_address or self.collateral_address,
-            ipAndPort or f'127.0.0.1:{self.nodePort}',
+            coreP2PAddrs or [f'127.0.0.1:{self.nodePort}'],
             ownerAddr or self.ownerAddr,
             pubKeyOperator or self.pubKeyOperator,
             votingAddr or self.votingAddr,
@@ -1410,7 +1408,7 @@ class MasternodeInfo:
 
         return ret
 
-    def update_service(self, node: TestNode, submit: bool, ipAndPort: Optional[str] = None, platform_node_id: Optional[str] = None, platform_p2p_port: Optional[int] = None,
+    def update_service(self, node: TestNode, submit: bool, coreP2PAddrs: Union[str, List[str], None] = None, platform_node_id: Optional[str] = None, platform_p2p_port: Optional[int] = None,
                        platform_http_port: Optional[int] = None, address_operator: Optional[str] = None, fundsAddr: Optional[str] = None,
                        expected_assert_code: Optional[int] = None, expected_assert_msg: Optional[str] = None) -> Optional[str]:
         if (expected_assert_code and not expected_assert_msg) or (not expected_assert_code and expected_assert_msg):
@@ -1442,7 +1440,7 @@ class MasternodeInfo:
         # Common arguments shared between regular masternodes and EvoNodes
         args = [
             self.proTxHash,
-            ipAndPort or f'127.0.0.1:{self.nodePort}',
+            coreP2PAddrs or [f'127.0.0.1:{self.nodePort}'],
             self.keyOperator,
         ]
         address_funds = fundsAddr or self.fundsAddr
@@ -1643,11 +1641,11 @@ class DashTestFramework(BitcoinTestFramework):
         mn.bury_tx(self, genIdx=0, txid=collateral_txid, depth=1)
         collateral_vout = mn.get_collateral_vout(self.nodes[0], collateral_txid)
 
-        ipAndPort = '127.0.0.1:%d' % node_p2p_port
+        coreP2PAddrs = ['127.0.0.1:%d' % node_p2p_port]
         operatorReward = idx
 
         # platform_node_id, platform_p2p_port and platform_http_port are ignored for regular masternodes
-        protx_result = mn.register(self.nodes[0], submit=True, collateral_txid=collateral_txid, collateral_vout=collateral_vout, ipAndPort=ipAndPort, operator_reward=operatorReward,
+        protx_result = mn.register(self.nodes[0], submit=True, collateral_txid=collateral_txid, collateral_vout=collateral_vout, coreP2PAddrs=coreP2PAddrs, operator_reward=operatorReward,
                                    platform_node_id=platform_node_id, platform_p2p_port=platform_p2p_port, platform_http_port=platform_http_port)
         assert protx_result is not None
 
@@ -1709,16 +1707,16 @@ class DashTestFramework(BitcoinTestFramework):
         self.nodes[0].sendtoaddress(mn.fundsAddr, 0.001)
 
         port = p2p_port(len(self.nodes) + idx)
-        ipAndPort = '127.0.0.1:%d' % port
+        coreP2PAddrs = ['127.0.0.1:%d' % port]
         operatorReward = idx
 
         submit = (idx % 4) < 2
 
         if register_fund:
-            protx_result = mn.register_fund(self.nodes[0], submit=submit, ipAndPort=ipAndPort, operator_reward=operatorReward)
+            protx_result = mn.register_fund(self.nodes[0], submit=submit, coreP2PAddrs=coreP2PAddrs, operator_reward=operatorReward)
         else:
             self.generate(self.nodes[0], 1, sync_fun=self.no_op)
-            protx_result = mn.register(self.nodes[0], submit=submit, collateral_txid=txid, collateral_vout=collateral_vout, ipAndPort=ipAndPort,
+            protx_result = mn.register(self.nodes[0], submit=submit, collateral_txid=txid, collateral_vout=collateral_vout, coreP2PAddrs=coreP2PAddrs,
                                        operator_reward=operatorReward)
         if submit:
             proTxHash = protx_result
@@ -1730,7 +1728,7 @@ class DashTestFramework(BitcoinTestFramework):
         if operatorReward > 0:
             self.generate(self.nodes[0], 1, sync_fun=self.no_op)
             operatorPayoutAddress = self.nodes[0].getnewaddress()
-            mn.update_service(self.nodes[0], submit=True, ipAndPort=ipAndPort, address_operator=operatorPayoutAddress)
+            mn.update_service(self.nodes[0], submit=True, coreP2PAddrs=coreP2PAddrs, address_operator=operatorPayoutAddress)
 
         self.mninfo.append(mn)
         self.log.info("Prepared MN %d: collateral_txid=%s, collateral_vout=%d, protxHash=%s" % (idx, txid, collateral_vout, proTxHash))
@@ -1788,14 +1786,11 @@ class DashTestFramework(BitcoinTestFramework):
         force_finish_mnsync(self.nodes[mnidx])
 
     def setup_nodes(self):
-        extra_args = [[]] * self.num_nodes
-        if hasattr(self, "extra_args"):
-            extra_args = self.extra_args
         self.log.info("Creating and starting controller node")
         num_simple_nodes = self.num_nodes - self.mn_count
         self.log.info("Creating and starting %s simple nodes", num_simple_nodes)
         for i in range(0, num_simple_nodes):
-            self.create_simple_node(extra_args)
+            self.create_simple_node(self.extra_args)
         if self.requires_wallet:
             self.import_deterministic_coinbase_privkeys()
         required_balance = EVONODE_COLLATERAL * self.evo_count
@@ -1903,16 +1898,6 @@ class DashTestFramework(BitcoinTestFramework):
         ret = {**decoded, **ret}
         return ret
 
-    def wait_for_tx(self, txid, node, expected=True, timeout=60):
-        def check_tx():
-            try:
-                self.bump_mocktime(1)
-                return node.getrawtransaction(txid)
-            except:
-                return False
-        if self.wait_until(check_tx, timeout=timeout, sleep=1, do_assert=expected) and not expected:
-            raise AssertionError("waiting unexpectedly succeeded")
-
     def create_isdlock(self, hextx):
         tx = tx_from_hex(hextx)
         tx.rehash()
@@ -1935,15 +1920,19 @@ class DashTestFramework(BitcoinTestFramework):
 
         return isdlock
 
+    # due to privacy reasons random delay is used before sending transaction by network
+    # most times is just 2-5 seconds, but once in 1000 it's up to 1000 seconds.
+    # it's recommended to bump mocktime for 30 seconds before wait_for_instantlock
     def wait_for_instantlock(self, txid, node, expected=True, timeout=60):
+
         def check_instantlock():
-            self.bump_mocktime(1)
             try:
                 return node.getrawtransaction(txid, True)["instantlock"]
             except:
                 return False
+
         self.log.info(f"Expecting InstantLock for {txid}")
-        if self.wait_until(check_instantlock, timeout=timeout, sleep=1, do_assert=expected) and not expected:
+        if self.wait_until(check_instantlock, timeout=timeout, do_assert=expected) and not expected:
             raise AssertionError("waiting unexpectedly succeeded")
 
     def wait_for_chainlocked_block(self, node, block_hash, expected=True, timeout=15):
@@ -1954,7 +1943,7 @@ class DashTestFramework(BitcoinTestFramework):
             except:
                 return False
         self.log.info(f"Expecting ChainLock for {block_hash}")
-        if self.wait_until(check_chainlocked_block, timeout=timeout, sleep=0.1, do_assert=expected) and not expected:
+        if self.wait_until(check_chainlocked_block, timeout=timeout, do_assert=expected) and not expected:
             raise AssertionError("waiting unexpectedly succeeded")
 
     def wait_for_chainlocked_block_all_nodes(self, block_hash, timeout=15, expected=True):
@@ -1962,7 +1951,7 @@ class DashTestFramework(BitcoinTestFramework):
             self.wait_for_chainlocked_block(node, block_hash, expected=expected, timeout=timeout)
 
     def wait_for_best_chainlock(self, node, block_hash, timeout=15):
-        self.wait_until(lambda: node.getbestchainlock()["blockhash"] == block_hash, timeout=timeout, sleep=0.1)
+        self.wait_until(lambda: node.getbestchainlock()["blockhash"] == block_hash, timeout=timeout)
 
     def wait_for_sporks_same(self, timeout=30):
         def check_sporks_same():

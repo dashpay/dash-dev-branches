@@ -30,9 +30,15 @@ if [[ $BITCOIN_CONFIG = *--with-sanitizers=*address* ]]; then # If ran with (ASa
 fi
 
 export P_CI_DIR="$PWD"
+export BINS_SCRATCH_DIR="${BASE_SCRATCH_DIR}/bins/"
 
 if [ -z "$DANGER_RUN_CI_ON_HOST" ]; then
   echo "Creating $DOCKER_NAME_TAG container to run in"
+  LOCAL_UID=$(id -u)
+  LOCAL_GID=$(id -g)
+
+  # the name isn't important, so long as we use the same UID
+  LOCAL_USER=nonroot
   ${CI_RETRY_EXE} docker pull "$DOCKER_NAME_TAG"
 
   # shellcheck disable=SC2086
@@ -45,26 +51,41 @@ if [ -z "$DANGER_RUN_CI_ON_HOST" ]; then
                   --env-file /tmp/env \
                   --name $CONTAINER_NAME \
                   $DOCKER_NAME_TAG)
-  export DOCKER_CI_CMD_PREFIX="docker exec $DOCKER_ID"
+
+  # Create a non-root user inside the container which matches the local user.
+  #
+  # This prevents the root user in the container modifying the local file system permissions
+  # on the mounted directories
+  docker exec "$DOCKER_ID" useradd -u "$LOCAL_UID" -o -m "$LOCAL_USER"
+  docker exec "$DOCKER_ID" groupmod -o -g "$LOCAL_GID" "$LOCAL_USER"
+  docker exec "$DOCKER_ID" chown -R "$LOCAL_USER":"$LOCAL_USER" "${BASE_ROOT_DIR}"
+  export DOCKER_CI_CMD_PREFIX_ROOT="docker exec -u 0 $DOCKER_ID"
+  export DOCKER_CI_CMD_PREFIX="docker exec -u $LOCAL_UID $DOCKER_ID"
 else
   echo "Running on host system without docker wrapper"
 fi
 
 CI_EXEC () {
-  $DOCKER_CI_CMD_PREFIX bash -c "export PATH=$BASE_SCRATCH_DIR/bins/:\$PATH && cd \"$P_CI_DIR\" && $*"
+  $DOCKER_CI_CMD_PREFIX bash -c "export PATH=${BINS_SCRATCH_DIR}:\$PATH && cd \"$P_CI_DIR\" && $*"
+}
+CI_EXEC_ROOT () {
+  $DOCKER_CI_CMD_PREFIX_ROOT bash -c "export PATH=${BINS_SCRATCH_DIR}:\$PATH && cd \"$P_CI_DIR\" && $*"
 }
 export -f CI_EXEC
+export -f CI_EXEC_ROOT
+
+CI_EXEC mkdir -p "${BINS_SCRATCH_DIR}"
 
 if [ -n "$DPKG_ADD_ARCH" ]; then
-  CI_EXEC dpkg --add-architecture "$DPKG_ADD_ARCH"
+  CI_EXEC_ROOT dpkg --add-architecture "$DPKG_ADD_ARCH"
 fi
 
 if [[ $DOCKER_NAME_TAG == *centos* ]]; then
-  CI_EXEC yum -y install epel-release
-  CI_EXEC yum -y install "$DOCKER_PACKAGES" "$PACKAGES"
+  CI_EXEC_ROOT yum -y install epel-release
+  CI_EXEC_ROOT yum -y install "$DOCKER_PACKAGES" "$PACKAGES"
 elif [ "$CI_USE_APT_INSTALL" != "no" ]; then
-  ${CI_RETRY_EXE} CI_EXEC apt-get update
-  ${CI_RETRY_EXE} CI_EXEC apt-get install --no-install-recommends --no-upgrade -y "$PACKAGES" "$DOCKER_PACKAGES"
+  ${CI_RETRY_EXE} CI_EXEC_ROOT apt-get update
+  ${CI_RETRY_EXE} CI_EXEC_ROOT apt-get install --no-install-recommends --no-upgrade -y "$PACKAGES" "$DOCKER_PACKAGES"
   if [ -n "$PIP_PACKAGES" ]; then
     # shellcheck disable=SC2086
     ${CI_RETRY_EXE} pip3 install --user $PIP_PACKAGES
@@ -109,12 +130,10 @@ fi
 
 if [ "$USE_BUSY_BOX" = "true" ]; then
   echo "Setup to use BusyBox utils"
-  CI_EXEC mkdir -p "${BASE_SCRATCH_DIR}/bins/"
   # tar excluded for now because it requires passing in the exact archive type in ./depends (fixed in later BusyBox version)
-  # find excluded for now because it does not recognize the -delete option in ./depends (fixed in later BusyBox version)
   # ar excluded for now because it does not recognize the -q option in ./depends (unknown if fixed)
   # shellcheck disable=SC1010
-  CI_EXEC for util in \$\(busybox --list \| grep -v "^ar$" \| grep -v "^tar$" \| grep -v "^find$"\)\; do ln -s \$\(command -v busybox\) "${BASE_SCRATCH_DIR}/bins/\$util"\; done
+  CI_EXEC for util in \$\(busybox --list \| grep -v "^ar$" \| grep -v "^tar$" \)\; do ln -s \$\(command -v busybox\) "${BINS_SCRATCH_DIR}/\$util"\; done
   # Print BusyBox version
   CI_EXEC patch --help
 fi

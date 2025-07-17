@@ -56,7 +56,8 @@ static void CoinSelection(benchmark::Bench& bench)
     // Create coins
     std::vector<COutput> coins;
     for (const auto& wtx : wtxs) {
-        coins.emplace_back(COutPoint(wtx->GetHash(), 0), wtx->tx->vout.at(0), /*depth=*/6 * 24, GetTxSpendSize(wallet, *wtx, 0), /*spendable=*/true, /*solvable=*/true, /*safe=*/true, wtx->GetTxTime(), /*from_me=*/true, /*fees=*/ 0);
+        const auto txout = wtx->tx->vout.at(0);
+        coins.emplace_back(COutPoint(wtx->GetHash(), 0), txout, /*depth=*/6 * 24, CalculateMaximumSignedInputSize(txout, &wallet, /*coin_control=*/nullptr), /*spendable=*/true, /*solvable=*/true, /*safe=*/true, wtx->GetTxTime(), /*from_me=*/true, /*fees=*/ 0);
     }
     const CoinEligibilityFilter filter_standard(1, 6, 0);
     FastRandomContext rand{};
@@ -95,9 +96,9 @@ static CAmount make_hard_case(int utxos, std::vector<OutputGroup>& utxo_pool)
     utxo_pool.clear();
     CAmount target = 0;
     for (int i = 0; i < utxos; ++i) {
-        target += (CAmount)1 << (utxos+i);
-        add_coin((CAmount)1 << (utxos+i), 2*i, utxo_pool);
-        add_coin(((CAmount)1 << (utxos+i)) + ((CAmount)1 << (utxos-1-i)), 2*i + 1, utxo_pool);
+        target += CAmount{1} << (utxos+i);
+        add_coin(CAmount{1} << (utxos+i), 2*i, utxo_pool);
+        add_coin((CAmount{1} << (utxos+i)) + (CAmount{1} << (utxos-1-i)), 2*i + 1, utxo_pool);
     }
     return target;
 }

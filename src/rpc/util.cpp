@@ -50,7 +50,8 @@ void RPCTypeCheck(const UniValue& params,
 void RPCTypeCheckArgument(const UniValue& value, const UniValueType& typeExpected)
 {
     if (!typeExpected.typeAny && value.type() != typeExpected.type) {
-        throw JSONRPCError(RPC_TYPE_ERROR, strprintf("Expected type %s, got %s", uvTypeName(typeExpected.type), uvTypeName(value.type())));
+        throw JSONRPCError(RPC_TYPE_ERROR,
+                           strprintf("JSON value of type %s is not of expected type %s", uvTypeName(value.type()), uvTypeName(typeExpected.type)));
     }
 }
 
@@ -290,8 +291,7 @@ CTxDestination AddAndGetMultisigDestination(const int required, const std::vecto
         throw JSONRPCError(RPC_INVALID_PARAMETER, (strprintf("redeemScript exceeds size limit: %d > %d", script_out.size(), MAX_SCRIPT_ELEMENT_SIZE)));
     }
 
-    // Make the address (simpler implementation in compare to bitcoin)
-    return AddAndGetDestinationForScript(keystore, script_out);
+    return AddAndGetDestinationForScript(keystore, script_out, OutputType::LEGACY);
 }
 
 class DescribeAddressVisitor

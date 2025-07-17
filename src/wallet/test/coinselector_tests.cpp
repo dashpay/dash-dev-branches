@@ -88,7 +88,8 @@ static void add_coin(std::vector<COutput>& coins, CWallet& wallet, const CAmount
     auto ret = wallet.mapWallet.emplace(std::piecewise_construct, std::forward_as_tuple(txid), std::forward_as_tuple(MakeTransactionRef(std::move(tx)), TxStateInactive{}));
     assert(ret.second);
     CWalletTx& wtx = (*ret.first).second;
-    coins.emplace_back(COutPoint(wtx.GetHash(), nInput), wtx.tx->vout.at(nInput), nAge, GetTxSpendSize(wallet, wtx, nInput), /*spendable=*/ true, /*solvable=*/ true, /*safe=*/ true, wtx.GetTxTime(), fIsFromMe, feerate);
+    const auto& txout = wtx.tx->vout.at(nInput);
+    coins.emplace_back(COutPoint(wtx.GetHash(), nInput), txout, nAge, CalculateMaximumSignedInputSize(txout, &wallet, /*coin_control=*/nullptr), /*spendable=*/ true, /*solvable=*/ true, /*safe=*/ true, wtx.GetTxTime(), fIsFromMe, feerate);
 }
 
 /** Check if SelectionResult a is equivalent to SelectionResult b.
@@ -125,9 +126,9 @@ static CAmount make_hard_case(int utxos, std::vector<COutput>& utxo_pool)
     utxo_pool.clear();
     CAmount target = 0;
     for (int i = 0; i < utxos; ++i) {
-        target += (CAmount)1 << (utxos+i);
-        add_coin((CAmount)1 << (utxos+i), 2*i, utxo_pool);
-        add_coin(((CAmount)1 << (utxos+i)) + ((CAmount)1 << (utxos-1-i)), 2*i + 1, utxo_pool);
+        target += CAmount{1} << (utxos+i);
+        add_coin(CAmount{1} << (utxos+i), 2*i, utxo_pool);
+        add_coin((CAmount{1} << (utxos+i)) + (CAmount{1} << (utxos-1-i)), 2*i + 1, utxo_pool);
     }
     return target;
 }
@@ -297,12 +298,14 @@ BOOST_AUTO_TEST_CASE(bnb_search_test)
         /*tx_noinputs_size=*/ 0,
         /*avoid_partial=*/ false,
     };
+    coin_selection_params_bnb.m_subtract_fee_outputs = true;
+
     {
         std::unique_ptr<CWallet> wallet = std::make_unique<CWallet>(m_node.chain.get(), /*coinjoin_loader=*/nullptr, "", m_args, CreateMockWalletDatabase());
         wallet->LoadWallet();
         LOCK(wallet->cs_wallet);
         wallet->SetWalletFlag(WALLET_FLAG_DESCRIPTORS);
-        wallet->SetupDescriptorScriptPubKeyMans();
+        wallet->SetupDescriptorScriptPubKeyMans("", "");
 
         std::vector<COutput> coins;
 
@@ -314,7 +317,6 @@ BOOST_AUTO_TEST_CASE(bnb_search_test)
         coins.clear();
         add_coin(coins, *wallet, 1 * CENT, coin_selection_params_bnb.m_effective_feerate);
         coins.at(0).input_bytes = 40;
-        coin_selection_params_bnb.m_subtract_fee_outputs = true;
         const auto result9 = SelectCoinsBnB(GroupCoins(coins), 1 * CENT, coin_selection_params_bnb.m_cost_of_change);
         BOOST_CHECK(result9);
         BOOST_CHECK_EQUAL(result9->GetSelectedValue(), 1 * CENT);
@@ -325,7 +327,7 @@ BOOST_AUTO_TEST_CASE(bnb_search_test)
         wallet->LoadWallet();
         LOCK(wallet->cs_wallet);
         wallet->SetWalletFlag(WALLET_FLAG_DESCRIPTORS);
-        wallet->SetupDescriptorScriptPubKeyMans();
+        wallet->SetupDescriptorScriptPubKeyMans("", "");
 
         std::vector<COutput> coins;
 
@@ -333,7 +335,7 @@ BOOST_AUTO_TEST_CASE(bnb_search_test)
         add_coin(coins, *wallet, 3 * CENT, coin_selection_params_bnb.m_effective_feerate, 6 * 24, false, 0, true);
         add_coin(coins, *wallet, 2 * CENT, coin_selection_params_bnb.m_effective_feerate, 6 * 24, false, 0, true);
         CCoinControl coin_control;
-        coin_control.fAllowOtherInputs = true;
+        coin_control.m_allow_other_inputs = true;
         coin_control.Select(coins.at(0).outpoint);
         coin_selection_params_bnb.m_effective_feerate = CFeeRate(0);
         const auto result10 = SelectCoins(*wallet, coins, 10 * CENT, coin_control, coin_selection_params_bnb);
@@ -344,7 +346,7 @@ BOOST_AUTO_TEST_CASE(bnb_search_test)
         wallet->LoadWallet();
         LOCK(wallet->cs_wallet);
         wallet->SetWalletFlag(WALLET_FLAG_DESCRIPTORS);
-        wallet->SetupDescriptorScriptPubKeyMans();
+        wallet->SetupDescriptorScriptPubKeyMans("", "");
 
         std::vector<COutput> coins;
 
@@ -390,7 +392,7 @@ BOOST_AUTO_TEST_CASE(bnb_search_test)
         expected_result.Clear();
         add_coin(9 * CENT, 2, expected_result);
         add_coin(1 * CENT, 2, expected_result);
-        coin_control.fAllowOtherInputs = true;
+        coin_control.m_allow_other_inputs = true;
         coin_control.Select(coins.at(1).outpoint); // pre select 9 coin
         const auto result13 = SelectCoins(*wallet, coins, 10 * CENT, coin_control, coin_selection_params_bnb);
         BOOST_CHECK(EquivalentResult(expected_result, *result13));
@@ -406,7 +408,7 @@ BOOST_AUTO_TEST_CASE(knapsack_solver_test)
     wallet->LoadWallet();
     LOCK(wallet->cs_wallet);
     wallet->SetWalletFlag(WALLET_FLAG_DESCRIPTORS);
-    wallet->SetupDescriptorScriptPubKeyMans();
+    wallet->SetupDescriptorScriptPubKeyMans("", "");
 
     std::vector<COutput> coins;
 
@@ -716,7 +718,7 @@ BOOST_AUTO_TEST_CASE(ApproximateBestSubset)
     wallet->LoadWallet();
     LOCK(wallet->cs_wallet);
     wallet->SetWalletFlag(WALLET_FLAG_DESCRIPTORS);
-    wallet->SetupDescriptorScriptPubKeyMans();
+    wallet->SetupDescriptorScriptPubKeyMans("", "");
 
     std::vector<COutput> coins;
 
@@ -738,7 +740,7 @@ BOOST_AUTO_TEST_CASE(SelectCoins_test)
     wallet->LoadWallet();
     LOCK(wallet->cs_wallet);
     wallet->SetWalletFlag(WALLET_FLAG_DESCRIPTORS);
-    wallet->SetupDescriptorScriptPubKeyMans();
+    wallet->SetupDescriptorScriptPubKeyMans("", "");
 
     // Random generator stuff
     std::default_random_engine generator;
@@ -915,6 +917,52 @@ BOOST_AUTO_TEST_CASE(effective_value_test)
     // input bytes unknown (input_bytes = -1), pass fees in constructor
     COutput output5(COutPoint(tx.GetHash(), nInput), tx.vout.at(nInput), /*depth=*/ 1, /*input_bytes=*/ -1, /*spendable=*/ true, /*solvable=*/ true, /*safe=*/ true, /*time=*/ 0, /*from_me=*/ false, /*fees=*/ 0);
     BOOST_CHECK_EQUAL(output5.GetEffectiveValue(), nValue); // The effective value should be equal to the absolute value if input_bytes is -1
+}
+
+/* --------------------------- Dash-specific tests start here --------------------------- */
+BOOST_AUTO_TEST_CASE(minimum_inputs_test)
+{
+    std::unique_ptr<CWallet> wallet = std::make_unique<CWallet>(m_node.chain.get(), /*coinjoin_loader=*/nullptr, "", m_args, CreateMockWalletDatabase());
+    wallet->LoadWallet();
+    LOCK(wallet->cs_wallet);
+    wallet->SetWalletFlag(WALLET_FLAG_DESCRIPTORS);
+    wallet->SetupDescriptorScriptPubKeyMans("", "");
+
+    // Create coins (denominations) for a target that can be met without consuming all the coins
+    std::vector<COutput> coins{};
+    CAmount target{25 * COIN};
+    add_coin(coins, *wallet,  9 * COIN, CFeeRate(0), /*nAge=*/6*24, /*fIsFromMe=*/false, /*nInput=*/0, /*spendable=*/true);
+    add_coin(coins, *wallet, 16 * COIN, CFeeRate(0), /*nAge=*/6*24, /*fIsFromMe=*/false, /*nInput=*/0, /*spendable=*/true);
+    add_coin(coins, *wallet, 24 * COIN, CFeeRate(0), /*nAge=*/6*24, /*fIsFromMe=*/false, /*nInput=*/0, /*spendable=*/true);
+
+    // Setup coin control to select from the given coins (!m_allow_other_inputs) *but* consume as little
+    // as possible (!fRequireAllInputs) and select our coins.
+    CCoinControl coin_control{};
+    coin_control.m_allow_other_inputs = false;
+    coin_control.fRequireAllInputs = false;
+    for (const auto& coin : coins) {
+        coin_control.Select(coin.outpoint);
+    }
+
+    // Select coins
+    FastRandomContext rand{};
+    CoinSelectionParams coin_selection_params{
+        rand,
+        /*change_output_size=*/0,
+        /*change_spend_size=*/0,
+        /*min_change_target=*/CENT,
+        /*effective_feerate=*/CFeeRate(0),
+        /*long_term_feerate=*/CFeeRate(0),
+        /*discard_feerate=*/CFeeRate(0),
+        /*tx_noinputs_size=*/0,
+        /*avoid_partial=*/false,
+    };
+    const auto result = SelectCoins(*wallet, coins, target, coin_control, coin_selection_params);
+    BOOST_REQUIRE(result);
+
+    // Should consume only the first two coins (9 + 16) >= 25 and account correctly
+    BOOST_CHECK_EQUAL(result->GetInputSet().size(), 2);
+    BOOST_CHECK_EQUAL(result->GetSelectedValue(), 25 * COIN);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

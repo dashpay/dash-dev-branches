@@ -120,6 +120,9 @@ public:
     //! Sign message
     virtual SigningResult signMessage(const std::string& message, const PKHash& pkhash, std::string& str_sig) = 0;
 
+    //! Sign special transaction payload
+    virtual bool signSpecialTxPayload(const uint256& hash, const CKeyID& keyid, std::vector<unsigned char>& vchSig) = 0;
+
     //! Return whether wallet has private key.
     virtual bool isSpendable(const CScript& script) = 0;
     virtual bool isSpendable(const CTxDestination& dest) = 0;
@@ -195,7 +198,7 @@ public:
     virtual WalletTx getWalletTx(const uint256& txid) = 0;
 
     //! Get list of all wallet transactions.
-    virtual std::vector<WalletTx> getWalletTxs() = 0;
+    virtual std::set<WalletTx> getWalletTxs() = 0;
 
     //! Try to get updated status for a particular transaction, if possible without blocking.
     virtual bool tryGetTxStatus(const uint256& txid,
@@ -429,6 +432,8 @@ struct WalletTx
     bool is_coinbase;
     bool is_platform_transfer{false};
     bool is_denominate;
+
+    bool operator<(const WalletTx& a) const { return tx->GetHash() < a.tx->GetHash(); }
 };
 
 //! Updated transaction status.
