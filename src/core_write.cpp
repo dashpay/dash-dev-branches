@@ -180,6 +180,8 @@ void ScriptToUniv(const CScript& script, UniValue& out, bool include_hex, bool i
 
 void TxToUniv(const CTransaction& tx, const uint256& block_hash, UniValue& entry, bool include_hex, int serialize_flags, const CTxUndo* txundo, TxVerbosity verbosity, const CSpentIndexTxInfo* ptxSpentInfo)
 {
+    CHECK_NONFATAL(verbosity >= TxVerbosity::SHOW_DETAILS);
+
     uint256 txid = tx.GetHash();
     entry.pushKV("txid", txid.GetHex());
     // Transaction version is actually unsigned in consensus checks, just signed in memory,
@@ -270,7 +272,7 @@ void TxToUniv(const CTransaction& tx, const uint256& block_hash, UniValue& entry
             if (it != ptxSpentInfo->mSpentInfo.end()) {
                 auto spentInfo = it->second;
                 out.pushKV("spentTxId", spentInfo.m_tx_hash.GetHex());
-                out.pushKV("spentIndex", (int)spentInfo.m_tx_index);
+                out.pushKV("spentIndex", spentInfo.m_tx_index);
                 out.pushKV("spentHeight", spentInfo.m_block_height);
             }
         }
@@ -283,7 +285,7 @@ void TxToUniv(const CTransaction& tx, const uint256& block_hash, UniValue& entry
     entry.pushKV("vout", vout);
 
     if (!tx.vExtraPayload.empty()) {
-        entry.pushKV("extraPayloadSize", (int)tx.vExtraPayload.size());
+        entry.pushKV("extraPayloadSize", tx.vExtraPayload.size());
         entry.pushKV("extraPayload", HexStr(tx.vExtraPayload));
     }
 

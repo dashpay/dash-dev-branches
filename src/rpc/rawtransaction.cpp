@@ -66,10 +66,10 @@ using node::GetTransaction;
 using node::NodeContext;
 using node::PSBTAnalysis;
 
-void TxToJSON(const CTransaction& tx, const uint256 hashBlock, const  CTxMemPool& mempool, const CChainState& active_chainstate, const llmq::CChainLocksHandler& clhandler, const llmq::CInstantSendManager& isman, UniValue& entry)
+void TxToJSON(const CTransaction& tx, const uint256 hashBlock, const  CTxMemPool& mempool, const CChainState& active_chainstate, const llmq::CChainLocksHandler& clhandler, const llmq::CInstantSendManager& isman, UniValue& entry, TxVerbosity verbosity = TxVerbosity::SHOW_DETAILS)
 {
+    CHECK_NONFATAL(verbosity >= TxVerbosity::SHOW_DETAILS);
     LOCK(::cs_main);
-
     // Call into TxToUniv() in bitcoin-common to decode the transaction hex.
     //
     // Blockchain contextual information (confirmations and blocktime) is not
@@ -102,7 +102,7 @@ void TxToJSON(const CTransaction& tx, const uint256 hashBlock, const  CTxMemPool
         txSpentInfoPtr = &txSpentInfo;
     }
 
-    TxToUniv(tx, /*block_hash=*/uint256(), entry, /*include_hex=*/true, /*serialize_flags=*/0, /*txundo=*/nullptr, TxVerbosity::SHOW_DETAILS, txSpentInfoPtr);
+    TxToUniv(tx, /*block_hash=*/uint256(), entry, /*include_hex=*/true, /*serialize_flags=*/0, /*txundo=*/nullptr, verbosity, txSpentInfoPtr);
 
     bool chainLock = false;
     if (!hashBlock.IsNull()) {
@@ -263,7 +263,7 @@ static RPCHelpMan getrawtransaction()
     // Accept either a bool (true) or a num (>=1) to indicate verbose output.
     bool fVerbose = false;
     if (!request.params[1].isNull()) {
-        fVerbose = request.params[1].isNum() ? (request.params[1].get_int() != 0) : request.params[1].get_bool();
+        fVerbose = request.params[1].isNum() ? (request.params[1].getInt<int>() != 0) : request.params[1].get_bool();
     }
 
     if (!request.params[2].isNull()) {
@@ -352,7 +352,7 @@ static RPCHelpMan getrawtransactionmulti() {
     // Accept either a bool (true) or a num (>=1) to indicate verbose output.
     bool fVerbose{false};
     if (!request.params[1].isNull()) {
-        fVerbose = request.params[1].isNum() ? (request.params[1].get_int() != 0) : request.params[1].get_bool();
+        fVerbose = request.params[1].isNum() ? (request.params[1].getInt<int>() != 0) : request.params[1].get_bool();
     }
 
     const NodeContext& node{EnsureAnyNodeContext(request.context)};
@@ -627,7 +627,7 @@ static RPCHelpMan getassetunlockstatuses()
     std::optional<int> nSpecificCoreHeight{std::nullopt};
 
     if (!request.params[1].isNull()) {
-        nSpecificCoreHeight = request.params[1].get_int();
+        nSpecificCoreHeight = request.params[1].getInt<int>();
         if (nSpecificCoreHeight.value() < 0 || nSpecificCoreHeight.value() > chainman.ActiveChain().Height()) {
             throw JSONRPCError(RPC_INVALID_PARAMETER, "Block height out of range");
         }
