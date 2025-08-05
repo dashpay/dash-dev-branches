@@ -543,21 +543,26 @@ def get_mnemonic(node):
     Raises exception if there is none.
     """
     if not node.getwalletinfo()['descriptors']:
-        return node.dumphdinfo()["mnemonic"]
+        hd = node.dumphdinfo()
+        return (hd["mnemonic"], hd["mnemonicpassphrase"])
 
     mnemonic = None
+    mnemonic_passphrase = None
     descriptors = node.listdescriptors(True)['descriptors']
     for desc in descriptors:
         if desc['desc'][:4] == 'pkh(':
             if mnemonic is None:
                 mnemonic = desc['mnemonic']
+                mnemonic_passphrase = desc['mnemonicpassphrase']
             else:
                 assert_equal(mnemonic, desc['mnemonic'])
+                assert_equal(mnemonic_passphrase, desc['mnemonicpassphrase'])
         elif desc['desc'][:6] == 'combo(':
             assert 'mnemonic' not in desc
+            assert 'mnemonicpassphrase' not in desc
         else:
             raise AssertionError(f"Unknown descriptor type: {desc['desc']}")
-    return mnemonic
+    return (mnemonic, mnemonic_passphrase)
 
 # Transaction/Block functions
 #############################
@@ -573,39 +578,6 @@ def find_output(node, txid, amount, *, blockhash=None):
         if txdata["vout"][i]["value"] == amount:
             return i
     raise RuntimeError("find_output txid %s : %s not found" % (txid, str(amount)))
-
-
-# Helper to create at least "count" utxos
-# Pass in a fee that is sufficient for relay and mining new transactions.
-def create_confirmed_utxos(test_framework, fee, node, count, **kwargs):
-    to_generate = int(0.5 * count) + 101
-    while to_generate > 0:
-        test_framework.generate(node, min(25, to_generate), **kwargs)
-        to_generate -= 25
-    utxos = node.listunspent()
-    iterations = count - len(utxos)
-    addr1 = node.getnewaddress()
-    addr2 = node.getnewaddress()
-    if iterations <= 0:
-        return utxos
-    for _ in range(iterations):
-        t = utxos.pop()
-        inputs = []
-        inputs.append({"txid": t["txid"], "vout": t["vout"]})
-        outputs = {}
-        send_value = t['amount'] - fee
-        outputs[addr1] = satoshi_round(send_value / 2)
-        outputs[addr2] = satoshi_round(send_value / 2)
-        raw_tx = node.createrawtransaction(inputs, outputs)
-        signed_tx = node.signrawtransactionwithwallet(raw_tx)["hex"]
-        node.sendrawtransaction(signed_tx)
-
-    while (node.getmempoolinfo()['size'] > 0):
-        test_framework.generate(node, 1, **kwargs)
-
-    utxos = node.listunspent()
-    assert len(utxos) >= count
-    return utxos
 
 
 def chain_transaction(node, parent_txids, vouts, value, fee, num_outputs):

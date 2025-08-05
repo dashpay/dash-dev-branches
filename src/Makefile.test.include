@@ -121,6 +121,7 @@ BITCOIN_TESTS =\
   test/getarg_tests.cpp \
   test/governance_validators_tests.cpp \
   test/hash_tests.cpp \
+  test/httpserver_tests.cpp \
   test/i2p_tests.cpp \
   test/interfaces_tests.cpp \
   test/key_io_tests.cpp \
@@ -156,6 +157,7 @@ BITCOIN_TESTS =\
   test/raii_event_tests.cpp \
   test/random_tests.cpp \
   test/ratecheck_tests.cpp \
+  test/rest_tests.cpp \
   test/reverselock_tests.cpp \
   test/rpc_tests.cpp \
   test/sanity_tests.cpp \
@@ -364,6 +366,7 @@ test_fuzz_fuzz_SOURCES = \
  test/fuzz/tx_in.cpp \
  test/fuzz/tx_out.cpp \
  test/fuzz/tx_pool.cpp \
+ test/fuzz/txorphan.cpp \
  test/fuzz/utxo_snapshot.cpp \
  test/fuzz/validation_load_mempool.cpp \
  test/fuzz/versionbits.cpp
@@ -444,10 +447,9 @@ endif
 
 %.json.h: %.json
 	@$(MKDIR_P) $(@D)
-	@{ \
+	$(AM_V_GEN) { \
 	 echo "namespace json_tests{" && \
 	 echo "static unsigned const char $(*F)[] = {" && \
 	 $(HEXDUMP) -v -e '8/1 "0x%02x, "' -e '"\n"' $< | $(SED) -e 's/0x  ,//g' && \
 	 echo "};};"; \
 	} > "$@.new" && mv -f "$@.new" "$@"
-	@echo "Generated $@"

@@ -62,7 +62,6 @@
 #include <torcontrol.h>
 #include <txdb.h>
 #include <txmempool.h>
-#include <txorphanage.h>
 #include <util/asmap.h>
 #include <util/error.h>
 #include <util/moneystr.h>
@@ -1041,7 +1040,7 @@ namespace { // Variables internal to initialization process only
 int nMaxConnections;
 int nUserMaxConnections;
 int nFD;
-ServiceFlags nLocalServices = ServiceFlags(NODE_NETWORK | NODE_NETWORK_LIMITED | NODE_HEADERS_COMPRESSED);
+ServiceFlags nLocalServices = ServiceFlags(NODE_NETWORK_LIMITED | NODE_HEADERS_COMPRESSED);
 int64_t peer_connect_timeout;
 std::set<BlockFilterType> g_enabled_filter_types;
 
@@ -2221,12 +2220,9 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     }
     // ********************************************************* Step 10: data directory maintenance
 
-
-    // if pruning, unset the service bit and perform the initial blockstore prune
+    // if pruning, perform the initial blockstore prune
     // after any wallet rescanning has taken place.
     if (fPruneMode) {
-        LogPrintf("Unsetting NODE_NETWORK on prune mode\n");
-        nLocalServices = ServiceFlags(nLocalServices & ~NODE_NETWORK);
         if (!fReindex) {
             LOCK(cs_main);
             for (CChainState* chainstate : chainman.GetAll()) {
@@ -2234,6 +2230,9 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
                 chainstate->PruneAndFlush();
             }
         }
+    } else {
+        LogPrintf("Setting NODE_NETWORK on non-prune mode\n");
+        nLocalServices = ServiceFlags(nLocalServices | NODE_NETWORK);
     }
 
     // As PruneAndFlush can take several minutes, it's possible the user

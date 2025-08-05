@@ -574,7 +574,7 @@ public:
     void AbortRescan() { fAbortRescan = true; }
     bool IsAbortingRescan() const { return fAbortRescan; }
     bool IsScanning() const { return fScanningWallet; }
-    int64_t ScanningDuration() const { return fScanningWallet ? GetTimeMillis() - m_scanning_start : 0; }
+    int64_t ScanningDuration() const { return fScanningWallet ? TicksSinceEpoch<std::chrono::milliseconds>(SystemClock::now()) - m_scanning_start : 0; }
     double ScanningProgress() const { return fScanningWallet ? (double) m_scanning_progress : 0; }
 
     //! Upgrade stored CKeyMetadata objects to store key origin info as KeyOriginInfo
@@ -617,6 +617,10 @@ public:
     //! @return true if wtx is changed and needs to be saved to disk, otherwise false
     using UpdateWalletTxFn = std::function<bool(CWalletTx& wtx, bool new_tx)>;
 
+    /**
+     * Add the transaction to the wallet, wrapping it up inside a CWalletTx
+     * @return the recently added wtx pointer or nullptr if there was a db write error.
+     */
     CWalletTx* AddToWallet(CTransactionRef tx, const TxState& state, const UpdateWalletTxFn& update_wtx=nullptr, bool fFlushOnClose=true, bool rescanning_old_block = false);
     bool LoadToWallet(const uint256& hash, const UpdateWalletTxFn& fill_wtx) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
     void transactionAddedToMempool(const CTransactionRef& tx, int64_t nAcceptTime, uint64_t mempool_sequence) override;
@@ -915,15 +919,11 @@ public:
     /* Returns true if HD is enabled */
     bool IsHDEnabled() const;
 
-    // TODO: move it to scriptpubkeyman
-    /* Generates a new HD chain */
-    bool GenerateNewHDChain(const SecureString& secureMnemonic, const SecureString& secureMnemonicPassphrase, const SecureString& secureWalletPassphrase = "");
-
     /* Returns true if the wallet can give out new addresses. This means it has keys in the keypool or can generate new keys */
     bool CanGetAddresses(bool internal = false) const;
 
     void notifyTransactionLock(const CTransactionRef &tx, const std::shared_ptr<const instantsend::InstantSendLock>& islock) override;
-    void notifyChainLock(const CBlockIndex* pindexChainLock, const std::shared_ptr<const llmq::CChainLockSig>& clsig) override;
+    void notifyChainLock(const CBlockIndex* pindexChainLock, const std::shared_ptr<const chainlock::ChainLockSig>& clsig) override;
 
     /** Load a CGovernanceObject into m_gobjects. */
     bool LoadGovernanceObject(const Governance::Object& obj) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
@@ -974,9 +974,6 @@ public:
 
     /** Upgrade the wallet */
     bool UpgradeWallet(int version, bilingual_str& error);
-
-    /** Upgrade non-HD wallet to HD wallet */
-    bool UpgradeToHD(const SecureString& secureMnemonic, const SecureString& secureMnemonicPassphrase, const SecureString& secureWalletPassphrase, bilingual_str& error);
 
     //! Returns all unique ScriptPubKeyMans in m_internal_spk_managers and m_external_spk_managers
     std::set<ScriptPubKeyMan*> GetActiveScriptPubKeyMans() const;
@@ -1086,7 +1083,7 @@ public:
         if (m_wallet.fScanningWallet.exchange(true)) {
             return false;
         }
-        m_wallet.m_scanning_start = GetTimeMillis();
+        m_wallet.m_scanning_start = TicksSinceEpoch<std::chrono::milliseconds>(SystemClock::now());
         m_wallet.m_scanning_progress = 0;
         m_wallet.fAbortRescan = false;
         m_could_reserve = true;

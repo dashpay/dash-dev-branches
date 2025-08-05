@@ -150,6 +150,9 @@ BITCOIN_CORE_H = \
   cachemultimap.h \
   blockfilter.h \
   chain.h \
+  chainlock/chainlock.h \
+  chainlock/clsig.h \
+  chainlock/signing.h \
   chainparams.h \
   chainparamsbase.h \
   chainparamsseeds.h \
@@ -239,8 +242,6 @@ BITCOIN_CORE_H = \
   key_io.h \
   limitedmap.h \
   llmq/blockprocessor.h \
-  llmq/chainlocks.h \
-  llmq/clsig.h \
   llmq/commitment.h \
   llmq/context.h \
   llmq/debug.h \
@@ -302,6 +303,7 @@ BITCOIN_CORE_H = \
   psbt.h \
   random.h \
   randomenv.h \
+  rest.h \
   rpc/blockchain.h \
   rpc/client.h \
   rpc/evo_util.h \
@@ -434,7 +436,7 @@ BITCOIN_CORE_H = \
 
 obj/build.h: FORCE
 	@$(MKDIR_P) $(builddir)/obj
-	@$(top_srcdir)/share/genbuild.sh "$(abs_top_builddir)/src/obj/build.h" \
+	$(AM_V_GEN) $(top_srcdir)/share/genbuild.sh "$(abs_top_builddir)/src/obj/build.h" \
 	  "$(abs_top_srcdir)"
 libbitcoin_util_a-clientversion.$(OBJEXT): obj/build.h
 
@@ -455,6 +457,9 @@ libbitcoin_node_a_SOURCES = \
   blockencodings.cpp \
   blockfilter.cpp \
   chain.cpp \
+  chainlock/chainlock.cpp \
+  chainlock/clsig.cpp \
+  chainlock/signing.cpp \
   coinjoin/coinjoin.cpp \
   coinjoin/context.cpp \
   coinjoin/server.cpp \
@@ -498,8 +503,6 @@ libbitcoin_node_a_SOURCES = \
   instantsend/lock.cpp \
   instantsend/signing.cpp \
   llmq/blockprocessor.cpp \
-  llmq/chainlocks.cpp \
-  llmq/clsig.cpp \
   llmq/commitment.cpp \
   llmq/context.cpp \
   llmq/debug.cpp \
@@ -1071,7 +1074,7 @@ clean-local:
 	-rm -rf *.dSYM test/*.dSYM bench/*.dSYM qt/*.dSYM qt/test/*.dSYM
 
 .rc.o:
-	@test -f $(WINDRES)
+	@test -f $(WINDRES) || (echo "windres $(WINDRES) not found, but is required to compile windows resource files"; exit 1)
 	## FIXME: How to get the appropriate modulename_CPPFLAGS in here?
 	$(AM_V_GEN) $(WINDRES) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(CPPFLAGS) -DWINDRES_PREPROC -i $< -o $@
 
@@ -1130,12 +1133,11 @@ endif
 
 %.raw.h: %.raw
 	@$(MKDIR_P) $(@D)
-	@{ \
+	$(AM_V_GEN) { \
 	 echo "static unsigned const char $(*F)_raw[] = {" && \
 	 $(HEXDUMP) -v -e '8/1 "0x%02x, "' -e '"\n"' $< | $(SED) -e 's/0x  ,//g' && \
 	 echo "};"; \
 	} > "$@.new" && mv -f "$@.new" "$@"
-	@echo "Generated $@"
 
 include Makefile.minisketch.include
 

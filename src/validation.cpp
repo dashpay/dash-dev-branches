@@ -50,12 +50,12 @@
 #include <validationinterface.h>
 #include <warnings.h>
 
+#include <chainlock/chainlock.h>
 #include <evo/chainhelper.h>
 #include <evo/deterministicmns.h>
 #include <evo/evodb.h>
 #include <evo/specialtx.h>
 #include <evo/specialtxman.h>
-#include <llmq/chainlocks.h>
 #include <masternode/payments.h>
 #include <stats/client.h>
 
@@ -2691,8 +2691,6 @@ bool CChainState::FlushStateToDisk(
 {
     LOCK(cs_main);
     assert(this->CanFlushToDisk());
-    static std::chrono::microseconds nLastWrite{0};
-    static std::chrono::microseconds nLastFlush{0};
     std::set<int> setFilesToPrune;
     bool full_flush_completed = false;
 
@@ -2746,11 +2744,11 @@ bool CChainState::FlushStateToDisk(
         }
         const auto nNow = GetTime<std::chrono::microseconds>();
         // Avoid writing/flushing immediately after startup.
-        if (nLastWrite.count() == 0) {
-            nLastWrite = nNow;
+        if (m_last_write.count() == 0) {
+            m_last_write = nNow;
         }
-        if (nLastFlush.count() == 0) {
-            nLastFlush = nNow;
+        if (m_last_flush.count() == 0) {
+            m_last_flush = nNow;
         }
         // The cache is large and we're within 10% and 10 MiB of the limit, but we have time now (not in the middle of a block processing).
         bool fCacheLarge = mode == FlushStateMode::PERIODIC && cache_state >= CoinsCacheSizeState::LARGE;
@@ -2759,9 +2757,9 @@ bool CChainState::FlushStateToDisk(
         // The evodb cache is too large
         bool fEvoDbCacheCritical = mode == FlushStateMode::IF_NEEDED && m_evoDb.GetMemoryUsage() >= (64 << 20);
         // It's been a while since we wrote the block index to disk. Do this frequently, so we don't need to redownload after a crash.
-        bool fPeriodicWrite = mode == FlushStateMode::PERIODIC && nNow > nLastWrite + DATABASE_WRITE_INTERVAL;
+        bool fPeriodicWrite = mode == FlushStateMode::PERIODIC && nNow > m_last_write + DATABASE_WRITE_INTERVAL;
         // It's been very long since we flushed the cache. Do this infrequently, to optimize cache usage.
-        bool fPeriodicFlush = mode == FlushStateMode::PERIODIC && nNow > nLastFlush + DATABASE_FLUSH_INTERVAL;
+        bool fPeriodicFlush = mode == FlushStateMode::PERIODIC && nNow > m_last_flush + DATABASE_FLUSH_INTERVAL;
         // Combine all conditions that result in a full cache flush.
         fDoFullFlush = (mode == FlushStateMode::ALWAYS) || fCacheLarge || fCacheCritical || fEvoDbCacheCritical || fPeriodicFlush || fFlushForPrune;
         // Write blocks and block index to disk.
@@ -2792,7 +2790,7 @@ bool CChainState::FlushStateToDisk(
 
                 UnlinkPrunedFiles(setFilesToPrune);
             }
-            nLastWrite = nNow;
+            m_last_write = nNow;
         }
         // Flush best chain related state. This can only be done if the blocks / block index write was also done.
         if (fDoFullFlush && !CoinsTip().GetBestBlock().IsNull()) {
@@ -2818,7 +2816,7 @@ bool CChainState::FlushStateToDisk(
                     return AbortNode(state, "Failed to commit EvoDB");
                 }
             }
-            nLastFlush = nNow;
+            m_last_flush = nNow;
             full_flush_completed = true;
             TRACE5(utxocache, flush,
                    (int64_t)(GetTimeMicros() - nNow.count()), // in microseconds (µs)
@@ -2961,6 +2959,7 @@ bool CChainState::DisconnectTip(BlockValidationState& state, DisconnectedBlockTr
 
     CBlockIndex *pindexDelete = m_chain.Tip();
     assert(pindexDelete);
+    assert(pindexDelete->pprev);
     // Read block from disk.
     std::shared_ptr<CBlock> pblock = std::make_shared<CBlock>();
     CBlock& block = *pblock;
@@ -3011,7 +3010,7 @@ bool CChainState::DisconnectTip(BlockValidationState& state, DisconnectedBlockTr
         }
     }
 
-    m_chain.SetTip(pindexDelete->pprev);
+    m_chain.SetTip(*pindexDelete->pprev);
 
     UpdateTip(pindexDelete->pprev);
     // Let wallets know transactions went from 1-confirmed to
@@ -3142,7 +3141,7 @@ bool CChainState::ConnectTip(BlockValidationState& state, CBlockIndex* pindexNew
         disconnectpool.removeForBlock(blockConnecting.vtx);
     }
     // Update m_chain & related variables.
-    m_chain.SetTip(pindexNew);
+    m_chain.SetTip(*pindexNew);
     UpdateTip(pindexNew);
 
     int64_t nTime6 = GetTimeMicros(); nTimePostConnect += nTime6 - nTime5; nTimeTotal += nTime6 - nTime1;
@@ -4487,7 +4486,7 @@ bool CChainState::LoadChainTip()
     if (!pindex) {
         return false;
     }
-    m_chain.SetTip(pindex);
+    m_chain.SetTip(*pindex);
     PruneBlockIndexCandidates();
 
     tip = m_chain.Tip();
@@ -5866,7 +5865,7 @@ bool ChainstateManager::PopulateAndValidateSnapshot(
         return false;
     }
 
-    snapshot_chainstate.m_chain.SetTip(snapshot_start_block);
+    snapshot_chainstate.m_chain.SetTip(*snapshot_start_block);
 
     // The remainder of this function requires modifying data protected by cs_main.
     LOCK(::cs_main);

@@ -19,12 +19,10 @@
 #include <test/util/net.h>
 #include <test/util/setup_common.h>
 #include <test/util/validation.h>
-#include <txorphanage.h>
 #include <validationinterface.h>
 #include <version.h>
 
 #include <llmq/blockprocessor.h>
-#include <llmq/chainlocks.h>
 #include <llmq/dkgsessionmgr.h>
 #include <llmq/quorums.h>
 #include <llmq/signing.h>
