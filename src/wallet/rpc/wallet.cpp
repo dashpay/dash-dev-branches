@@ -354,9 +354,7 @@ static RPCHelpMan upgradetohd()
             {"walletpassphrase", RPCArg::Type::STR, RPCArg::Default{""}, "If your wallet is encrypted you must have your wallet passphrase here. If your wallet is not encrypted, specifying wallet passphrase will trigger wallet encryption."},
             {"rescan", RPCArg::Type::BOOL, RPCArg::DefaultHint{"false if mnemonic is empty"}, "Whether to rescan the blockchain for missing transactions or not"},
         },
-        RPCResult{
-            RPCResult::Type::BOOL, "", "true if successful"
-        },
+        RPCResult{RPCResult::Type::STR, "", "A string with further instructions"},
         RPCExamples{
             HelpExampleCli("upgradetohd", "")
     + HelpExampleCli("upgradetohd", "\"mnemonicword1 ... mnemonicwordN\"")
@@ -370,7 +368,7 @@ static RPCHelpMan upgradetohd()
     if (!pwallet) return NullUniValue;
 
     bool generate_mnemonic = request.params[0].isNull() || request.params[0].get_str().empty();
-
+    bool mnemonic_passphrase_has_null{false};
     {
         LOCK(pwallet->cs_wallet);
 
@@ -395,14 +393,7 @@ static RPCHelpMan upgradetohd()
         mnemonic_passphrase.reserve(256);
         if (!request.params[1].isNull()) {
             mnemonic_passphrase = std::string_view{request.params[1].get_str()};
-        }
-
-        // TODO: breaking changes kept for v21!
-        // instead upgradetohd let's use more straightforward 'sethdseed'
-        constexpr bool is_v21 = false;
-        const int previous_version{pwallet->GetVersion()};
-        if (is_v21 && previous_version >= FEATURE_HD) {
-            return JSONRPCError(RPC_WALLET_ERROR, "Already at latest version. Wallet version unchanged.");
+            mnemonic_passphrase_has_null = (mnemonic_passphrase.find('\0') != std::string::npos);
         }
 
         // Do not do anything to HD wallets
@@ -428,7 +419,17 @@ static RPCHelpMan upgradetohd()
 
             // Unlock the wallet
             if (!pwallet->Unlock(wallet_passphrase)) {
-                throw JSONRPCError(RPC_WALLET_PASSPHRASE_INCORRECT, "Error: The wallet passphrase entered was incorrect");
+                // Check if the passphrase has a null character (see bitcoin#27067 for details)
+                if (wallet_passphrase.find('\0') == std::string::npos) {
+                    throw JSONRPCError(RPC_WALLET_PASSPHRASE_INCORRECT, "Error: The wallet passphrase entered was incorrect.");
+                } else {
+                    throw JSONRPCError(RPC_WALLET_PASSPHRASE_INCORRECT, "Error: The wallet passphrase entered is incorrect. "
+                                                                        "It contains a null character (ie - a zero byte). "
+                                                                        "If the passphrase was set with a version of this software prior to 23.0, "
+                                                                        "please try again with only the characters up to — but not including — "
+                                                                        "the first null character. If this is successful, please set a new "
+                                                                        "passphrase to avoid this issue in the future.");
+                }
             }
         }
 
@@ -480,7 +481,17 @@ static RPCHelpMan upgradetohd()
         }
     }
 
-    return true;
+    // Check if the passphrase has a null character (see #27067 for details)
+    if (!mnemonic_passphrase_has_null) {
+        return "Make sure that you have backup of your mnemonic.";
+    } else {
+        return "Make sure that you have backup of your mnemonic. "
+               "Your mnemonic passphrase contains a null character (ie - a zero byte). "
+               "If the passphrase was created with a version of this software prior to 23.0, "
+               "please try again with only the characters up to — but not including — "
+               "the first null character. If this is successful, please set a new "
+               "passphrase to avoid this issue in the future.";
+    }
 },
     };
 }
@@ -842,7 +853,6 @@ static RPCHelpMan sethdseed()
                 },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
-    // TODO: add mnemonic feature to sethdseed or remove it in favour of upgradetohd
     std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
     if (!pwallet) return NullUniValue;
 
@@ -901,7 +911,8 @@ static RPCHelpMan upgradewallet()
 {
     return RPCHelpMan{"upgradewallet",
         "\nUpgrade the wallet. Upgrades to the latest version if no version number is specified.\n"
-        "New keys may be generated and a new wallet backup will need to be made.",
+        "New keys may be generated and a new wallet backup will need to be made.\n"
+        "Consider using RPC upgradetohd instead upgradewallet if you have BIP39 mnemonic or want to set a wallet passphrase also (encrypt wallet).",
         {
             {"version", RPCArg::Type::NUM, RPCArg::Default{int{FEATURE_LATEST}}, "The version number to upgrade to. Default is the latest wallet version."}
         },
