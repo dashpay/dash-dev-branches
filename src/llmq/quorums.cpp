@@ -397,20 +397,20 @@ void CQuorumManager::CheckQuorumConnections(CConnman& connman, const Consensus::
 CQuorumPtr CQuorumManager::BuildQuorumFromCommitment(const Consensus::LLMQType llmqType, gsl::not_null<const CBlockIndex*> pQuorumBaseBlockIndex, bool populate_cache) const
 {
     const uint256& quorumHash{pQuorumBaseBlockIndex->GetBlockHash()};
-    uint256 minedBlockHash;
-    CFinalCommitmentPtr qc = quorumBlockProcessor.GetMinedCommitment(llmqType, quorumHash, minedBlockHash);
-    if (qc == nullptr) {
+
+    auto [qc, minedBlockHash] = quorumBlockProcessor.GetMinedCommitment(llmqType, quorumHash);
+    if (minedBlockHash == uint256::ZERO) {
         LogPrint(BCLog::LLMQ, "CQuorumManager::%s -- No mined commitment for llmqType[%d] nHeight[%d] quorumHash[%s]\n", __func__, ToUnderlying(llmqType), pQuorumBaseBlockIndex->nHeight, pQuorumBaseBlockIndex->GetBlockHash().ToString());
         return nullptr;
     }
-    assert(qc->quorumHash == pQuorumBaseBlockIndex->GetBlockHash());
+    assert(qc.quorumHash == pQuorumBaseBlockIndex->GetBlockHash());
 
     const auto& llmq_params_opt = Params().GetLLMQ(llmqType);
     assert(llmq_params_opt.has_value());
     auto quorum = std::make_shared<CQuorum>(llmq_params_opt.value(), blsWorker);
-    auto members = utils::GetAllQuorumMembers(qc->llmqType, m_dmnman, m_qsnapman, pQuorumBaseBlockIndex);
+    auto members = utils::GetAllQuorumMembers(qc.llmqType, m_dmnman, m_qsnapman, pQuorumBaseBlockIndex);
 
-    quorum->Init(std::move(qc), pQuorumBaseBlockIndex, minedBlockHash, members);
+    quorum->Init(std::make_unique<CFinalCommitment>(std::move(qc)), pQuorumBaseBlockIndex, minedBlockHash, members);
 
     if (populate_cache && llmq_params_opt->size == 1) {
         WITH_LOCK(cs_map_quorums, mapQuorumsCache[llmqType].insert(quorumHash, quorum));
@@ -703,13 +703,13 @@ size_t CQuorumManager::GetQuorumRecoveryStartOffset(const CQuorumCPtr pQuorum, c
     return nIndex % pQuorum->qc->validMembers.size();
 }
 
-PeerMsgRet CQuorumManager::ProcessMessage(CNode& pfrom, CConnman& connman, const std::string& msg_type, CDataStream& vRecv)
+MessageProcessingResult CQuorumManager::ProcessMessage(CNode& pfrom, CConnman& connman, std::string_view msg_type, CDataStream& vRecv)
 {
     auto strFunc = __func__;
-    auto errorHandler = [&](const std::string& strError, int nScore = 10) -> PeerMsgRet {
+    auto errorHandler = [&](const std::string& strError, int nScore = 10) -> MessageProcessingResult {
         LogPrint(BCLog::LLMQ, "CQuorumManager::%s -- %s: %s, from peer=%d\n", strFunc, msg_type, strError, pfrom.GetId());
         if (nScore > 0) {
-            return tl::unexpected{nScore};
+            return MisbehavingError{nScore};
         }
         return {};
     };
@@ -724,8 +724,8 @@ PeerMsgRet CQuorumManager::ProcessMessage(CNode& pfrom, CConnman& connman, const
 
         auto sendQDATA = [&](CQuorumDataRequest::Errors nError,
                              bool request_limit_exceeded,
-                             const CDataStream& body = CDataStream(SER_NETWORK, PROTOCOL_VERSION)) -> PeerMsgRet {
-            PeerMsgRet ret{};
+                             const CDataStream& body = CDataStream(SER_NETWORK, PROTOCOL_VERSION)) -> MessageProcessingResult {
+            MessageProcessingResult ret{};
             switch (nError) {
                 case (CQuorumDataRequest::Errors::NONE):
                 case (CQuorumDataRequest::Errors::QUORUM_TYPE_INVALID):
