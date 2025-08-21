@@ -138,6 +138,7 @@ BASE_SCRIPTS = [
     'feature_llmq_singlenode.py', # NOTE: needs dash_hash to pass
     'feature_dip4_coinbasemerkleroots.py', # NOTE: needs dash_hash to pass
     'feature_mnehf.py', # NOTE: needs dash_hash to pass
+    'feature_masternode_params.py', # NOTE: needs dash_hash to pass
     'feature_governance.py --legacy-wallet',
     'feature_governance.py --descriptors',
     'feature_governance_cl.py --legacy-wallet',
@@ -204,10 +205,10 @@ BASE_SCRIPTS = [
     'rpc_users.py',
     'rpc_whitelist.py',
     'feature_proxy.py',
-    'rpc_signrawtransaction.py --legacy-wallet',
-    'rpc_signrawtransaction.py --descriptors',
+    'wallet_signrawtransactionwithwallet.py --legacy-wallet',
+    'wallet_signrawtransactionwithwallet.py --descriptors',
+    'rpc_signrawtransactionwithkey.py',
     'rpc_rawtransaction.py --legacy-wallet',
-    'rpc_rawtransaction.py --descriptors',
     'wallet_transactiontime_rescan.py --descriptors',
     'wallet_transactiontime_rescan.py --legacy-wallet',
     'p2p_addrv2_relay.py',
@@ -290,8 +291,7 @@ BASE_SCRIPTS = [
     'wallet_balance.py --legacy-wallet',
     'wallet_balance.py --descriptors',
     'p2p_initial_headers_sync.py',
-    'feature_nulldummy.py --legacy-wallet',
-    'feature_nulldummy.py --descriptors',
+    'feature_nulldummy.py',
     'mempool_accept.py',
     'mempool_expiry.py',
     'wallet_import_rescan.py --legacy-wallet',
@@ -303,6 +303,7 @@ BASE_SCRIPTS = [
     'rpc_bind.py --ipv4',
     'rpc_bind.py --ipv6',
     'rpc_bind.py --nonloopback',
+    'wallet_crosschain.py',
     'mining_basic.py',
     'rpc_named_arguments.py',
     'feature_startupnotify.py',
