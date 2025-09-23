@@ -8,13 +8,14 @@
 #include <bls/bls.h>
 #include <gsl/pointers.h>
 #include <llmq/params.h>
+#include <llmq/signhash.h>
 #include <net_types.h>
 #include <protocol.h>
 #include <random.h>
 #include <saltedhasher.h>
 #include <sync.h>
-#include <util/threadinterrupt.h>
 #include <unordered_lru_cache.h>
+#include <util/threadinterrupt.h>
 
 #include <string_view>
 #include <unordered_map>
@@ -67,7 +68,7 @@ public:
         return msgHash;
     }
 
-    [[nodiscard]] uint256 buildSignHash() const;
+    [[nodiscard]] SignHash buildSignHash() const;
 };
 
 class CRecoveredSig : virtual public CSigBase
@@ -115,8 +116,8 @@ private:
 
     mutable Mutex cs_cache;
     mutable unordered_lru_cache<std::pair<Consensus::LLMQType, uint256>, bool, StaticSaltedHasher, 30000> hasSigForIdCache GUARDED_BY(cs_cache);
-    mutable unordered_lru_cache<uint256, bool, StaticSaltedHasher, 30000> hasSigForSessionCache GUARDED_BY(cs_cache);
-    mutable unordered_lru_cache<uint256, bool, StaticSaltedHasher, 30000> hasSigForHashCache GUARDED_BY(cs_cache);
+    mutable Uint256LruHashMap<bool, 30000> hasSigForSessionCache GUARDED_BY(cs_cache);
+    mutable Uint256LruHashMap<bool, 30000> hasSigForHashCache GUARDED_BY(cs_cache);
 
 public:
     explicit CRecoveredSigsDb(bool fMemory, bool fWipe);
@@ -165,7 +166,7 @@ private:
     mutable Mutex cs_pending;
     // Incoming and not verified yet
     std::unordered_map<NodeId, std::list<std::shared_ptr<const CRecoveredSig>>> pendingRecoveredSigs GUARDED_BY(cs_pending);
-    std::unordered_map<uint256, std::shared_ptr<const CRecoveredSig>, StaticSaltedHasher> pendingReconstructedRecoveredSigs GUARDED_BY(cs_pending);
+    Uint256HashMap<std::shared_ptr<const CRecoveredSig>> pendingReconstructedRecoveredSigs GUARDED_BY(cs_pending);
 
     FastRandomContext rnd GUARDED_BY(cs_pending);
 
@@ -262,8 +263,6 @@ void IterateNodesRandom(NodesContainer& nodeStates, Continue&& cont, Callback&& 
         }
     }
 }
-
-uint256 BuildSignHash(Consensus::LLMQType llmqType, const uint256& quorumHash, const uint256& id, const uint256& msgHash);
 
 bool IsQuorumActive(Consensus::LLMQType llmqType, const CQuorumManager& qman, const uint256& quorumHash);
 

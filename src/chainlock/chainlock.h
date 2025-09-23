@@ -46,7 +46,7 @@ private:
     std::unique_ptr<CScheduler> scheduler;
     std::unique_ptr<std::thread> scheduler_thread;
 
-    chainlock::ChainLockSigner* m_signer{nullptr};
+    std::atomic<chainlock::ChainLockSigner*> m_signer{nullptr};
 
     mutable Mutex cs;
     std::atomic<bool> tryLockChainTipScheduled{false};
@@ -59,7 +59,7 @@ private:
     const CBlockIndex* bestChainLockBlockIndex GUARDED_BY(cs){nullptr};
     const CBlockIndex* lastNotifyChainLockBlockIndex GUARDED_BY(cs){nullptr};
 
-    std::unordered_map<uint256, std::chrono::seconds, StaticSaltedHasher> txFirstSeenTime GUARDED_BY(cs);
+    Uint256HashMap<std::chrono::seconds> txFirstSeenTime GUARDED_BY(cs);
 
     std::map<uint256, std::chrono::seconds> seenChainLocks GUARDED_BY(cs);
 
@@ -73,10 +73,10 @@ public:
     void ConnectSigner(gsl::not_null<chainlock::ChainLockSigner*> signer)
     {
         // Prohibit double initialization
-        assert(m_signer == nullptr);
-        m_signer = signer;
+        assert(m_signer.load(std::memory_order_acquire) == nullptr);
+        m_signer.store(signer, std::memory_order_release);
     }
-    void DisconnectSigner() { m_signer = nullptr; }
+    void DisconnectSigner() { m_signer.store(nullptr, std::memory_order_release); }
 
     void Start(const llmq::CInstantSendManager& isman);
     void Stop();
@@ -87,8 +87,7 @@ public:
         EXCLUSIVE_LOCKS_REQUIRED(!cs);
     chainlock::ChainLockSig GetBestChainLock() const
         EXCLUSIVE_LOCKS_REQUIRED(!cs);
-    void UpdateTxFirstSeenMap(const std::unordered_set<uint256, StaticSaltedHasher>& tx, const int64_t& time) override
-        EXCLUSIVE_LOCKS_REQUIRED(!cs);
+    void UpdateTxFirstSeenMap(const Uint256HashSet& tx, const int64_t& time) override EXCLUSIVE_LOCKS_REQUIRED(!cs);
 
     [[nodiscard]] MessageProcessingResult ProcessNewChainLock(NodeId from, const chainlock::ChainLockSig& clsig,
                                                               const uint256& hash) override

@@ -7,6 +7,7 @@
 #include <index/txindex.h>
 #include <net_processing.h>
 #include <node/context.h>
+#include <rpc/evo_util.h>
 #include <rpc/server.h>
 #include <rpc/server_util.h>
 #include <rpc/util.h>
@@ -22,6 +23,7 @@
 #include <llmq/dkgsession.h>
 #include <llmq/options.h>
 #include <llmq/quorums.h>
+#include <llmq/signhash.h>
 #include <llmq/signing.h>
 #include <llmq/signing_shares.h>
 #include <llmq/snapshot.h>
@@ -207,7 +209,7 @@ static UniValue BuildQuorumInfo(const llmq::CQuorumBlockProcessor& quorum_block_
             if (IsDeprecatedRPCEnabled("service")) {
                 mo.pushKV("service", dmn->pdmnState->netInfo->GetPrimary().ToStringAddrPort());
             }
-            mo.pushKV("addresses", dmn->pdmnState->netInfo->ToJson());
+            mo.pushKV("addresses", GetNetInfoWithLegacyFields(*dmn->pdmnState, dmn->nType));
             mo.pushKV("pubKeyOperator", dmn->pdmnState->pubKeyOperator.ToString());
             mo.pushKV("valid", static_cast<bool>(quorum->qc->validMembers[i]));
             if (quorum->qc->validMembers[i]) {
@@ -607,8 +609,8 @@ static RPCHelpMan quorum_verify()
         throw JSONRPCError(RPC_INVALID_PARAMETER, "quorum not found");
     }
 
-    uint256 signHash = llmq::BuildSignHash(llmqType, quorum->qc->quorumHash, id, msgHash);
-    return sig.VerifyInsecure(quorum->qc->quorumPublicKey, signHash);
+    llmq::SignHash signHash{llmqType, quorum->qc->quorumHash, id, msgHash};
+    return sig.VerifyInsecure(quorum->qc->quorumPublicKey, signHash.Get());
 },
     };
 }
