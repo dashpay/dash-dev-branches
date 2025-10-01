@@ -7,17 +7,19 @@
 
 #include <evo/dmnstate.h>
 
+#include <evo/dmn_types.h>
+#include <evo/providertx.h>
+#include <evo/types.h>
+
 #include <arith_uint256.h>
 #include <clientversion.h>
 #include <consensus/params.h>
 #include <crypto/common.h>
-#include <evo/dmn_types.h>
-#include <evo/providertx.h>
-#include <gsl/pointers.h>
 #include <saltedhasher.h>
 #include <scheduler.h>
 #include <sync.h>
 
+#include <gsl/pointers.h>
 #include <immer/map.hpp>
 
 #include <atomic>
@@ -32,6 +34,7 @@ class CCoinsViewCache;
 class CEvoDB;
 class CSimplifiedMNList;
 class CSimplifiedMNListEntry;
+class CMasternodeMetaMan;
 class TxValidationState;
 
 extern RecursiveMutex cs_main;
@@ -85,7 +88,6 @@ public:
     [[nodiscard]] std::string ToString() const;
     [[nodiscard]] UniValue ToJson() const;
 };
-using CDeterministicMNCPtr = std::shared_ptr<const CDeterministicMN>;
 
 class CDeterministicMNListDiff;
 
@@ -627,6 +629,7 @@ private:
     std::atomic<int> to_cleanup {0};
 
     CEvoDB& m_evoDb;
+    CMasternodeMetaMan& m_mn_metaman;
 
     Uint256HashMap<CDeterministicMNList> mnListsCache GUARDED_BY(cs);
     Uint256HashMap<CDeterministicMNListDiff> mnListDiffsCache GUARDED_BY(cs);
@@ -634,8 +637,9 @@ private:
     const CBlockIndex* m_initial_snapshot_index GUARDED_BY(cs) {nullptr};
 
 public:
-    explicit CDeterministicMNManager(CEvoDB& evoDb) :
-        m_evoDb(evoDb)
+    explicit CDeterministicMNManager(CEvoDB& evoDb, CMasternodeMetaMan& mn_metaman) :
+        m_evoDb(evoDb),
+        m_mn_metaman(mn_metaman)
     {
     }
     ~CDeterministicMNManager() = default;

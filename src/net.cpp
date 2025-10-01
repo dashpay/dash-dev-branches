@@ -1021,7 +1021,7 @@ const std::array<std::string, 40> V2_DASH_IDS = {
 
 /** A complete set of short IDs
  *
- * Bitcoin takes up short IDs upto 128 (lower half) while Dash can take
+ * Bitcoin takes up short IDs up to 128 (lower half) while Dash can take
  * up short IDs between 128 and 256 (upper half) most of the array will
  * have entries that correspond to nothing.
  *
@@ -4217,7 +4217,7 @@ std::vector<CAddress> CConnman::GetAddresses(CNode& requestor, size_t max_addres
     auto r = m_addr_response_caches.emplace(cache_id, CachedAddrResponse{});
     CachedAddrResponse& cache_entry = r.first->second;
     if (cache_entry.m_cache_entry_expiration < current_time) { // If emplace() added new one it has expiration 0.
-        cache_entry.m_addrs_response_cache = GetAddresses(max_addresses, max_pct, /* network */ std::nullopt);
+        cache_entry.m_addrs_response_cache = GetAddresses(max_addresses, max_pct, /*network=*/std::nullopt);
         // Choosing a proper cache lifetime is a trade-off between the privacy leak minimization
         // and the usefulness of ADDR responses to honest users.
         //
