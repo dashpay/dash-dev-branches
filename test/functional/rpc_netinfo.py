@@ -22,8 +22,8 @@ from _decimal import Decimal
 from random import randint
 from typing import List, Optional
 
-# Height at which BIP9 deployment DEPLOYMENT_V23 is activated
-V23_ACTIVATION_THRESHOLD = 100
+# Height at which BIP9 deployment DEPLOYMENT_V24 is activated
+V24_ACTIVATION_THRESHOLD = 100
 # See CMainParams in src/chainparams.cpp
 DEFAULT_PORT_MAINNET_CORE_P2P = 9999
 # See CRegTestParams in src/chainparams.cpp
@@ -34,6 +34,21 @@ DMNSTATE_DIFF_DUMMY_ADDR = "255.255.255.255"
 # See ProTxVersion in src/evo/providertx.h
 PROTXVER_BASIC = 2
 PROTXVER_EXTADDR = 3
+
+# Sample domains
+DOMAINS_CLR = [
+    "server-1.example.com",
+    "server-2.example.com",
+]
+DOMAINS_TOR = [
+    "kpgvmscirrdqpekbqjsvw5teanhatztpp2gl6eee4zkowvwfxwenqaid.onion",
+    "pg6mmjiyjmcrsslvykfwnntlaru7p5svn6y2ymmju6nubxndf4pscryd.onion",
+]
+DOMAINS_I2P = [
+    "c4gfnttsuwqomiygupdqqqyy5y5emnk5c73hrfvatri67prd7vyq.b32.i2p",
+    "udhdrtrcetjm5sxzskjyr5ztpeszydbh4dpl3pl4utgqqw2v4jna.b32.i2p",
+    "ukeu3k5oycgaauneqgtnvselmt4yemvoilkln7jpvamvfx7dnkdq.b32.i2p",
+]
 
 class EvoNode:
     mn: MasternodeInfo
@@ -137,18 +152,18 @@ class NetInfoTest(BitcoinTestFramework):
     def set_test_params(self):
         self.num_nodes = 2
         self.extra_args = [[
-            "-dip3params=2:2", f"-vbparams=v23:{self.mocktime}:999999999999:{V23_ACTIVATION_THRESHOLD}:10:8:6:5:0"
+            "-dip3params=2:2", f"-vbparams=v24:{self.mocktime}:999999999999:{V24_ACTIVATION_THRESHOLD}:10:8:6:5:0"
         ] for _ in range(self.num_nodes)]
 
     def skip_test_if_missing_module(self):
         self.skip_if_no_wallet()
 
-    def activate_v23(self):
+    def activate_v24(self):
         batch_size: int = 50
-        while not softfork_active(self.nodes[0], "v23"):
+        while not softfork_active(self.nodes[0], "v24"):
             self.bump_mocktime(batch_size)
             self.generate(self.nodes[0], batch_size, sync_fun=lambda: self.sync_blocks())
-        assert softfork_active(self.nodes[0], "v23")
+        assert softfork_active(self.nodes[0], "v24")
 
     def check_netinfo_fields(self, val, core_p2p_port: int, plat_https_port: Optional[int], plat_p2p_port: Optional[int]):
         assert_equal(val['core_p2p'][0], f"127.0.0.1:{core_p2p_port}")
@@ -182,8 +197,8 @@ class NetInfoTest(BitcoinTestFramework):
         self.test_validation_legacy()
         self.log.info("Test output masternode address fields for consistency (pre-fork)")
         self.test_fields()
-        self.log.info("Mine blocks to activate DEPLOYMENT_V23")
-        self.activate_v23()
+        self.log.info("Mine blocks to activate DEPLOYMENT_V24")
+        self.activate_v24()
         self.log.info("Test input validation for masternode address fields (post-fork)")
         self.test_validation_common()
         self.test_validation_extended()
@@ -191,6 +206,12 @@ class NetInfoTest(BitcoinTestFramework):
         self.test_empty_fields()
         self.log.info("Test output masternode address fields for consistency (post-fork)")
         self.test_shims()
+        # Need to destroy masternodes as the next test will be re-creating them
+        self.node_evo.destroy_mn(self)
+        self.node_two.destroy_mn(self)
+        self.reconnect_nodes()
+        self.log.info("Test unique properties map duplication checks")
+        self.test_uniqueness()
 
     def test_validation_common(self):
         # Arrays of addresses with invalid inputs get refused
@@ -325,6 +346,15 @@ class NetInfoTest(BitcoinTestFramework):
         assert self.node_evo.node.testmempoolaccept([
             self.node_evo.register_mn(self, False, f"127.0.0.1:{self.node_evo.mn.nodePort}", DEFAULT_PORT_PLATFORM_P2P,
                                       [f"127.0.0.1:{DEFAULT_PORT_PLATFORM_HTTP}"])])[0]['allowed']
+
+        # coreP2PAddrs and platformP2PAddrs accept privacy network domains and platformHTTPSAddrs additionally supports internet domains
+        # Note: I2P entries cannot be differentiated by port, they must always use port 0
+        assert self.node_evo.node.testmempoolaccept([
+            self.node_evo.register_mn(self, False,
+                                      [f"127.0.0.1:{self.node_evo.mn.nodePort}", f"{DOMAINS_TOR[0]}:{self.node_evo.mn.nodePort}", f"{DOMAINS_I2P[0]}:0"],
+                                      [f"127.0.0.1:{DEFAULT_PORT_PLATFORM_P2P}", f"{DOMAINS_TOR[0]}:{DEFAULT_PORT_PLATFORM_P2P}", f"{DOMAINS_I2P[1]}:0"],
+                                      [f"127.0.0.1:{DEFAULT_PORT_PLATFORM_HTTP}", f"{DOMAINS_TOR[0]}:{DEFAULT_PORT_PLATFORM_HTTP}", f"{DOMAINS_I2P[2]}:0",
+                                       f"{DOMAINS_CLR[0]}:{DEFAULT_PORT_PLATFORM_HTTP}"] )])[0]['allowed']
 
         # Port numbers may not be wrapped in arrays, either as integers or strings
         self.node_evo.register_mn(self, False, f"127.0.0.1:{self.node_evo.mn.nodePort}", [DEFAULT_PORT_PLATFORM_P2P], DEFAULT_PORT_PLATFORM_HTTP,
@@ -510,6 +540,41 @@ class NetInfoTest(BitcoinTestFramework):
         # Restart the client to see if (de)ser works as intended (CDeterministicMNStateDiff is a special case and we just made an update)
         self.node_evo.set_active_state(self, False)
         self.reconnect_nodes()
+
+    def test_uniqueness(self):
+        # Empty registrations are not registered as conflicts
+        self.node_evo.register_mn(self, True, "", "", "")
+        self.node_two.register_mn(self, True, "", "", "")
+
+        # Validate that the unique properties map correctly recognizes entries as duplicates
+        self.node_evo.update_mn(self, True,
+                                [f"127.0.0.1:{self.node_evo.mn.nodePort}", f"{DOMAINS_TOR[0]}:{self.node_evo.mn.nodePort}"],
+                                [f"127.0.0.1:{DEFAULT_PORT_PLATFORM_P2P}", f"{DOMAINS_I2P[0]}:0"],
+                                [f"127.0.0.1:{DEFAULT_PORT_PLATFORM_HTTP}", f"{DOMAINS_CLR[0]}:{DEFAULT_PORT_PLATFORM_HTTP}"])
+
+        def update_node_two(self, duplicate_addr = None, duplicate_tor = None, duplicate_i2p = None, duplicate_domain = None):
+            args = [
+                self, True,
+                [duplicate_addr or f"127.0.0.2:{self.node_two.mn.nodePort}", duplicate_tor or f"{DOMAINS_TOR[1]}:{self.node_two.mn.nodePort}"],
+                [f"127.0.0.2:{DEFAULT_PORT_PLATFORM_P2P}", duplicate_i2p or f"{DOMAINS_I2P[1]}:0"],
+                [f"127.0.0.2:{DEFAULT_PORT_PLATFORM_HTTP}", duplicate_domain or f"{DOMAINS_CLR[1]}:{DEFAULT_PORT_PLATFORM_HTTP}"]
+            ]
+            if duplicate_addr or duplicate_tor or duplicate_i2p or duplicate_domain:
+                args += [-1, "bad-protx-dup-netinfo-entry"]
+            self.node_two.update_mn(*args)
+
+        # Check for detection of duplicate IP:addr (CService)
+        update_node_two(self, duplicate_addr=f"127.0.0.1:{self.node_evo.mn.nodePort}")
+
+        # Check for detection of duplicate privacy addr (CService)
+        update_node_two(self, duplicate_tor=f"{DOMAINS_TOR[0]}:{self.node_evo.mn.nodePort}")
+        update_node_two(self, duplicate_i2p=f"{DOMAINS_I2P[0]}:0")
+
+        # Check for detection of duplicate internet addr (DomainPort)
+        update_node_two(self, duplicate_domain=f"{DOMAINS_CLR[0]}:{DEFAULT_PORT_PLATFORM_HTTP}")
+
+        # All non-duplicate entries should still succeed
+        update_node_two(self)
 
 if __name__ == "__main__":
     NetInfoTest().main()
