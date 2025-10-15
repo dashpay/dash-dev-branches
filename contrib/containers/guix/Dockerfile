@@ -71,21 +71,23 @@ ARG USER_ID=1000 \
 RUN groupmod -g ${GROUP_ID} ubuntu; \
     usermod -u ${USER_ID} -aG sudo ubuntu; \
     echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+ENV HOME /home/ubuntu
+
+# Create directories for mounting to save/restore cache and grant necessary permissions
+RUN mkdir -p \
+        ${HOME}/.{cache,config} \
+        /src/dash/depends/{built,sources,work}; \
+    chown -R ${USER_ID}:${GROUP_ID} \
+        ${HOME}/.{cache,config} \
+        /src;
 
 # Copy required files to container
+COPY --from=docker_root ./channels.scm         ${HOME}/.config/guix/channels.scm
 COPY --from=docker_root ./motd.txt             /etc/motd
 COPY --from=docker_root ./scripts/entrypoint   /usr/local/bin/entrypoint
 COPY --from=docker_root ./scripts/guix-check   /usr/local/bin/guix-check
 COPY --from=docker_root ./scripts/guix-start   /usr/local/bin/guix-start
 COPY --from=docker_root ./scripts/setup-sdk    /usr/local/bin/setup-sdk
-
-# Create directories for mounting to save/restore cache and grant necessary permissions
-RUN mkdir -p \
-        /home/ubuntu/.cache \
-        /src/dash/depends/{built,sources,work}; \
-    chown -R ${USER_ID}:${GROUP_ID} \
-        /home/ubuntu/.cache \
-        /src;
 
 WORKDIR "/src/dash"
 
