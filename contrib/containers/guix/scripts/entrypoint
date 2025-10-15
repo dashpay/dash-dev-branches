@@ -18,12 +18,9 @@ SERVERS=(
 )
 
 # Start the Guix daemon
-IFS_OLD="${IFS}"
-IFS=' '
 sudo env PATH=${PATH} \
-  guix-daemon --build-users-group='guixbuild' --substitute-urls="${SERVERS[*]}" < /dev/null 2>&1 |
+  guix-daemon --build-users-group='guixbuild' --substitute-urls="$(IFS=' '; echo "${SERVERS[*]}")" < /dev/null 2>&1 |
   sudo tee /var/log/guix.log > /dev/null &
-IFS="${IFS_OLD}"
 
 # Hand over control
 exec bash
