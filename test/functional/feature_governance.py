@@ -317,7 +317,7 @@ class DashGovernanceTest (DashTestFramework):
         self.bump_mocktime(GOVERNANCE_UPDATE_MIN + 1, update_schedulers=False)
 
         self.log.info("Move another block inside the Superblock maturity window")
-        with self.nodes[1].assert_debug_log(["CGovernanceManager::VoteGovernanceTriggers"]):
+        with self.nodes[1].assert_debug_log(["VoteGovernanceTriggers --"]):
             self.bump_mocktime(1)
             self.generate(self.nodes[0], 1, sync_fun=self.sync_blocks())
 

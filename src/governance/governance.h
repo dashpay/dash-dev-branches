@@ -5,27 +5,38 @@
 #ifndef BITCOIN_GOVERNANCE_GOVERNANCE_H
 #define BITCOIN_GOVERNANCE_GOVERNANCE_H
 
-#include <governance/classes.h>
-#include <governance/object.h>
-
 #include <cachemap.h>
 #include <cachemultimap.h>
-#include <protocol.h>
-#include <util/check.h>
+#include <governance/signing.h>
 
+#include <protocol.h>
+#include <sync.h>
+
+#include <chrono>
+#include <limits>
+#include <map>
+#include <memory>
 #include <optional>
+#include <set>
+#include <string>
 #include <string_view>
+#include <vector>
 
 class CBloomFilter;
 class CBlockIndex;
+class CChain;
 class CConnman;
+class ChainstateManager;
 template<typename T>
 class CFlatDB;
 class CInv;
+class CNode;
+class CScheduler;
 class PeerManager;
 
 class CDeterministicMNList;
 class CDeterministicMNManager;
+class CGovernanceException;
 class CGovernanceManager;
 class CGovernanceObject;
 class CGovernanceVote;
@@ -33,6 +44,14 @@ class CMasternodeMetaMan;
 class CMasternodeSync;
 class CNetFulfilledRequestManager;
 class CSporkManager;
+class CSuperblock;
+class GovernanceSigner;
+
+class UniValue;
+
+using CDeterministicMNListPtr = std::shared_ptr<CDeterministicMNList>;
+using CSuperblock_sptr = std::shared_ptr<CSuperblock>;
+using vote_time_pair_t = std::pair<CGovernanceVote, int64_t>;
 
 static constexpr int RATE_BUFFER_SIZE = 5;
 static constexpr bool DEFAULT_GOVERNANCE_ENABLE{true};
@@ -222,16 +241,12 @@ public:
 //
 // Governance Manager : Contains all proposals for the budget
 //
-class CGovernanceManager : public GovernanceStore
+class CGovernanceManager : public GovernanceStore, public GovernanceSignerParent
 {
     friend class CGovernanceObject;
 
 private:
     using db_type = CFlatDB<GovernanceStore>;
-
-private:
-    static const int MAX_TIME_FUTURE_DEVIATION;
-    static const int RELIABLE_PROPAGATION_TIME;
 
 private:
     const std::unique_ptr<db_type> m_db;
@@ -253,15 +268,23 @@ private:
     std::optional<uint256> votedFundingYesTriggerHash;
     std::map<uint256, std::shared_ptr<CSuperblock>> mapTrigger;
 
+    mutable Mutex cs_relay;
+    std::vector<CInv> m_relay_invs GUARDED_BY(cs_relay);
+
 public:
     explicit CGovernanceManager(CMasternodeMetaMan& mn_metaman, CNetFulfilledRequestManager& netfulfilledman,
                                 const ChainstateManager& chainman,
                                 const std::unique_ptr<CDeterministicMNManager>& dmnman, CMasternodeSync& mn_sync);
     ~CGovernanceManager();
 
+    void Schedule(CScheduler& scheduler, CConnman& connman, PeerManager& peerman);
+
     bool LoadCache(bool load_cache);
 
-    bool IsValid() const { return is_valid; }
+    bool IsValid() const override { return is_valid; }
+
+    void RelayObject(const CGovernanceObject& obj) EXCLUSIVE_LOCKS_REQUIRED(!cs_relay);
+    void RelayVote(const CGovernanceVote& vote) EXCLUSIVE_LOCKS_REQUIRED(!cs_relay);
 
     /**
      * This is called by AlreadyHave in net_processing.cpp as part of the inventory
@@ -273,34 +296,30 @@ public:
     [[nodiscard]] MessageProcessingResult SyncSingleObjVotes(CNode& peer, const uint256& nProp, const CBloomFilter& filter, CConnman& connman);
     [[nodiscard]] MessageProcessingResult SyncObjects(CNode& peer, CConnman& connman) const;
 
-    [[nodiscard]] MessageProcessingResult ProcessMessage(CNode& peer, CConnman& connman, PeerManager& peerman, std::string_view msg_type, CDataStream& vRecv);
-
-private:
-    void ResetVotedFundingTrigger();
-
-public:
-    void DoMaintenance(CConnman& connman);
+    [[nodiscard]] MessageProcessingResult ProcessMessage(CNode& peer, CConnman& connman, std::string_view msg_type,
+                                                         CDataStream& vRecv) EXCLUSIVE_LOCKS_REQUIRED(!cs_relay);
 
     const CGovernanceObject* FindConstGovernanceObject(const uint256& nHash) const EXCLUSIVE_LOCKS_REQUIRED(cs);
-    CGovernanceObject* FindGovernanceObject(const uint256& nHash) EXCLUSIVE_LOCKS_REQUIRED(cs);
-    CGovernanceObject* FindGovernanceObjectByDataHash(const uint256& nDataHash) EXCLUSIVE_LOCKS_REQUIRED(cs);
+    CGovernanceObject* FindGovernanceObject(const uint256& nHash) override EXCLUSIVE_LOCKS_REQUIRED(!cs);
+    CGovernanceObject* FindGovernanceObjectByDataHash(const uint256& nDataHash) override EXCLUSIVE_LOCKS_REQUIRED(!cs);
     void DeleteGovernanceObject(const uint256& nHash);
 
     // These commands are only used in RPC
     std::vector<CGovernanceVote> GetCurrentVotes(const uint256& nParentHash, const COutPoint& mnCollateralOutpointFilter) const;
     void GetAllNewerThan(std::vector<CGovernanceObject>& objs, int64_t nMoreThanTime) const;
 
-    void AddGovernanceObject(CGovernanceObject& govobj, PeerManager& peerman, const CNode* pfrom = nullptr);
+    void AddGovernanceObject(CGovernanceObject& govobj, const CNode* pfrom = nullptr) override
+        EXCLUSIVE_LOCKS_REQUIRED(!cs_relay);
 
     void CheckAndRemove();
 
     UniValue ToJson() const;
 
-    void UpdatedBlockTip(const CBlockIndex* pindex, CConnman& connman, PeerManager& peerman, const CActiveMasternodeManager* const mn_activeman);
+    void UpdatedBlockTip(const CBlockIndex* pindex) EXCLUSIVE_LOCKS_REQUIRED(!cs_relay);
     int64_t GetLastDiffTime() const { return nTimeLastDiff; }
     void UpdateLastDiffTime(int64_t nTimeIn) { nTimeLastDiff = nTimeIn; }
 
-    int GetCachedBlockHeight() const { return nCachedBlockHeight; }
+    int GetCachedBlockHeight() const override { return nCachedBlockHeight; }
 
     // Accessors for thread-safe access to maps
     bool HaveObjectForHash(const uint256& nHash) const;
@@ -313,21 +332,18 @@ public:
 
     bool SerializeVoteForHash(const uint256& nHash, CDataStream& ss) const;
 
-    void AddPostponedObject(const CGovernanceObject& govobj)
-    {
-        LOCK(cs);
-        mapPostponedObjects.insert(std::make_pair(govobj.GetHash(), govobj));
-    }
+    void AddPostponedObject(const CGovernanceObject& govobj);
 
     void MasternodeRateUpdate(const CGovernanceObject& govobj);
 
-    bool MasternodeRateCheck(const CGovernanceObject& govobj, bool fUpdateFailStatus = false);
+    bool MasternodeRateCheck(const CGovernanceObject& govobj, bool fUpdateFailStatus = false) override;
 
     bool MasternodeRateCheck(const CGovernanceObject& govobj, bool fUpdateFailStatus, bool fForce, bool& fRateCheckBypassed);
 
-    bool ProcessVoteAndRelay(const CGovernanceVote& vote, CGovernanceException& exception, CConnman& connman, PeerManager& peerman);
+    bool ProcessVoteAndRelay(const CGovernanceVote& vote, CGovernanceException& exception, CConnman& connman) override
+        EXCLUSIVE_LOCKS_REQUIRED(!cs_relay);
 
-    void CheckPostponedObjects(PeerManager& peerman);
+    void CheckPostponedObjects() EXCLUSIVE_LOCKS_REQUIRED(!cs_relay);
 
     bool AreRateChecksEnabled() const
     {
@@ -346,7 +362,7 @@ public:
      *   - Track governance objects which are triggers
      *   - After triggers are activated and executed, they can be removed
     */
-    std::vector<std::shared_ptr<CSuperblock>> GetActiveTriggers() const EXCLUSIVE_LOCKS_REQUIRED(cs);
+    std::vector<std::shared_ptr<CSuperblock>> GetActiveTriggers() const override EXCLUSIVE_LOCKS_REQUIRED(!cs);
     bool AddNewTrigger(uint256 nHash) EXCLUSIVE_LOCKS_REQUIRED(cs);
     void CleanAndRemoveTriggers() EXCLUSIVE_LOCKS_REQUIRED(cs);
 
@@ -370,33 +386,31 @@ public:
     bool IsValidSuperblock(const CChain& active_chain, const CDeterministicMNList& tip_mn_list,
                            const CTransaction& txNew, int nBlockHeight, CAmount blockReward);
 
-private:
-    void ExecuteBestSuperblock(const CDeterministicMNList& tip_mn_list, int nBlockHeight);
-    bool GetBestSuperblock(const CDeterministicMNList& tip_mn_list, CSuperblock_sptr& pSuperblockRet, int nBlockHeight)
-        EXCLUSIVE_LOCKS_REQUIRED(cs);
+    bool GetBestSuperblock(const CDeterministicMNList& tip_mn_list, CSuperblock_sptr& pSuperblockRet,
+                           int nBlockHeight) override EXCLUSIVE_LOCKS_REQUIRED(!cs);
 
-    std::optional<const CSuperblock> CreateSuperblockCandidate(int nHeight) const;
-    std::optional<const CGovernanceObject> CreateGovernanceTrigger(const std::optional<const CSuperblock>& sb_opt, PeerManager& peerman,
-                                                                   const CActiveMasternodeManager& mn_activeman);
-    void VoteGovernanceTriggers(const std::optional<const CGovernanceObject>& trigger_opt, CConnman& connman, PeerManager& peerman,
-                                const CActiveMasternodeManager& mn_activeman);
-    bool VoteFundingTrigger(const uint256& nHash, const vote_outcome_enum_t outcome, CConnman& connman, PeerManager& peerman,
-                            const CActiveMasternodeManager& mn_activeman);
-    bool HasAlreadyVotedFundingTrigger() const;
+    std::vector<std::shared_ptr<const CGovernanceObject>> GetApprovedProposals(const CDeterministicMNList& tip_mn_list) override
+        EXCLUSIVE_LOCKS_REQUIRED(!cs);
+
+private:
+    //! Internal functions that require locks to be held
+    CGovernanceObject* FindGovernanceObjectInternal(const uint256& nHash) EXCLUSIVE_LOCKS_REQUIRED(cs);
+    std::vector<std::shared_ptr<CSuperblock>> GetActiveTriggersInternal() const EXCLUSIVE_LOCKS_REQUIRED(cs);
+    bool GetBestSuperblockInternal(const CDeterministicMNList& tip_mn_list, CSuperblock_sptr& pSuperblockRet,
+                                   int nBlockHeight) EXCLUSIVE_LOCKS_REQUIRED(cs);
+
+    void ExecuteBestSuperblock(const CDeterministicMNList& tip_mn_list, int nBlockHeight);
 
     void RequestGovernanceObject(CNode* pfrom, const uint256& nHash, CConnman& connman, bool fUseFilter = false) const;
 
-    void AddInvalidVote(const CGovernanceVote& vote)
-    {
-        cmapInvalidVotes.Insert(vote.GetHash(), vote);
-    }
+    void AddInvalidVote(const CGovernanceVote& vote);
 
     bool ProcessVote(CNode* pfrom, const CGovernanceVote& vote, CGovernanceException& exception, CConnman& connman);
 
     /// Called to indicate a requested object or vote has been received
     bool AcceptMessage(const uint256& nHash);
 
-    void CheckOrphanVotes(CGovernanceObject& govobj, PeerManager& peerman);
+    void CheckOrphanVotes(CGovernanceObject& govobj) EXCLUSIVE_LOCKS_REQUIRED(!cs_relay);
 
     void RebuildIndexes();
 
@@ -407,7 +421,6 @@ private:
     void CleanOrphanObjects();
 
     void RemoveInvalidVotes();
-
 };
 
 bool AreSuperblocksEnabled(const CSporkManager& sporkman);

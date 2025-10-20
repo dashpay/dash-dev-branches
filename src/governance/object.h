@@ -11,9 +11,10 @@
 #include <governance/votedb.h>
 #include <sync.h>
 
+#include <span.h>
+
 #include <univalue.h>
 
-class CActiveMasternodeManager;
 class CBLSPublicKey;
 class CDeterministicMNList;
 class CGovernanceManager;
@@ -21,23 +22,14 @@ class CGovernanceObject;
 class CGovernanceVote;
 class ChainstateManager;
 class CMasternodeMetaMan;
-class CMasternodeSync;
-class CNode;
-class PeerManager;
 
 extern RecursiveMutex cs_main;
 
 static constexpr double GOVERNANCE_FILTER_FP_RATE = 0.001;
-
-
 static constexpr CAmount GOVERNANCE_PROPOSAL_FEE_TX = (1 * COIN);
-
 static constexpr int64_t GOVERNANCE_FEE_CONFIRMATIONS = 6;
 static constexpr int64_t GOVERNANCE_MIN_RELAY_FEE_CONFIRMATIONS = 1;
 static constexpr int64_t GOVERNANCE_UPDATE_MIN = 60 * 60;
-static constexpr int64_t GOVERNANCE_DELETION_DELAY = 10 * 60;
-static constexpr int64_t GOVERNANCE_ORPHAN_EXPIRATION_TIME = 10 * 60;
-static constexpr int64_t GOVERNANCE_FUDGE_WINDOW = 60 * 60 * 2;
 
 // FOR SEEN MAP ARRAYS - GOVERNANCE OBJECTS AND VOTES
 enum class SeenObjectStatus {
@@ -221,7 +213,7 @@ public:
     // Signature related functions
 
     void SetMasternodeOutpoint(const COutPoint& outpoint);
-    bool Sign(const CActiveMasternodeManager& mn_activeman);
+    void SetSignature(Span<const uint8_t> sig);
     bool CheckSignature(const CBLSPublicKey& pubKey) const;
 
     uint256 GetSignatureHash() const;
@@ -251,8 +243,6 @@ public:
     CAmount GetMinCollateralFee() const;
 
     UniValue GetJSONObject() const;
-
-    void Relay(PeerManager& peerman, const CMasternodeSync& mn_sync) const;
 
     uint256 GetHash() const;
     uint256 GetDataHash() const;

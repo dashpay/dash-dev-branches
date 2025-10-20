@@ -4,6 +4,7 @@
 
 #include <masternode/active/notificationinterface.h>
 
+#include <governance/signing.h>
 #include <llmq/ehf_signals.h>
 #include <masternode/active/context.h>
 #include <masternode/node.h>
@@ -22,6 +23,7 @@ void ActiveNotificationInterface::UpdatedBlockTip(const CBlockIndex* pindexNew, 
 
     m_mn_activeman.UpdatedBlockTip(pindexNew, pindexFork, fInitialDownload);
     m_active_ctx.ehf_sighandler->UpdatedBlockTip(pindexNew);
+    m_active_ctx.gov_signer->UpdatedBlockTip(pindexNew);
 }
 
 std::unique_ptr<ActiveNotificationInterface> g_active_notification_interface;

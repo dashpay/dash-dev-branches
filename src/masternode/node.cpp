@@ -276,6 +276,14 @@ template bool CActiveMasternodeManager::Decrypt(const CBLSIESMultiRecipientObjec
     return WITH_READ_LOCK(cs, return m_info.blsKeyOperator.Sign(hash, is_legacy));
 }
 
+[[nodiscard]] std::vector<uint8_t> CActiveMasternodeManager::SignBasic(const uint256& hash) const
+{
+    AssertLockNotHeld(cs);
+    auto sig = Sign(hash, /*is_legacy=*/false);
+    assert(sig.IsValid());
+    return sig.ToByteVector(/*specificLegacyScheme=*/false);
+}
+
 // We need to pass a copy as opposed to a const ref because CBLSPublicKeyVersionWrapper
 // does not accept a const ref in its construction args
 [[nodiscard]] CBLSPublicKey CActiveMasternodeManager::GetPubKey() const

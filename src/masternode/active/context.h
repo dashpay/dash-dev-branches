@@ -13,11 +13,13 @@ class CCoinJoinServer;
 class CConnman;
 class CDeterministicMNManager;
 class CDSTXManager;
+class CGovernanceManager;
 class CMasternodeMetaMan;
 class CMasternodeSync;
 class CMNHFManager;
 class CSporkManager;
 class CTxMemPool;
+class GovernanceSigner;
 class PeerManager;
 struct LLMQContext;
 namespace chainlock {
@@ -46,9 +48,9 @@ public:
     ActiveContext() = delete;
     ActiveContext(const ActiveContext&) = delete;
     ActiveContext(ChainstateManager& chainman, CConnman& connman, CDeterministicMNManager& dmnman,
-                  CDSTXManager& dstxman, CMasternodeMetaMan& mn_metaman, CMNHFManager& mnhfman, LLMQContext& llmq_ctx,
-                  CSporkManager& sporkman, CTxMemPool& mempool, PeerManager& peerman,
-                  const CActiveMasternodeManager& mn_activeman, const CMasternodeSync& mn_sync);
+                  CDSTXManager& dstxman, CGovernanceManager& govman, CMasternodeMetaMan& mn_metaman,
+                  CMNHFManager& mnhfman, CSporkManager& sporkman, CTxMemPool& mempool, LLMQContext& llmq_ctx,
+                  PeerManager& peerman, const CActiveMasternodeManager& mn_activeman, const CMasternodeSync& mn_sync);
     ~ActiveContext();
 
     /*
@@ -57,6 +59,7 @@ public:
      * TODO: Move CActiveMasternodeManager here when dependents have been migrated
      */
     const std::unique_ptr<CCoinJoinServer> cj_server;
+    const std::unique_ptr<GovernanceSigner> gov_signer;
     const std::unique_ptr<llmq::CEHFSignalsHandler> ehf_sighandler;
 };
 

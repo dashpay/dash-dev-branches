@@ -30,7 +30,6 @@
 #include <wallet/rpc/wallet.h>
 #include <wallet/spend.h>
 #include <wallet/wallet.h>
-#include <governance/object.h>
 #include <governance/validators.h>
 #include <evo/deterministicmns.h>
 #include <masternode/sync.h>

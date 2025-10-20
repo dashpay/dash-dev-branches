@@ -12,6 +12,7 @@
 #include <coinjoin/common.h>
 #include <deploymentstatus.h>
 #include <evo/deterministicmns.h>
+#include <governance/classes.h>
 #include <governance/exceptions.h>
 #include <governance/governance.h>
 #include <governance/object.h>
@@ -147,9 +148,9 @@ public:
     }
     bool processVoteAndRelay(const CGovernanceVote& vote, std::string& error) override
     {
-        if (context().govman != nullptr && context().connman != nullptr && context().peerman != nullptr) {
+        if (context().govman != nullptr && context().connman != nullptr) {
             CGovernanceException exception;
-            bool result = context().govman->ProcessVoteAndRelay(vote, exception, *context().connman, *context().peerman);
+            bool result = context().govman->ProcessVoteAndRelay(vote, exception, *context().connman);
             if (!result) {
                 error = exception.GetMessage();
             }
@@ -234,12 +235,11 @@ public:
             }
         }
         if (!Assert(context().govman)->MasternodeRateCheck(govobj)) { error = "Object creation rate limit exceeded"; return false; }
-        PeerManager& peerman = EnsurePeerman(context());
         if (fMissingConfirmations) {
             context().govman->AddPostponedObject(govobj);
-            govobj.Relay(peerman, *Assert(context().mn_sync));
+            context().govman->RelayObject(govobj);
         } else {
-            context().govman->AddGovernanceObject(govobj, peerman);
+            context().govman->AddGovernanceObject(govobj);
         }
         out_object_hash = govobj.GetHash().ToString();
         return true;

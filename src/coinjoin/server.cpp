@@ -345,7 +345,7 @@ void CCoinJoinServer::CommitFinalTransaction()
     if (!m_dstxman.GetDSTX(hashTx)) {
         CCoinJoinBroadcastTx dstxNew(finalTransaction, m_mn_activeman.GetOutPoint(), m_mn_activeman.GetProTxHash(),
                                      GetAdjustedTime());
-        dstxNew.Sign(m_mn_activeman);
+        dstxNew.vchSig = m_mn_activeman.SignBasic(dstxNew.GetSignatureHash());
         m_dstxman.AddDSTX(dstxNew);
     }
 
@@ -504,7 +504,7 @@ void CCoinJoinServer::CheckForCompleteQueue()
                            GetAdjustedTime(), true);
         LogPrint(BCLog::COINJOIN, "CCoinJoinServer::CheckForCompleteQueue -- queue is ready, signing and relaying (%s) " /* Continued */
                                      "with %d participants\n", dsq.ToString(), vecSessionCollaterals.size());
-        dsq.Sign(m_mn_activeman);
+        dsq.vchSig = m_mn_activeman.SignBasic(dsq.GetSignatureHash());
         m_peerman.RelayDSQ(dsq);
         WITH_LOCK(cs_vecqueue, vecCoinJoinQueue.push_back(dsq));
     }
@@ -714,7 +714,7 @@ bool CCoinJoinServer::CreateNewSession(const CCoinJoinAccept& dsa, PoolMessage& 
         CCoinJoinQueue dsq(nSessionDenom, m_mn_activeman.GetOutPoint(), m_mn_activeman.GetProTxHash(),
                            GetAdjustedTime(), false);
         LogPrint(BCLog::COINJOIN, "CCoinJoinServer::CreateNewSession -- signing and relaying new queue: %s\n", dsq.ToString());
-        dsq.Sign(m_mn_activeman);
+        dsq.vchSig = m_mn_activeman.SignBasic(dsq.GetSignatureHash());
         m_peerman.RelayDSQ(dsq);
         LOCK(cs_vecqueue);
         vecCoinJoinQueue.push_back(dsq);

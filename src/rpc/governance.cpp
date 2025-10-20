@@ -393,12 +393,11 @@ static RPCHelpMan gobject_submit()
 
     LogPrintf("gobject(submit) -- Adding locally created governance object - %s\n", strHash);
 
-    PeerManager& peerman = EnsurePeerman(node);
     if (fMissingConfirmations) {
         node.govman->AddPostponedObject(govobj);
-        govobj.Relay(peerman, *CHECK_NONFATAL(node.mn_sync));
+        node.govman->RelayObject(govobj);
     } else {
-        node.govman->AddGovernanceObject(govobj, peerman);
+        node.govman->AddGovernanceObject(govobj);
     }
 
     return govobj.GetHash().ToString();
@@ -456,8 +455,7 @@ static UniValue VoteWithMasternodes(const JSONRPCRequest& request, const CWallet
 
         CGovernanceException exception;
         CConnman& connman = EnsureConnman(node);
-        PeerManager& peerman = EnsurePeerman(node);
-        if (node.govman->ProcessVoteAndRelay(vote, exception, connman, peerman)) {
+        if (node.govman->ProcessVoteAndRelay(vote, exception, connman)) {
             nSuccessful++;
             statusObj.pushKV("result", "success");
         } else {
@@ -961,10 +959,9 @@ static RPCHelpMan voteraw()
     }
 
     CConnman& connman = EnsureConnman(node);
-    PeerManager& peerman = EnsurePeerman(node);
 
     CGovernanceException exception;
-    if (node.govman->ProcessVoteAndRelay(vote, exception, connman, peerman)) {
+    if (node.govman->ProcessVoteAndRelay(vote, exception, connman)) {
         return "Voted successfully";
     } else {
         throw JSONRPCError(RPC_INTERNAL_ERROR, "Error voting : " + exception.GetMessage());
@@ -1052,41 +1049,32 @@ static RPCHelpMan getsuperblockbudget()
 #ifdef ENABLE_WALLET
 Span<const CRPCCommand> GetWalletGovernanceRPCCommands()
 {
-// clang-format off
-static const CRPCCommand commands[] =
-{ //  category              actor (function)
-  //  --------------------- -----------------------
-    { "dash",               &gobject_prepare,           },
-    { "dash",               &gobject_list_prepared,     },
-    { "dash",               &gobject_vote_many,         },
-    { "dash",               &gobject_vote_alias,        },
-};
-// clang-format on
+    static const CRPCCommand commands[]{
+        {"dash", &gobject_prepare},
+        {"dash", &gobject_list_prepared},
+        {"dash", &gobject_vote_many},
+        {"dash", &gobject_vote_alias},
+    };
     return commands;
 }
 #endif // ENABLE_WALLET
 
 void RegisterGovernanceRPCCommands(CRPCTable &t)
 {
-// clang-format off
-static const CRPCCommand commands[] =
-{ //  category              actor (function)
-  //  --------------------- -----------------------
-    /* Dash features */
-    { "dash",               &getgovernanceinfo,         },
-    { "dash",               &getsuperblockbudget,       },
-    { "dash",               &gobject,                   },
-    { "dash",               &gobject_count,             },
-    { "dash",               &gobject_deserialize,       },
-    { "dash",               &gobject_check,             },
-    { "dash",               &gobject_submit,            },
-    { "dash",               &gobject_list,              },
-    { "dash",               &gobject_diff,              },
-    { "dash",               &gobject_get,               },
-    { "dash",               &gobject_getcurrentvotes,   },
-    { "dash",               &voteraw,                   },
-};
-// clang-format on
+    static const CRPCCommand commands[]{
+        {"dash", &getgovernanceinfo},
+        {"dash", &getsuperblockbudget},
+        {"dash", &gobject},
+        {"dash", &gobject_count},
+        {"dash", &gobject_deserialize},
+        {"dash", &gobject_check},
+        {"dash", &gobject_submit},
+        {"dash", &gobject_list},
+        {"dash", &gobject_diff},
+        {"dash", &gobject_get},
+        {"dash", &gobject_getcurrentvotes},
+        {"dash", &voteraw},
+    };
     for (const auto& command : commands) {
         t.appendCommand(command.name, &command);
     }

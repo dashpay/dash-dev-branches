@@ -5,16 +5,16 @@
 #include <governance/object.h>
 
 #include <bls/bls.h>
-#include <chainparams.h>
-#include <core_io.h>
 #include <evo/deterministicmns.h>
 #include <governance/governance.h>
 #include <governance/validators.h>
-#include <index/txindex.h>
 #include <masternode/meta.h>
-#include <masternode/node.h>
 #include <masternode/sync.h>
-#include <net_processing.h>
+
+#include <chainparams.h>
+#include <core_io.h>
+#include <index/txindex.h>
+#include <logging.h>
 #include <timedata.h>
 #include <util/time.h>
 #include <validation.h>
@@ -244,14 +244,9 @@ void CGovernanceObject::SetMasternodeOutpoint(const COutPoint& outpoint)
     m_obj.masternodeOutpoint = outpoint;
 }
 
-bool CGovernanceObject::Sign(const CActiveMasternodeManager& mn_activeman)
+void CGovernanceObject::SetSignature(Span<const uint8_t> sig)
 {
-    CBLSSignature sig = mn_activeman.Sign(GetSignatureHash(), false);
-    if (!sig.IsValid()) {
-        return false;
-    }
-    m_obj.vchSig = sig.ToByteVector(false);
-    return true;
+    m_obj.vchSig.assign(sig.begin(), sig.end());
 }
 
 bool CGovernanceObject::CheckSignature(const CBLSPublicKey& pubKey) const
@@ -592,18 +587,6 @@ bool CGovernanceObject::GetCurrentMNVotes(const COutPoint& mnCollateralOutpoint,
     }
     voteRecord = it->second;
     return true;
-}
-
-void CGovernanceObject::Relay(PeerManager& peerman, const CMasternodeSync& mn_sync) const
-{
-    // Do not relay until fully synced
-    if (!mn_sync.IsSynced()) {
-        LogPrint(BCLog::GOBJECT, "CGovernanceObject::Relay -- won't relay until fully synced\n");
-        return;
-    }
-
-    CInv inv(MSG_GOVERNANCE_OBJECT, GetHash());
-    peerman.RelayInv(inv);
 }
 
 void CGovernanceObject::UpdateSentinelVariables(const CDeterministicMNList& tip_mn_list)
