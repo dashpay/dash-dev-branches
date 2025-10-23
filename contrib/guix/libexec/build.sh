@@ -238,8 +238,6 @@ case "$HOST" in
     *mingw*)  HOST_LDFLAGS="-Wl,--no-insert-timestamp" ;;
 esac
 
-# Make $HOST-specific native binaries from depends available in $PATH
-export PATH="${BASEPREFIX}/${HOST}/native/bin:${PATH}"
 mkdir -p "$DISTSRC"
 (
     cd "$DISTSRC"
@@ -354,6 +352,10 @@ mkdir -p "$DISTSRC"
                 cp "${DISTSRC}/README.md" "${DISTNAME}/"
                 ;;
         esac
+
+        # copy over the example dash.conf file. if contrib/devtools/gen-dash-conf.sh
+        # has not been run before buildling, this file will be a stub
+        cp "${DISTSRC}/contrib/debian/examples/dash.conf" "${DISTNAME}/"
 
         # Finally, deterministically produce {non-,}debug binary tarballs ready
         # for release

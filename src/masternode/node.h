@@ -11,6 +11,7 @@
 #include <threadsafety.h>
 #include <validationinterface.h>
 
+class CConnman;
 class CDeterministicMNManager;
 
 struct CActiveMasternodeInfo {

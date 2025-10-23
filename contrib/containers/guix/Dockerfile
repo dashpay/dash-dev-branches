@@ -52,8 +52,9 @@ RUN guix_file_name=guix-binary-${guix_version}.$(uname -m)-linux.tar.xz         
 
 RUN touch /etc/nsswitch.conf
 
-RUN guix archive --authorize < /usr/local/guix/current/share/guix/ci.guix.gnu.org.pub && \
-    guix archive --authorize < /usr/local/guix/current/share/guix/bordeaux.guix.gnu.org.pub
+RUN guix archive --authorize < /usr/local/guix/current/share/guix/berlin.guix.gnu.org.pub && \
+    guix archive --authorize < /usr/local/guix/current/share/guix/bordeaux.guix.gnu.org.pub && \
+    guix archive --authorize < /usr/local/guix/current/share/guix/ci.guix.gnu.org.pub
 
 # Build Environment Setup
 # https://guix.gnu.org/manual/en/html_node/Build-Environment-Setup.html
@@ -73,6 +74,9 @@ RUN groupmod -g ${GROUP_ID} ubuntu; \
     echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
 # Copy required files to container
+COPY --chown=${USER_ID}:${GROUP_ID} \
+     --chmod=u=rwX,go=rX \
+     --from=docker_root ./channels.scm         /home/ubuntu/.config/guix/channels.scm
 COPY --from=docker_root ./motd.txt             /etc/motd
 COPY --from=docker_root ./scripts/entrypoint   /usr/local/bin/entrypoint
 COPY --from=docker_root ./scripts/guix-check   /usr/local/bin/guix-check

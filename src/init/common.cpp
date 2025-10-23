@@ -16,6 +16,7 @@
 #include <node/interface_ui.h>
 #include <random.h>
 #include <tinyformat.h>
+#include <util/time.h>
 #include <util/string.h>
 #include <util/system.h>
 #include <util/translation.h>

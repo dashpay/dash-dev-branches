@@ -21,10 +21,17 @@ fi
 cd "${BASE_ROOT_DIR}/build-ci/dashcore-${BUILD_TARGET}"
 iwyu_tool.py \
   "src/compat" \
+  "src/dbwrapper.cpp" \
   "src/init" \
+  "src/node/chainstate.cpp" \
+  "src/policy/feerate.cpp" \
+  "src/policy/packages.cpp" \
+  "src/policy/settings.cpp" \
+  "src/primitives/transaction.cpp" \
   "src/rpc/fees.cpp" \
   "src/rpc/signmessage.cpp" \
   "src/test/fuzz/txorphan.cpp" \
+  "src/threadinterrupt.cpp" \
   "src/util/bip32.cpp" \
   "src/util/bytevectorhash.cpp" \
   "src/util/check.cpp" \

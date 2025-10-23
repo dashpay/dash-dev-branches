@@ -180,7 +180,7 @@ struct MempoolAcceptResult {
     const TxValidationState m_state;
 
     // The following fields are only present when m_result_type = ResultType::VALID or MEMPOOL_ENTRY
-    /** Virtual size as used by the mempool, calculated using serialized size and sigops. */
+    /** Size as used by the mempool, calculated using serialized size and sigops. */
     const std::optional<int64_t> m_vsize;
     /** Raw base fees in satoshis. */
     const std::optional<CAmount> m_base_fees;
@@ -231,10 +231,18 @@ struct PackageMempoolAcceptResult
     * was a package-wide error (see result in m_state), m_tx_results will be empty.
     */
     std::map<const uint256, const MempoolAcceptResult> m_tx_results;
+    /** Package feerate, defined as the aggregated modified fees divided by the total size
+     * of all transactions in the package.  May be unavailable if some inputs were not available or
+     * a transaction failure caused validation to terminate early. */
+    std::optional<CFeeRate> m_package_feerate;
 
     explicit PackageMempoolAcceptResult(PackageValidationState state,
                                         std::map<const uint256, const MempoolAcceptResult>&& results)
         : m_state{state}, m_tx_results(std::move(results)) {}
+
+    explicit PackageMempoolAcceptResult(PackageValidationState state, CFeeRate feerate,
+                                        std::map<const uint256, const MempoolAcceptResult>&& results)
+        : m_state{state}, m_tx_results(std::move(results)), m_package_feerate{feerate} {}
 
     /** Constructor to create a PackageMempoolAcceptResult from a single MempoolAcceptResult */
     explicit PackageMempoolAcceptResult(const uint256 &txid, const MempoolAcceptResult& result)

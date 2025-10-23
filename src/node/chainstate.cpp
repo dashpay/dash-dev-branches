@@ -4,18 +4,34 @@
 
 #include <node/chainstate.h>
 
+#include <chain.h>
+#include <coins.h>
 #include <chainparamsbase.h>
 #include <consensus/params.h>
 #include <deploymentstatus.h>
 #include <node/blockstorage.h>
+#include <sync.h>
+#include <threadsafety.h>
+#include <tinyformat.h>
+#include <txdb.h>
+#include <txmempool.h>
+#include <uint256.h>
+#include <util/translation.h>
 #include <validation.h>
 
+#include <bls/bls.h>
 #include <evo/chainhelper.h>
 #include <evo/creditpool.h>
 #include <evo/deterministicmns.h>
 #include <evo/evodb.h>
 #include <evo/mnhftx.h>
+#include <gsl/pointers.h>
 #include <llmq/context.h>
+
+#include <atomic>
+#include <cassert>
+#include <memory>
+#include <vector>
 
 namespace node {
 std::optional<ChainstateLoadingError> LoadChainstate(bool fReset,
@@ -148,9 +164,9 @@ std::optional<ChainstateLoadingError> LoadChainstate(bool fReset,
 
     for (CChainState* chainstate : chainman.GetAll()) {
         chainstate->InitCoinsDB(
-            /* cache_size_bytes */ nCoinDBCache,
-            /* in_memory */ coins_db_in_memory,
-            /* should_wipe */ fReset || fReindexChainState);
+            /*cache_size_bytes=*/nCoinDBCache,
+            /*in_memory=*/coins_db_in_memory,
+            /*should_wipe=*/fReset || fReindexChainState);
 
         if (coins_error_cb) {
             chainstate->CoinsErrorCatcher().AddReadErrCallback(coins_error_cb);

@@ -11,7 +11,7 @@ fi
 
 if [[ -z "${HOSTS}" || "${HOSTS}" == *"darwin"* ]]; then
     export SDK_PATH="${SDK_PATH:-${WORKSPACE_PATH}/depends/SDKs}"
-    export SDK_SRCS="${SDK_PATH:-${WORKSPACE_PATH}/depends/sdk-sources}"
+    export SDK_SOURCES="${SDK_SOURCES:-${WORKSPACE_PATH}/depends/sdk-sources}"
 
     ./contrib/containers/guix/scripts/setup-sdk
 fi

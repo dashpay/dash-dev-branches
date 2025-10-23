@@ -5,18 +5,38 @@
 #ifndef BITCOIN_DBWRAPPER_H
 #define BITCOIN_DBWRAPPER_H
 
+#include <assert.h>
 #include <clientversion.h>
 #include <fs.h>
+#include <logging.h>
 #include <serialize.h>
 #include <span.h>
 #include <streams.h>
-#include <util/strencodings.h>
-#include <util/system.h>
 
-#include <typeindex>
+#include <sys/types.h>
 
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <exception>
 #include <leveldb/db.h>
+#include <leveldb/iterator.h>
+#include <leveldb/options.h>
+#include <leveldb/slice.h>
+#include <leveldb/status.h>
 #include <leveldb/write_batch.h>
+#include <map>
+#include <memory>
+#include <set>
+#include <stdexcept>
+#include <string>
+#include <type_traits>
+#include <utility>
+#include <vector>
+
+namespace leveldb {
+class Env;
+}
 
 static const size_t DBWRAPPER_PREALLOC_KEY_SIZE = 64;
 static const size_t DBWRAPPER_PREALLOC_VALUE_SIZE = 1024;

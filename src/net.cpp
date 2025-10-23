@@ -4348,7 +4348,7 @@ Uint256HashSet CConnman::GetMasternodeQuorums(Consensus::LLMQType llmqType) cons
     return result;
 }
 
-std::unordered_set<NodeId> CConnman::GetMasternodeQuorumNodes(Consensus::LLMQType llmqType, const uint256& quorumHash) const
+std::vector<NodeId> CConnman::GetMasternodeQuorumNodes(Consensus::LLMQType llmqType, const uint256& quorumHash) const
 {
     LOCK2(m_nodes_mutex, cs_vPendingMasternodes);
     auto it = masternodeQuorumNodes.find(std::make_pair(llmqType, quorumHash));
@@ -4357,16 +4357,18 @@ std::unordered_set<NodeId> CConnman::GetMasternodeQuorumNodes(Consensus::LLMQTyp
     }
     const auto& proRegTxHashes = it->second;
 
-    std::unordered_set<NodeId> nodes;
-    for (const auto pnode : m_nodes) {
-        if (pnode->fDisconnect) {
-            continue;
-        }
-        auto verifiedProRegTxHash = pnode->GetVerifiedProRegTxHash();
-        if (!pnode->qwatch && (verifiedProRegTxHash.IsNull() || !proRegTxHashes.count(verifiedProRegTxHash))) {
-            continue;
-        }
-        nodes.emplace(pnode->GetId());
+    std::vector<NodeId> nodes;
+
+    auto IsMasternodeQuorumNode = [&](const CNode* n) {
+        if (n->fDisconnect) return false;
+        const auto h = n->GetVerifiedProRegTxHash();
+        return n->qwatch || (!h.IsNull() && proRegTxHashes.contains(h));
+    };
+
+    for (NodeId id : m_nodes
+        | std::views::filter(IsMasternodeQuorumNode)
+        | std::views::transform([](const CNode* n){ return n->GetId(); })) {
+        nodes.push_back(id);
     }
     return nodes;
 }

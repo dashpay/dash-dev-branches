@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <evo/evodb.h>
+#include <util/system.h>
 
 #include <uint256.h>
 

@@ -10,6 +10,7 @@
 #include <serialize.h>
 #include <txdb.h>
 #include <undo.h>
+#include <util/system.h>
 #include <validation.h>
 #include <util/check.h>
 

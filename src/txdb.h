@@ -9,6 +9,7 @@
 #include <coins.h>
 #include <dbwrapper.h>
 #include <spentindex.h>
+#include <sync.h>
 #include <timestampindex.h>
 
 #include <memory>
