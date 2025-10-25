@@ -231,6 +231,7 @@ $(host_prefix)/share/config.site : config.site.in $(host_prefix)/.stamp_$(final_
             -e 's|@STRIP@|$(host_STRIP)|' \
             -e 's|@OBJDUMP@|$(host_OBJDUMP)|' \
             -e 's|@DSYMUTIL@|$(host_DSYMUTIL)|' \
+            -e 's|@WINDRES@|$(host_WINDRES)|' \
             -e 's|@build_os@|$(build_os)|' \
             -e 's|@host_os@|$(host_os)|' \
             -e 's|@CFLAGS@|$(strip $(host_CFLAGS) $(host_$(release_type)_CFLAGS))|' \
