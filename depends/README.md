@@ -29,6 +29,10 @@ To build dependencies for the current arch+OS:
 
     pkg install bash
 
+Skip the following packages if you don't intend to use the GUI and will build with [`NO_QT=1`](#dependency-options):
+
+    pkg install bison ninja pkgconf python3
+
 To build dependencies for the current arch+OS:
 
     gmake

@@ -967,6 +967,9 @@ case $host in
    *linux*)
      TARGET_OS=linux
      ;;
+   *freebsd*)
+     TARGET_OS=freebsd
+     ;;
 esac
 
 if test "$use_extended_functional_tests" != "no"; then
