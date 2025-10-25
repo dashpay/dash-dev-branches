@@ -4,7 +4,8 @@ $(package)_download_path=https://download.qt.io/archive/qt/5.15/$($(package)_ver
 $(package)_suffix=everywhere-opensource-src-$($(package)_version).tar.xz
 $(package)_file_name=qtbase-$($(package)_suffix)
 $(package)_sha256_hash=b04815058c18058b6ba837206756a2c87d1391f07a0dcb0dd314f970fd041592
-$(package)_linux_dependencies=freetype fontconfig libxcb libxkbcommon libxcb_util libxcb_util_render libxcb_util_keysyms libxcb_util_image libxcb_util_wm
+$(package)_linux_dependencies := freetype fontconfig libxcb libxkbcommon libxcb_util libxcb_util_render libxcb_util_keysyms libxcb_util_image libxcb_util_wm
+$(package)_freebsd_dependencies := $($(package)_linux_dependencies)
 $(package)_qt_libs=corelib network widgets gui plugins testlib
 $(package)_linguist_tools = lrelease lupdate lconvert
 $(package)_patches = qt.pro
@@ -159,6 +160,7 @@ $(package)_config_opts_linux += -dbus-runtime
 ifneq ($(LTO),)
 $(package)_config_opts_linux += -ltcg
 endif
+$(package)_config_opts_freebsd := $$($(package)_config_opts_linux)
 
 ifneq (,$(findstring clang,$($(package)_cxx)))
   ifneq (,$(findstring -stdlib=libc++,$($(package)_cxx)))
