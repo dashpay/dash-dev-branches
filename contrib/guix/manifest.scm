@@ -517,7 +517,6 @@ inspecting signatures in Mach-O binaries.")
         moreutils
         ;; Compression and archiving
         tar
-        bzip2
         gzip
         xz
         ;; Build tools
