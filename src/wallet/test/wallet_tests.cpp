@@ -11,7 +11,6 @@
 #include <vector>
 
 #include <coinjoin/client.h>
-#include <coinjoin/context.h>
 #include <interfaces/chain.h>
 #include <interfaces/coinjoin.h>
 #include <key_io.h>

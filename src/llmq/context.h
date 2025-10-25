@@ -9,7 +9,6 @@
 
 class CActiveMasternodeManager;
 class CBLSWorker;
-class CConnman;
 class ChainstateManager;
 class CDeterministicMNManager;
 class CEvoDB;
@@ -28,14 +27,10 @@ class CInstantSendManager;
 class CQuorumBlockProcessor;
 class CQuorumManager;
 class CQuorumSnapshotManager;
-class CSigSharesManager;
 class CSigningManager;
 }
 
 struct LLMQContext {
-private:
-    const bool is_masternode;
-
 public:
     LLMQContext() = delete;
     LLMQContext(const LLMQContext&) = delete;
@@ -46,7 +41,7 @@ public:
     ~LLMQContext();
 
     void Interrupt();
-    void Start(CConnman& connman, PeerManager& peerman);
+    void Start(PeerManager& peerman);
     void Stop();
 
     /** Guaranteed if LLMQContext is initialized then all members are valid too
@@ -66,7 +61,6 @@ public:
     const std::unique_ptr<llmq::CDKGSessionManager> qdkgsman;
     const std::unique_ptr<llmq::CQuorumManager> qman;
     const std::unique_ptr<llmq::CSigningManager> sigman;
-    const std::unique_ptr<llmq::CSigSharesManager> shareman;
     const std::unique_ptr<llmq::CChainLocksHandler> clhandler;
     const std::unique_ptr<llmq::CInstantSendManager> isman;
 };

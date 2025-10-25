@@ -5,12 +5,13 @@
 #ifndef BITCOIN_LLMQ_BLOCKPROCESSOR_H
 #define BITCOIN_LLMQ_BLOCKPROCESSOR_H
 
-#include <unordered_lru_cache.h>
-
 #include <bls/bls.h>
-#include <checkqueue.h>
 #include <llmq/params.h>
 #include <llmq/utils.h>
+#include <msg_result.h>
+#include <unordered_lru_cache.h>
+
+#include <checkqueue.h>
 #include <protocol.h>
 #include <saltedhasher.h>
 #include <sync.h>

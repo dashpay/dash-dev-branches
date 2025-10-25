@@ -10,23 +10,26 @@
 #include <validationinterface.h>
 #include <version.h>
 
+#include <msg_result.h>
+
 #include <atomic>
 
-class CActiveMasternodeManager;
 class AddrMan;
-class CTxMemPool;
+class CActiveMasternodeManager;
 class CCoinJoinQueue;
+class CCoinJoinServer;
 class CDeterministicMNManager;
+class CDSTXManager;
+class CGovernanceManager;
+class ChainstateManager;
+class CInv;
+class CJWalletManager;
 class CMasternodeMetaMan;
 class CMasternodeSync;
-class ChainstateManager;
-class CCoinJoinServer;
-class CGovernanceManager;
-class CInv;
 class CSporkManager;
 class CTransaction;
+class CTxMemPool;
 struct ActiveContext;
-struct CJContext;
 struct LLMQContext;
 
 /** Default for -maxorphantxsize, maximum size in megabytes the orphan map can grow before entries are removed */
@@ -56,13 +59,13 @@ class PeerManager : public CValidationInterface, public NetEventsInterface
 {
 public:
     static std::unique_ptr<PeerManager> make(const CChainParams& chainparams, CConnman& connman, AddrMan& addrman,
-                                             BanMan* banman, ChainstateManager& chainman,
+                                             BanMan* banman, CDSTXManager& dstxman, ChainstateManager& chainman,
                                              CTxMemPool& pool, CMasternodeMetaMan& mn_metaman, CMasternodeSync& mn_sync,
                                              CGovernanceManager& govman, CSporkManager& sporkman,
                                              const CActiveMasternodeManager* const mn_activeman,
                                              const std::unique_ptr<CDeterministicMNManager>& dmnman,
                                              const std::unique_ptr<ActiveContext>& active_ctx,
-                                             const std::unique_ptr<CJContext>& cj_ctx,
+                                             CJWalletManager* const cj_walletman,
                                              const std::unique_ptr<LLMQContext>& llmq_ctx, bool ignore_incoming_txs);
     virtual ~PeerManager() { }
 

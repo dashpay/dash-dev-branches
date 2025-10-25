@@ -35,6 +35,7 @@ from test_framework.blocktools import (
 from test_framework.governance import EXPECTED_STDERR_NO_GOV_PRUNE
 from test_framework.messages import (
     CBlockHeader,
+    dashhash,
     from_hex,
     msg_block,
 )
@@ -491,6 +492,10 @@ class BlockchainTest(BitcoinTestFramework):
         self.wallet.send_self_transfer(fee_rate=fee_per_kb, from_node=node)
         blockhash = self.generate(node, 1)[0]
 
+        def assert_hexblock_hashes(verbosity):
+            block = node.getblock(blockhash, verbosity)
+            assert_equal(blockhash, dashhash(bytes.fromhex(block[:160]))[::-1].hex())
+
         def assert_fee_not_in_block(verbosity):
             block = node.getblock(blockhash, verbosity)
             assert 'fee' not in block['tx'][1]
@@ -525,8 +530,13 @@ class BlockchainTest(BitcoinTestFramework):
                 for vin in tx["vin"]:
                     assert "prevout" not in vin
 
+        self.log.info("Test that getblock with verbosity 0 hashes to expected value")
+        assert_hexblock_hashes(0)
+        assert_hexblock_hashes(False)
+
         self.log.info("Test that getblock with verbosity 1 doesn't include fee")
         assert_fee_not_in_block(1)
+        assert_fee_not_in_block(True)
 
         self.log.info('Test that getblock with verbosity 2 and 3 includes expected fee')
         assert_fee_in_block(2)

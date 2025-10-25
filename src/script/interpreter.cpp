@@ -1443,7 +1443,7 @@ public:
 template <class T>
 uint256 GetPrevoutsSHA256(const T& txTo)
 {
-    CHashWriter ss(SER_GETHASH, 0);
+    HashWriter ss{};
     for (const auto& txin : txTo.vin) {
         ss << txin.prevout;
     }
@@ -1454,7 +1454,7 @@ uint256 GetPrevoutsSHA256(const T& txTo)
 template <class T>
 uint256 GetSequencesSHA256(const T& txTo)
 {
-    CHashWriter ss(SER_GETHASH, 0);
+    HashWriter ss{};
     for (const auto& txin : txTo.vin) {
         ss << txin.nSequence;
     }
@@ -1465,7 +1465,7 @@ uint256 GetSequencesSHA256(const T& txTo)
 template <class T>
 uint256 GetOutputsSHA256(const T& txTo)
 {
-    CHashWriter ss(SER_GETHASH, 0);
+    HashWriter ss{};
     for (const auto& txout : txTo.vout) {
         ss << txout;
     }
@@ -1525,7 +1525,7 @@ uint256 SignatureHash(const CScript& scriptCode, const T& txTo, unsigned int nIn
     CTransactionSignatureSerializer<T> txTmp(txTo, scriptCode, nIn, nHashType);
 
     // Serialize and hash
-    CHashWriter ss(SER_GETHASH, 0);
+    HashWriter ss{};
     ss << txTmp << nHashType;
     return ss.GetHash();
 }

@@ -148,8 +148,8 @@ static std::vector<RPCResult> DecodeTxDoc(const std::string& txid_field_doc)
                 {RPCResult::Type::NUM, "vout", /*optional=*/true, "The output number (if not coinbase transaction)"},
                 {RPCResult::Type::OBJ, "scriptSig", /*optional=*/true, "The script (if not coinbase transaction)",
                 {
-                    {RPCResult::Type::STR, "asm", "asm"},
-                    {RPCResult::Type::STR_HEX, "hex", "hex"},
+                    {RPCResult::Type::STR, "asm", "Disassembly of the signature script"},
+                    {RPCResult::Type::STR_HEX, "hex", "The raw signature script bytes, hex-encoded"},
                 }},
                 {RPCResult::Type::NUM, "sequence", "The script sequence number"},
             }},
@@ -162,9 +162,9 @@ static std::vector<RPCResult> DecodeTxDoc(const std::string& txid_field_doc)
                 {RPCResult::Type::NUM, "n", "index"},
                 {RPCResult::Type::OBJ, "scriptPubKey", "",
                 {
-                    {RPCResult::Type::STR, "asm", "the asm"},
+                    {RPCResult::Type::STR, "asm", "Disassembly of the public key script"},
                     {RPCResult::Type::STR, "desc", "Inferred descriptor for the output"},
-                    {RPCResult::Type::STR_HEX, "hex", "the hex"},
+                    {RPCResult::Type::STR_HEX, "hex", "The raw public key script bytes, hex-encoded"},
                     {RPCResult::Type::STR, "type", "The type, eg 'pubkeyhash'"},
                     {RPCResult::Type::STR, "address", /*optional=*/true, "The Dash address (only if a well-defined address exists)"},
                 }},
@@ -358,8 +358,19 @@ static RPCHelpMan getrawtransactionmulti() {
                     {"verbose", RPCArg::Type::BOOL, RPCArg::Default{false},
                      "If false, return a string, otherwise return a json object"},
             },
-            // TODO: replace RPCResults to proper annotation
-            RPCResults{},
+            RPCResult{
+                RPCResult::Type::OBJ, "", "",
+                {
+                    {"If verbose is not set or set to false",
+                        RPCResult::Type::STR_HEX, "txid", "The serialized, hex-encoded data for 'txid'"},
+                    {"if verbose is set to true",
+                        RPCResult::Type::OBJ, "txid", "The decoded network-serialized transaction.",
+                        {
+                            {RPCResult::Type::ELISION, "", "The layout is the same as the output of getrawtransaction."},
+                        }},
+                    {"If tx is unknown", RPCResult::Type::STR, "txid", "None"},
+                },
+            },
             RPCExamples{
                     HelpExampleCli("getrawtransactionmulti",
                                    R"('{"blockhash1":["txid1","txid2"], "0":["txid3"]}')")
@@ -1033,8 +1044,8 @@ const RPCResult decodepsbt_inputs{
             {RPCResult::Type::STR, "sighash", /*optional=*/true, "The sighash type to be used"},
             {RPCResult::Type::OBJ, "redeem_script", /*optional=*/true, "",
             {
-                {RPCResult::Type::STR, "asm", "The asm"},
-                {RPCResult::Type::STR_HEX, "hex", "The hex"},
+                {RPCResult::Type::STR, "asm", "Disassembly of the redeem script"},
+                {RPCResult::Type::STR_HEX, "hex", "The raw redeem script bytes, hex-encoded"},
                 {RPCResult::Type::STR, "type", "The type, eg 'pubkeyhash'"},
             }},
             {RPCResult::Type::ARR, "bip32_derivs", /*optional=*/true, "",
@@ -1048,8 +1059,8 @@ const RPCResult decodepsbt_inputs{
             }},
             {RPCResult::Type::OBJ, "final_scriptSig", /*optional=*/true, "",
             {
-                {RPCResult::Type::STR, "asm", "The asm"},
-                {RPCResult::Type::STR_HEX, "hex", "The hex"},
+                {RPCResult::Type::STR, "asm", "Disassembly of the final signature script"},
+                {RPCResult::Type::STR_HEX, "hex", "The raw final signature script bytes, hex-encoded"},
             }},
             {RPCResult::Type::OBJ_DYN, "ripemd160_preimages", /*optional=*/true, "",
             {
@@ -1092,8 +1103,8 @@ const RPCResult decodepsbt_outputs{
         {
             {RPCResult::Type::OBJ, "redeem_script", /*optional=*/true, "",
             {
-                {RPCResult::Type::STR, "asm", "The asm"},
-                {RPCResult::Type::STR_HEX, "hex", "The hex"},
+                {RPCResult::Type::STR, "asm", "Disassembly of the redeem script"},
+                {RPCResult::Type::STR_HEX, "hex", "The raw redeem script bytes, hex-encoded"},
                 {RPCResult::Type::STR, "type", "The type, eg 'pubkeyhash'"},
             }},
             {RPCResult::Type::ARR, "bip32_derivs", /*optional=*/true, "",

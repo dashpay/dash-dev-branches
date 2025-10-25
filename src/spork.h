@@ -5,6 +5,8 @@
 #ifndef BITCOIN_SPORK_H
 #define BITCOIN_SPORK_H
 
+#include <msg_result.h>
+
 #include <hash.h>
 #include <key.h>
 #include <net.h>

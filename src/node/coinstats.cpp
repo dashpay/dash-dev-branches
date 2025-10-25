@@ -50,7 +50,7 @@ CDataStream TxOutSer(const COutPoint& outpoint, const Coin& coin) {
 //! It is also possible, though very unlikely, that a change in this
 //! construction could cause a previously invalid (and potentially malicious)
 //! UTXO snapshot to be considered valid.
-static void ApplyHash(CHashWriter& ss, const uint256& hash, const std::map<uint32_t, Coin>& outputs)
+static void ApplyHash(HashWriter& ss, const uint256& hash, const std::map<uint32_t, Coin>& outputs)
 {
     for (auto it = outputs.begin(); it != outputs.end(); ++it) {
         if (it == outputs.begin()) {
@@ -149,7 +149,7 @@ bool GetUTXOStats(CCoinsView* view, BlockManager& blockman, CCoinsStats& stats, 
 {
     switch (stats.m_hash_type) {
     case(CoinStatsHashType::HASH_SERIALIZED): {
-        CHashWriter ss(SER_GETHASH, PROTOCOL_VERSION);
+        HashWriter ss{};
         return GetUTXOStats(view, blockman, stats, ss, interruption_point, pindex);
     }
     case(CoinStatsHashType::MUHASH): {
@@ -164,7 +164,7 @@ bool GetUTXOStats(CCoinsView* view, BlockManager& blockman, CCoinsStats& stats, 
 }
 
 // The legacy hash serializes the hashBlock
-static void PrepareHash(CHashWriter& ss, const CCoinsStats& stats)
+static void PrepareHash(HashWriter& ss, const CCoinsStats& stats)
 {
     ss << stats.hashBlock;
 }
@@ -172,7 +172,7 @@ static void PrepareHash(CHashWriter& ss, const CCoinsStats& stats)
 static void PrepareHash(MuHash3072& muhash, CCoinsStats& stats) {}
 static void PrepareHash(std::nullptr_t, CCoinsStats& stats) {}
 
-static void FinalizeHash(CHashWriter& ss, CCoinsStats& stats)
+static void FinalizeHash(HashWriter& ss, CCoinsStats& stats)
 {
     stats.hashSerialized = ss.GetHash();
 }

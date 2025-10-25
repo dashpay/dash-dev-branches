@@ -30,19 +30,13 @@ class InstantSendSigner;
 } // namespace instantsend
 namespace llmq {
 class CEHFSignalsHandler;
+class CSigSharesManager;
 } // namespace llmq
 
 struct ActiveContext {
 private:
     // TODO: Switch to references to members when migration is finished
     LLMQContext& m_llmq_ctx;
-
-    /*
-     * Entities that are registered with LLMQContext members are not accessible
-     * and are managed with (Dis)connectSigner() in the (c/d)tor instead
-     */
-    const std::unique_ptr<chainlock::ChainLockSigner> cl_signer;
-    const std::unique_ptr<instantsend::InstantSendSigner> is_signer;
 
 public:
     ActiveContext() = delete;
@@ -53,6 +47,10 @@ public:
                   PeerManager& peerman, const CActiveMasternodeManager& mn_activeman, const CMasternodeSync& mn_sync);
     ~ActiveContext();
 
+    void Interrupt();
+    void Start(CConnman& connman, PeerManager& peerman);
+    void Stop();
+
     /*
      * Entities that are only utilized when masternode mode is enabled
      * and are accessible in their own right
@@ -60,7 +58,16 @@ public:
      */
     const std::unique_ptr<CCoinJoinServer> cj_server;
     const std::unique_ptr<GovernanceSigner> gov_signer;
+    const std::unique_ptr<llmq::CSigSharesManager> shareman;
     const std::unique_ptr<llmq::CEHFSignalsHandler> ehf_sighandler;
+
+private:
+    /*
+     * Entities that are registered with LLMQContext members are not accessible
+     * and are managed with (Dis)connectSigner() in the (c/d)tor instead
+     */
+    const std::unique_ptr<chainlock::ChainLockSigner> cl_signer;
+    const std::unique_ptr<instantsend::InstantSendSigner> is_signer;
 };
 
 #endif // BITCOIN_MASTERNODE_ACTIVE_CONTEXT_H

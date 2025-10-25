@@ -7,8 +7,13 @@
 
 #include <validationinterface.h>
 
+#include <memory>
+
 class CActiveMasternodeManager;
 struct ActiveContext;
+namespace llmq {
+class CRecoveredSig;
+} // namespace llmq
 
 class ActiveNotificationInterface final : public CValidationInterface
 {
@@ -20,6 +25,7 @@ public:
 
 protected:
     // CValidationInterface
+    void NotifyRecoveredSig(const std::shared_ptr<const llmq::CRecoveredSig>& sig) override;
     void UpdatedBlockTip(const CBlockIndex* pindexNew, const CBlockIndex* pindexFork, bool fInitialDownload) override;
 
 private:

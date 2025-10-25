@@ -683,7 +683,7 @@ static UniValue protx_register_common_wrapper(const JSONRPCRequest& request,
     const bool isEvoRequested = mnType == MnType::Evo;
 
     std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
-    if (!pwallet) return NullUniValue;
+    if (!pwallet) return UniValue::VNULL;
 
     if (action == ProTxRegisterAction::External || action == ProTxRegisterAction::Fund) {
         EnsureWalletIsUnlocked(*pwallet);
@@ -888,7 +888,7 @@ static RPCHelpMan protx_register_submit()
     CChainstateHelper& chain_helper = *CHECK_NONFATAL(node.chain_helper);
 
     const std::shared_ptr<const CWallet> wallet = GetWalletForJSONRPCRequest(request);
-    if (!wallet) return NullUniValue;
+    if (!wallet) return UniValue::VNULL;
 
     EnsureWalletIsUnlocked(*wallet);
 
@@ -997,7 +997,7 @@ static UniValue protx_update_service_common_wrapper(const JSONRPCRequest& reques
 
     const bool isEvoRequested = mnType == MnType::Evo;
     std::shared_ptr<CWallet> const wallet = GetWalletForJSONRPCRequest(request);
-    if (!wallet) return NullUniValue;
+    if (!wallet) return UniValue::VNULL;
 
     EnsureWalletIsUnlocked(*wallet);
 
@@ -1131,7 +1131,7 @@ static RPCHelpMan protx_update_registrar_wrapper(const bool specific_legacy_bls_
     CChainstateHelper& chain_helper = *CHECK_NONFATAL(node.chain_helper);
 
     std::shared_ptr<CWallet> const wallet = GetWalletForJSONRPCRequest(request);
-    if (!wallet) return NullUniValue;
+    if (!wallet) return UniValue::VNULL;
 
     EnsureWalletIsUnlocked(*wallet);
 
@@ -1251,7 +1251,7 @@ static RPCHelpMan protx_revoke()
     CChainstateHelper& chain_helper = *CHECK_NONFATAL(node.chain_helper);
 
     std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
-    if (!pwallet) return NullUniValue;
+    if (!pwallet) return UniValue::VNULL;
 
     EnsureWalletIsUnlocked(*pwallet);
 
@@ -1404,7 +1404,16 @@ static RPCHelpMan protx_list()
             {"detailed", RPCArg::Type::BOOL, RPCArg::Default{false}, "If not specified, only the hashes of the ProTx will be returned."},
             {"height", RPCArg::Type::NUM, RPCArg::DefaultHint{"current chain-tip"}, ""},
         },
-        RPCResults{},
+        RPCResult{
+            RPCResult::Type::ARR, "", "List of masternodes",
+            {
+                RPCResult{"when detailed=false", RPCResult::Type::STR, "", "ProTx hash"},
+                RPCResult{"when detailed=true", RPCResult::Type::OBJ, "", "",
+                    {
+                        // TODO: document fields of the detailed entry
+                        {RPCResult::Type::ELISION, "", ""}
+                    }},
+            }},
         RPCExamples{""},
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
@@ -1511,6 +1520,7 @@ static RPCHelpMan protx_info()
         RPCResult{
             RPCResult::Type::OBJ, "", "Details about a specific deterministic masternode",
             {
+                // TODO: implement proper doc for protx info
                 {RPCResult::Type::ELISION, "", ""}
             }
         },
@@ -1644,8 +1654,40 @@ static RPCHelpMan protx_listdiff()
                        {"baseBlock", RPCArg::Type::NUM, RPCArg::Optional::NO, "The starting block height."},
                        {"block", RPCArg::Type::NUM, RPCArg::Optional::NO, "The ending block height."},
                },
-               RPCResults{},
-               RPCExamples{""},
+                RPCResult {
+                    RPCResult::Type::OBJ, "", "",
+                    {
+                        {RPCResult::Type::NUM, "baseHeight", "Height of base (starting) block"},
+                        {RPCResult::Type::NUM, "blockHeight", "Height of target (ending) block"},
+                        {RPCResult::Type::ARR, "addedMNs", "Added masternodes",
+                            {
+                                {RPCResult::Type::OBJ, "", "",
+                                {
+                                    // TODO: list fields of output for RPC help instead ELISION
+                                    {RPCResult::Type::ELISION, "", ""}
+                                }},
+                            },
+                        },
+                        {RPCResult::Type::ARR, "removedMns", "Removed masternodes",
+                            {
+                                {RPCResult::Type::STR_HEX, "protx", "ProTx of removed masternode"},
+                            },
+                        },
+                        {RPCResult::Type::ARR, "updatedMNs", "Updated masternodes",
+                            {
+                                {RPCResult::Type::OBJ, "", "",
+                                {
+                                    {RPCResult::Type::OBJ, "protx", "ProTx of updated masternode",
+                                    {
+                                        // TODO: list fields of output for RPC help instead ELISION
+                                        {RPCResult::Type::ELISION, "", ""}
+                                    }},
+                                }},
+                            },
+                        },
+                    },
+                },
+                RPCExamples{""},
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
     const NodeContext& node = EnsureAnyNodeContext(request.context);
@@ -1743,7 +1785,7 @@ static RPCHelpMan protx_help()
         {
             {"command", RPCArg::Type::STR, RPCArg::Optional::NO, "The command to execute"},
         },
-        RPCResults{},
+        RPCResult{RPCResult::Type::NONE, "", ""},
         RPCExamples{""},
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
@@ -1833,7 +1875,7 @@ static RPCHelpMan bls_help()
         {
             {"command", RPCArg::Type::STR, RPCArg::Optional::NO, "The command to execute"},
         },
-        RPCResults{},
+        RPCResult{RPCResult::Type::NONE, "", ""},
         RPCExamples{""},
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {

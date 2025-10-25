@@ -43,8 +43,8 @@ bool AreChainLocksEnabled(const CSporkManager& sporkman)
     return sporkman.IsSporkActive(SPORK_19_CHAINLOCKS_ENABLED);
 }
 
-CChainLocksHandler::CChainLocksHandler(CChainState& chainstate, CQuorumManager& _qman, CSigningManager& _sigman,
-                                       CSporkManager& sporkman, CTxMemPool& _mempool, const CMasternodeSync& mn_sync) :
+CChainLocksHandler::CChainLocksHandler(CChainState& chainstate, CQuorumManager& _qman, CSporkManager& sporkman,
+                                       CTxMemPool& _mempool, const CMasternodeSync& mn_sync) :
     m_chainstate{chainstate},
     qman{_qman},
     spork_manager{sporkman},

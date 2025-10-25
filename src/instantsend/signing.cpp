@@ -13,6 +13,7 @@
 
 #include <chainlock/chainlock.h>
 #include <llmq/quorums.h>
+#include <llmq/signing_shares.h>
 #include <masternode/sync.h>
 #include <spork.h>
 
@@ -330,7 +331,7 @@ bool InstantSendSigner::TrySignInputLocks(const CTransaction& tx, bool fRetroact
         WITH_LOCK(cs_input_requests, inputRequestIds.emplace(id));
         LogPrint(BCLog::INSTANTSEND, "%s -- txid=%s: trying to vote on input %s with id %s. fRetroactive=%d\n",
                  __func__, tx.GetHash().ToString(), in.prevout.ToStringShort(), id.ToString(), fRetroactive);
-        if (m_sigman.AsyncSignIfMember(llmqType, m_shareman, id, tx.GetHash(), {}, fRetroactive)) {
+        if (m_shareman.AsyncSignIfMember(llmqType, m_sigman, id, tx.GetHash(), {}, fRetroactive)) {
             LogPrint(BCLog::INSTANTSEND, "%s -- txid=%s: voted on input %s with id %s\n", __func__,
                      tx.GetHash().ToString(), in.prevout.ToStringShort(), id.ToString());
         }
@@ -388,6 +389,6 @@ void InstantSendSigner::TrySignInstantSendLock(const CTransaction& tx)
         txToCreatingInstantSendLocks.emplace(tx.GetHash(), &e.first->second);
     }
 
-    m_sigman.AsyncSignIfMember(llmqType, m_shareman, id, tx.GetHash(), quorum->m_quorum_base_block_index->GetBlockHash());
+    m_shareman.AsyncSignIfMember(llmqType, m_sigman, id, tx.GetHash(), quorum->m_quorum_base_block_index->GetBlockHash());
 }
 } // namespace instantsend

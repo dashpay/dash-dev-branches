@@ -191,7 +191,7 @@ static RPCHelpMan spork()
         return ret;
     }
 
-    return NullUniValue;
+    return UniValue::VNULL;
 },
     };
 }
@@ -233,7 +233,7 @@ static RPCHelpMan sporkupdate()
         return "success";
     }
 
-    return NullUniValue;
+    return UniValue::VNULL;
 },
     };
 }
@@ -274,7 +274,7 @@ static RPCHelpMan setmocktime()
         }
     }
 
-    return NullUniValue;
+    return UniValue::VNULL;
 },
     };
 }
@@ -827,7 +827,7 @@ static RPCHelpMan mockscheduler()
         {
             {"delta_time", RPCArg::Type::NUM, RPCArg::Optional::NO, "Number of seconds to forward the scheduler into the future." },
         },
-        RPCResults{},
+        RPCResult{RPCResult::Type::NONE, "", ""},
         RPCExamples{""},
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
@@ -847,7 +847,7 @@ static RPCHelpMan mockscheduler()
     CHECK_NONFATAL(node_context->scheduler);
     node_context->scheduler->MockForward(std::chrono::seconds(delta_seconds));
 
-    return NullUniValue;
+    return UniValue::VNULL;
 },
     };
 }

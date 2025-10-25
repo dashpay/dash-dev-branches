@@ -18,7 +18,11 @@
 #include <gsl/pointers.h>
 
 #include <atomic>
+#include <cassert>
+#include <chrono>
 #include <map>
+#include <memory>
+#include <thread>
 #include <unordered_map>
 
 class CBlock;
@@ -66,8 +70,8 @@ private:
     std::atomic<std::chrono::seconds> lastCleanupTime{0s};
 
 public:
-    explicit CChainLocksHandler(CChainState& chainstate, CQuorumManager& _qman, CSigningManager& _sigman,
-                                CSporkManager& sporkman, CTxMemPool& _mempool, const CMasternodeSync& mn_sync);
+    explicit CChainLocksHandler(CChainState& chainstate, CQuorumManager& _qman, CSporkManager& sporkman,
+                                CTxMemPool& _mempool, const CMasternodeSync& mn_sync);
     ~CChainLocksHandler();
 
     void ConnectSigner(gsl::not_null<chainlock::ChainLockSigner*> signer)

@@ -11,9 +11,9 @@
 #include <evo/types.h>
 #include <llmq/params.h>
 #include <llmq/types.h>
+#include <msg_result.h>
 #include <unordered_lru_cache.h>
 
-#include <protocol.h>
 #include <saltedhasher.h>
 #include <util/threadinterrupt.h>
 #include <util/time.h>

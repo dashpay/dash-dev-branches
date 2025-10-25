@@ -6,7 +6,8 @@
 
 #include <addrman.h>
 #include <banman.h>
-#include <coinjoin/context.h>
+#include <coinjoin/coinjoin.h>
+#include <coinjoin/walletman.h>
 #include <evo/chainhelper.h>
 #include <evo/creditpool.h>
 #include <evo/deterministicmns.h>

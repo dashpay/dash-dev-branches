@@ -64,7 +64,7 @@ static RPCHelpMan listaddressbalances()
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
     const std::shared_ptr<const CWallet> pwallet = GetWalletForJSONRPCRequest(request);
-    if (!pwallet) return NullUniValue;
+    if (!pwallet) return UniValue::VNULL;
 
     LOCK(pwallet->cs_wallet);
 
@@ -96,7 +96,7 @@ static RPCHelpMan setcoinjoinrounds()
                 "The default number of rounds is " + ToString(DEFAULT_COINJOIN_ROUNDS) +
                 " Cannot be more than " + ToString(MAX_COINJOIN_ROUNDS) + " nor less than " + ToString(MIN_COINJOIN_ROUNDS)},
         },
-        RPCResults{},
+        RPCResult{RPCResult::Type::NONE, "", ""},
         RPCExamples{
             HelpExampleCli("setcoinjoinrounds", "4")
     + HelpExampleRpc("setcoinjoinrounds", "16")
@@ -104,7 +104,7 @@ static RPCHelpMan setcoinjoinrounds()
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
     const std::shared_ptr<const CWallet> wallet = GetWalletForJSONRPCRequest(request);
-    if (!wallet) return NullUniValue;
+    if (!wallet) return UniValue::VNULL;
 
     int nRounds = request.params[0].getInt<int>();
 
@@ -113,7 +113,7 @@ static RPCHelpMan setcoinjoinrounds()
 
     CCoinJoinClientOptions::SetRounds(nRounds);
 
-    return NullUniValue;
+    return UniValue::VNULL;
 },
     };
 }
@@ -127,7 +127,7 @@ static RPCHelpMan setcoinjoinamount()
                 "The default amount is " + ToString(DEFAULT_COINJOIN_AMOUNT) +
                 " Cannot be more than " + ToString(MAX_COINJOIN_AMOUNT) + " nor less than " + ToString(MIN_COINJOIN_AMOUNT)},
         },
-        RPCResults{},
+        RPCResult{RPCResult::Type::NONE, "", ""},
         RPCExamples{
             HelpExampleCli("setcoinjoinamount", "500")
     + HelpExampleRpc("setcoinjoinamount", "208")
@@ -135,7 +135,7 @@ static RPCHelpMan setcoinjoinamount()
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
     const std::shared_ptr<const CWallet> wallet = GetWalletForJSONRPCRequest(request);
-    if (!wallet) return NullUniValue;
+    if (!wallet) return UniValue::VNULL;
 
     int nAmount = request.params[0].getInt<int>();
 
@@ -144,7 +144,7 @@ static RPCHelpMan setcoinjoinamount()
 
     CCoinJoinClientOptions::SetAmount(nAmount);
 
-    return NullUniValue;
+    return UniValue::VNULL;
 },
     };
 }
@@ -200,7 +200,7 @@ static RPCHelpMan getwalletinfo()
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
     const std::shared_ptr<const CWallet> pwallet = GetWalletForJSONRPCRequest(request);
-    if (!pwallet) return NullUniValue;
+    if (!pwallet) return UniValue::VNULL;
 
     // Make sure the results are valid at least up to the most recent block
     // the user could have gotten from another RPC command prior to now
@@ -365,7 +365,7 @@ static RPCHelpMan upgradetohd()
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
     std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
-    if (!pwallet) return NullUniValue;
+    if (!pwallet) return UniValue::VNULL;
 
     bool generate_mnemonic = request.params[0].isNull() || request.params[0].get_str().empty();
     bool mnemonic_passphrase_has_null{false};
@@ -570,7 +570,7 @@ static RPCHelpMan setwalletflag()
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
     std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
-    if (!pwallet) return NullUniValue;
+    if (!pwallet) return UniValue::VNULL;
 
 
     std::string flag_str = request.params[0].get_str();
@@ -776,7 +776,7 @@ static RPCHelpMan wipewallettxes()
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
     std::shared_ptr<CWallet> const wallet = GetWalletForJSONRPCRequest(request);
-    if (!wallet) return NullUniValue;
+    if (!wallet) return UniValue::VNULL;
     CWallet* const pwallet = wallet.get();
 
     WalletRescanReserver reserver(*pwallet);
@@ -825,7 +825,7 @@ static RPCHelpMan wipewallettxes()
 
     pwallet->ShowProgress(strprintf("%s " + _("Wiping wallet transactions…").translated, pwallet->GetDisplayName()), 100);
 
-    return NullUniValue;
+    return UniValue::VNULL;
 },
     };
 }
@@ -854,7 +854,7 @@ static RPCHelpMan sethdseed()
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
     std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
-    if (!pwallet) return NullUniValue;
+    if (!pwallet) return UniValue::VNULL;
 
     LegacyScriptPubKeyMan& spk_man = EnsureLegacyScriptPubKeyMan(*pwallet, true);
 
@@ -902,7 +902,7 @@ static RPCHelpMan sethdseed()
 
     if (flush_key_pool) spk_man.NewKeyPool();
 
-    return NullUniValue;
+    return UniValue::VNULL;
 },
     };
 }
@@ -933,7 +933,7 @@ static RPCHelpMan upgradewallet()
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
     std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
-    if (!pwallet) return NullUniValue;
+    if (!pwallet) return UniValue::VNULL;
 
     RPCTypeCheck(request.params, {UniValue::VNUM}, true);
 

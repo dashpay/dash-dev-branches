@@ -179,10 +179,10 @@ BITCOIN_CORE_H = \
   coinjoin/coinjoin.h \
   coinjoin/client.h \
   coinjoin/common.h \
-  coinjoin/context.h \
   coinjoin/options.h \
   coinjoin/server.h \
   coinjoin/util.h \
+  coinjoin/walletman.h \
   coins.h \
   common/bloom.h \
   compat/assumptions.h \
@@ -292,6 +292,7 @@ BITCOIN_CORE_H = \
   memusage.h \
   merkleblock.h \
   messagesigner.h \
+  msg_result.h \
   net.h \
   net_permissions.h \
   net_processing.h \
@@ -486,8 +487,8 @@ libbitcoin_node_a_SOURCES = \
   chainlock/clsig.cpp \
   chainlock/signing.cpp \
   coinjoin/coinjoin.cpp \
-  coinjoin/context.cpp \
   coinjoin/server.cpp \
+  coinjoin/walletman.cpp \
   consensus/tx_verify.cpp \
   dbwrapper.cpp \
   deploymentstatus.cpp \

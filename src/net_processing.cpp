@@ -14,11 +14,11 @@
 #include <consensus/validation.h>
 #include <hash.h>
 #include <index/blockfilterindex.h>
-#include <validation.h>
+#include <index/txindex.h>
 #include <merkleblock.h>
-#include <netmessagemaker.h>
-#include <netbase.h>
 #include <net_types.h>
+#include <netbase.h>
+#include <netmessagemaker.h>
 #include <node/blockstorage.h>
 #include <node/txreconciliation.h>
 #include <policy/policy.h>
@@ -31,42 +31,24 @@
 #include <sync.h>
 #include <timedata.h>
 #include <tinyformat.h>
-#include <index/txindex.h>
 #include <txmempool.h>
 #include <txorphanage.h>
 #include <util/check.h>
-#include <util/system.h>
 #include <util/strencodings.h>
-#include <util/underlying.h>
+#include <util/system.h>
 #include <util/trace.h>
-
-#include <algorithm>
-#include <atomic>
-#include <chrono>
-#include <future>
-#include <list>
-#include <memory>
-#include <optional>
-#include <ranges>
-#include <typeinfo>
-
-#include <spork.h>
-#include <governance/governance.h>
-#include <masternode/active/context.h>
-#include <masternode/sync.h>
-#include <masternode/meta.h>
-#ifdef ENABLE_WALLET
-#include <coinjoin/client.h>
-#endif // ENABLE_WALLET
-#include <coinjoin/context.h>
-#include <coinjoin/server.h>
+#include <util/underlying.h>
+#include <validation.h>
 
 #include <chainlock/chainlock.h>
+#include <coinjoin/server.h>
+#include <coinjoin/walletman.h>
 #include <evo/deterministicmns.h>
 #include <evo/mnauth.h>
 #include <evo/smldiff.h>
-#include <instantsend/lock.h>
+#include <governance/governance.h>
 #include <instantsend/instantsend.h>
+#include <instantsend/lock.h>
 #include <llmq/blockprocessor.h>
 #include <llmq/commitment.h>
 #include <llmq/context.h>
@@ -77,8 +59,22 @@
 #include <llmq/signing.h>
 #include <llmq/signing_shares.h>
 #include <llmq/snapshot.h>
-
+#include <masternode/active/context.h>
+#include <masternode/meta.h>
+#include <masternode/sync.h>
+#include <msg_result.h>
+#include <spork.h>
 #include <stats/client.h>
+
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <future>
+#include <list>
+#include <memory>
+#include <optional>
+#include <ranges>
+#include <typeinfo>
 
 using node::ReadBlockFromDisk;
 using node::fImporting;
@@ -592,15 +588,12 @@ class PeerManagerImpl final : public PeerManager
 {
 public:
     PeerManagerImpl(const CChainParams& chainparams, CConnman& connman, AddrMan& addrman, BanMan* banman,
-                    ChainstateManager& chainman, CTxMemPool& pool,
-                    CMasternodeMetaMan& mn_metaman, CMasternodeSync& mn_sync,
-                    CGovernanceManager& govman, CSporkManager& sporkman,
-                    const CActiveMasternodeManager* const mn_activeman,
+                    CDSTXManager& dstxman, ChainstateManager& chainman, CTxMemPool& pool,
+                    CMasternodeMetaMan& mn_metaman, CMasternodeSync& mn_sync, CGovernanceManager& govman,
+                    CSporkManager& sporkman, const CActiveMasternodeManager* const mn_activeman,
                     const std::unique_ptr<CDeterministicMNManager>& dmnman,
-                    const std::unique_ptr<ActiveContext>& active_ctx,
-                    const std::unique_ptr<CJContext>& cj_ctx,
-                    const std::unique_ptr<LLMQContext>& llmq_ctx,
-                    bool ignore_incoming_txs);
+                    const std::unique_ptr<ActiveContext>& active_ctx, CJWalletManager* const cj_walletman,
+                    const std::unique_ptr<LLMQContext>& llmq_ctx, bool ignore_incoming_txs);
 
     /** Overridden from CValidationInterface. */
     void BlockConnected(const std::shared_ptr<const CBlock>& pblock, const CBlockIndex* pindexConnected) override
@@ -789,12 +782,14 @@ private:
     AddrMan& m_addrman;
     /** Pointer to this node's banman. May be nullptr - check existence before dereferencing. */
     BanMan* const m_banman;
+    CDSTXManager& m_dstxman;
     ChainstateManager& m_chainman;
     CTxMemPool& m_mempool;
     std::unique_ptr<TxReconciliationTracker> m_txreconciliation;
     const std::unique_ptr<CDeterministicMNManager>& m_dmnman;
     const std::unique_ptr<ActiveContext>& m_active_ctx;
-    const std::unique_ptr<CJContext>& m_cj_ctx;
+    /** Pointer to this node's CJWalletManager. May be nullptr - check existence before dereferencing. */
+    CJWalletManager* const m_cj_walletman;
     const std::unique_ptr<LLMQContext>& m_llmq_ctx;
     CMasternodeMetaMan& m_mn_metaman;
     CMasternodeSync& m_mn_sync;
@@ -1960,38 +1955,38 @@ std::optional<std::string> PeerManagerImpl::FetchBlock(NodeId peer_id, const CBl
     return std::nullopt;
 }
 
-std::unique_ptr<PeerManager> PeerManager::make(const CChainParams& chainparams, CConnman& connman, AddrMan& addrman, BanMan* banman,
-                                               ChainstateManager& chainman, CTxMemPool& pool,
-                                               CMasternodeMetaMan& mn_metaman, CMasternodeSync& mn_sync,
-                                               CGovernanceManager& govman, CSporkManager& sporkman,
+std::unique_ptr<PeerManager> PeerManager::make(const CChainParams& chainparams, CConnman& connman, AddrMan& addrman,
+                                               BanMan* banman, CDSTXManager& dstxman, ChainstateManager& chainman,
+                                               CTxMemPool& pool, CMasternodeMetaMan& mn_metaman,
+                                               CMasternodeSync& mn_sync, CGovernanceManager& govman,
+                                               CSporkManager& sporkman,
                                                const CActiveMasternodeManager* const mn_activeman,
                                                const std::unique_ptr<CDeterministicMNManager>& dmnman,
                                                const std::unique_ptr<ActiveContext>& active_ctx,
-                                               const std::unique_ptr<CJContext>& cj_ctx,
+                                               CJWalletManager* const cj_walletman,
                                                const std::unique_ptr<LLMQContext>& llmq_ctx, bool ignore_incoming_txs)
 {
-    return std::make_unique<PeerManagerImpl>(chainparams, connman, addrman, banman, chainman, pool, mn_metaman, mn_sync, govman, sporkman, mn_activeman, dmnman, active_ctx, cj_ctx, llmq_ctx, ignore_incoming_txs);
+    return std::make_unique<PeerManagerImpl>(chainparams, connman, addrman, banman, dstxman, chainman, pool, mn_metaman, mn_sync, govman, sporkman, mn_activeman, dmnman, active_ctx, cj_walletman, llmq_ctx, ignore_incoming_txs);
 }
 
 PeerManagerImpl::PeerManagerImpl(const CChainParams& chainparams, CConnman& connman, AddrMan& addrman, BanMan* banman,
-                                 ChainstateManager& chainman, CTxMemPool& pool,
-                                 CMasternodeMetaMan& mn_metaman, CMasternodeSync& mn_sync,
-                                 CGovernanceManager& govman, CSporkManager& sporkman,
-                                 const CActiveMasternodeManager* const mn_activeman,
+                                 CDSTXManager& dstxman, ChainstateManager& chainman, CTxMemPool& pool,
+                                 CMasternodeMetaMan& mn_metaman, CMasternodeSync& mn_sync, CGovernanceManager& govman,
+                                 CSporkManager& sporkman, const CActiveMasternodeManager* const mn_activeman,
                                  const std::unique_ptr<CDeterministicMNManager>& dmnman,
                                  const std::unique_ptr<ActiveContext>& active_ctx,
-                                 const std::unique_ptr<CJContext>& cj_ctx,
-                                 const std::unique_ptr<LLMQContext>& llmq_ctx,
-                                 bool ignore_incoming_txs)
+                                 CJWalletManager* const cj_walletman,
+                                 const std::unique_ptr<LLMQContext>& llmq_ctx, bool ignore_incoming_txs)
     : m_chainparams(chainparams),
       m_connman(connman),
       m_addrman(addrman),
       m_banman(banman),
+      m_dstxman(dstxman),
       m_chainman(chainman),
       m_mempool(pool),
       m_dmnman(dmnman),
       m_active_ctx(active_ctx),
-      m_cj_ctx(cj_ctx),
+      m_cj_walletman(cj_walletman),
       m_llmq_ctx(llmq_ctx),
       m_mn_metaman(mn_metaman),
       m_mn_sync(mn_sync),
@@ -2242,7 +2237,7 @@ bool PeerManagerImpl::AlreadyHave(const CInv& inv)
                                         m_llmq_ctx->isman->IsLocked(inv.hash);
 
             return (!fIgnoreRecentRejects && m_recent_rejects.contains(inv.hash)) ||
-                   (inv.IsMsgDstx() && static_cast<bool>(m_cj_ctx->dstxman->GetDSTX(inv.hash))) ||
+                   (inv.IsMsgDstx() && static_cast<bool>(m_dstxman.GetDSTX(inv.hash))) ||
                    m_mempool.exists(inv.hash) ||
                    (g_txindex != nullptr && g_txindex->HasTx(inv.hash));
         }
@@ -2280,11 +2275,7 @@ bool PeerManagerImpl::AlreadyHave(const CInv& inv)
     case MSG_ISDLOCK:
         return m_llmq_ctx->isman->AlreadyHave(inv);
     case MSG_DSQ:
-        return
-#ifdef ENABLE_WALLET
-                (m_cj_ctx->queueman && m_cj_ctx->queueman->HasQueue(inv.hash)) ||
-#endif // ENABLE_WALLET
-                (m_active_ctx && m_active_ctx->cj_server->HasQueue(inv.hash));
+        return (m_cj_walletman && m_cj_walletman->hasQueue(inv.hash)) || (m_active_ctx && m_active_ctx->cj_server->HasQueue(inv.hash));
     case MSG_PLATFORM_BAN:
         return m_mn_metaman.AlreadyHavePlatformBan(inv.hash);
     }
@@ -2406,11 +2397,13 @@ void PeerManagerImpl::RelayInvFiltered(const CInv& inv, const CTransaction& rela
 {
     // TODO: Migrate to iteration through m_peer_map
     m_connman.ForEachNode([&](CNode* pnode) {
+        if (!pnode->CanRelay()) return;
+
         PeerRef peer = GetPeerRef(pnode->GetId());
         if (peer == nullptr) return;
 
         auto tx_relay = peer->GetTxRelay();
-        if (!pnode->CanRelay() || tx_relay == nullptr) {
+        if (tx_relay == nullptr) {
             return;
         }
 
@@ -2459,7 +2452,7 @@ void PeerManagerImpl::RelayTransaction(const uint256& txid)
 
 void PeerManagerImpl::_RelayTransaction(const uint256& txid)
 {
-    const CInv inv{m_cj_ctx->dstxman->GetDSTX(txid) ? MSG_DSTX : MSG_TX, txid};
+    const CInv inv{m_dstxman.GetDSTX(txid) ? MSG_DSTX : MSG_TX, txid};
     LOCK(m_peer_mutex);
     for(auto& it : m_peer_map) {
         Peer& peer = *it.second;
@@ -2751,7 +2744,7 @@ void PeerManagerImpl::ProcessGetData(CNode& pfrom, Peer& peer, const std::atomic
             if (tx) {
                 CCoinJoinBroadcastTx dstx;
                 if (inv.IsMsgDstx()) {
-                    dstx = m_cj_ctx->dstxman->GetDSTX(inv.hash);
+                    dstx = m_dstxman.GetDSTX(inv.hash);
                 }
                 if (dstx) {
                     m_connman.PushMessage(&pfrom, msgMaker.Make(NetMsgType::DSTX, dstx));
@@ -2890,11 +2883,9 @@ void PeerManagerImpl::ProcessGetData(CNode& pfrom, Peer& peer, const std::atomic
         }
         if (!push && inv.type == MSG_DSQ) {
             auto opt_dsq = m_active_ctx ? m_active_ctx->cj_server->GetQueueFromHash(inv.hash) : std::nullopt;
-#ifdef ENABLE_WALLET
-            if (m_cj_ctx->queueman && !opt_dsq.has_value()) {
-                opt_dsq = m_cj_ctx->queueman->GetQueueFromHash(inv.hash);
+            if (m_cj_walletman && !opt_dsq.has_value()) {
+                opt_dsq = m_cj_walletman->getQueueFromHash(inv.hash);
             }
-#endif
             if (opt_dsq.has_value()) {
                 m_connman.PushMessage(&pfrom, msgMaker.Make(NetMsgType::DSQUEUE, *opt_dsq));
                 push = true;
@@ -3521,6 +3512,9 @@ void PeerManagerImpl::PostProcessMessage(MessageProcessingResult&& result, NodeI
     }
     for (const auto& inv : result.m_inventory) {
         RelayInv(inv);
+    }
+    for (const auto& dsq : result.m_dsq) {
+        RelayDSQ(dsq);
     }
     if (result.m_inv_filter) {
         const auto& [inv, filter] = result.m_inv_filter.value();
@@ -4565,7 +4559,7 @@ void PeerManagerImpl::ProcessMessage(
         if (nInvType == MSG_DSTX) {
            // Validate DSTX and return bRet if we need to return from here
            uint256 hashTx = tx.GetHash();
-           const auto& [bRet, bDoReturn] = ValidateDSTX(*m_dmnman, *(m_cj_ctx->dstxman), m_chainman, m_mn_metaman, m_mempool, dstx, hashTx);
+           const auto& [bRet, bDoReturn] = ValidateDSTX(*m_dmnman, m_dstxman, m_chainman, m_mn_metaman, m_mempool, dstx, hashTx);
            if (bDoReturn) {
                return;
            }
@@ -4597,7 +4591,7 @@ void PeerManagerImpl::ProcessMessage(
             if (nInvType == MSG_DSTX) {
                 LogPrint(BCLog::COINJOIN, "DSTX -- Masternode transaction accepted, txid=%s, peer=%d\n",
                          tx.GetHash().ToString(), pfrom.GetId());
-                m_cj_ctx->dstxman->AddDSTX(dstx);
+                m_dstxman.AddDSTX(dstx);
             }
 
             _RelayTransaction(tx.GetHash());
@@ -5367,16 +5361,12 @@ void PeerManagerImpl::ProcessMessage(
     if (found)
     {
         //probably one the extensions
-#ifdef ENABLE_WALLET
-        if (m_cj_ctx->queueman) {
-            PostProcessMessage(m_cj_ctx->queueman->ProcessMessage(pfrom.GetId(), m_connman, *this, msg_type, vRecv), pfrom.GetId());
+        if (m_cj_walletman) {
+            PostProcessMessage(m_cj_walletman->processMessage(pfrom, m_chainman.ActiveChainstate(), m_connman, m_mempool, msg_type, vRecv), pfrom.GetId());
         }
-        m_cj_ctx->walletman->ForEachCJClientMan([this, &pfrom, &msg_type, &vRecv](std::unique_ptr<CCoinJoinClientManager>& clientman) {
-            clientman->ProcessMessage(pfrom, m_chainman.ActiveChainstate(), m_connman, m_mempool, msg_type, vRecv);
-        });
-#endif // ENABLE_WALLET
         if (m_active_ctx) {
             PostProcessMessage(m_active_ctx->cj_server->ProcessMessage(pfrom, msg_type, vRecv), pfrom.GetId());
+            m_active_ctx->shareman->ProcessMessage(pfrom, msg_type, vRecv);
         }
         PostProcessMessage(m_sporkman.ProcessMessage(pfrom, m_connman, msg_type, vRecv), pfrom.GetId());
         m_mn_sync.ProcessMessage(pfrom, msg_type, vRecv);
@@ -5385,7 +5375,6 @@ void PeerManagerImpl::ProcessMessage(
         PostProcessMessage(m_llmq_ctx->quorum_block_processor->ProcessMessage(pfrom, msg_type, vRecv), pfrom.GetId());
         PostProcessMessage(m_llmq_ctx->qdkgsman->ProcessMessage(pfrom, is_masternode, msg_type, vRecv), pfrom.GetId());
         PostProcessMessage(m_llmq_ctx->qman->ProcessMessage(pfrom, m_connman, msg_type, vRecv), pfrom.GetId());
-        m_llmq_ctx->shareman->ProcessMessage(pfrom, *this, m_sporkman, msg_type, vRecv);
         PostProcessMessage(m_llmq_ctx->sigman->ProcessMessage(pfrom.GetId(), msg_type, vRecv), pfrom.GetId());
         PostProcessMessage(ProcessPlatformBanMessage(pfrom.GetId(), msg_type, vRecv), pfrom.GetId());
 
@@ -6205,7 +6194,7 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
                     tx_relay->m_tx_inventory_to_send.erase(hash);
                     if (tx_relay->m_bloom_filter && !tx_relay->m_bloom_filter->IsRelevantAndUpdate(*txinfo.tx)) continue;
 
-                    int nInvType = m_cj_ctx->dstxman->GetDSTX(hash) ? MSG_DSTX : MSG_TX;
+                    int nInvType = m_dstxman.GetDSTX(hash) ? MSG_DSTX : MSG_TX;
                     tx_relay->m_tx_inventory_known_filter.insert(hash);
                     queueAndMaybePushInv(CInv(nInvType, hash));
 
@@ -6280,7 +6269,7 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
                             g_relay_expiration.emplace_back(current_time + RELAY_TX_CACHE_TIME, ret.first);
                         }
                     }
-                    int nInvType = m_cj_ctx->dstxman->GetDSTX(hash) ? MSG_DSTX : MSG_TX;
+                    int nInvType = m_dstxman.GetDSTX(hash) ? MSG_DSTX : MSG_TX;
                     tx_relay->m_tx_inventory_known_filter.insert(hash);
                     queueAndMaybePushInv(CInv(nInvType, hash));
                 }

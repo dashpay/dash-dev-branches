@@ -6,6 +6,7 @@
 #define BITCOIN_COINJOIN_SERVER_H
 
 #include <coinjoin/coinjoin.h>
+#include <msg_result.h>
 
 #include <net_types.h>
 #include <protocol.h>

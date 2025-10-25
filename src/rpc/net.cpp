@@ -90,7 +90,7 @@ static RPCHelpMan ping()
 
     // Request that each node send a ping during next message processing pass
     peerman.SendPings();
-    return NullUniValue;
+    return UniValue::VNULL;
 },
     };
 }
@@ -340,7 +340,7 @@ static RPCHelpMan addnode()
     {
         CAddress addr;
         connman.OpenNetworkConnection(addr, /*fCountFailure=*/false, /*grant_outbound=*/{}, node_arg.c_str(), ConnectionType::MANUAL, use_v2transport);
-        return NullUniValue;
+        return UniValue::VNULL;
     }
 
     if (command == "add")
@@ -356,7 +356,7 @@ static RPCHelpMan addnode()
         }
     }
 
-    return NullUniValue;
+    return UniValue::VNULL;
 },
     };
 }
@@ -466,7 +466,7 @@ static RPCHelpMan disconnectnode()
         throw JSONRPCError(RPC_CLIENT_NODE_NOT_CONNECTED, "Node not found in connected nodes");
     }
 
-    return NullUniValue;
+    return UniValue::VNULL;
 },
     };
 }
@@ -804,7 +804,7 @@ static RPCHelpMan setban()
             throw JSONRPCError(RPC_CLIENT_INVALID_IP_OR_SUBNET, "Error: Unban failed. Requested address/subnet was not previously manually banned.");
         }
     }
-    return NullUniValue;
+    return UniValue::VNULL;
 },
     };
 }
@@ -872,7 +872,7 @@ static RPCHelpMan clearbanned()
 
     banman.ClearBanned();
 
-    return NullUniValue;
+    return UniValue::VNULL;
 },
     };
 }
@@ -893,7 +893,7 @@ static RPCHelpMan cleardiscouraged()
 
     banman.ClearDiscouraged();
 
-    return NullUniValue;
+    return UniValue::VNULL;
 },
     };
 }
@@ -1079,7 +1079,7 @@ static RPCHelpMan sendmsgtopeer()
                 throw JSONRPCError(RPC_MISC_ERROR, "Error: Could not send message to peer");
             }
 
-            return NullUniValue;
+            return UniValue::VNULL;
         },
     };
 }
