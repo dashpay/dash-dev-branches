@@ -214,7 +214,7 @@ void GovernanceSigner::VoteGovernanceTriggers(const std::optional<const CGoverna
     // Vote NO-FUNDING for the rest of the active triggers
     const auto activeTriggers = m_govman.GetActiveTriggers();
     for (const auto& trigger : activeTriggers) {
-        const auto govobj = m_govman.FindGovernanceObject(trigger->GetGovernanceObjHash());
+        auto govobj = m_govman.FindGovernanceObject(trigger->GetGovernanceObjHash());
         if (!govobj) {
             LogPrint(BCLog::GOBJECT, "%s -- Not voting NO-FUNDING for unknown trigger %s\n", __func__,
                      trigger->GetGovernanceObjHash().ToString());

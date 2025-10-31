@@ -262,9 +262,6 @@ private:
     const llmq::CInstantSendManager& m_isman;
     const std::unique_ptr<CCoinJoinClientQueueManager>& m_queueman;
 
-    // Keep track of the used Masternodes
-    std::vector<COutPoint> vecMasternodesUsed;
-
     mutable Mutex cs_deqsessions;
     // TODO: or map<denom, CCoinJoinClientSession> ??
     std::deque<CCoinJoinClientSession> deqSessions GUARDED_BY(cs_deqsessions);
@@ -327,7 +324,7 @@ public:
 
     void ProcessPendingDsaRequest(CConnman& connman) EXCLUSIVE_LOCKS_REQUIRED(!cs_deqsessions);
 
-    void AddUsedMasternode(const COutPoint& outpointMn);
+    void AddUsedMasternode(const uint256& proTxHash);
     CDeterministicMNCPtr GetRandomNotUsedMasternode();
 
     void UpdatedSuccessBlock();

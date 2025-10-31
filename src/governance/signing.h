@@ -37,8 +37,8 @@ public:
     virtual bool MasternodeRateCheck(const CGovernanceObject& govobj, bool fUpdateFailStatus = false) = 0;
     virtual bool ProcessVoteAndRelay(const CGovernanceVote& vote, CGovernanceException& exception, CConnman& connman) = 0;
     virtual int GetCachedBlockHeight() const = 0;
-    virtual CGovernanceObject* FindGovernanceObject(const uint256& nHash) = 0;
-    virtual CGovernanceObject* FindGovernanceObjectByDataHash(const uint256& nDataHash) = 0;
+    virtual std::shared_ptr<CGovernanceObject> FindGovernanceObject(const uint256& nHash) = 0;
+    virtual std::shared_ptr<CGovernanceObject> FindGovernanceObjectByDataHash(const uint256& nDataHash) = 0;
     virtual std::vector<std::shared_ptr<CSuperblock>> GetActiveTriggers() const = 0;
     virtual std::vector<std::shared_ptr<const CGovernanceObject>> GetApprovedProposals(
         const CDeterministicMNList& tip_mn_list) = 0;

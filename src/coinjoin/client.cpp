@@ -248,7 +248,6 @@ void CCoinJoinClientSession::ResetPool()
 void CCoinJoinClientManager::ResetPool()
 {
     nCachedLastSuccessBlock = 0;
-    vecMasternodesUsed.clear();
     AssertLockNotHeld(cs_deqsessions);
     LOCK(cs_deqsessions);
     for (auto& session : deqSessions) {
@@ -967,11 +966,14 @@ bool CCoinJoinClientManager::DoAutomaticDenominating(ChainstateManager& chainman
     // If we've used 90% of the Masternode list then drop the oldest first ~30%
     int nThreshold_high = nMnCountEnabled * 0.9;
     int nThreshold_low = nThreshold_high * 0.7;
-    WalletCJLogPrint(m_wallet, "Checking vecMasternodesUsed: size: %d, threshold: %d\n", (int)vecMasternodesUsed.size(), nThreshold_high);
+    size_t used_count{m_mn_metaman.GetUsedMasternodesCount()};
 
-    if ((int)vecMasternodesUsed.size() > nThreshold_high) {
-        vecMasternodesUsed.erase(vecMasternodesUsed.begin(), vecMasternodesUsed.begin() + vecMasternodesUsed.size() - nThreshold_low);
-        WalletCJLogPrint(m_wallet, "  vecMasternodesUsed: new size: %d, threshold: %d\n", (int)vecMasternodesUsed.size(), nThreshold_high);
+    WalletCJLogPrint(m_wallet, "Checking threshold - used: %d, threshold: %d\n", (int)used_count, nThreshold_high);
+
+    if ((int)used_count > nThreshold_high) {
+        m_mn_metaman.RemoveUsedMasternodes(used_count - nThreshold_low);
+        WalletCJLogPrint(m_wallet, "  new used: %d, threshold: %d\n", (int)m_mn_metaman.GetUsedMasternodesCount(),
+                         nThreshold_high);
     }
 
     bool fResult = true;
@@ -995,9 +997,9 @@ bool CCoinJoinClientManager::DoAutomaticDenominating(ChainstateManager& chainman
     return fResult;
 }
 
-void CCoinJoinClientManager::AddUsedMasternode(const COutPoint& outpointMn)
+void CCoinJoinClientManager::AddUsedMasternode(const uint256& proTxHash)
 {
-    vecMasternodesUsed.push_back(outpointMn);
+    m_mn_metaman.AddUsedMasternode(proTxHash);
 }
 
 CDeterministicMNCPtr CCoinJoinClientManager::GetRandomNotUsedMasternode()
@@ -1005,7 +1007,7 @@ CDeterministicMNCPtr CCoinJoinClientManager::GetRandomNotUsedMasternode()
     auto mnList = m_dmnman.GetListAtChainTip();
 
     size_t nCountEnabled = mnList.GetValidMNsCount();
-    size_t nCountNotExcluded = nCountEnabled - vecMasternodesUsed.size();
+    size_t nCountNotExcluded{nCountEnabled - m_mn_metaman.GetUsedMasternodesCount()};
 
     WalletCJLogPrint(m_wallet, "CCoinJoinClientManager::%s -- %d enabled masternodes, %d masternodes to choose from\n", __func__, nCountEnabled, nCountNotExcluded);
     if (nCountNotExcluded < 1) {
@@ -1022,15 +1024,14 @@ CDeterministicMNCPtr CCoinJoinClientManager::GetRandomNotUsedMasternode()
     // shuffle pointers
     Shuffle(vpMasternodesShuffled.begin(), vpMasternodesShuffled.end(), FastRandomContext());
 
-    std::set<COutPoint> excludeSet(vecMasternodesUsed.begin(), vecMasternodesUsed.end());
-
-    // loop through
+    // loop through - using direct O(1) lookup instead of creating a set copy
     for (const auto& dmn : vpMasternodesShuffled) {
-        if (excludeSet.count(dmn->collateralOutpoint)) {
+        if (m_mn_metaman.IsUsedMasternode(dmn->proTxHash)) {
             continue;
         }
 
-        WalletCJLogPrint(m_wallet, "CCoinJoinClientManager::%s -- found, masternode=%s\n", __func__, dmn->collateralOutpoint.ToStringShort());
+        WalletCJLogPrint(m_wallet, "CCoinJoinClientManager::%s -- found, masternode=%s\n", __func__,
+                         dmn->proTxHash.ToString());
         return dmn;
     }
 
@@ -1083,7 +1084,7 @@ bool CCoinJoinClientSession::JoinExistingQueue(CAmount nBalanceNeedsAnonymized, 
             continue;
         }
 
-        m_clientman.AddUsedMasternode(dsq.masternodeOutpoint);
+        m_clientman.AddUsedMasternode(dmn->proTxHash);
 
         if (connman.IsMasternodeOrDisconnectRequested(dmn->pdmnState->netInfo->GetPrimary())) {
             WalletCJLogPrint(m_wallet, /* Continued */
@@ -1137,7 +1138,7 @@ bool CCoinJoinClientSession::StartNewQueue(CAmount nBalanceNeedsAnonymized, CCon
             return false;
         }
 
-        m_clientman.AddUsedMasternode(dmn->collateralOutpoint);
+        m_clientman.AddUsedMasternode(dmn->proTxHash);
 
         // skip next mn payments winners
         if (dmn->pdmnState->nLastPaidHeight + nWeightedMnCount < mnList.GetHeight() + WinnersToSkip()) {

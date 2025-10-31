@@ -8,7 +8,7 @@
 #include <univalue.h>
 #include <util/time.h>
 
-const std::string MasternodeMetaStore::SERIALIZATION_VERSION_STRING = "CMasternodeMetaMan-Version-4";
+const std::string MasternodeMetaStore::SERIALIZATION_VERSION_STRING = "CMasternodeMetaMan-Version-5";
 
 CMasternodeMetaMan::CMasternodeMetaMan() :
     m_db{std::make_unique<db_type>("mncache.dat", "magicMasternodeCache")}
@@ -153,10 +153,44 @@ void CMasternodeMetaMan::RememberPlatformBan(const uint256& inv_hash, PlatformBa
     m_seen_platform_bans.insert(inv_hash, std::move(msg));
 }
 
+void CMasternodeMetaMan::AddUsedMasternode(const uint256& proTxHash)
+{
+    LOCK(cs);
+    // Only add if not already present (prevents duplicates)
+    if (m_used_masternodes_set.insert(proTxHash).second) {
+        m_used_masternodes.push_back(proTxHash);
+    }
+}
+
+void CMasternodeMetaMan::RemoveUsedMasternodes(size_t count)
+{
+    LOCK(cs);
+    size_t removed = 0;
+    while (removed < count && !m_used_masternodes.empty()) {
+        // Remove from both the set and the deque
+        m_used_masternodes_set.erase(m_used_masternodes.front());
+        m_used_masternodes.pop_front();
+        ++removed;
+    }
+}
+
+size_t CMasternodeMetaMan::GetUsedMasternodesCount() const
+{
+    LOCK(cs);
+    return m_used_masternodes.size();
+}
+
+bool CMasternodeMetaMan::IsUsedMasternode(const uint256& proTxHash) const
+{
+    LOCK(cs);
+    return m_used_masternodes_set.find(proTxHash) != m_used_masternodes_set.end();
+}
+
 std::string MasternodeMetaStore::ToString() const
 {
     LOCK(cs);
-    return strprintf("Masternodes: meta infos object count: %d, nDsqCount: %d", metaInfos.size(), nDsqCount);
+    return strprintf("Masternodes: meta infos object count: %d, nDsqCount: %d, used masternodes count: %d",
+                     metaInfos.size(), nDsqCount, m_used_masternodes.size());
 }
 
 uint256 PlatformBanMessage::GetHash() const { return ::SerializeHash(*this); }

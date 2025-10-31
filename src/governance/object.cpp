@@ -144,7 +144,6 @@ bool CGovernanceObject::ProcessVote(CMasternodeMetaMan& mn_metaman, CGovernanceM
             __func__, vote.GetMasternodeOutpoint().ToStringShort(), GetHash().ToString(), vote.GetHash().ToString())};
         LogPrintf("%s\n", msg);
         exception = CGovernanceException(msg, GOVERNANCE_EXCEPTION_PERMANENT_ERROR, 20);
-        govman.AddInvalidVote(vote);
         return false;
     }
 
@@ -535,13 +534,12 @@ int CGovernanceObject::CountMatchingVotes(const CDeterministicMNList& tip_mn_lis
     LOCK(cs);
 
     int nCount = 0;
-    for (const auto& votepair : mapCurrentMNVotes) {
-        const vote_rec_t& recVote = votepair.second;
+    for (const auto& [outpoint, recVote] : mapCurrentMNVotes) {
         auto it2 = recVote.mapInstances.find(eVoteSignalIn);
         if (it2 != recVote.mapInstances.end() && it2->second.eOutcome == eVoteOutcomeIn) {
             // 4x times weight vote for EvoNode owners.
             // No need to check if v19 is active since no EvoNode are allowed to register before v19s
-            auto dmn = tip_mn_list.GetMNByCollateral(votepair.first);
+            auto dmn = tip_mn_list.GetMNByCollateral(outpoint);
             if (dmn != nullptr) nCount += GetMnType(dmn->nType).voting_weight;
         }
     }
@@ -554,26 +552,31 @@ int CGovernanceObject::CountMatchingVotes(const CDeterministicMNList& tip_mn_lis
 
 int CGovernanceObject::GetAbsoluteYesCount(const CDeterministicMNList& tip_mn_list, vote_signal_enum_t eVoteSignalIn) const
 {
+    AssertLockNotHeld(cs);
     return GetYesCount(tip_mn_list, eVoteSignalIn) - GetNoCount(tip_mn_list, eVoteSignalIn);
 }
 
 int CGovernanceObject::GetAbsoluteNoCount(const CDeterministicMNList& tip_mn_list, vote_signal_enum_t eVoteSignalIn) const
 {
+    AssertLockNotHeld(cs);
     return GetNoCount(tip_mn_list, eVoteSignalIn) - GetYesCount(tip_mn_list, eVoteSignalIn);
 }
 
 int CGovernanceObject::GetYesCount(const CDeterministicMNList& tip_mn_list, vote_signal_enum_t eVoteSignalIn) const
 {
+    AssertLockNotHeld(cs);
     return CountMatchingVotes(tip_mn_list, eVoteSignalIn, VOTE_OUTCOME_YES);
 }
 
 int CGovernanceObject::GetNoCount(const CDeterministicMNList& tip_mn_list, vote_signal_enum_t eVoteSignalIn) const
 {
+    AssertLockNotHeld(cs);
     return CountMatchingVotes(tip_mn_list, eVoteSignalIn, VOTE_OUTCOME_NO);
 }
 
 int CGovernanceObject::GetAbstainCount(const CDeterministicMNList& tip_mn_list, vote_signal_enum_t eVoteSignalIn) const
 {
+    AssertLockNotHeld(cs);
     return CountMatchingVotes(tip_mn_list, eVoteSignalIn, VOTE_OUTCOME_ABSTAIN);
 }
 
@@ -591,6 +594,8 @@ bool CGovernanceObject::GetCurrentMNVotes(const COutPoint& mnCollateralOutpoint,
 
 void CGovernanceObject::UpdateSentinelVariables(const CDeterministicMNList& tip_mn_list)
 {
+    AssertLockNotHeld(cs);
+
     // CALCULATE MINIMUM SUPPORT LEVELS REQUIRED
 
     int nWeightedMnCount = (int)tip_mn_list.GetValidWeightedMNsCount();
@@ -614,6 +619,7 @@ void CGovernanceObject::UpdateSentinelVariables(const CDeterministicMNList& tip_
     if (GetAbsoluteYesCount(tip_mn_list, VOTE_SIGNAL_FUNDING) >= nAbsVoteReq) fCachedFunding = true;
     if ((GetAbsoluteYesCount(tip_mn_list, VOTE_SIGNAL_DELETE) >= nAbsDeleteReq) && !fCachedDelete) {
         fCachedDelete = true;
+        LOCK(cs);
         if (nDeletionTime == 0) {
             nDeletionTime = GetTime<std::chrono::seconds>().count();
         }
