@@ -101,7 +101,10 @@ private:
     CDKGDebugStatus localStatus GUARDED_BY(cs_lockStatus);
 
 public:
+    CDKGDebugManager(const CDKGDebugManager&) = delete;
+    CDKGDebugManager& operator=(const CDKGDebugManager&) = delete;
     CDKGDebugManager();
+    ~CDKGDebugManager();
 
     void GetLocalDebugStatus(CDKGDebugStatus& ret) const EXCLUSIVE_LOCKS_REQUIRED(!cs_lockStatus);
 

@@ -634,6 +634,14 @@ void CDeterministicMNList::RemoveMN(const uint256& proTxHash)
     InvalidateSMLCache();
 }
 
+CDeterministicMNManager::CDeterministicMNManager(CEvoDB& evoDb, CMasternodeMetaMan& mn_metaman) :
+    m_evoDb{evoDb},
+    m_mn_metaman{mn_metaman}
+{
+}
+
+CDeterministicMNManager::~CDeterministicMNManager() = default;
+
 bool CDeterministicMNManager::ProcessBlock(const CBlock& block, gsl::not_null<const CBlockIndex*> pindex,
                                            BlockValidationState& state, const CDeterministicMNList& newList,
                                            std::optional<MNListUpdates>& updatesRet)

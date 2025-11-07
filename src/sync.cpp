@@ -288,6 +288,15 @@ template void AssertLockHeldInternal(const char*, const char*, int, RecursiveMut
 template void AssertLockHeldInternal(const char*, const char*, int, SharedMutex*);
 
 template <typename MutexType>
+void AssertSharedLockHeldInternal(const char* pszName, const char* pszFile, int nLine, MutexType* cs)
+{
+    if (LockHeld(cs)) return;
+    tfm::format(std::cerr, "Assertion failed: shared lock %s not held in %s:%i; locks held:\n%s", pszName, pszFile, nLine, LocksHeld());
+    abort();
+}
+template void AssertSharedLockHeldInternal(const char*, const char*, int, SharedMutex*);
+
+template <typename MutexType>
 void AssertLockNotHeldInternal(const char* pszName, const char* pszFile, int nLine, MutexType* cs)
 {
     if (!LockHeld(cs)) return;

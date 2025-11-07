@@ -70,6 +70,9 @@ private:
     std::atomic<std::chrono::seconds> lastCleanupTime{0s};
 
 public:
+    CChainLocksHandler() = delete;
+    CChainLocksHandler(const CChainLocksHandler&) = delete;
+    CChainLocksHandler& operator=(const CChainLocksHandler&) = delete;
     explicit CChainLocksHandler(CChainState& chainstate, CQuorumManager& _qman, CSporkManager& sporkman,
                                 CTxMemPool& _mempool, const CMasternodeSync& mn_sync);
     ~CChainLocksHandler();

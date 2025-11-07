@@ -48,6 +48,7 @@ std::optional<ChainstateLoadingError> LoadChainstate(bool fReset,
                                                      std::unique_ptr<CMNHFManager>& mnhf_manager,
                                                      std::unique_ptr<LLMQContext>& llmq_ctx,
                                                      CTxMemPool* mempool,
+                                                     const fs::path& data_dir,
                                                      bool fPruneMode,
                                                      bool is_addrindex_enabled,
                                                      bool is_governance_enabled,
@@ -62,6 +63,7 @@ std::optional<ChainstateLoadingError> LoadChainstate(bool fReset,
                                                      int64_t nCoinCacheUsage,
                                                      bool block_tree_db_in_memory,
                                                      bool coins_db_in_memory,
+                                                     bool dash_dbs_in_memory,
                                                      std::function<bool()> shutdown_requested,
                                                      std::function<void()> coins_error_cb)
 {
@@ -71,9 +73,8 @@ std::optional<ChainstateLoadingError> LoadChainstate(bool fReset,
 
     LOCK(cs_main);
 
-    int64_t nEvoDbCache{64 * 1024 * 1024}; // TODO
     evodb.reset();
-    evodb = std::make_unique<CEvoDB>(nEvoDbCache, false, fReset || fReindexChainState);
+    evodb = std::make_unique<CEvoDB>(util::DbWrapperParams{.path = data_dir, .memory = dash_dbs_in_memory, .wipe = fReset || fReindexChainState});
 
     mnhf_manager.reset();
     mnhf_manager = std::make_unique<CMNHFManager>(*evodb);
@@ -89,8 +90,8 @@ std::optional<ChainstateLoadingError> LoadChainstate(bool fReset,
     pblocktree.reset(new CBlockTreeDB(nBlockTreeDBCache, block_tree_db_in_memory, fReset));
 
     DashChainstateSetup(chainman, govman, mn_metaman, mn_sync, sporkman, mn_activeman, chain_helper, cpoolman,
-                        dmnman, evodb, mnhf_manager, llmq_ctx, mempool, fReset, fReindexChainState,
-                        consensus_params);
+                        dmnman, evodb, mnhf_manager, llmq_ctx, mempool, data_dir, dash_dbs_in_memory,
+                        /*llmq_dbs_wipe=*/fReset || fReindexChainState, consensus_params);
 
     if (fReset) {
         pblocktree->WriteReindexing(true);
@@ -229,8 +230,9 @@ void DashChainstateSetup(ChainstateManager& chainman,
                          std::unique_ptr<CMNHFManager>& mnhf_manager,
                          std::unique_ptr<LLMQContext>& llmq_ctx,
                          CTxMemPool* mempool,
-                         bool fReset,
-                         bool fReindexChainState,
+                         const fs::path& data_dir,
+                         bool llmq_dbs_in_memory,
+                         bool llmq_dbs_wipe,
                          const Consensus::Params& consensus_params)
 {
     // Same logic as pblocktree
@@ -246,7 +248,8 @@ void DashChainstateSetup(ChainstateManager& chainman,
     }
     llmq_ctx.reset();
     llmq_ctx = std::make_unique<LLMQContext>(chainman, *dmnman, *evodb, mn_metaman, *mnhf_manager, sporkman,
-                                             *mempool, mn_activeman.get(), mn_sync, /*unit_tests=*/false, /*wipe=*/fReset || fReindexChainState);
+                                             *mempool, mn_activeman.get(), mn_sync,
+                                             util::DbWrapperParams{.path = data_dir, .memory = llmq_dbs_in_memory, .wipe = llmq_dbs_wipe});
     mempool->ConnectManagers(dmnman.get(), llmq_ctx->isman.get());
     // Enable CMNHFManager::{Process, Undo}Block
     mnhf_manager->ConnectManagers(&chainman, llmq_ctx->qman.get());

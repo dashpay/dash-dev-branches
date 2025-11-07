@@ -20,10 +20,10 @@
 #include <deploymentstatus.h>
 #include <flatfile.h>
 #include <hash.h>
+#include <kernel/coinstats.h>
 #include <logging.h>
 #include <logging/timer.h>
 #include <node/blockstorage.h>
-#include <node/coinstats.h>
 #include <node/interface_ui.h>
 #include <node/utxo_snapshot.h>
 #include <policy/policy.h>
@@ -67,12 +67,14 @@
 #include <ranges>
 #include <string>
 
+using kernel::CCoinsStats;
+using kernel::CoinStatsHashType;
+using kernel::ComputeUTXOStats;
+
 using node::BlockManager;
 using node::BlockMap;
 using node::CBlockIndexHeightOnlyComparator;
 using node::CBlockIndexWorkComparator;
-using node::CCoinsStats;
-using node::CoinStatsHashType;
 using node::DEFAULT_ADDRESSINDEX;
 using node::DEFAULT_SPENTINDEX;
 using node::DEFAULT_TIMESTAMPINDEX;
@@ -2813,12 +2815,12 @@ bool CChainState::FlushStateToDisk(
                 }
             }
         }
-        const auto nNow = GetTime<std::chrono::microseconds>();
+        const auto nNow{SteadyClock::now()};
         // Avoid writing/flushing immediately after startup.
-        if (m_last_write.count() == 0) {
+        if (m_last_write == decltype(m_last_write){}) {
             m_last_write = nNow;
         }
-        if (m_last_flush.count() == 0) {
+        if (m_last_flush == decltype(m_last_flush){}) {
             m_last_flush = nNow;
         }
         // The cache is large and we're within 10% and 10 MiB of the limit, but we have time now (not in the middle of a block processing).
@@ -2890,7 +2892,7 @@ bool CChainState::FlushStateToDisk(
             m_last_flush = nNow;
             full_flush_completed = true;
             TRACE5(utxocache, flush,
-                   (int64_t)(GetTimeMicros() - nNow.count()), // in microseconds (µs)
+                   int64_t{Ticks<std::chrono::microseconds>(SteadyClock::now() - nNow)},
                    (uint32_t)mode,
                    (uint64_t)coins_count,
                    (uint64_t)coins_mem_usage,
@@ -5825,7 +5827,8 @@ bool ChainstateManager::PopulateAndValidateSnapshot(
     CBlockIndex* snapshot_start_block = WITH_LOCK(::cs_main, return m_blockman.LookupBlockIndex(base_blockhash));
 
     if (!snapshot_start_block) {
-        // Needed for GetUTXOStats and ExpectedAssumeutxo to determine the height and to avoid a crash when base_blockhash.IsNull()
+        // Needed for ComputeUTXOStats and ExpectedAssumeutxo to determine the
+        // height and to avoid a crash when base_blockhash.IsNull()
         LogPrintf("[snapshot] Did not find snapshot start blockheader %s\n",
                   base_blockhash.ToString());
         return false;
@@ -5933,22 +5936,22 @@ bool ChainstateManager::PopulateAndValidateSnapshot(
 
     assert(coins_cache.GetBestBlock() == base_blockhash);
 
-    CCoinsStats stats{CoinStatsHashType::HASH_SERIALIZED};
     auto breakpoint_fnc = [] { /* TODO insert breakpoint here? */ };
 
     // As above, okay to immediately release cs_main here since no other context knows
     // about the snapshot_chainstate.
     CCoinsViewDB* snapshot_coinsdb = WITH_LOCK(::cs_main, return &snapshot_chainstate.CoinsDB());
 
-    if (!GetUTXOStats(snapshot_coinsdb, m_blockman, stats, breakpoint_fnc)) {
+    const std::optional<CCoinsStats> maybe_stats = ComputeUTXOStats(CoinStatsHashType::HASH_SERIALIZED, snapshot_coinsdb, m_blockman, breakpoint_fnc);
+    if (!maybe_stats.has_value()) {
         LogPrintf("[snapshot] failed to generate coins stats\n");
         return false;
     }
 
     // Assert that the deserialized chainstate contents match the expected assumeutxo value.
-    if (AssumeutxoHash{stats.hashSerialized} != au_data.hash_serialized) {
+    if (AssumeutxoHash{maybe_stats->hashSerialized} != au_data.hash_serialized) {
         LogPrintf("[snapshot] bad snapshot content hash: expected %s, got %s\n",
-            au_data.hash_serialized.ToString(), stats.hashSerialized.ToString());
+            au_data.hash_serialized.ToString(), maybe_stats->hashSerialized.ToString());
         return false;
     }
 

@@ -336,6 +336,14 @@ uint256 GetLastBaseBlockHash(Span<const CBlockIndex*> baseBlockIndexes, const CB
     return hash;
 }
 
+CQuorumSnapshotManager::CQuorumSnapshotManager(CEvoDB& evoDb) :
+    m_evoDb{evoDb},
+    quorumSnapshotCache{32}
+{
+}
+
+CQuorumSnapshotManager::~CQuorumSnapshotManager() = default;
+
 std::optional<CQuorumSnapshot> CQuorumSnapshotManager::GetSnapshotForBlock(const Consensus::LLMQType llmqType, const CBlockIndex* pindex)
 {
     CQuorumSnapshot snapshot = {};

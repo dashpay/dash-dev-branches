@@ -14,13 +14,12 @@ import sys
 EXPECTED_CIRCULAR_DEPENDENCIES = (
     "chainparamsbase -> util/system -> chainparamsbase",
     "node/blockstorage -> validation -> node/blockstorage",
-    "index/coinstatsindex -> node/coinstats -> index/coinstatsindex",
     "policy/fees -> txmempool -> policy/fees",
     "qt/addresstablemodel -> qt/walletmodel -> qt/addresstablemodel",
     "qt/recentrequeststablemodel -> qt/walletmodel -> qt/recentrequeststablemodel",
     "qt/transactiontablemodel -> qt/walletmodel -> qt/transactiontablemodel",
     "wallet/wallet -> wallet/walletdb -> wallet/wallet",
-    "node/coinstats -> validation -> node/coinstats",
+    "kernel/coinstats -> validation -> kernel/coinstats",
     # Dash
     "banman -> common/bloom -> evo/assetlocktx -> llmq/quorums -> net -> banman",
     "chainlock/chainlock -> instantsend/instantsend -> chainlock/chainlock",

@@ -51,7 +51,11 @@ private:
     const std::unique_ptr<CDeterministicMNManager>& m_dmnman;
 
 public:
+    CActiveMasternodeManager() = delete;
+    CActiveMasternodeManager(const CActiveMasternodeManager&) = delete;
+    CActiveMasternodeManager& operator=(const CActiveMasternodeManager&) = delete;
     explicit CActiveMasternodeManager(const CBLSSecretKey& sk, CConnman& connman, const std::unique_ptr<CDeterministicMNManager>& dmnman);
+    ~CActiveMasternodeManager();
 
     void UpdatedBlockTip(const CBlockIndex* pindexNew, const CBlockIndex* pindexFork, bool fInitialDownload)
         EXCLUSIVE_LOCKS_REQUIRED(!cs);

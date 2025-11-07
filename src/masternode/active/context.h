@@ -41,10 +41,12 @@ private:
 public:
     ActiveContext() = delete;
     ActiveContext(const ActiveContext&) = delete;
-    ActiveContext(ChainstateManager& chainman, CConnman& connman, CDeterministicMNManager& dmnman,
-                  CDSTXManager& dstxman, CGovernanceManager& govman, CMasternodeMetaMan& mn_metaman,
-                  CMNHFManager& mnhfman, CSporkManager& sporkman, CTxMemPool& mempool, LLMQContext& llmq_ctx,
-                  PeerManager& peerman, const CActiveMasternodeManager& mn_activeman, const CMasternodeSync& mn_sync);
+    ActiveContext& operator=(const ActiveContext&) = delete;
+    explicit ActiveContext(ChainstateManager& chainman, CConnman& connman, CDeterministicMNManager& dmnman,
+                           CDSTXManager& dstxman, CGovernanceManager& govman, CMasternodeMetaMan& mn_metaman,
+                           CMNHFManager& mnhfman, CSporkManager& sporkman, CTxMemPool& mempool, LLMQContext& llmq_ctx,
+                           PeerManager& peerman, const CActiveMasternodeManager& mn_activeman,
+                           const CMasternodeSync& mn_sync);
     ~ActiveContext();
 
     void Interrupt();

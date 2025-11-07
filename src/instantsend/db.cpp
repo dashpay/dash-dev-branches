@@ -26,23 +26,22 @@ static std::tuple<std::string, uint32_t, uint256> BuildInversedISLockKey(std::st
 }
 } // anonymous namespace
 
-CInstantSendDb::CInstantSendDb(bool unitTests, bool fWipe) :
-    db(std::make_unique<CDBWrapper>(unitTests ? "" : (gArgs.GetDataDirNet() / "llmq/isdb"), 32 << 20, unitTests, fWipe))
+CInstantSendDb::CInstantSendDb(const util::DbWrapperParams& db_params) :
+    db{util::MakeDbWrapper({db_params.path / "llmq" / "isdb", db_params.memory, db_params.wipe, /*cache_size=*/32 << 20})}
 {
-    Upgrade(unitTests);
+    Upgrade({db_params.path / "llmq" / "isdb", db_params.memory, /*wipe=*/true, /*cache_size=*/32 << 20});
 }
 
 CInstantSendDb::~CInstantSendDb() = default;
 
-void CInstantSendDb::Upgrade(bool unitTests)
+void CInstantSendDb::Upgrade(const util::DbWrapperParams& db_params)
 {
     LOCK(cs_db);
     int v{0};
     if (!db->Read(DB_VERSION, v) || v < CInstantSendDb::CURRENT_VERSION) {
         // Wipe db
         db.reset();
-        db = std::make_unique<CDBWrapper>(unitTests ? "" : (gArgs.GetDataDirNet() / "llmq/isdb"), 32 << 20, unitTests,
-                                          /*fWipe=*/true);
+        db = util::MakeDbWrapper(db_params);
         CDBBatch batch(*db);
         batch.Write(DB_VERSION, CInstantSendDb::CURRENT_VERSION);
         // Sync DB changes to disk

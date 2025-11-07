@@ -47,10 +47,10 @@ static const std::string DB_BEST_BLOCK_UPGRADE = "q_bbu2";
 
 CQuorumBlockProcessor::CQuorumBlockProcessor(CChainState& chainstate, CDeterministicMNManager& dmnman, CEvoDB& evoDb,
                                              CQuorumSnapshotManager& qsnapman) :
-    m_chainstate(chainstate),
-    m_dmnman(dmnman),
-    m_evoDb(evoDb),
-    m_qsnapman(qsnapman)
+    m_chainstate{chainstate},
+    m_dmnman{dmnman},
+    m_evoDb{evoDb},
+    m_qsnapman{qsnapman}
 {
     utils::InitQuorumsCache(mapHasMinedCommitmentCache);
 
@@ -70,7 +70,10 @@ CQuorumBlockProcessor::CQuorumBlockProcessor(CChainState& chainstate, CDetermini
     m_bls_queue.StartWorkerThreads(bls_threads);
 }
 
-CQuorumBlockProcessor::~CQuorumBlockProcessor() { m_bls_queue.StopWorkerThreads(); }
+CQuorumBlockProcessor::~CQuorumBlockProcessor()
+{
+    m_bls_queue.StopWorkerThreads();
+}
 
 MessageProcessingResult CQuorumBlockProcessor::ProcessMessage(const CNode& peer, std::string_view msg_type,
                                                               CDataStream& vRecv)

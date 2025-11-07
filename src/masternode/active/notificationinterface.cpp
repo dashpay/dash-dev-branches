@@ -16,6 +16,8 @@ ActiveNotificationInterface::ActiveNotificationInterface(ActiveContext& active_c
 {
 }
 
+ActiveNotificationInterface::~ActiveNotificationInterface() = default;
+
 void ActiveNotificationInterface::UpdatedBlockTip(const CBlockIndex* pindexNew, const CBlockIndex* pindexFork,
                                                   bool fInitialDownload)
 {

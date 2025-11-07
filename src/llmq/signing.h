@@ -32,6 +32,9 @@ class CDBWrapper;
 class CInv;
 class PeerManager;
 struct RPCResult;
+namespace util {
+struct DbWrapperParams;
+} // namespace util
 
 class UniValue;
 
@@ -124,7 +127,7 @@ private:
     mutable Uint256LruHashMap<bool, 30000> hasSigForHashCache GUARDED_BY(cs_cache);
 
 public:
-    explicit CRecoveredSigsDb(bool fMemory, bool fWipe);
+    explicit CRecoveredSigsDb(const util::DbWrapperParams& db_params);
     ~CRecoveredSigsDb();
 
     bool HasRecoveredSig(Consensus::LLMQType llmqType, const uint256& id, const uint256& msgHash) const;
@@ -180,7 +183,12 @@ private:
     std::vector<CRecoveredSigsListener*> recoveredSigsListeners GUARDED_BY(cs_listeners);
 
 public:
-    CSigningManager(const CChainState& chainstate, const CQuorumManager& _qman, bool fMemory, bool fWipe);
+    CSigningManager() = delete;
+    CSigningManager(const CSigningManager&) = delete;
+    CSigningManager& operator=(const CSigningManager&) = delete;
+    explicit CSigningManager(const CChainState& chainstate, const CQuorumManager& _qman,
+                             const util::DbWrapperParams& db_params);
+    ~CSigningManager();
 
     bool AlreadyHave(const CInv& inv) const EXCLUSIVE_LOCKS_REQUIRED(!cs_pending);
     bool GetRecoveredSigForGetData(const uint256& hash, CRecoveredSig& ret) const;

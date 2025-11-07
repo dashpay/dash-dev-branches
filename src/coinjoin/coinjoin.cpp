@@ -122,6 +122,10 @@ void CCoinJoinBaseSession::SetNull()
     nTimeLastSuccessfulStep = GetTime();
 }
 
+CCoinJoinBaseManager::CCoinJoinBaseManager() = default;
+
+CCoinJoinBaseManager::~CCoinJoinBaseManager() = default;
+
 void CCoinJoinBaseManager::SetNull()
 {
     LOCK(cs_vecqueue);
@@ -393,6 +397,10 @@ bilingual_str CoinJoin::GetMessageByID(PoolMessage nMessageID)
         return _("Unknown response.");
     }
 }
+
+CDSTXManager::CDSTXManager() = default;
+
+CDSTXManager::~CDSTXManager() = default;
 
 void CDSTXManager::AddDSTX(const CCoinJoinBroadcastTx& dstx)
 {

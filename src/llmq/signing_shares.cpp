@@ -1728,8 +1728,9 @@ void CSigSharesManager::ForceReAnnouncement(const CQuorumCPtr& quorum, Consensus
 
 MessageProcessingResult CSigSharesManager::HandleNewRecoveredSig(const llmq::CRecoveredSig& recoveredSig)
 {
+    auto signHash = recoveredSig.buildSignHash().Get();
     LOCK(cs);
-    RemoveSigSharesForSession(recoveredSig.buildSignHash().Get());
+    RemoveSigSharesForSession(signHash);
     return {};
 }
 } // namespace llmq

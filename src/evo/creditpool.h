@@ -123,9 +123,11 @@ public:
     static constexpr CAmount LimitAmountV22 = 2000 * COIN;
     static constexpr CAmount LimitAmountV24 = 4000 * COIN;
 
+    CCreditPoolManager() = delete;
+    CCreditPoolManager(const CCreditPoolManager&) = delete;
+    CCreditPoolManager& operator=(const CCreditPoolManager&) = delete;
     explicit CCreditPoolManager(CEvoDB& _evoDb);
-
-    ~CCreditPoolManager() = default;
+    ~CCreditPoolManager();
 
     /**
       * @return CCreditPool with data or with empty depends on activation V19 at that block

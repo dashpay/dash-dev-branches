@@ -49,8 +49,9 @@ bool GetLocal(CService& addr, const CNetAddr* paddrPeer)
 }
 } // anonymous namespace
 
-CActiveMasternodeManager::CActiveMasternodeManager(const CBLSSecretKey& sk, CConnman& connman, const std::unique_ptr<CDeterministicMNManager>& dmnman) :
-    m_info(sk, sk.GetPublicKey()),
+CActiveMasternodeManager::CActiveMasternodeManager(const CBLSSecretKey& sk, CConnman& connman,
+                                                   const std::unique_ptr<CDeterministicMNManager>& dmnman) :
+    m_info{sk, sk.GetPublicKey()},
     m_connman{connman},
     m_dmnman{dmnman}
 {
@@ -59,6 +60,8 @@ CActiveMasternodeManager::CActiveMasternodeManager(const CBLSSecretKey& sk, CCon
             m_info.blsPubKeyOperator.ToString(/*specificLegacyScheme=*/ true),
             m_info.blsPubKeyOperator.ToString(/*specificLegacyScheme=*/ false));
 }
+
+CActiveMasternodeManager::~CActiveMasternodeManager() = default;
 
 std::string CActiveMasternodeManager::GetStateString() const
 {

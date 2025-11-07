@@ -51,7 +51,7 @@ BOOST_AUTO_TEST_CASE(chainstatemanager)
         /*cache_size_bytes=*/1 << 23, /*in_memory=*/true, /*should_wipe=*/false);
     WITH_LOCK(::cs_main, c1.InitCoinsCache(1 << 23));
 
-    DashChainstateSetup(manager, m_node, /*fReset=*/false, /*fReindexChainState=*/false, consensus_params);
+    DashChainstateSetup(manager, m_node, /*llmq_dbs_in_memory=*/true, /*llmq_dbs_wipe=*/false, consensus_params);
 
     BOOST_CHECK(!manager.IsSnapshotActive());
     BOOST_CHECK(WITH_LOCK(::cs_main, return !manager.IsSnapshotValidated()));
@@ -84,7 +84,7 @@ BOOST_AUTO_TEST_CASE(chainstatemanager)
     );
     chainstates.push_back(&c2);
 
-    DashChainstateSetup(manager, m_node, /*fReset=*/false, /*fReindexChainState=*/false, consensus_params);
+    DashChainstateSetup(manager, m_node, /*llmq_dbs_in_memory=*/true, /*llmq_dbs_wipe=*/false, consensus_params);
 
     BOOST_CHECK_EQUAL(manager.SnapshotBlockhash().value(), snapshot_blockhash);
 

@@ -39,16 +39,9 @@ See [dependencies.md](dependencies.md) for a complete overview.
 ## Building for 64-bit Windows
 
 The first step is to install the mingw-w64 cross-compilation tool chain:
-  - on modern systems (Ubuntu 21.04 Hirsute Hippo or newer, Debian 11 Bullseye or newer):
 
 ```sh
 sudo apt install g++-mingw-w64-x86-64-posix
-```
-
-  - on older systems:
-
-```sh
-sudo apt install g++-mingw-w64-x86-64
 ```
 
 Once the toolchain is installed the build steps are common:

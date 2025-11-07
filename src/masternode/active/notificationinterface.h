@@ -20,8 +20,9 @@ class ActiveNotificationInterface final : public CValidationInterface
 public:
     ActiveNotificationInterface() = delete;
     ActiveNotificationInterface(const ActiveNotificationInterface&) = delete;
+    ActiveNotificationInterface& operator=(const ActiveNotificationInterface&) = delete;
     explicit ActiveNotificationInterface(ActiveContext& active_ctx, CActiveMasternodeManager& mn_activeman);
-    virtual ~ActiveNotificationInterface() = default;
+    virtual ~ActiveNotificationInterface();
 
 protected:
     // CValidationInterface

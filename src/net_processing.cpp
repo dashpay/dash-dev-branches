@@ -1296,23 +1296,23 @@ void PeerManagerImpl::MaybeSetPeerAsAnnouncingHeaderAndIDs(NodeId nodeid)
     }
     m_connman.ForNode(nodeid, [this](CNode* pfrom) EXCLUSIVE_LOCKS_REQUIRED(::cs_main) {
         AssertLockHeld(::cs_main);
-        if (lNodesAnnouncingHeaderAndIDs.size() >= 3) {
-            // As per BIP152, we only get 3 of our peers to announce
-            // blocks using compact encodings.
-            m_connman.ForNode(lNodesAnnouncingHeaderAndIDs.front(), [this](CNode* pnodeStop){
-                m_connman.PushMessage(pnodeStop, CNetMsgMaker(pnodeStop->GetCommonVersion()).Make(NetMsgType::SENDCMPCT, /*high_bandwidth=*/false, /*version=*/CMPCTBLOCKS_VERSION));
-                // save BIP152 bandwidth state: we select peer to be low-bandwidth
-                pnodeStop->m_bip152_highbandwidth_to = false;
-                return true;
-            });
-            lNodesAnnouncingHeaderAndIDs.pop_front();
-        }
         m_connman.PushMessage(pfrom, CNetMsgMaker(pfrom->GetCommonVersion()).Make(NetMsgType::SENDCMPCT, /*high_bandwidth=*/true, /*version=*/CMPCTBLOCKS_VERSION));
         // save BIP152 bandwidth state: we select peer to be high-bandwidth
         pfrom->m_bip152_highbandwidth_to = true;
         lNodesAnnouncingHeaderAndIDs.push_back(pfrom->GetId());
         return true;
     });
+    if (lNodesAnnouncingHeaderAndIDs.size() > 3) {
+        // As per BIP152, we only get 3 of our peers to announce
+        // blocks using compact encodings.
+        m_connman.ForNode(lNodesAnnouncingHeaderAndIDs.front(), [this](CNode* pnodeStop){
+            m_connman.PushMessage(pnodeStop, CNetMsgMaker(pnodeStop->GetCommonVersion()).Make(NetMsgType::SENDCMPCT, /*high_bandwidth=*/false, /*version=*/CMPCTBLOCKS_VERSION));
+            // save BIP152 bandwidth state: we select peer to be low-bandwidth
+            pnodeStop->m_bip152_highbandwidth_to = false;
+            return true;
+        });
+        lNodesAnnouncingHeaderAndIDs.pop_front();
+    }
 }
 
 bool PeerManagerImpl::TipMayBeStale()
@@ -1935,6 +1935,8 @@ std::optional<std::string> PeerManagerImpl::FetchBlock(NodeId peer_id, const CBl
 
     LOCK(cs_main);
     // Mark block as in-flight unless it already is (for this peer).
+    // If the peer does not send us a block, vBlocksInFlight remains non-empty,
+    // causing us to timeout and disconnect.
     // If a block was already in-flight for a different peer, its BLOCKTXN
     // response will be dropped.
     if (!BlockRequested(peer_id, block_index)) return "Already requested from this peer";
@@ -2760,9 +2762,9 @@ void PeerManagerImpl::ProcessGetData(CNode& pfrom, Peer& peer, const std::atomic
                 std::vector<uint256> parent_ids_to_add;
                 {
                     LOCK(m_mempool.cs);
-                    auto txiter = m_mempool.GetIter(tx->GetHash());
-                    if (txiter) {
-                        const CTxMemPoolEntry::Parents& parents = (*txiter)->GetMemPoolParentsConst();
+                    auto tx_iter = m_mempool.GetIter(tx->GetHash());
+                    if (tx_iter) {
+                        const CTxMemPoolEntry::Parents& parents = (*tx_iter)->GetMemPoolParentsConst();
                         parent_ids_to_add.reserve(parents.size());
                         for (const CTxMemPoolEntry& parent : parents) {
                             if (parent.GetTime() > now - UNCONDITIONAL_RELAY_DELAY) {

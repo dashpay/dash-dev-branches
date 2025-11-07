@@ -38,6 +38,17 @@ using wallet::CoinType;
 using wallet::CWallet;
 using wallet::ReserveDestination;
 
+CCoinJoinClientQueueManager::CCoinJoinClientQueueManager(CoinJoinWalletManager& walletman, CDeterministicMNManager& dmnman,
+                                                         CMasternodeMetaMan& mn_metaman, const CMasternodeSync& mn_sync) :
+    m_walletman{walletman},
+    m_dmnman{dmnman},
+    m_mn_metaman{mn_metaman},
+    m_mn_sync{mn_sync}
+{
+}
+
+CCoinJoinClientQueueManager::~CCoinJoinClientQueueManager() = default;
+
 MessageProcessingResult CCoinJoinClientQueueManager::ProcessMessage(NodeId from, CConnman& connman,
                                                                     std::string_view msg_type, CDataStream& vRecv)
 {
@@ -138,6 +149,28 @@ MessageProcessingResult CCoinJoinClientQueueManager::ProcessMessage(NodeId from,
     ret.m_dsq.push_back(dsq);
     return ret;
 }
+
+void CCoinJoinClientQueueManager::DoMaintenance()
+{
+    if (!m_mn_sync.IsBlockchainSynced() || ShutdownRequested()) return;
+
+    CheckQueue();
+}
+
+CCoinJoinClientManager::CCoinJoinClientManager(const std::shared_ptr<wallet::CWallet>& wallet,
+                                               CDeterministicMNManager& dmnman, CMasternodeMetaMan& mn_metaman,
+                                               const CMasternodeSync& mn_sync, const llmq::CInstantSendManager& isman,
+                                               const std::unique_ptr<CCoinJoinClientQueueManager>& queueman) :
+    m_wallet{wallet},
+    m_dmnman{dmnman},
+    m_mn_metaman{mn_metaman},
+    m_mn_sync{mn_sync},
+    m_isman{isman},
+    m_queueman{queueman}
+{
+}
+
+CCoinJoinClientManager::~CCoinJoinClientManager() = default;
 
 void CCoinJoinClientManager::ProcessMessage(CNode& peer, CChainState& active_chainstate, CConnman& connman, const CTxMemPool& mempool, std::string_view msg_type, CDataStream& vRecv)
 {
@@ -1816,13 +1849,6 @@ void CCoinJoinClientManager::UpdatedBlockTip(const CBlockIndex* pindex)
     WalletCJLogPrint(m_wallet, "CCoinJoinClientManager::UpdatedBlockTip -- nCachedBlockHeight: %d\n", nCachedBlockHeight);
 }
 
-void CCoinJoinClientQueueManager::DoMaintenance()
-{
-    if (!m_mn_sync.IsBlockchainSynced() || ShutdownRequested()) return;
-
-    CheckQueue();
-}
-
 void CCoinJoinClientManager::DoMaintenance(ChainstateManager& chainman, CConnman& connman, const CTxMemPool& mempool)
 {
     if (!CCoinJoinClientOptions::IsEnabled()) return;
@@ -1872,6 +1898,28 @@ void CCoinJoinClientManager::GetJsonInfo(UniValue& obj) const
         }
     }
     obj.pushKV("sessions", arrSessions);
+}
+
+CoinJoinWalletManager::CoinJoinWalletManager(ChainstateManager& chainman, CDeterministicMNManager& dmnman,
+                                             CMasternodeMetaMan& mn_metaman, const CTxMemPool& mempool,
+                                             const CMasternodeSync& mn_sync, const llmq::CInstantSendManager& isman,
+                                             const std::unique_ptr<CCoinJoinClientQueueManager>& queueman) :
+    m_chainman{chainman},
+    m_dmnman{dmnman},
+    m_mn_metaman{mn_metaman},
+    m_mempool{mempool},
+    m_mn_sync{mn_sync},
+    m_isman{isman},
+    m_queueman{queueman}
+{
+}
+
+CoinJoinWalletManager::~CoinJoinWalletManager()
+{
+    LOCK(cs_wallet_manager_map);
+    for (auto& [wallet_name, cj_man] : m_wallet_manager_map) {
+        cj_man.reset();
+    }
 }
 
 void CoinJoinWalletManager::Add(const std::shared_ptr<CWallet>& wallet)

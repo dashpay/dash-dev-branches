@@ -99,9 +99,11 @@ private:
     Uint256LruHashMap<Signals> mnhfCache GUARDED_BY(cs_cache){MNHFCacheSize};
 
 public:
+    CMNHFManager() = delete;
+    CMNHFManager(const CMNHFManager&) = delete;
+    CMNHFManager& operator=(const CMNHFManager&) = delete;
     explicit CMNHFManager(CEvoDB& evoDb);
     ~CMNHFManager();
-    explicit CMNHFManager(const CMNHFManager&) = delete;
 
     /**
      * Every new block should be processed when Tip() is updated by calling of CMNHFManager::ProcessBlock.

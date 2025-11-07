@@ -87,8 +87,8 @@ static constexpr CAmount CENT{1000000};
 /** Initialize Dash-specific components during chainstate initialization (NodeContext-friendly aliases) */
 void DashChainstateSetup(ChainstateManager& chainman,
                          node::NodeContext& node,
-                         bool fReset,
-                         bool fReindexChainState,
+                         bool llmq_dbs_in_memory,
+                         bool llmq_dbs_wipe,
                          const Consensus::Params& consensus_params);
 void DashChainstateSetupClose(node::NodeContext& node);
 

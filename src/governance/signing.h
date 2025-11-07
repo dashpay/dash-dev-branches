@@ -59,6 +59,9 @@ private:
     std::optional<uint256> votedFundingYesTriggerHash{std::nullopt};
 
 public:
+    GovernanceSigner() = delete;
+    GovernanceSigner(const GovernanceSigner&) = delete;
+    GovernanceSigner& operator=(const GovernanceSigner&) = delete;
     explicit GovernanceSigner(CConnman& connman, CDeterministicMNManager& dmnman, GovernanceSignerParent& govman,
                               const CActiveMasternodeManager& mn_activeman, const ChainstateManager& chainman,
                               const CMasternodeSync& mn_sync);

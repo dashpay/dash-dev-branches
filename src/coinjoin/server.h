@@ -94,23 +94,14 @@ private:
     void SetNull() override EXCLUSIVE_LOCKS_REQUIRED(cs_coinjoin);
 
 public:
+    CCoinJoinServer() = delete;
+    CCoinJoinServer(const CCoinJoinServer&) = delete;
+    CCoinJoinServer& operator=(const CCoinJoinServer&) = delete;
     explicit CCoinJoinServer(ChainstateManager& chainman, CConnman& _connman, CDeterministicMNManager& dmnman,
                              CDSTXManager& dstxman, CMasternodeMetaMan& mn_metaman, CTxMemPool& mempool,
                              PeerManager& peerman, const CActiveMasternodeManager& mn_activeman,
-                             const CMasternodeSync& mn_sync, const llmq::CInstantSendManager& isman) :
-        m_chainman(chainman),
-        connman(_connman),
-        m_dmnman(dmnman),
-        m_dstxman(dstxman),
-        m_mn_metaman(mn_metaman),
-        mempool(mempool),
-        m_peerman(peerman),
-        m_mn_activeman(mn_activeman),
-        m_mn_sync(mn_sync),
-        m_isman{isman},
-        vecSessionCollaterals(),
-        fUnitTest(false)
-    {}
+                             const CMasternodeSync& mn_sync, const llmq::CInstantSendManager& isman);
+    ~CCoinJoinServer();
 
     [[nodiscard]] MessageProcessingResult ProcessMessage(CNode& pfrom, std::string_view msg_type, CDataStream& vRecv);
 

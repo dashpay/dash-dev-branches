@@ -19,7 +19,6 @@
 #include <context.h>
 #include <consensus/amount.h>
 #include <deploymentstatus.h>
-#include <node/coinstats.h>
 #include <fs.h>
 #include <hash.h>
 #include <httpserver.h>
@@ -32,6 +31,7 @@
 #include <interfaces/init.h>
 #include <interfaces/node.h>
 #include <interfaces/wallet.h>
+#include <kernel/coinstats.h>
 #include <mapport.h>
 #include <node/miner.h>
 #include <net.h>
@@ -134,10 +134,10 @@
 #include <zmq/zmqrpc.h>
 #endif
 
+using kernel::CoinStatsHashType;
+
 using node::CacheSizes;
 using node::CalculateCacheSizes;
-using node::CCoinsStats;
-using node::CoinStatsHashType;
 using node::ChainstateLoadingError;
 using node::ChainstateLoadVerifyError;
 using node::DashChainstateSetupClose;
@@ -224,8 +224,24 @@ static fs::path GetPidFile(const ArgsManager& args)
 // shutdown thing.
 //
 
+#if HAVE_SYSTEM
+static void ShutdownNotify(const ArgsManager& args)
+{
+    std::vector<std::thread> threads;
+    for (const auto& cmd : args.GetArgs("-shutdownnotify")) {
+        threads.emplace_back(runCommand, cmd);
+    }
+    for (auto& t : threads) {
+        t.join();
+    }
+}
+#endif
+
 void Interrupt(NodeContext& node)
 {
+#if HAVE_SYSTEM
+    ShutdownNotify(*node.args);
+#endif
     InterruptHTTPServer();
     InterruptHTTPRPC();
     InterruptRPC();
@@ -439,7 +455,6 @@ void Shutdown(NodeContext& node)
         LogPrintf("%s: Unable to remove PID file: %s\n", __func__, fsbridge::get_filesystem_error_message(e));
     }
 
-    node.args = nullptr;
     LogPrintf("%s: done\n", __func__);
 }
 
@@ -553,6 +568,7 @@ void SetupServerArgs(ArgsManager& argsman)
     argsman.AddArg("-syncmempool", strprintf("Sync mempool from other nodes on start (default: %u)", DEFAULT_SYNC_MEMPOOL), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
 #if HAVE_SYSTEM
     argsman.AddArg("-startupnotify=<cmd>", "Execute command on startup.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
+    argsman.AddArg("-shutdownnotify=<cmd>", "Execute command immediately before beginning shutdown. The need for shutdown may be urgent, so be careful not to delay it long (if the command doesn't require interaction with the server, consider having it fork into the background).", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
 #endif
 #ifndef WIN32
     argsman.AddArg("-sysperms", "Create new files with system default permissions, instead of umask 077 (only effective with disabled wallet functionality)", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
@@ -840,15 +856,15 @@ static void PeriodicStats(NodeContext& node)
     ChainstateManager& chainman = *Assert(node.chainman);
     const CTxMemPool& mempool = *Assert(node.mempool);
     const llmq::CInstantSendManager& isman = *Assert(node.llmq_ctx->isman);
-    CCoinsStats stats{CoinStatsHashType::NONE};
     chainman.ActiveChainstate().ForceFlushStateToDisk();
-    if (WITH_LOCK(cs_main, return GetUTXOStats(&chainman.ActiveChainstate().CoinsDB(), chainman.m_blockman, stats, node.rpc_interruption_point, chainman.ActiveChain().Tip()))) {
-        ::g_stats_client->gauge("utxoset.tx", stats.nTransactions, 1.0f);
-        ::g_stats_client->gauge("utxoset.txOutputs", stats.nTransactionOutputs, 1.0f);
-        ::g_stats_client->gauge("utxoset.dbSizeBytes", stats.nDiskSize, 1.0f);
-        ::g_stats_client->gauge("utxoset.blockHeight", stats.nHeight, 1.0f);
-        if (stats.total_amount.has_value()) {
-            ::g_stats_client->gauge("utxoset.totalAmount", (double)stats.total_amount.value() / (double)COIN, 1.0f);
+    const auto maybe_stats = WITH_LOCK(::cs_main, return GetUTXOStats(&chainman.ActiveChainstate().CoinsDB(), chainman.m_blockman, /*hash_type=*/CoinStatsHashType::NONE, node.rpc_interruption_point, chainman.ActiveChain().Tip(), /*index_requested=*/true));
+    if (maybe_stats.has_value()) {
+        ::g_stats_client->gauge("utxoset.tx", maybe_stats->nTransactions, 1.0f);
+        ::g_stats_client->gauge("utxoset.txOutputs", maybe_stats->nTransactionOutputs, 1.0f);
+        ::g_stats_client->gauge("utxoset.dbSizeBytes", maybe_stats->nDiskSize, 1.0f);
+        ::g_stats_client->gauge("utxoset.blockHeight", maybe_stats->nHeight, 1.0f);
+        if (maybe_stats->total_amount.has_value()) {
+            ::g_stats_client->gauge("utxoset.totalAmount", (double)maybe_stats->total_amount.value() / (double)COIN, 1.0f);
         }
     } else {
         // something went wrong
@@ -1981,6 +1997,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
                                               node.mnhf_manager,
                                               node.llmq_ctx,
                                               Assert(node.mempool.get()),
+                                              args.GetDataDirNet(),
                                               fPruneMode,
                                               args.GetBoolArg("-addressindex", DEFAULT_ADDRESSINDEX),
                                               is_governance_enabled,
@@ -1995,6 +2012,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
                                               cache_sizes.coins,
                                               /*block_tree_db_in_memory=*/false,
                                               /*coins_db_in_memory=*/false,
+                                              /*dash_dbs_in_memory=*/false,
                                               /*shutdown_requested=*/ShutdownRequested,
                                               /*coins_error_cb=*/[]() {
                                                   uiInterface.ThreadSafeMessageBox(
@@ -2304,6 +2322,24 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
         return false;
     }
 
+    int chain_active_height = WITH_LOCK(cs_main, return chainman.ActiveChain().Height());
+
+    // On first startup, warn on low block storage space
+    if (!fReindex && !fReindexChainState && chain_active_height <= 1) {
+        uint64_t additional_bytes_needed = fPruneMode ? nPruneTarget
+            : chainparams.AssumedBlockchainSize() * 1024 * 1024 * 1024;
+
+        if (!CheckDiskSpace(args.GetBlocksDirPath(), additional_bytes_needed)) {
+            InitWarning(strprintf(_(
+                    "Disk space for %s may not accommodate the block files. " \
+                    "Approximately %u GB of data will be stored in this directory."
+                ),
+                fs::quoted(fs::PathToString(args.GetBlocksDirPath())),
+                chainparams.AssumedBlockchainSize()
+            ));
+        }
+    }
+
     // Either install a handler to notify us when genesis activates, or set fHaveGenesis directly.
     // No locking, as this happens before any background thread is started.
     boost::signals2::connection block_notify_genesis_wait_connection;
@@ -2393,8 +2429,6 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     }
 
     // ********************************************************* Step 12: start node
-
-    int chain_active_height;
 
     //// debug print
     {

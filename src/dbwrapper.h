@@ -709,4 +709,19 @@ public:
     }
 };
 
+namespace util {
+struct DbWrapperParams
+{
+    const fs::path path{""};
+    const bool memory{false};
+    const bool wipe{false};
+    const size_t cache_size{1 << 20};
+};
+
+static inline std::unique_ptr<CDBWrapper> MakeDbWrapper(const DbWrapperParams& params)
+{
+    return std::make_unique<CDBWrapper>(params.path, params.cache_size, params.memory, params.wipe);
+}
+} // namespace util
+
 #endif // BITCOIN_DBWRAPPER_H

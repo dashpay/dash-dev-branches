@@ -134,38 +134,32 @@ private:
 
     bool VerifyBatchInsecure(const std::map<uint256, std::vector<MessageMapIterator>>& byMessageHash)
     {
-        CBLSSignature aggSig;
+        std::vector<CBLSSignature> sigsToAggregate;
         std::vector<uint256> msgHashes;
         std::vector<CBLSPublicKey> pubKeys;
         std::set<MessageId> dups;
 
         msgHashes.reserve(messages.size());
         pubKeys.reserve(messages.size());
+        sigsToAggregate.reserve(messages.size());
 
-        for (const auto& p : byMessageHash) {
-            const auto& msgHash = p.first;
+        std::vector<CBLSPublicKey> pubKeysToAggregate;
+        for (const auto& [msgHash, vec_message_it] : byMessageHash) {
+            pubKeysToAggregate.clear();
+            pubKeysToAggregate.reserve(vec_message_it.size());
 
-            CBLSPublicKey aggPubKey;
-
-            for (const auto& msgIt : p.second) {
+            for (const auto& msgIt : vec_message_it) {
                 const auto& msg = msgIt->second;
 
                 if (!dups.emplace(msg.msgId).second) {
                     continue;
                 }
 
-                if (!aggSig.IsValid()) {
-                    aggSig = msg.sig;
-                } else {
-                    aggSig.AggregateInsecure(msg.sig);
-                }
-
-                if (!aggPubKey.IsValid()) {
-                    aggPubKey = msg.pubKey;
-                } else {
-                    aggPubKey.AggregateInsecure(msg.pubKey);
-                }
+                sigsToAggregate.push_back(msg.sig);
+                pubKeysToAggregate.push_back(msg.pubKey);
             }
+
+            CBLSPublicKey aggPubKey = CBLSPublicKey::AggregateInsecure(pubKeysToAggregate);
 
             if (!aggPubKey.IsValid()) {
                 // only duplicates for this msgHash
@@ -180,6 +174,7 @@ private:
             return true;
         }
 
+        CBLSSignature aggSig = CBLSSignature::AggregateInsecure(sigsToAggregate);
         return aggSig.VerifyInsecureAggregated(pubKeys, msgHashes);
     }
 
@@ -199,13 +194,14 @@ private:
 
     bool VerifyBatchSecureStep(std::map<uint256, std::vector<MessageMapIterator>>& byMessageHash)
     {
-        CBLSSignature aggSig;
+        std::vector<CBLSSignature> sigsToAggregate;
         std::vector<uint256> msgHashes;
         std::vector<CBLSPublicKey> pubKeys;
         std::set<MessageId> dups;
 
         msgHashes.reserve(messages.size());
         pubKeys.reserve(messages.size());
+        sigsToAggregate.reserve(messages.size());
 
         for (auto it = byMessageHash.begin(); it != byMessageHash.end(); ) {
             const auto& msgHash = it->first;
@@ -215,12 +211,7 @@ private:
             if (dups.emplace(msg.msgId).second) {
                 msgHashes.emplace_back(msgHash);
                 pubKeys.emplace_back(msg.pubKey);
-
-                if (!aggSig.IsValid()) {
-                    aggSig = msg.sig;
-                } else {
-                    aggSig.AggregateInsecure(msg.sig);
-                }
+                sigsToAggregate.push_back(msg.sig);
             }
 
             messageIts.pop_back();
@@ -233,6 +224,7 @@ private:
 
         assert(!msgHashes.empty());
 
+        CBLSSignature aggSig = CBLSSignature::AggregateInsecure(sigsToAggregate);
         return aggSig.VerifyInsecureAggregated(pubKeys, msgHashes);
     }
 };

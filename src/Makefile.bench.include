@@ -23,6 +23,7 @@ bench_bench_dash_SOURCES = \
   bench/block_assemble.cpp \
   bench/bls.cpp \
   bench/bls_dkg.cpp \
+  bench/bls_pubkey_agg.cpp \
   bench/ccoins_caching.cpp \
   bench/chacha20.cpp \
   bench/checkblock.cpp \

@@ -18,6 +18,9 @@ struct LLMQContext;
 class CDSNotificationInterface : public CValidationInterface
 {
 public:
+    CDSNotificationInterface() = delete;
+    CDSNotificationInterface(const CDSNotificationInterface&) = delete;
+    CDSNotificationInterface& operator=(const CDSNotificationInterface&) = delete;
     explicit CDSNotificationInterface(CConnman& connman,
                                       CDSTXManager& dstxman,
                                       CMasternodeSync& mn_sync,
@@ -25,7 +28,7 @@ public:
                                       const ChainstateManager& chainman,
                                       const std::unique_ptr<CDeterministicMNManager>& dmnman,
                                       const std::unique_ptr<LLMQContext>& llmq_ctx);
-    virtual ~CDSNotificationInterface() = default;
+    virtual ~CDSNotificationInterface();
 
     // a small helper to initialize current block height in sub-modules on startup
     void InitializeCurrentBlockTip();

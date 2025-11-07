@@ -1503,6 +1503,12 @@ if test "$use_usdt" != "no"; then
 fi
 AM_CONDITIONAL([ENABLE_USDT_TRACEPOINTS], [test "$use_usdt" = "yes"])
 
+if test "$build_bitcoind$bitcoin_enable_qt$use_bench$use_tests" = "nononono"; then
+  use_upnp=no
+  use_natpmp=no
+  use_zmq=no
+fi
+
 dnl Check for libminiupnpc (optional)
 if test "$use_upnp" != "no"; then
   TEMP_CPPFLAGS="$CPPFLAGS"
@@ -1512,14 +1518,15 @@ if test "$use_upnp" != "no"; then
     [AC_CHECK_LIB([miniupnpc], [upnpDiscover], [MINIUPNPC_LIBS="$MINIUPNPC_LIBS -lminiupnpc"], [have_miniupnpc=no], [$MINIUPNPC_LIBS])],
     [have_miniupnpc=no]
   )
-  dnl The minimum supported miniUPnPc API version is set to 10. This keeps compatibility
-  dnl with Ubuntu 16.04 LTS and Debian 8 libminiupnpc-dev packages.
+
+  dnl The minimum supported miniUPnPc API version is set to 17. This excludes
+  dnl versions with known vulnerabilities.
   if test "$have_miniupnpc" != "no"; then
     AC_MSG_CHECKING([whether miniUPnPc API version is supported])
     AC_PREPROC_IFELSE([AC_LANG_PROGRAM([[
         @%:@include <miniupnpc/miniupnpc.h>
       ]], [[
-        #if MINIUPNPC_API_VERSION >= 10
+        #if MINIUPNPC_API_VERSION >= 17
         // Everything is okay
         #else
         #  error miniUPnPc API version is too old
@@ -1528,7 +1535,7 @@ if test "$use_upnp" != "no"; then
         AC_MSG_RESULT([yes])
       ],[
       AC_MSG_RESULT([no])
-      AC_MSG_WARN([miniUPnPc API version < 10 is unsupported, disabling UPnP support.])
+      AC_MSG_WARN([miniUPnPc API version < 17 is unsupported, disabling UPnP support.])
       have_miniupnpc=no
     ])
   fi

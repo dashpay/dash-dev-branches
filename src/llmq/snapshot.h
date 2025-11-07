@@ -223,8 +223,11 @@ private:
     Uint256LruHashMap<CQuorumSnapshot> quorumSnapshotCache GUARDED_BY(snapshotCacheCs);
 
 public:
-    explicit CQuorumSnapshotManager(CEvoDB& evoDb) :
-        m_evoDb(evoDb), quorumSnapshotCache(32) {}
+    CQuorumSnapshotManager() = delete;
+    CQuorumSnapshotManager(const CQuorumSnapshotManager&) = delete;
+    CQuorumSnapshotManager& operator=(const CQuorumSnapshotManager&) = delete;
+    explicit CQuorumSnapshotManager(CEvoDB& evoDb);
+    ~CQuorumSnapshotManager();
 
     std::optional<CQuorumSnapshot> GetSnapshotForBlock(Consensus::LLMQType llmqType, const CBlockIndex* pindex);
     void StoreSnapshotForBlock(Consensus::LLMQType llmqType, const CBlockIndex* pindex, const CQuorumSnapshot& snapshot);

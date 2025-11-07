@@ -331,7 +331,8 @@ protected:
     void CheckQueue() EXCLUSIVE_LOCKS_REQUIRED(!cs_vecqueue);
 
 public:
-    CCoinJoinBaseManager() = default;
+    CCoinJoinBaseManager();
+    virtual ~CCoinJoinBaseManager();
 
     int GetQueueSize() const EXCLUSIVE_LOCKS_REQUIRED(!cs_vecqueue) { LOCK(cs_vecqueue); return vecCoinJoinQueue.size(); }
     bool GetQueueItemAndTry(CCoinJoinQueue& dsqRet) EXCLUSIVE_LOCKS_REQUIRED(!cs_vecqueue);
@@ -371,7 +372,11 @@ class CDSTXManager
     std::map<uint256, CCoinJoinBroadcastTx> mapDSTX GUARDED_BY(cs_mapdstx);
 
 public:
-    CDSTXManager() = default;
+    CDSTXManager(const CDSTXManager&) = delete;
+    CDSTXManager& operator=(const CDSTXManager&) = delete;
+    CDSTXManager();
+    ~CDSTXManager();
+
     void AddDSTX(const CCoinJoinBroadcastTx& dstx) EXCLUSIVE_LOCKS_REQUIRED(!cs_mapdstx);
     CCoinJoinBroadcastTx GetDSTX(const uint256& hash) EXCLUSIVE_LOCKS_REQUIRED(!cs_mapdstx);
 

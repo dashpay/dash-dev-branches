@@ -222,7 +222,7 @@ bool LegacyScriptPubKeyMan::CheckDecryptionKey(const CKeyingMaterial& master_key
             return false;
         }
 
-        if(!m_hd_chain.IsNull() && !m_hd_chain.IsCrypted()) {
+        if(!m_hd_chain.IsNull() && m_hd_chain.IsCrypted()) {
             // try to decrypt seed and make sure it matches
             CHDChain hdChainTmp;
             if (!DecryptHDChain(master_key, hdChainTmp) || (m_hd_chain.GetID() != hdChainTmp.GetSeedHash())) {
@@ -2209,7 +2209,7 @@ std::unique_ptr<FlatSigningProvider> DescriptorScriptPubKeyMan::GetSigningProvid
     // Fetch SigningProvider from cache to avoid re-deriving
     auto it = m_map_signing_providers.find(index);
     if (it != m_map_signing_providers.end()) {
-        *out_keys = Merge(*out_keys, it->second);
+        out_keys->Merge(FlatSigningProvider{it->second});
     } else {
         // Get the scripts, keys, and key origins for this script
         std::vector<CScript> scripts_temp;
@@ -2246,7 +2246,7 @@ bool DescriptorScriptPubKeyMan::SignTransaction(CMutableTransaction& tx, const s
         if (!coin_keys) {
             continue;
         }
-        *keys = Merge(*keys, *coin_keys);
+        keys->Merge(std::move(*coin_keys));
     }
 
     return ::SignTransaction(tx, keys.get(), coins, sighash, input_errors);
@@ -2318,7 +2318,7 @@ TransactionError DescriptorScriptPubKeyMan::FillPSBT(PartiallySignedTransaction&
         std::unique_ptr<FlatSigningProvider> keys = std::make_unique<FlatSigningProvider>();
         std::unique_ptr<FlatSigningProvider> script_keys = GetSigningProvider(script, sign);
         if (script_keys) {
-            *keys = Merge(*keys, *script_keys);
+            keys->Merge(std::move(*script_keys));
         } else {
             // Maybe there are pubkeys listed that we can sign for
             script_keys = std::make_unique<FlatSigningProvider>();
@@ -2326,7 +2326,7 @@ TransactionError DescriptorScriptPubKeyMan::FillPSBT(PartiallySignedTransaction&
                 const CPubKey& pubkey = pk_pair.first;
                 std::unique_ptr<FlatSigningProvider> pk_keys = GetSigningProvider(pubkey);
                 if (pk_keys) {
-                    *keys = Merge(*keys, *pk_keys);
+                    keys->Merge(std::move(*pk_keys));
                 }
             }
         }

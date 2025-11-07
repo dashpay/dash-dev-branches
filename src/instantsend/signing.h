@@ -69,6 +69,9 @@ private:
     Uint256HashMap<InstantSendLock*> txToCreatingInstantSendLocks GUARDED_BY(cs_creating);
 
 public:
+    InstantSendSigner() = delete;
+    InstantSendSigner(const InstantSendSigner&) = delete;
+    InstantSendSigner& operator=(const InstantSendSigner&) = delete;
     explicit InstantSendSigner(CChainState& chainstate, llmq::CChainLocksHandler& clhandler,
                                InstantSendSignerParent& isman, llmq::CSigningManager& sigman,
                                llmq::CSigSharesManager& shareman, llmq::CQuorumManager& qman, CSporkManager& sporkman,

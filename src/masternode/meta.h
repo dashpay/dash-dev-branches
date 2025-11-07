@@ -250,7 +250,9 @@ private:
         SeenBanInventorySize};
 
 public:
-    explicit CMasternodeMetaMan();
+    CMasternodeMetaMan(const CMasternodeMetaMan&) = delete;
+    CMasternodeMetaMan& operator=(const CMasternodeMetaMan&) = delete;
+    CMasternodeMetaMan();
     ~CMasternodeMetaMan();
 
     bool LoadCache(bool load_cache);

@@ -43,12 +43,12 @@ def assert_approx(v, vexp, vspan=0.00001):
 
 def assert_fee_amount(fee, tx_size, feerate_DASH_kvB):
     """Assert the fee is in range."""
-    feerate_DASH_vB = feerate_DASH_kvB / 1000
-    target_fee = satoshi_round(tx_size * feerate_DASH_vB)
+    target_fee = get_fee(tx_size, feerate_DASH_kvB)
     if fee < target_fee:
         raise AssertionError("Fee of %s DASH too low! (Should be %s DASH)" % (str(fee), str(target_fee)))
     # allow the wallet's estimation to be at most 2 bytes off
-    if fee > (tx_size + 2) * feerate_DASH_vB:
+    high_fee = get_fee(tx_size + 2, feerate_DASH_kvB)
+    if fee > high_fee:
         raise AssertionError("Fee of %s DASH too high! (Should be %s DASH)" % (str(fee), str(target_fee)))
 
 
@@ -242,6 +242,18 @@ def random_bitflip(data):
     return bytes(data)
 
 
+def ceildiv(a, b):
+    """Divide 2 ints and round up to next int rather than round down"""
+    return -(-a // b)
+
+
+def get_fee(tx_size, feerate_dash_kvb):
+    """Calculate the fee in DASH given a feerate is DASH/kvB. Reflects CFeeRate::GetFee"""
+    feerate_sat_kvb = int(feerate_dash_kvb * Decimal(1e8)) # Fee in sat/kvb as an int to avoid float precision errors
+    target_fee_sat = ceildiv(feerate_sat_kvb * tx_size, 1000) # Round calculated fee up to nearest sat
+    return satoshi_round(target_fee_sat / Decimal(1e8)) # Truncate DASH result to nearest sat
+
+
 def satoshi_round(amount):
     return Decimal(amount).quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)
 
@@ -311,7 +323,7 @@ MAX_NODES = 20
 # Don't assign rpc or p2p ports lower than this
 PORT_MIN = int(os.getenv('TEST_RUNNER_PORT_MIN', default=11000))
 # The number of ports to "reserve" for p2p and rpc, each
-PORT_RANGE = 5000
+PORT_RANGE = 10000
 
 
 class PortSeed:

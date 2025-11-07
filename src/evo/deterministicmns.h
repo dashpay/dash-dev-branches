@@ -654,12 +654,11 @@ private:
     const CBlockIndex* m_initial_snapshot_index GUARDED_BY(cs) {nullptr};
 
 public:
-    explicit CDeterministicMNManager(CEvoDB& evoDb, CMasternodeMetaMan& mn_metaman) :
-        m_evoDb(evoDb),
-        m_mn_metaman(mn_metaman)
-    {
-    }
-    ~CDeterministicMNManager() = default;
+    CDeterministicMNManager() = delete;
+    CDeterministicMNManager(const CDeterministicMNManager&) = delete;
+    CDeterministicMNManager& operator=(const CDeterministicMNManager&) = delete;
+    explicit CDeterministicMNManager(CEvoDB& evoDb, CMasternodeMetaMan& mn_metaman);
+    ~CDeterministicMNManager();
 
     bool ProcessBlock(const CBlock& block, gsl::not_null<const CBlockIndex*> pindex, BlockValidationState& state,
                       const CDeterministicMNList& newList, std::optional<MNListUpdates>& updatesRet)

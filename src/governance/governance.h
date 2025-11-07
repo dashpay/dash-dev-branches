@@ -275,6 +275,9 @@ private:
     std::vector<CInv> m_relay_invs GUARDED_BY(cs_relay);
 
 public:
+    CGovernanceManager() = delete;
+    CGovernanceManager(const CGovernanceManager&) = delete;
+    CGovernanceManager& operator=(const CGovernanceManager&) = delete;
     explicit CGovernanceManager(CMasternodeMetaMan& mn_metaman, CNetFulfilledRequestManager& netfulfilledman,
                                 const ChainstateManager& chainman,
                                 const std::unique_ptr<CDeterministicMNManager>& dmnman, CMasternodeSync& mn_sync);

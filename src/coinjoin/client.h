@@ -75,24 +75,14 @@ public:
     using wallet_name_cjman_map = std::map<const std::string, std::unique_ptr<CCoinJoinClientManager>>;
 
 public:
-    CoinJoinWalletManager(ChainstateManager& chainman, CDeterministicMNManager& dmnman, CMasternodeMetaMan& mn_metaman,
-                          const CTxMemPool& mempool, const CMasternodeSync& mn_sync, const llmq::CInstantSendManager& isman,
-                          const std::unique_ptr<CCoinJoinClientQueueManager>& queueman) :
-        m_chainman(chainman),
-        m_dmnman(dmnman),
-        m_mn_metaman(mn_metaman),
-        m_mempool(mempool),
-        m_mn_sync(mn_sync),
-        m_isman{isman},
-        m_queueman(queueman)
-    {}
-
-    ~CoinJoinWalletManager() {
-        LOCK(cs_wallet_manager_map);
-        for (auto& [wallet_name, cj_man] : m_wallet_manager_map) {
-            cj_man.reset();
-        }
-    }
+    CoinJoinWalletManager() = delete;
+    CoinJoinWalletManager(const CoinJoinWalletManager&) = delete;
+    CoinJoinWalletManager& operator=(const CoinJoinWalletManager&) = delete;
+    explicit CoinJoinWalletManager(ChainstateManager& chainman, CDeterministicMNManager& dmnman,
+                                   CMasternodeMetaMan& mn_metaman, const CTxMemPool& mempool,
+                                   const CMasternodeSync& mn_sync, const llmq::CInstantSendManager& isman,
+                                   const std::unique_ptr<CCoinJoinClientQueueManager>& queueman);
+    ~CoinJoinWalletManager();
 
     void Add(const std::shared_ptr<wallet::CWallet>& wallet) EXCLUSIVE_LOCKS_REQUIRED(!cs_wallet_manager_map);
     void DoMaintenance(CConnman& connman) EXCLUSIVE_LOCKS_REQUIRED(!cs_wallet_manager_map);
@@ -235,14 +225,12 @@ private:
     mutable Mutex cs_ProcessDSQueue;
 
 public:
+    CCoinJoinClientQueueManager() = delete;
+    CCoinJoinClientQueueManager(const CCoinJoinClientQueueManager&) = delete;
+    CCoinJoinClientQueueManager& operator=(const CCoinJoinClientQueueManager&) = delete;
     explicit CCoinJoinClientQueueManager(CoinJoinWalletManager& walletman, CDeterministicMNManager& dmnman,
-                                         CMasternodeMetaMan& mn_metaman, const CMasternodeSync& mn_sync) :
-        m_walletman(walletman),
-        m_dmnman(dmnman),
-        m_mn_metaman(mn_metaman),
-        m_mn_sync(mn_sync)
-    {
-    }
+                                         CMasternodeMetaMan& mn_metaman, const CMasternodeSync& mn_sync);
+    ~CCoinJoinClientQueueManager();
 
     [[nodiscard]] MessageProcessingResult ProcessMessage(NodeId from, CConnman& connman, std::string_view msg_type,
                                                          CDataStream& vRecv)
@@ -285,21 +273,13 @@ public:
     bool fCreateAutoBackups{true}; // builtin support for automatic backups
 
     CCoinJoinClientManager() = delete;
-    CCoinJoinClientManager(CCoinJoinClientManager const&) = delete;
-    CCoinJoinClientManager& operator=(CCoinJoinClientManager const&) = delete;
-
+    CCoinJoinClientManager(const CCoinJoinClientManager&) = delete;
+    CCoinJoinClientManager& operator=(const CCoinJoinClientManager&) = delete;
     explicit CCoinJoinClientManager(const std::shared_ptr<wallet::CWallet>& wallet, CDeterministicMNManager& dmnman,
                                     CMasternodeMetaMan& mn_metaman, const CMasternodeSync& mn_sync,
                                     const llmq::CInstantSendManager& isman,
-                                    const std::unique_ptr<CCoinJoinClientQueueManager>& queueman) :
-        m_wallet(wallet),
-        m_dmnman(dmnman),
-        m_mn_metaman(mn_metaman),
-        m_mn_sync(mn_sync),
-        m_isman{isman},
-        m_queueman(queueman)
-    {
-    }
+                                    const std::unique_ptr<CCoinJoinClientQueueManager>& queueman);
+    ~CCoinJoinClientManager();
 
     void ProcessMessage(CNode& peer, CChainState& active_chainstate, CConnman& connman, const CTxMemPool& mempool, std::string_view msg_type, CDataStream& vRecv) EXCLUSIVE_LOCKS_REQUIRED(!cs_deqsessions);
 

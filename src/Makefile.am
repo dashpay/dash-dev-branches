@@ -259,6 +259,7 @@ BITCOIN_CORE_H = \
   instantsend/instantsend.h \
   instantsend/lock.h \
   instantsend/signing.h \
+  kernel/coinstats.h \
   key.h \
   key_io.h \
   limitedmap.h \
@@ -306,7 +307,6 @@ BITCOIN_CORE_H = \
   node/caches.h \
   node/chainstate.h \
   node/coin.h \
-  node/coinstats.h \
   node/connection_types.h \
   node/context.h \
   node/eviction.h \
@@ -530,6 +530,7 @@ libbitcoin_node_a_SOURCES = \
   instantsend/instantsend.cpp \
   instantsend/lock.cpp \
   instantsend/signing.cpp \
+  kernel/coinstats.cpp \
   llmq/blockprocessor.cpp \
   llmq/commitment.cpp \
   llmq/context.cpp \
@@ -561,7 +562,6 @@ libbitcoin_node_a_SOURCES = \
   node/caches.cpp \
   node/chainstate.cpp \
   node/coin.cpp \
-  node/coinstats.cpp \
   node/connection_types.cpp \
   node/context.cpp \
   node/eviction.cpp \
@@ -1087,7 +1087,21 @@ dash_wallet_SOURCES = bitcoin-wallet.cpp
 dash_wallet_CPPFLAGS = $(bitcoin_bin_cppflags)
 dash_wallet_CXXFLAGS = $(bitcoin_bin_cxxflags)
 dash_wallet_LDFLAGS = $(bitcoin_bin_ldflags)
-dash_wallet_LDADD = $(LIBBITCOIN_WALLET_TOOL) $(bitcoin_bin_ldadd)
+dash_wallet_LDADD = \
+  $(LIBBITCOIN_WALLET_TOOL) \
+  $(LIBBITCOIN_WALLET) \
+  $(LIBBITCOIN_COMMON) \
+  $(LIBBITCOIN_UTIL) \
+  $(LIBUNIVALUE) \
+  $(LIBBITCOIN_CONSENSUS) \
+  $(LIBBITCOIN_CRYPTO) \
+  $(LIBDASHBLS) \
+  $(LIBSECP256K1) \
+  $(BACKTRACE_LIB) \
+  $(BOOST_LIBS) \
+  $(BDB_LIBS) \
+  $(SQLITE_LIBS) \
+  $(GMP_LIBS)
 
 if TARGET_WINDOWS
 dash_wallet_SOURCES += dash-wallet-res.rc
@@ -1162,7 +1176,7 @@ clean-local:
 	-rm -rf *.dSYM test/*.dSYM bench/*.dSYM qt/*.dSYM qt/test/*.dSYM
 
 .rc.o:
-	@test -f $(WINDRES) || (echo "windres $(WINDRES) not found, but is required to compile windows resource files"; exit 1)
+	@command -v $(WINDRES) || (echo "windres $(WINDRES) not found, but is required to compile windows resource files"; exit 1)
 	## FIXME: How to get the appropriate modulename_CPPFLAGS in here?
 	$(AM_V_GEN) $(WINDRES) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(CPPFLAGS) -DWINDRES_PREPROC -i $< -o $@
 

@@ -61,6 +61,8 @@ void CheckLastCritical(void* cs, std::string& lockname, const char* guardname, c
 template <typename MutexType>
 void AssertLockHeldInternal(const char* pszName, const char* pszFile, int nLine, MutexType* cs) EXCLUSIVE_LOCKS_REQUIRED(cs);
 template <typename MutexType>
+void AssertSharedLockHeldInternal(const char* pszName, const char* pszFile, int nLine, MutexType* cs) SHARED_LOCKS_REQUIRED(cs);
+template <typename MutexType>
 void AssertLockNotHeldInternal(const char* pszName, const char* pszFile, int nLine, MutexType* cs) LOCKS_EXCLUDED(cs);
 void DeleteLock(void* cs);
 bool LockStackEmpty();
@@ -78,6 +80,8 @@ inline void LeaveCritical() {}
 inline void CheckLastCritical(void* cs, std::string& lockname, const char* guardname, const char* file, int line) {}
 template <typename MutexType>
 inline void AssertLockHeldInternal(const char* pszName, const char* pszFile, int nLine, MutexType* cs) EXCLUSIVE_LOCKS_REQUIRED(cs) {}
+template <typename MutexType>
+inline void AssertSharedLockHeldInternal(const char* pszName, const char* pszFile, int nLine, MutexType* cs) SHARED_LOCKS_REQUIRED(cs) {};
 template <typename MutexType>
 void AssertLockNotHeldInternal(const char* pszName, const char* pszFile, int nLine, MutexType* cs) LOCKS_EXCLUDED(cs) {}
 inline void DeleteLock(void* cs) {}
@@ -160,6 +164,7 @@ class GlobalMutex : public Mutex { };
 using SharedMutex = SharedAnnotatedMixin<std::shared_mutex>;
 
 #define AssertLockHeld(cs) AssertLockHeldInternal(#cs, __FILE__, __LINE__, &cs)
+#define AssertSharedLockHeld(cs) AssertSharedLockHeldInternal(#cs, __FILE__, __LINE__, &cs)
 
 inline void AssertLockNotHeldInline(const char* name, const char* file, int line, Mutex* cs) EXCLUSIVE_LOCKS_REQUIRED(!cs) { AssertLockNotHeldInternal(name, file, line, cs); }
 inline void AssertLockNotHeldInline(const char* name, const char* file, int line, RecursiveMutex* cs) LOCKS_EXCLUDED(cs) { AssertLockNotHeldInternal(name, file, line, cs); }

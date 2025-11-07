@@ -58,8 +58,8 @@ Uint256HashSet GetIdsFromLockable(const std::vector<T>& vec)
 
 CInstantSendManager::CInstantSendManager(CChainLocksHandler& _clhandler, CChainState& chainstate, CQuorumManager& _qman,
                                          CSigningManager& _sigman, CSporkManager& sporkman, CTxMemPool& _mempool,
-                                         const CMasternodeSync& mn_sync, bool unitTests, bool fWipe) :
-    db{unitTests, fWipe},
+                                         const CMasternodeSync& mn_sync, const util::DbWrapperParams& db_params) :
+    db{db_params},
     clhandler{_clhandler},
     m_chainstate{chainstate},
     qman{_qman},

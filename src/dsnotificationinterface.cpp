@@ -27,15 +27,17 @@ CDSNotificationInterface::CDSNotificationInterface(CConnman& connman,
                                                    const ChainstateManager& chainman,
                                                    const std::unique_ptr<CDeterministicMNManager>& dmnman,
                                                    const std::unique_ptr<LLMQContext>& llmq_ctx) :
-    m_connman(connman),
-    m_dstxman(dstxman),
-    m_mn_sync(mn_sync),
-    m_govman(govman),
-    m_chainman(chainman),
-    m_dmnman(dmnman),
-    m_llmq_ctx(llmq_ctx)
+    m_connman{connman},
+    m_dstxman{dstxman},
+    m_mn_sync{mn_sync},
+    m_govman{govman},
+    m_chainman{chainman},
+    m_dmnman{dmnman},
+    m_llmq_ctx{llmq_ctx}
 {
 }
+
+CDSNotificationInterface::~CDSNotificationInterface() = default;
 
 void CDSNotificationInterface::InitializeCurrentBlockTip()
 {

@@ -238,10 +238,12 @@ CCreditPool CCreditPoolManager::GetCreditPool(const CBlockIndex* block_index, co
     return *poolTmp;
 }
 
-CCreditPoolManager::CCreditPoolManager(CEvoDB& _evoDb)
-: evoDb(_evoDb)
+CCreditPoolManager::CCreditPoolManager(CEvoDB& _evoDb) :
+    evoDb{_evoDb}
 {
 }
+
+CCreditPoolManager::~CCreditPoolManager() = default;
 
 CCreditPoolDiff::CCreditPoolDiff(CCreditPool starter, const CBlockIndex* pindexPrev,
                                  const Consensus::Params& consensusParams, const CAmount blockSubsidy) :

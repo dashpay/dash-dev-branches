@@ -416,12 +416,13 @@ private:
     std::atomic<uint32_t> recoveredSigsCounter{0};
 
 public:
+    CSigSharesManager() = delete;
+    CSigSharesManager(const CSigSharesManager&) = delete;
+    CSigSharesManager& operator=(const CSigSharesManager&) = delete;
     explicit CSigSharesManager(CConnman& connman, CChainState& chainstate, CSigningManager& _sigman,
                                PeerManager& peerman, const CActiveMasternodeManager& mn_activeman,
                                const CQuorumManager& _qman, const CSporkManager& sporkman);
     ~CSigSharesManager() override;
-
-    CSigSharesManager() = delete;
 
     void StartWorkerThread();
     void StopWorkerThread();

@@ -55,6 +55,9 @@ private:
     mutable std::map<Consensus::LLMQType, Uint256LruHashMap<bool>> mapHasMinedCommitmentCache GUARDED_BY(minableCommitmentsCs);
 
 public:
+    CQuorumBlockProcessor() = delete;
+    CQuorumBlockProcessor(const CQuorumBlockProcessor&) = delete;
+    CQuorumBlockProcessor& operator=(const CQuorumBlockProcessor&) = delete;
     explicit CQuorumBlockProcessor(CChainState& chainstate, CDeterministicMNManager& dmnman, CEvoDB& evoDb,
                                    CQuorumSnapshotManager& qsnapman);
     ~CQuorumBlockProcessor();
