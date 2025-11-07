@@ -23,6 +23,9 @@ $(package)_patches += memory_resource.patch
 $(package)_patches += utc_from_string_no_optimize.patch
 $(package)_patches += windows_lto.patch
 $(package)_patches += darwin_no_libm.patch
+$(package)_patches += CVE-2025-4211-qtbase-5.15.patch
+$(package)_patches += CVE-2025-5455-qtbase-5.15.patch
+$(package)_patches += CVE-2025-30348-qtbase-5.15.patch
 
 $(package)_qttranslations_file_name=qttranslations-$($(package)_suffix)
 $(package)_qttranslations_sha256_hash=e5625757913caf66a9d702ba102ae92cb165d8dde17759b6de9fdea84a1f857f
@@ -252,6 +255,9 @@ define $(package)_preprocess_cmds
   patch -p1 -i $($(package)_patch_dir)/guix_cross_lib_path.patch && \
   patch -p1 -i $($(package)_patch_dir)/windows_lto.patch && \
   patch -p1 -i $($(package)_patch_dir)/darwin_no_libm.patch && \
+  patch -p1 -i $($(package)_patch_dir)/CVE-2025-4211-qtbase-5.15.patch && \
+  patch -p1 -i $($(package)_patch_dir)/CVE-2025-5455-qtbase-5.15.patch && \
+  patch -p1 -i $($(package)_patch_dir)/CVE-2025-30348-qtbase-5.15.patch && \
   mkdir -p qtbase/mkspecs/macx-clang-linux &&\
   cp -f qtbase/mkspecs/macx-clang/qplatformdefs.h qtbase/mkspecs/macx-clang-linux/ &&\
   cp -f $($(package)_patch_dir)/mac-qmake.conf qtbase/mkspecs/macx-clang-linux/qmake.conf && \
