@@ -58,8 +58,11 @@ sudo apt-get install build-essential libtool autotools-dev automake pkg-config b
 Now, you can either build from self-compiled [depends](/depends/README.md) or install the required dependencies:
 
 ```sh
-sudo apt-get install libevent-dev libboost-dev
+sudo apt-get install libbacktrace-dev libevent-dev libboost-dev
 ```
+
+Note: libbacktrace-dev is available in Debian 13 (Trixie) and Ubuntu 25.04+.
+For older releases, use the /depends/README.md which includes all required libraries.
 
 SQLite is required for the descriptor wallet:
 
@@ -141,6 +144,8 @@ Now, you can either build from self-compiled [depends](/depends/README.md) or in
 ```sh
 sudo dnf install libevent-devel boost-devel
 ```
+
+Note: Fedora repositories do not include libbacktrace. To build Dash Core without stack trace support, configure with `--disable-stacktraces`.
 
 SQLite is required for the descriptor wallet:
 
@@ -279,7 +284,7 @@ Setup and Build Example: Arch Linux
 This example lists the steps necessary to setup and build a command line only distribution of the latest changes on Arch Linux:
 
 ```sh
-pacman --sync --needed autoconf automake boost gcc git libevent libtool make pkgconf python sqlite
+pacman --sync --needed autoconf automake boost gcc git libbacktrace libevent libtool make pkgconf python sqlite
 git clone https://github.com/dashpay/dash.git
 cd dash/
 ./autogen.sh
