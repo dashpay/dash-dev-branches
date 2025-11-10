@@ -34,18 +34,18 @@ void NetInstantSend::ProcessMessage(CNode& pfrom, const std::string& msg_type, C
         return;
     }
 
-    int block_height = [this, islock] {
+    auto cycleHeightOpt = m_is_manager.GetBlockHeight(islock->cycleHash);
+    if (!cycleHeightOpt) {
         const auto blockIndex = WITH_LOCK(::cs_main, return m_chainstate.m_blockman.LookupBlockIndex(islock->cycleHash));
         if (blockIndex == nullptr) {
-            return -1;
+            // Maybe we don't have the block yet or maybe some peer spams invalid values for cycleHash
+            m_peer_manager->PeerMisbehaving(pfrom.GetId(), 1);
+            return;
         }
-        return blockIndex->nHeight;
-    }();
-    if (block_height < 0) {
-        // Maybe we don't have the block yet or maybe some peer spams invalid values for cycleHash
-        m_peer_manager->PeerMisbehaving(pfrom.GetId(), 1);
-        return;
+        m_is_manager.CacheBlockHeight(blockIndex->GetBlockHash(), blockIndex->nHeight);
+        cycleHeightOpt = blockIndex->nHeight;
     }
+    const int block_height = *cycleHeightOpt;
 
     // Deterministic islocks MUST use rotation based llmq
     auto llmqType = Params().GetConsensus().llmqTypeDIP0024InstantSend;
@@ -125,16 +125,18 @@ Uint256HashSet NetInstantSend::ProcessPendingInstantSendLocks(
             continue;
         }
 
-        const auto blockIndex = WITH_LOCK(::cs_main, return m_chainstate.m_blockman.LookupBlockIndex(islock->cycleHash));
-        if (blockIndex == nullptr) {
+        auto cycleHeightOpt = m_is_manager.GetBlockHeight(islock->cycleHash);
+        if (!cycleHeightOpt) {
             batchVerifier.badSources.emplace(nodeId);
             continue;
         }
 
         int nSignHeight{-1};
         const auto dkgInterval = llmq_params.dkgInterval;
-        if (blockIndex->nHeight + dkgInterval < m_chainstate.m_chain.Height()) {
-            nSignHeight = blockIndex->nHeight + dkgInterval - 1;
+        const int tipHeight = m_is_manager.GetTipHeight();
+        const int cycleHeight = *cycleHeightOpt;
+        if (cycleHeight + dkgInterval < tipHeight) {
+            nSignHeight = cycleHeight + dkgInterval - 1;
         }
         // For RegTest non-rotating quorum cycleHash has directly quorum hash
         auto quorum = llmq_params.useRotation ? llmq::SelectQuorumForSigning(llmq_params, m_chainstate.m_chain, m_qman,

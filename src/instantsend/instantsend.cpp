@@ -148,22 +148,35 @@ std::variant<uint256, CTransactionRef, std::monostate> CInstantSendManager::Proc
     const CBlockIndex* pindexMined{nullptr};
     const bool found_transaction{tx != nullptr};
     // we ignore failure here as we must be able to propagate the lock even if we don't have the TX locally
+    int minedHeight{-1};
     if (found_transaction && !hashBlock.IsNull()) {
-        pindexMined = WITH_LOCK(::cs_main, return m_chainstate.m_blockman.LookupBlockIndex(hashBlock));
-
-        // Let's see if the TX that was locked by this islock is already mined in a ChainLocked block. If yes,
-        // we can simply ignore the islock, as the ChainLock implies locking of all TXs in that chain
-        if (pindexMined != nullptr && clhandler.HasChainLock(pindexMined->nHeight, pindexMined->GetBlockHash())) {
-            LogPrint(BCLog::INSTANTSEND, "CInstantSendManager::%s -- txlock=%s, islock=%s: dropping islock as it already got a ChainLock in block %s, peer=%d\n", __func__,
-                     islock->txid.ToString(), hash.ToString(), hashBlock.ToString(), from);
-            return std::monostate{};
+        if (auto h = GetBlockHeight(hashBlock)) {
+            minedHeight = *h;
+            // Let's see if the TX that was locked by this islock is already mined in a ChainLocked block. If yes,
+            // we can simply ignore the islock, as the ChainLock implies locking of all TXs in that chain
+            if (clhandler.HasChainLock(minedHeight, hashBlock)) {
+                LogPrint(BCLog::INSTANTSEND, "CInstantSendManager::%s -- txlock=%s, islock=%s: dropping islock as it already got a ChainLock in block %s, peer=%d\n", __func__,
+                         islock->txid.ToString(), hash.ToString(), hashBlock.ToString(), from);
+                return std::monostate{};
+            }
+        } else {
+            pindexMined = WITH_LOCK(::cs_main, return m_chainstate.m_blockman.LookupBlockIndex(hashBlock));
+            if (pindexMined != nullptr) {
+                CacheBlockHeight(pindexMined->GetBlockHash(), pindexMined->nHeight);
+                minedHeight = pindexMined->nHeight;
+                if (clhandler.HasChainLock(minedHeight, pindexMined->GetBlockHash())) {
+                    LogPrint(BCLog::INSTANTSEND, "CInstantSendManager::%s -- txlock=%s, islock=%s: dropping islock as it already got a ChainLock in block %s, peer=%d\n", __func__,
+                             islock->txid.ToString(), hash.ToString(), hashBlock.ToString(), from);
+                    return std::monostate{};
+                }
+            }
         }
     }
 
     if (found_transaction) {
         db.WriteNewInstantSendLock(hash, islock);
-        if (pindexMined) {
-            db.WriteInstantSendLockMined(hash, pindexMined->nHeight);
+        if (minedHeight >= 0) {
+            db.WriteInstantSendLockMined(hash, minedHeight);
         }
     } else {
         // put it in a separate pending map and try again later
@@ -251,6 +264,12 @@ void CInstantSendManager::BlockConnected(const std::shared_ptr<const CBlock>& pb
         return;
     }
 
+    {
+        LOCK(cs_height_cache);
+        CacheBlockHeightInternal(pindex->GetBlockHash(), pindex->nHeight);
+        m_cached_tip_height = pindex->nHeight;
+    }
+
     if (m_mn_sync.IsBlockchainSynced()) {
         const bool has_chainlock = clhandler.HasChainLock(pindex->nHeight, pindex->GetBlockHash());
         for (const auto& tx : pblock->vtx) {
@@ -278,6 +297,16 @@ void CInstantSendManager::BlockConnected(const std::shared_ptr<const CBlock>& pb
 void CInstantSendManager::BlockDisconnected(const std::shared_ptr<const CBlock>& pblock,
                                             const CBlockIndex* pindexDisconnected)
 {
+    {
+        LOCK(cs_height_cache);
+        m_cached_block_heights.erase(pindexDisconnected->GetBlockHash());
+        const CBlockIndex* const new_tip = pindexDisconnected->pprev;
+        m_cached_tip_height = new_tip ? new_tip->nHeight : -1;
+        if (new_tip) {
+            CacheBlockHeightInternal(new_tip->GetBlockHash(), new_tip->nHeight);
+        }
+    }
+
     db.RemoveBlockInstantSendLocks(pblock, pindexDisconnected);
 }
 
@@ -417,6 +446,12 @@ void CInstantSendManager::NotifyChainLock(const CBlockIndex* pindexChainLock)
 
 void CInstantSendManager::UpdatedBlockTip(const CBlockIndex* pindexNew)
 {
+    {
+        LOCK(cs_height_cache);
+        CacheBlockHeightInternal(pindexNew->GetBlockHash(), pindexNew->nHeight);
+        m_cached_tip_height = pindexNew->nHeight;
+    }
+
     bool fDIP0008Active = pindexNew->pprev && pindexNew->pprev->nHeight >= Params().GetConsensus().DIP0008Height;
 
     if (AreChainLocksEnabled(spork_manager) && fDIP0008Active) {
@@ -597,7 +632,7 @@ void CInstantSendManager::RemoveConflictingLock(const uint256& islockHash, const
 {
     LogPrintf("CInstantSendManager::%s -- txid=%s, islock=%s: Removing ISLOCK and its chained children\n", __func__,
               islock.txid.ToString(), islockHash.ToString());
-    int tipHeight = WITH_LOCK(::cs_main, return m_chainstate.m_chain.Height());
+    const int tipHeight = GetTipHeight();
 
     auto removedIslocks = db.RemoveChainedInstantSendLocks(islockHash, islock.txid, tipHeight);
     for (const auto& h : removedIslocks) {
@@ -701,6 +736,58 @@ instantsend::InstantSendLockPtr CInstantSendManager::GetConflictingLock(const CT
 size_t CInstantSendManager::GetInstantSendLockCount() const
 {
     return db.GetInstantSendLockCount();
+}
+
+void CInstantSendManager::CacheBlockHeightInternal(const uint256& hash, int height) const
+{
+    AssertLockHeld(cs_height_cache);
+    m_cached_block_heights.insert(hash, height);
+}
+
+void CInstantSendManager::CacheBlockHeight(const uint256& hash, int height) const
+{
+    LOCK(cs_height_cache);
+    CacheBlockHeightInternal(hash, height);
+}
+
+std::optional<int> CInstantSendManager::GetBlockHeight(const uint256& hash) const
+{
+    {
+        LOCK(cs_height_cache);
+        auto it = m_cached_block_heights.find(hash);
+        if (it != m_cached_block_heights.end()) {
+            return it->second;
+        }
+    }
+
+    const CBlockIndex* pindex =
+        WITH_LOCK(::cs_main, return m_chainstate.m_blockman.LookupBlockIndex(hash));
+    if (pindex == nullptr) {
+        return std::nullopt;
+    }
+
+    CacheBlockHeight(pindex->GetBlockHash(), pindex->nHeight);
+    return pindex->nHeight;
+}
+
+int CInstantSendManager::GetTipHeight() const
+{
+    {
+        LOCK(cs_height_cache);
+        if (m_cached_tip_height >= 0) {
+            return m_cached_tip_height;
+        }
+    }
+
+    const CBlockIndex* tip = WITH_LOCK(::cs_main, return m_chainstate.m_chain.Tip());
+    assert(tip != nullptr);
+
+    {
+        LOCK(cs_height_cache);
+        CacheBlockHeightInternal(tip->GetBlockHash(), tip->nHeight);
+        m_cached_tip_height = tip->nHeight;
+        return m_cached_tip_height;
+    }
 }
 
 bool CInstantSendManager::IsInstantSendEnabled() const

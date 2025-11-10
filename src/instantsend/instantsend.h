@@ -17,10 +17,12 @@
 #include <unordered_lru_cache.h>
 
 #include <atomic>
-#include <unordered_map>
+#include <optional>
 #include <unordered_set>
 #include <variant>
 #include <vector>
+
+#include <saltedhasher.h>
 
 class CBlockIndex;
 class CChainState;
@@ -90,6 +92,13 @@ private:
 
     mutable Mutex cs_timingsTxSeen;
     Uint256HashMap<int64_t> timingsTxSeen GUARDED_BY(cs_timingsTxSeen);
+
+    mutable Mutex cs_height_cache;
+    static constexpr size_t MAX_BLOCK_HEIGHT_CACHE{16384};
+    mutable unordered_lru_cache<uint256, int, StaticSaltedHasher, MAX_BLOCK_HEIGHT_CACHE> m_cached_block_heights GUARDED_BY(cs_height_cache);
+    mutable int m_cached_tip_height GUARDED_BY(cs_height_cache){-1};
+
+    void CacheBlockHeightInternal(const uint256& hash, int height) const EXCLUSIVE_LOCKS_REQUIRED(cs_height_cache);
 
 public:
     CInstantSendManager() = delete;
@@ -166,6 +175,10 @@ public:
         EXCLUSIVE_LOCKS_REQUIRED(!cs_pendingLocks);
 
     size_t GetInstantSendLockCount() const;
+
+    void CacheBlockHeight(const uint256& hash, int height) const;
+    std::optional<int> GetBlockHeight(const uint256& hash) const override;
+    int GetTipHeight() const override;
 
     bool IsInstantSendEnabled() const override;
     /**
