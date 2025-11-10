@@ -754,10 +754,8 @@ std::optional<int> CInstantSendManager::GetBlockHeight(const uint256& hash) cons
 {
     {
         LOCK(cs_height_cache);
-        auto it = m_cached_block_heights.find(hash);
-        if (it != m_cached_block_heights.end()) {
-            return it->second;
-        }
+        int cached_height{0};
+        if (m_cached_block_heights.get(hash, cached_height)) return cached_height;
     }
 
     const CBlockIndex* pindex =
