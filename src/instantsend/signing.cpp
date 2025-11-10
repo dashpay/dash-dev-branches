@@ -225,8 +225,7 @@ bool InstantSendSigner::CheckCanLock(const COutPoint& outpoint, bool printDebug,
 
     const int nTxAge = tipHeight - *blockHeight + 1;
 
-    if (nTxAge < nInstantSendConfirmationsRequired &&
-        !m_clhandler.HasChainLock(*blockHeight, hashBlock)) {
+    if (nTxAge < nInstantSendConfirmationsRequired && !m_clhandler.HasChainLock(*blockHeight, hashBlock)) {
         if (printDebug) {
             LogPrint(BCLog::INSTANTSEND, "%s -- txid=%s: outpoint %s too new and not ChainLocked. nTxAge=%d, nInstantSendConfirmationsRequired=%d\n", __func__,
                      txHash.ToString(), outpoint.ToStringShort(), nTxAge, nInstantSendConfirmationsRequired);

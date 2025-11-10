@@ -95,7 +95,8 @@ private:
 
     mutable Mutex cs_height_cache;
     static constexpr size_t MAX_BLOCK_HEIGHT_CACHE{16384};
-    mutable unordered_lru_cache<uint256, int, StaticSaltedHasher, MAX_BLOCK_HEIGHT_CACHE> m_cached_block_heights GUARDED_BY(cs_height_cache);
+    mutable unordered_lru_cache<uint256, int, StaticSaltedHasher, MAX_BLOCK_HEIGHT_CACHE> m_cached_block_heights
+        GUARDED_BY(cs_height_cache);
     mutable int m_cached_tip_height GUARDED_BY(cs_height_cache){-1};
 
     void CacheBlockHeightInternal(const uint256& hash, int height) const EXCLUSIVE_LOCKS_REQUIRED(cs_height_cache);
@@ -155,8 +156,7 @@ public:
 
     void TransactionAddedToMempool(const CTransactionRef& tx)
         EXCLUSIVE_LOCKS_REQUIRED(!cs_nonLocked, !cs_pendingLocks, !cs_pendingRetry, !cs_timingsTxSeen);
-    void TransactionRemovedFromMempool(const CTransactionRef& tx)
-        EXCLUSIVE_LOCKS_REQUIRED(!cs_height_cache);
+    void TransactionRemovedFromMempool(const CTransactionRef& tx) EXCLUSIVE_LOCKS_REQUIRED(!cs_height_cache);
     void BlockConnected(const std::shared_ptr<const CBlock>& pblock, const CBlockIndex* pindex)
         EXCLUSIVE_LOCKS_REQUIRED(!cs_nonLocked, !cs_pendingLocks, !cs_pendingRetry, !cs_timingsTxSeen, !cs_height_cache);
     void BlockDisconnected(const std::shared_ptr<const CBlock>& pblock, const CBlockIndex* pindexDisconnected)
@@ -179,12 +179,9 @@ public:
 
     size_t GetInstantSendLockCount() const;
 
-    void CacheBlockHeight(const uint256& hash, int height) const
-        EXCLUSIVE_LOCKS_REQUIRED(!cs_height_cache);
-    std::optional<int> GetBlockHeight(const uint256& hash) const override
-        EXCLUSIVE_LOCKS_REQUIRED(!cs_height_cache);
-    int GetTipHeight() const override
-        EXCLUSIVE_LOCKS_REQUIRED(!cs_height_cache);
+    void CacheBlockHeight(const uint256& hash, int height) const EXCLUSIVE_LOCKS_REQUIRED(!cs_height_cache);
+    std::optional<int> GetBlockHeight(const uint256& hash) const override EXCLUSIVE_LOCKS_REQUIRED(!cs_height_cache);
+    int GetTipHeight() const override EXCLUSIVE_LOCKS_REQUIRED(!cs_height_cache);
 
     bool IsInstantSendEnabled() const override;
     /**
