@@ -287,7 +287,7 @@ public:
 
     static bool HasQuorum(Consensus::LLMQType llmqType, const CQuorumBlockProcessor& quorum_block_processor, const uint256& quorumHash);
 
-    bool RequestQuorumData(CNode* pfrom, CConnman& connman, const CQuorumCPtr pQuorum, uint16_t nDataMask,
+    bool RequestQuorumData(CNode* pfrom, CConnman& connman, const CQuorum& quorum, uint16_t nDataMask,
                            const uint256& proTxHash = uint256()) const;
 
     // all these methods will lock cs_main for a short period of time
@@ -316,10 +316,10 @@ private:
     /// Returns the start offset for the masternode with the given proTxHash. This offset is applied when picking data recovery members of a quorum's
     /// memberlist and is calculated based on a list of all member of all active quorums for the given llmqType in a way that each member
     /// should receive the same number of request if all active llmqType members requests data from one llmqType quorum.
-    size_t GetQuorumRecoveryStartOffset(const CQuorumCPtr pQuorum, const CBlockIndex* pIndex) const;
+    size_t GetQuorumRecoveryStartOffset(const CQuorum& quorum, const CBlockIndex* pIndex) const;
 
-    void StartCachePopulatorThread(const CQuorumCPtr pQuorum) const;
-    void StartQuorumDataRecoveryThread(CConnman& connman, const CQuorumCPtr pQuorum, const CBlockIndex* pIndex,
+    void StartCachePopulatorThread(CQuorumCPtr pQuorum) const;
+    void StartQuorumDataRecoveryThread(CConnman& connman, CQuorumCPtr pQuorum, const CBlockIndex* pIndex,
                                        uint16_t nDataMask) const;
 
     void StartCleanupOldQuorumDataThread(const CBlockIndex* pIndex) const;

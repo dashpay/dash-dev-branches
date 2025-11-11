@@ -180,20 +180,20 @@ static RPCHelpMan quorum_list_extended()
 }
 
 static UniValue BuildQuorumInfo(const llmq::CQuorumBlockProcessor& quorum_block_processor,
-                                const llmq::CQuorumCPtr& quorum, bool includeMembers, bool includeSkShare)
+                                const llmq::CQuorum& quorum, bool includeMembers, bool includeSkShare)
 {
     UniValue ret(UniValue::VOBJ);
 
-    ret.pushKV("height", quorum->m_quorum_base_block_index->nHeight);
-    ret.pushKV("type", std::string(quorum->params.name));
-    ret.pushKV("quorumHash", quorum->qc->quorumHash.ToString());
-    ret.pushKV("quorumIndex", quorum->qc->quorumIndex);
-    ret.pushKV("minedBlock", quorum->minedBlockHash.ToString());
+    ret.pushKV("height", quorum.m_quorum_base_block_index->nHeight);
+    ret.pushKV("type", std::string(quorum.params.name));
+    ret.pushKV("quorumHash", quorum.qc->quorumHash.ToString());
+    ret.pushKV("quorumIndex", quorum.qc->quorumIndex);
+    ret.pushKV("minedBlock", quorum.minedBlockHash.ToString());
 
-    if (quorum->params.useRotation) {
-        auto previousActiveCommitment = quorum_block_processor.GetLastMinedCommitmentsByQuorumIndexUntilBlock(quorum->params.type, quorum->m_quorum_base_block_index, quorum->qc->quorumIndex, 0);
+    if (quorum.params.useRotation) {
+        auto previousActiveCommitment = quorum_block_processor.GetLastMinedCommitmentsByQuorumIndexUntilBlock(quorum.params.type, quorum.m_quorum_base_block_index, quorum.qc->quorumIndex, 0);
         if (previousActiveCommitment.has_value()) {
-            int previousConsecutiveDKGFailures = (quorum->m_quorum_base_block_index->nHeight - previousActiveCommitment.value()->nHeight) /  quorum->params.dkgInterval - 1;
+            int previousConsecutiveDKGFailures = (quorum.m_quorum_base_block_index->nHeight - previousActiveCommitment.value()->nHeight) /  quorum.params.dkgInterval - 1;
             ret.pushKV("previousConsecutiveDKGFailures", previousConsecutiveDKGFailures);
         }
         else {
@@ -203,19 +203,19 @@ static UniValue BuildQuorumInfo(const llmq::CQuorumBlockProcessor& quorum_block_
 
     if (includeMembers) {
         UniValue membersArr(UniValue::VARR);
-        for (size_t i = 0; i < quorum->members.size(); i++) {
-            const auto& dmn = quorum->members[i];
+        for (size_t i = 0; i < quorum.members.size(); i++) {
+            const auto& dmn = quorum.members[i];
             UniValue mo(UniValue::VOBJ);
             mo.pushKV("proTxHash", dmn->proTxHash.ToString());
             mo.pushKV("service", dmn->pdmnState->netInfo->GetPrimary().ToStringAddrPort());
             mo.pushKV("addresses", GetNetInfoWithLegacyFields(*dmn->pdmnState, dmn->nType));
             mo.pushKV("pubKeyOperator", dmn->pdmnState->pubKeyOperator.ToString());
-            mo.pushKV("valid", static_cast<bool>(quorum->qc->validMembers[i]));
-            if (quorum->qc->validMembers[i]) {
-                if (quorum->params.is_single_member()) {
+            mo.pushKV("valid", static_cast<bool>(quorum.qc->validMembers[i]));
+            if (quorum.qc->validMembers[i]) {
+                if (quorum.params.is_single_member()) {
                     mo.pushKV("pubKeyShare", dmn->pdmnState->pubKeyOperator.ToString());
                 } else {
-                    CBLSPublicKey pubKey = quorum->GetPubKeyShare(i);
+                    CBLSPublicKey pubKey = quorum.GetPubKeyShare(i);
                     if (pubKey.IsValid()) {
                         mo.pushKV("pubKeyShare", pubKey.ToString());
                     }
@@ -226,8 +226,8 @@ static UniValue BuildQuorumInfo(const llmq::CQuorumBlockProcessor& quorum_block_
 
         ret.pushKV("members", membersArr);
     }
-    ret.pushKV("quorumPublicKey", quorum->qc->quorumPublicKey.ToString());
-    const CBLSSecretKey& skShare = quorum->GetSkShare();
+    ret.pushKV("quorumPublicKey", quorum.qc->quorumPublicKey.ToString());
+    const CBLSSecretKey& skShare = quorum.GetSkShare();
     if (includeSkShare && skShare.IsValid()) {
         ret.pushKV("secretKeyShare", skShare.ToString());
     }
@@ -271,7 +271,7 @@ static RPCHelpMan quorum_info()
         throw JSONRPCError(RPC_INVALID_PARAMETER, "quorum not found");
     }
 
-    return BuildQuorumInfo(*llmq_ctx.quorum_block_processor, quorum, true, includeSkShare);
+    return BuildQuorumInfo(*llmq_ctx.quorum_block_processor, *quorum, true, includeSkShare);
 },
     };
 }
@@ -467,7 +467,7 @@ static RPCHelpMan quorum_memberof()
         auto quorums = llmq_ctx.qman->ScanQuorums(llmq_params_opt->type, count);
         for (auto& quorum : quorums) {
             if (quorum->IsMember(dmn->proTxHash)) {
-                auto json = BuildQuorumInfo(*llmq_ctx.quorum_block_processor, quorum, false, false);
+                auto json = BuildQuorumInfo(*llmq_ctx.quorum_block_processor, *quorum, false, false);
                 json.pushKV("isValidMember", quorum->IsValidMember(dmn->proTxHash));
                 json.pushKV("memberIndex", quorum->GetMemberIndex(dmn->proTxHash));
                 result.push_back(json);
@@ -521,7 +521,7 @@ static UniValue quorum_sign_helper(const JSONRPCRequest& request, Consensus::LLM
             throw JSONRPCError(RPC_INVALID_PARAMETER, "quorum not found");
         }
 
-        auto sigShare = CHECK_NONFATAL(node.active_ctx)->shareman->CreateSigShare(pQuorum, id, msgHash);
+        auto sigShare = CHECK_NONFATAL(node.active_ctx)->shareman->CreateSigShare(*pQuorum, id, msgHash);
 
         if (!sigShare.has_value() || !sigShare->sigShare.Get().IsValid()) {
             throw JSONRPCError(RPC_INVALID_PARAMETER, "failed to create sigShare");
@@ -815,7 +815,7 @@ static RPCHelpMan quorum_selectquorum()
 
     UniValue recoveryMembers(UniValue::VARR);
     for (int i = 0; i < quorum->params.recoveryMembers; ++i) {
-        auto dmn = llmq::CSigSharesManager::SelectMemberForRecovery(quorum, id, i);
+        auto dmn = llmq::CSigSharesManager::SelectMemberForRecovery(*quorum, id, i);
         recoveryMembers.push_back(dmn->proTxHash.ToString());
     }
     ret.pushKV("recoveryMembers", recoveryMembers);
@@ -902,7 +902,7 @@ static RPCHelpMan quorum_getdata()
         throw JSONRPCError(RPC_INVALID_PARAMETER, "quorum not found");
     }
     return connman.ForNode(nodeId, [&](CNode* pNode) {
-        return llmq_ctx.qman->RequestQuorumData(pNode, connman, quorum, nDataMask, proTxHash);
+        return llmq_ctx.qman->RequestQuorumData(pNode, connman, *quorum, nDataMask, proTxHash);
     });
 },
     };

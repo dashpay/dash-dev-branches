@@ -260,7 +260,7 @@ void CQuorumManager::TriggerQuorumDataRecoveryThreads(CConnman& connman, const C
     LogPrint(BCLog::LLMQ, "CQuorumManager::%s -- Process block %s\n", __func__, pIndex->GetBlockHash().ToString());
 
     for (const auto& params : Params().GetConsensus().llmqs) {
-        const auto vecQuorums = ScanQuorums(params.type, pIndex, params.keepOldConnections);
+        auto vecQuorums = ScanQuorums(params.type, pIndex, params.keepOldConnections);
 
         // First check if we are member of any quorum of this type
         const uint256 proTxHash = m_mn_activeman != nullptr ? m_mn_activeman->GetProTxHash() : uint256();
@@ -269,7 +269,7 @@ void CQuorumManager::TriggerQuorumDataRecoveryThreads(CConnman& connman, const C
             return pQuorum->IsValidMember(proTxHash);
         });
 
-        for (const auto& pQuorum : vecQuorums) {
+        for (auto& pQuorum : vecQuorums) {
             // If there is already a thread running for this specific quorum skip it
             if (pQuorum->fQuorumDataRecoveryThreadRunning) {
                 continue;
@@ -296,7 +296,7 @@ void CQuorumManager::TriggerQuorumDataRecoveryThreads(CConnman& connman, const C
             }
 
             // Finally start the thread which triggers the requests for this quorum
-            StartQuorumDataRecoveryThread(connman, pQuorum, pIndex, nDataMask);
+            StartQuorumDataRecoveryThread(connman, std::move(pQuorum), pIndex, nDataMask);
         }
     }
 }
@@ -478,7 +478,7 @@ bool CQuorumManager::HasQuorum(Consensus::LLMQType llmqType, const CQuorumBlockP
     return quorum_block_processor.HasMinedCommitment(llmqType, quorumHash);
 }
 
-bool CQuorumManager::RequestQuorumData(CNode* pfrom, CConnman& connman, CQuorumCPtr pQuorum, uint16_t nDataMask,
+bool CQuorumManager::RequestQuorumData(CNode* pfrom, CConnman& connman, const CQuorum& quorum, uint16_t nDataMask,
                                        const uint256& proTxHash) const
 {
     if (pfrom == nullptr) {
@@ -489,12 +489,12 @@ bool CQuorumManager::RequestQuorumData(CNode* pfrom, CConnman& connman, CQuorumC
         LogPrint(BCLog::LLMQ, "CQuorumManager::%s -- pfrom is not a verified masternode\n", __func__);
         return false;
     }
-    const Consensus::LLMQType llmqType = pQuorum->qc->llmqType;
+    const Consensus::LLMQType llmqType = quorum.qc->llmqType;
     if (!Params().GetLLMQ(llmqType).has_value()) {
         LogPrint(BCLog::LLMQ, "CQuorumManager::%s -- Invalid llmqType: %d\n", __func__, ToUnderlying(llmqType));
         return false;
     }
-    const CBlockIndex* pindex{pQuorum->m_quorum_base_block_index};
+    const CBlockIndex* pindex{quorum.m_quorum_base_block_index};
     if (pindex == nullptr) {
         LogPrint(BCLog::LLMQ, "CQuorumManager::%s -- Invalid m_quorum_base_block_index : nullptr\n", __func__);
         return false;
@@ -676,7 +676,7 @@ CQuorumCPtr CQuorumManager::GetQuorum(Consensus::LLMQType llmqType, gsl::not_nul
     return BuildQuorumFromCommitment(llmqType, pQuorumBaseBlockIndex, populate_cache);
 }
 
-size_t CQuorumManager::GetQuorumRecoveryStartOffset(const CQuorumCPtr pQuorum, const CBlockIndex* pIndex) const
+size_t CQuorumManager::GetQuorumRecoveryStartOffset(const CQuorum& quorum, const CBlockIndex* pIndex) const
 {
     assert(m_mn_activeman);
 
@@ -698,7 +698,7 @@ size_t CQuorumManager::GetQuorumRecoveryStartOffset(const CQuorumCPtr pQuorum, c
             }
         }
     }
-    return nIndex % pQuorum->qc->validMembers.size();
+    return nIndex % quorum.qc->validMembers.size();
 }
 
 MessageProcessingResult CQuorumManager::ProcessMessage(CNode& pfrom, CConnman& connman, std::string_view msg_type, CDataStream& vRecv)
@@ -886,7 +886,7 @@ MessageProcessingResult CQuorumManager::ProcessMessage(CNode& pfrom, CConnman& c
     return {};
 }
 
-void CQuorumManager::StartCachePopulatorThread(const CQuorumCPtr pQuorum) const
+void CQuorumManager::StartCachePopulatorThread(CQuorumCPtr pQuorum) const
 {
     if (!pQuorum->HasVerificationVector()) {
         return;
@@ -899,7 +899,7 @@ void CQuorumManager::StartCachePopulatorThread(const CQuorumCPtr pQuorum) const
             pQuorum->m_quorum_base_block_index->GetBlockHash().ToString());
 
     // when then later some other thread tries to get keys, it will be much faster
-    workerPool.push([pQuorum, t, this](int threadId) {
+    workerPool.push([pQuorum = std::move(pQuorum), t, this](int threadId) {
         for (const auto i : irange::range(pQuorum->members.size())) {
             if (quorumThreadInterrupt) {
                 break;
@@ -916,7 +916,7 @@ void CQuorumManager::StartCachePopulatorThread(const CQuorumCPtr pQuorum) const
     });
 }
 
-void CQuorumManager::StartQuorumDataRecoveryThread(CConnman& connman, const CQuorumCPtr pQuorum,
+void CQuorumManager::StartQuorumDataRecoveryThread(CConnman& connman, CQuorumCPtr pQuorum,
                                                    const CBlockIndex* pIndex, uint16_t nDataMaskIn) const
 {
     assert(m_mn_activeman);
@@ -927,13 +927,13 @@ void CQuorumManager::StartQuorumDataRecoveryThread(CConnman& connman, const CQuo
         return;
     }
 
-    workerPool.push([&connman, pQuorum, pIndex, nDataMaskIn, this](int threadId) {
+    workerPool.push([&connman, pQuorum = std::move(pQuorum), pIndex, nDataMaskIn, this](int threadId) {
         size_t nTries{0};
         uint16_t nDataMask{nDataMaskIn};
         int64_t nTimeLastSuccess{0};
         uint256* pCurrentMemberHash{nullptr};
         std::vector<uint256> vecMemberHashes;
-        const size_t nMyStartOffset{GetQuorumRecoveryStartOffset(pQuorum, pIndex)};
+        const size_t nMyStartOffset{GetQuorumRecoveryStartOffset(*pQuorum, pIndex)};
         const int64_t nRequestTimeout{10};
 
         auto printLog = [&](const std::string& strMessage) {
@@ -1009,7 +1009,7 @@ void CQuorumManager::StartQuorumDataRecoveryThread(CConnman& connman, const CQuo
                     return;
                 }
 
-                if (RequestQuorumData(pNode, connman, pQuorum, nDataMask, proTxHash)) {
+                if (RequestQuorumData(pNode, connman, *pQuorum, nDataMask, proTxHash)) {
                     nTimeLastSuccess = GetTime<std::chrono::seconds>().count();
                     printLog("Requested");
                 } else {

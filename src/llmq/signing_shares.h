@@ -432,14 +432,14 @@ public:
 
     void ProcessMessage(const CNode& pnode, const std::string& msg_type, CDataStream& vRecv);
 
-    void AsyncSign(const CQuorumCPtr& quorum, const uint256& id, const uint256& msgHash)
+    void AsyncSign(CQuorumCPtr quorum, const uint256& id, const uint256& msgHash)
         EXCLUSIVE_LOCKS_REQUIRED(!cs_pendingSigns);
-    std::optional<CSigShare> CreateSigShare(const CQuorumCPtr& quorum, const uint256& id, const uint256& msgHash) const;
-    void ForceReAnnouncement(const CQuorumCPtr& quorum, Consensus::LLMQType llmqType, const uint256& id, const uint256& msgHash);
+    std::optional<CSigShare> CreateSigShare(const CQuorum& quorum, const uint256& id, const uint256& msgHash) const;
+    void ForceReAnnouncement(const CQuorum& quorum, Consensus::LLMQType llmqType, const uint256& id, const uint256& msgHash);
 
     [[nodiscard]] MessageProcessingResult HandleNewRecoveredSig(const CRecoveredSig& recoveredSig) override;
 
-    static CDeterministicMNCPtr SelectMemberForRecovery(const CQuorumCPtr& quorum, const uint256& id, int attempt);
+    static CDeterministicMNCPtr SelectMemberForRecovery(const CQuorum& quorum, const uint256& id, int attempt);
 
     bool AsyncSignIfMember(Consensus::LLMQType llmqType, CSigningManager& sigman, const uint256& id,
                            const uint256& msgHash, const uint256& quorumHash = uint256(), bool allowReSign = false,
@@ -470,7 +470,7 @@ private:
         const std::unordered_map<std::pair<Consensus::LLMQType, uint256>, CQuorumCPtr, StaticSaltedHasher>& quorums);
 
     void ProcessSigShare(const CSigShare& sigShare, const CQuorumCPtr& quorum);
-    void TryRecoverSig(const CQuorumCPtr& quorum, const uint256& id, const uint256& msgHash);
+    void TryRecoverSig(const CQuorum& quorum, const uint256& id, const uint256& msgHash);
 
     bool GetSessionInfoByRecvId(NodeId nodeId, uint32_t sessionId, CSigSharesNodeState::SessionInfo& retInfo);
     static CSigShare RebuildSigShare(const CSigSharesNodeState::SessionInfo& session, const std::pair<uint16_t, CBLSLazySignature>& in);
