@@ -145,35 +145,27 @@ std::variant<uint256, CTransactionRef, std::monostate> CInstantSendManager::Proc
 
     uint256 hashBlock{};
     const auto tx = GetTransaction(nullptr, &mempool, islock->txid, Params().GetConsensus(), hashBlock);
-    const CBlockIndex* pindexMined{nullptr};
     const bool found_transaction{tx != nullptr};
     // we ignore failure here as we must be able to propagate the lock even if we don't have the TX locally
     int minedHeight{-1};
     if (found_transaction && !hashBlock.IsNull()) {
         if (auto h = GetBlockHeight(hashBlock)) {
             minedHeight = *h;
-            // Let's see if the TX that was locked by this islock is already mined in a ChainLocked block. If yes,
-            // we can simply ignore the islock, as the ChainLock implies locking of all TXs in that chain
-            if (clhandler.HasChainLock(minedHeight, hashBlock)) {
-                LogPrint(BCLog::INSTANTSEND, /* Continued */
-                         "CInstantSendManager::%s -- txlock=%s, islock=%s: dropping islock as it already got a " /* Continued */
-                         "ChainLock in block %s, peer=%d\n",
-                         __func__, islock->txid.ToString(), hash.ToString(), hashBlock.ToString(), from);
-                return std::monostate{};
-            }
         } else {
-            pindexMined = WITH_LOCK(::cs_main, return m_chainstate.m_blockman.LookupBlockIndex(hashBlock));
+            const CBlockIndex* pindexMined = WITH_LOCK(::cs_main, return m_chainstate.m_blockman.LookupBlockIndex(hashBlock));
             if (pindexMined != nullptr) {
                 CacheBlockHeight(pindexMined->GetBlockHash(), pindexMined->nHeight);
                 minedHeight = pindexMined->nHeight;
-                if (clhandler.HasChainLock(minedHeight, pindexMined->GetBlockHash())) {
-                    LogPrint(BCLog::INSTANTSEND, /* Continued */
-                             "CInstantSendManager::%s -- txlock=%s, islock=%s: dropping islock as it already got a " /* Continued */
-                             "ChainLock in block %s, peer=%d\n",
-                             __func__, islock->txid.ToString(), hash.ToString(), hashBlock.ToString(), from);
-                    return std::monostate{};
-                }
             }
+        }
+        // Let's see if the TX that was locked by this islock is already mined in a ChainLocked block. If yes,
+        // we can simply ignore the islock, as the ChainLock implies locking of all TXs in that chain
+        if (clhandler.HasChainLock(minedHeight, hashBlock)) {
+            LogPrint(BCLog::INSTANTSEND, /* Continued */
+                     "CInstantSendManager::%s -- txlock=%s, islock=%s: dropping islock as it already got a " /* Continued */
+                     "ChainLock in block %s, peer=%d\n",
+                     __func__, islock->txid.ToString(), hash.ToString(), hashBlock.ToString(), from);
+            return std::monostate{};
         }
     }
 
