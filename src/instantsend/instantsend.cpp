@@ -136,7 +136,7 @@ MessageProcessingResult CInstantSendManager::ProcessMessage(NodeId from, std::st
             ret.m_error = MisbehavingError{1};
             return ret;
         }
-        CacheBlockHeight(blockIndex->GetBlockHash(), blockIndex->nHeight);
+        CacheBlockHeight(blockIndex);
         cycleHeightOpt = blockIndex->nHeight;
     }
 
@@ -393,7 +393,7 @@ MessageProcessingResult CInstantSendManager::ProcessInstantSendLock(NodeId from,
         if (!minedHeight.has_value()) {
             const CBlockIndex* pindexMined = WITH_LOCK(::cs_main, return m_chainstate.m_blockman.LookupBlockIndex(hashBlock));
             if (pindexMined != nullptr) {
-                CacheBlockHeight(pindexMined->GetBlockHash(), pindexMined->nHeight);
+                CacheBlockHeight(pindexMined);
                 minedHeight = pindexMined->nHeight;
             }
         }
@@ -506,11 +506,7 @@ void CInstantSendManager::BlockConnected(const std::shared_ptr<const CBlock>& pb
         return;
     }
 
-    {
-        LOCK(cs_height_cache);
-        CacheBlockHeightInternal(pindex->GetBlockHash(), pindex->nHeight);
-        m_cached_tip_height = pindex->nHeight;
-    }
+    CacheTipHeight(pindex);
 
     if (m_mn_sync.IsBlockchainSynced()) {
         const bool has_chainlock = clhandler.HasChainLock(pindex->nHeight, pindex->GetBlockHash());
@@ -542,12 +538,9 @@ void CInstantSendManager::BlockDisconnected(const std::shared_ptr<const CBlock>&
     {
         LOCK(cs_height_cache);
         m_cached_block_heights.erase(pindexDisconnected->GetBlockHash());
-        const CBlockIndex* const new_tip = pindexDisconnected->pprev;
-        m_cached_tip_height = new_tip ? new_tip->nHeight : -1;
-        if (new_tip) {
-            CacheBlockHeightInternal(new_tip->GetBlockHash(), new_tip->nHeight);
-        }
     }
+
+    CacheTipHeight(pindexDisconnected->pprev);
 
     db.RemoveBlockInstantSendLocks(pblock, pindexDisconnected);
 }
@@ -670,11 +663,7 @@ void CInstantSendManager::NotifyChainLock(const CBlockIndex* pindexChainLock)
 
 void CInstantSendManager::UpdatedBlockTip(const CBlockIndex* pindexNew)
 {
-    {
-        LOCK(cs_height_cache);
-        CacheBlockHeightInternal(pindexNew->GetBlockHash(), pindexNew->nHeight);
-        m_cached_tip_height = pindexNew->nHeight;
-    }
+    CacheTipHeight(pindexNew);
 
     bool fDIP0008Active = pindexNew->pprev && pindexNew->pprev->nHeight >= Params().GetConsensus().DIP0008Height;
 
@@ -962,16 +951,16 @@ size_t CInstantSendManager::GetInstantSendLockCount() const
     return db.GetInstantSendLockCount();
 }
 
-void CInstantSendManager::CacheBlockHeightInternal(const uint256& hash, int height) const
+void CInstantSendManager::CacheBlockHeightInternal(const CBlockIndex* const block_index) const
 {
     AssertLockHeld(cs_height_cache);
-    m_cached_block_heights.insert(hash, height);
+    m_cached_block_heights.insert(block_index->GetBlockHash(), block_index->nHeight);
 }
 
-void CInstantSendManager::CacheBlockHeight(const uint256& hash, int height) const
+void CInstantSendManager::CacheBlockHeight(const CBlockIndex* const block_index) const
 {
     LOCK(cs_height_cache);
-    CacheBlockHeightInternal(hash, height);
+    CacheBlockHeightInternal(block_index);
 }
 
 std::optional<int> CInstantSendManager::GetBlockHeight(const uint256& hash) const
@@ -990,8 +979,19 @@ std::optional<int> CInstantSendManager::GetBlockHeight(const uint256& hash) cons
         return std::nullopt;
     }
 
-    CacheBlockHeight(pindex->GetBlockHash(), pindex->nHeight);
+    CacheBlockHeight(pindex);
     return pindex->nHeight;
+}
+
+void CInstantSendManager::CacheTipHeight(const CBlockIndex* const tip) const
+{
+    LOCK(cs_height_cache);
+    if (tip) {
+        CacheBlockHeightInternal(tip);
+        m_cached_tip_height = tip->nHeight;
+    } else {
+        m_cached_tip_height = -1;
+    }
 }
 
 int CInstantSendManager::GetTipHeight() const
@@ -1004,14 +1004,9 @@ int CInstantSendManager::GetTipHeight() const
     }
 
     const CBlockIndex* tip = WITH_LOCK(::cs_main, return m_chainstate.m_chain.Tip());
-    assert(tip != nullptr);
 
-    {
-        LOCK(cs_height_cache);
-        CacheBlockHeightInternal(tip->GetBlockHash(), tip->nHeight);
-        m_cached_tip_height = tip->nHeight;
-        return m_cached_tip_height;
-    }
+    CacheTipHeight(tip);
+    return tip ? tip->nHeight : -1;
 }
 
 void CInstantSendManager::WorkThreadMain(PeerManager& peerman)
