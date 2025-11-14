@@ -99,7 +99,7 @@ private:
         GUARDED_BY(cs_height_cache);
     mutable int m_cached_tip_height GUARDED_BY(cs_height_cache){-1};
 
-    void CacheBlockHeightInternal(const uint256& hash, int height) const EXCLUSIVE_LOCKS_REQUIRED(cs_height_cache);
+    void CacheBlockHeightInternal(const CBlockIndex* const block_index) const EXCLUSIVE_LOCKS_REQUIRED(cs_height_cache);
 
 public:
     CInstantSendManager() = delete;
@@ -179,8 +179,9 @@ public:
 
     size_t GetInstantSendLockCount() const;
 
-    void CacheBlockHeight(const uint256& hash, int height) const EXCLUSIVE_LOCKS_REQUIRED(!cs_height_cache);
+    void CacheBlockHeight(const CBlockIndex* const block_index) const EXCLUSIVE_LOCKS_REQUIRED(!cs_height_cache);
     std::optional<int> GetBlockHeight(const uint256& hash) const override EXCLUSIVE_LOCKS_REQUIRED(!cs_height_cache);
+    void CacheTipHeight(const CBlockIndex* const tip) const EXCLUSIVE_LOCKS_REQUIRED(!cs_height_cache);
     int GetTipHeight() const override EXCLUSIVE_LOCKS_REQUIRED(!cs_height_cache);
 
     bool IsInstantSendEnabled() const override;
