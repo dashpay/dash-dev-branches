@@ -110,7 +110,7 @@ RUN set -ex; \
 ENV PATH="/opt/shellcheck:${PATH}"
 
 # Packages needed to be able to run sanitizer builds
-ARG LLVM_VERSION=18
+ARG LLVM_VERSION=19
 RUN set -ex; \
     . /etc/os-release; \
     curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key > /etc/apt/trusted.gpg.d/apt.llvm.org.asc; \
