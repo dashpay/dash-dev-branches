@@ -131,7 +131,7 @@ static backtrace_state* GetLibBacktraceState()
     // libbacktrace is not able to handle the DWARF debuglink in the .exe
     // but luckily we can just specify the .dbg file here as it's a valid PE/XCOFF file
     static std::string debugFileName = g_exeFileName + ".dbg";
-    static const char* exeFileNamePtr = fs::exists(debugFileName) ? debugFileName.c_str() : g_exeFileName.c_str();
+    static const char* exeFileNamePtr = fs::exists(fs::absolute(fs::PathFromString(debugFileName))) ? debugFileName.c_str() : g_exeFileName.c_str();
 #else
     static const char* exeFileNamePtr = g_exeFileName.empty() ? nullptr : g_exeFileName.c_str();
 #endif
@@ -168,8 +168,6 @@ static __attribute__((noinline)) std::vector<uint64_t> GetStackFrames(size_t ski
 {
 #ifdef ENABLE_STACKTRACES
     // We can't use libbacktrace for stack unwinding on Windows as it returns invalid addresses (like 0x1 or 0xffffffff)
-    static BOOL symInitialized = SymInitialize(GetCurrentProcess(), nullptr, TRUE);
-
     // dbghelp is not thread safe
     static StdMutex m;
     StdLockGuard l(m);
@@ -471,7 +469,13 @@ std::string GetCrashInfoStrFromSerializedStr(const std::string& ciStr)
 
 static std::string GetCrashInfoStr(const crash_info& ci, size_t spaces)
 {
-    if (ci.stackframeInfos.empty()) {
+    // Check if we have any useful debug information at all
+    // libbacktrace may return stackframe_info entries but with empty filenames and functions
+    // when it can find the binary but can't resolve symbols
+    bool hasUsefulInfo = std::any_of(ci.stackframeInfos.begin(), ci.stackframeInfos.end(),
+                                     [](const auto& si) { return !si.filename.empty() || !si.function.empty(); });
+
+    if (!hasUsefulInfo) {
         return GetCrashInfoStrNoDebugInfo(ci);
     }
 

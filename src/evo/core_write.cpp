@@ -58,6 +58,7 @@ const std::map<std::string, RPCResult> RPCRESULT_MAP{{
     RESULT_MAP_ENTRY("PoSeRevivedHeight", RPCResult::Type::NUM, "Height masternode recovered from Proof of Service violations"),
     RESULT_MAP_ENTRY("proTxHash", RPCResult::Type::STR_HEX, "Hash of the masternode's initial ProRegTx"),
     RESULT_MAP_ENTRY("pubKeyOperator", RPCResult::Type::STR, "BLS public key used for operator signing"),
+    RESULT_MAP_ENTRY("quorumIndex", RPCResult::Type::NUM, "Quorum index. Relevant for rotation quorums only, 0 for non-rotating quorums"),
     RESULT_MAP_ENTRY("quorumHash", RPCResult::Type::STR_HEX, "Hash of the quorum"),
     RESULT_MAP_ENTRY("quorumSig", RPCResult::Type::STR_HEX, "BLS recovered threshold signature of quorum"),
     RESULT_MAP_ENTRY("registeredHeight", RPCResult::Type::NUM, "Height masternode was registered"),

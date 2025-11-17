@@ -568,6 +568,8 @@ bool CSigSharesManager::CollectPendingSigSharesToVerify(
     size_t maxUniqueSessions, std::unordered_map<NodeId, std::vector<CSigShare>>& retSigShares,
     std::unordered_map<std::pair<Consensus::LLMQType, uint256>, CQuorumCPtr, StaticSaltedHasher>& retQuorums)
 {
+    bool more_work{false};
+
     {
         LOCK(cs);
         if (nodeStates.empty()) {
@@ -606,6 +608,13 @@ bool CSigSharesManager::CollectPendingSigSharesToVerify(
         if (retSigShares.empty()) {
             return false;
         }
+
+        // Determine if there is still work left in any node state after pulling this batch
+        more_work = std::any_of(nodeStates.begin(), nodeStates.end(),
+                                [](const auto& entry) {
+                                    const auto& ns = entry.second;
+                                    return !ns.pendingIncomingSigShares.Empty();
+                                });
     }
 
     // For the convenience of the caller, also build a map of quorumHash -> quorum
@@ -632,7 +641,7 @@ bool CSigSharesManager::CollectPendingSigSharesToVerify(
         }
     }
 
-    return true;
+    return more_work;
 }
 
 bool CSigSharesManager::ProcessPendingSigShares()
@@ -641,8 +650,8 @@ bool CSigSharesManager::ProcessPendingSigShares()
     std::unordered_map<std::pair<Consensus::LLMQType, uint256>, CQuorumCPtr, StaticSaltedHasher> quorums;
 
     const size_t nMaxBatchSize{32};
-    bool collect_status = CollectPendingSigSharesToVerify(nMaxBatchSize, sigSharesByNodes, quorums);
-    if (!collect_status || sigSharesByNodes.empty()) {
+    bool more_work = CollectPendingSigSharesToVerify(nMaxBatchSize, sigSharesByNodes, quorums);
+    if (sigSharesByNodes.empty()) {
         return false;
     }
 
@@ -658,9 +667,12 @@ bool CSigSharesManager::ProcessPendingSigShares()
                 continue;
             }
 
+            // Materialize the signature once. Get() internally validates, so if it returns an invalid signature,
+            // we know it's malformed. This avoids calling Get() twice (once for IsValid(), once for PushMessage).
+            CBLSSignature sig = sigShare.sigShare.Get();
             // we didn't check this earlier because we use a lazy BLS signature and tried to avoid doing the expensive
             // deserialization in the message thread
-            if (!sigShare.sigShare.Get().IsValid()) {
+            if (!sig.IsValid()) {
                 BanNode(nodeId);
                 // don't process any additional shares from this node
                 break;
@@ -676,7 +688,7 @@ bool CSigSharesManager::ProcessPendingSigShares()
                 assert(false);
             }
 
-            batchVerifier.PushMessage(nodeId, sigShare.GetKey(), sigShare.GetSignHash(), sigShare.sigShare.Get(), pubKeyShare);
+            batchVerifier.PushMessage(nodeId, sigShare.GetKey(), sigShare.GetSignHash(), sig, pubKeyShare);
             verifyCount++;
         }
     }
@@ -700,7 +712,7 @@ bool CSigSharesManager::ProcessPendingSigShares()
         ProcessPendingSigShares(v, quorums);
     }
 
-    return sigSharesByNodes.size() >= nMaxBatchSize;
+    return more_work;
 }
 
 // It's ensured that no duplicates are passed to this method
@@ -780,6 +792,7 @@ void CSigSharesManager::TryRecoverSig(const CQuorum& quorum, const uint256& id, 
 
     std::vector<CBLSSignature> sigSharesForRecovery;
     std::vector<CBLSId> idsForRecovery;
+    std::shared_ptr<CRecoveredSig> singleMemberRecoveredSig;
     {
         LOCK(cs);
 
@@ -802,10 +815,8 @@ void CSigSharesManager::TryRecoverSig(const CQuorum& quorum, const uint256& id, 
             LogPrint(BCLog::LLMQ_SIGS, "CSigSharesManager::%s -- recover single-node signature. id=%s, msgHash=%s\n",
                      __func__, id.ToString(), msgHash.ToString());
 
-            auto rs = std::make_shared<CRecoveredSig>(quorum.params.type, quorum.qc->quorumHash, id, msgHash,
+            singleMemberRecoveredSig = std::make_shared<CRecoveredSig>(quorum.params.type, quorum.qc->quorumHash, id, msgHash,
                                                       recoveredSig);
-            sigman.ProcessRecoveredSig(rs, m_peerman);
-            return; // end of single-quorum processing
         }
 
         sigSharesForRecovery.reserve((size_t) quorum.params.threshold);
@@ -820,6 +831,12 @@ void CSigSharesManager::TryRecoverSig(const CQuorum& quorum, const uint256& id, 
         if (sigSharesForRecovery.size() < size_t(quorum.params.threshold)) {
             return;
         }
+    }
+
+    // Handle single-member quorum case after releasing the lock
+    if (singleMemberRecoveredSig) {
+        sigman.ProcessRecoveredSig(singleMemberRecoveredSig, m_peerman);
+        return; // end of single-quorum processing
     }
 
     // now recover it
@@ -1379,8 +1396,8 @@ CSigShare CSigSharesManager::RebuildSigShare(const CSigSharesNodeState::SessionI
 
 void CSigSharesManager::Cleanup()
 {
-    int64_t now = GetTime<std::chrono::seconds>().count();
-    if (now - lastCleanupTime < 5) {
+    constexpr auto CLEANUP_INTERVAL{5s};
+    if (!cleanupThrottler.TryCleanup(CLEANUP_INTERVAL)) {
         return;
     }
 
@@ -1443,6 +1460,7 @@ void CSigSharesManager::Cleanup()
 
         // Remove sessions which timed out
         Uint256HashSet timeoutSessions;
+        int64_t now = GetTime<std::chrono::seconds>().count();
         for (const auto& [signHash, lastSeenTime] : timeSeenForSessions) {
             if (now - lastSeenTime >= SESSION_NEW_SHARES_TIMEOUT) {
                 timeoutSessions.emplace(signHash);
@@ -1509,8 +1527,6 @@ void CSigSharesManager::Cleanup()
         });
         nodeStates.erase(nodeId);
     }
-
-    lastCleanupTime = GetTime<std::chrono::seconds>().count();
 }
 
 void CSigSharesManager::RemoveSigSharesForSession(const uint256& signHash)
@@ -1650,7 +1666,8 @@ std::optional<CSigShare> CSigSharesManager::CreateSigShare(const CQuorum& quorum
 
         // TODO: This one should be SIGN by QUORUM key, not by OPERATOR key
         // see TODO in CDKGSession::FinalizeSingleCommitment for details
-        sigShare.sigShare.Set(m_mn_activeman.Sign(signHash, bls::bls_legacy_scheme.load()), bls::bls_legacy_scheme.load());
+        auto bls_scheme = bls::bls_legacy_scheme.load();
+        sigShare.sigShare.Set(m_mn_activeman.Sign(signHash, bls_scheme), bls_scheme);
 
         if (!sigShare.sigShare.Get().IsValid()) {
             LogPrintf("CSigSharesManager::%s -- failed to sign sigShare. signHash=%s, id=%s, msgHash=%s, time=%s\n",
@@ -1684,7 +1701,8 @@ std::optional<CSigShare> CSigSharesManager::CreateSigShare(const CQuorum& quorum
     CSigShare sigShare(quorum.params.type, quorum.qc->quorumHash, id, msgHash, uint16_t(memberIdx), {});
     uint256 signHash = sigShare.buildSignHash().Get();
 
-    sigShare.sigShare.Set(skShare.Sign(signHash, bls::bls_legacy_scheme.load()), bls::bls_legacy_scheme.load());
+    auto bls_scheme = bls::bls_legacy_scheme.load();
+    sigShare.sigShare.Set(skShare.Sign(signHash, bls_scheme), bls_scheme);
     if (!sigShare.sigShare.Get().IsValid()) {
         LogPrintf("CSigSharesManager::%s -- failed to sign sigShare. signHash=%s, id=%s, msgHash=%s, time=%s\n", __func__,
                   signHash.ToString(), sigShare.getId().ToString(), sigShare.getMsgHash().ToString(), t.count());

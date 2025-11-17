@@ -17,6 +17,7 @@
 #include <saltedhasher.h>
 #include <sync.h>
 #include <util/threadinterrupt.h>
+#include <util/time.h>
 
 #include <gsl/pointers.h>
 
@@ -177,7 +178,7 @@ private:
 
     FastRandomContext rnd GUARDED_BY(cs_pending);
 
-    int64_t lastCleanupTime{0};
+    CleanupThrottler<NodeClock> cleanupThrottler;
 
     mutable Mutex cs_listeners;
     std::vector<CRecoveredSigsListener*> recoveredSigsListeners GUARDED_BY(cs_listeners);
@@ -208,7 +209,7 @@ public:
     void TruncateRecoveredSig(Consensus::LLMQType llmqType, const uint256& id);
 
 private:
-    void CollectPendingRecoveredSigsToVerify(
+    bool CollectPendingRecoveredSigsToVerify(
         size_t maxUniqueSessions, std::unordered_map<NodeId, std::list<std::shared_ptr<const CRecoveredSig>>>& retSigShares,
         std::unordered_map<std::pair<Consensus::LLMQType, uint256>, CQuorumCPtr, StaticSaltedHasher>& retQuorums)
         EXCLUSIVE_LOCKS_REQUIRED(!cs_pending);

@@ -4652,31 +4652,79 @@ void CNode::MarkReceivedMsgsForProcessing()
 {
     AssertLockNotHeld(m_msg_process_queue_mutex);
 
-    size_t nSizeAdded = 0;
-    for (const auto& msg : vRecvMsg) {
+    size_t nQuorumSizeAdded = 0;
+    size_t nNormalSizeAdded = 0;
+    std::list<CNetMessage> quorumMsgs;
+    std::list<CNetMessage> normalMsgs;
+
+    // Classify messages into quorum-priority and normal queues
+    for (auto it = vRecvMsg.begin(); it != vRecvMsg.end();) {
+        auto& msg = *it;
         // vRecvMsg contains only completed CNetMessage
         // the single possible partially deserialized message are held by TransportDeserializer
-        nSizeAdded += msg.m_raw_message_size;
+        if (IsQuorumPriorityMessage(msg.m_type)) {
+            quorumMsgs.splice(quorumMsgs.end(), vRecvMsg, it++);
+            nQuorumSizeAdded += msg.m_raw_message_size;
+        } else {
+            normalMsgs.splice(normalMsgs.end(), vRecvMsg, it++);
+            nNormalSizeAdded += msg.m_raw_message_size;
+        }
     }
 
     LOCK(m_msg_process_queue_mutex);
-    m_msg_process_queue.splice(m_msg_process_queue.end(), vRecvMsg);
-    m_msg_process_queue_size += nSizeAdded;
-    fPauseRecv = m_msg_process_queue_size > m_recv_flood_size;
+    // Splice classified messages into appropriate queues
+    m_msg_quorum_queue.splice(m_msg_quorum_queue.end(), quorumMsgs);
+    m_msg_quorum_queue_size += nQuorumSizeAdded;
+    m_msg_process_queue.splice(m_msg_process_queue.end(), normalMsgs);
+    m_msg_process_queue_size += nNormalSizeAdded;
+    // Compute backpressure over combined size of both queues
+    fPauseRecv = (m_msg_quorum_queue_size + m_msg_process_queue_size) > m_recv_flood_size;
 }
 
 std::optional<std::pair<CNetMessage, bool>> CNode::PollMessage()
 {
     LOCK(m_msg_process_queue_mutex);
+
+    // Ratio-based processing: process N quorum messages for every 1 normal message
+    // This ensures forward progress for both queues while strongly prioritizing quorum messages
+    // However, if normal queue is empty, process quorum messages in bursts (like old algorithm)
+    constexpr size_t QUORUM_TO_NORMAL_RATIO = 100;
+
+    // Check if we should process normal queue for forward progress
+    // Only apply ratio when both queues have messages to allow burst processing when normal queue is empty
+    bool skip_quorum_processing = !m_msg_process_queue.empty() &&
+                                  m_quorum_msg_count_since_normal >= QUORUM_TO_NORMAL_RATIO;
+
+    // Prioritize quorum queue: pop from it first if non-empty and ratio not reached
+    // If normal queue is empty, process quorum messages without ratio limit (burst mode)
+    if (!m_msg_quorum_queue.empty() && !skip_quorum_processing) {
+        std::list<CNetMessage> msgs;
+        // Just take one message from quorum queue
+        msgs.splice(msgs.begin(), m_msg_quorum_queue, m_msg_quorum_queue.begin());
+        m_msg_quorum_queue_size -= msgs.front().m_raw_message_size;
+        // Only increment counter if normal queue has messages (to track ratio)
+        // If normal queue is empty, don't increment so we can process bursts quickly
+        if (!m_msg_process_queue.empty()) {
+            ++m_quorum_msg_count_since_normal;
+        }
+        // Compute backpressure over combined size of both queues
+        fPauseRecv = (m_msg_quorum_queue_size + m_msg_process_queue_size) > m_recv_flood_size;
+        // Return true for 'more' if either queue has remaining messages
+        return std::make_pair(std::move(msgs.front()), !m_msg_quorum_queue.empty() || !m_msg_process_queue.empty());
+    }
+
+    // Process normal queue (either because quorum queue is empty or ratio reached)
     if (m_msg_process_queue.empty()) return std::nullopt;
 
     std::list<CNetMessage> msgs;
     // Just take one message
     msgs.splice(msgs.begin(), m_msg_process_queue, m_msg_process_queue.begin());
     m_msg_process_queue_size -= msgs.front().m_raw_message_size;
-    fPauseRecv = m_msg_process_queue_size > m_recv_flood_size;
+    m_quorum_msg_count_since_normal = 0; // Reset counter after processing normal message
+    // Compute backpressure over combined size of both queues
+    fPauseRecv = (m_msg_quorum_queue_size + m_msg_process_queue_size) > m_recv_flood_size;
 
-    return std::make_pair(std::move(msgs.front()), !m_msg_process_queue.empty());
+    return std::make_pair(std::move(msgs.front()), !m_msg_quorum_queue.empty() || !m_msg_process_queue.empty());
 }
 
 bool CConnman::NodeFullyConnected(const CNode* pnode)

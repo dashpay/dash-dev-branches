@@ -8,6 +8,7 @@
 
 #include <compat/compat.h>
 
+#include <atomic>
 #include <chrono> // IWYU pragma: export
 #include <cstdint>
 #include <string>
@@ -30,6 +31,39 @@ using SteadyMilliseconds = std::chrono::time_point<std::chrono::steady_clock, st
 using SteadyMicroseconds = std::chrono::time_point<std::chrono::steady_clock, std::chrono::microseconds>;
 
 using SystemClock = std::chrono::system_clock;
+
+/**
+ * Thread-safe cleanup interval throttler.
+ * Ensures cleanup functions don't run more frequently than specified interval.
+ */
+template<typename ClockType = NodeClock>
+class CleanupThrottler {
+private:
+    std::atomic<typename ClockType::time_point> nextCleanup{typename ClockType::time_point{}};
+
+public:
+    /**
+     * Attempt to claim a cleanup slot.
+     * @param interval Minimum time between cleanups
+     * @return true if cleanup should proceed, false if throttled
+     */
+    bool TryCleanup(typename ClockType::duration interval) {
+        auto now = ClockType::now();
+        auto expected = nextCleanup.load(std::memory_order_relaxed);
+
+        // Cleanup not yet due
+        if (now < expected) {
+            return false;
+        }
+
+        // Atomically claim the cleanup slot
+        return nextCleanup.compare_exchange_strong(
+            expected,
+            now + interval,
+            std::memory_order_relaxed
+        );
+    }
+};
 
 void UninterruptibleSleep(const std::chrono::microseconds& n);
 

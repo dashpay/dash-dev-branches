@@ -12,6 +12,7 @@
 #include <protocol.h>
 #include <saltedhasher.h>
 #include <sync.h>
+#include <util/time.h>
 
 #include <chainlock/signing.h>
 
@@ -67,7 +68,7 @@ private:
 
     std::map<uint256, std::chrono::seconds> seenChainLocks GUARDED_BY(cs);
 
-    std::atomic<std::chrono::seconds> lastCleanupTime{0s};
+    CleanupThrottler<NodeClock> cleanupThrottler;
 
 public:
     CChainLocksHandler() = delete;

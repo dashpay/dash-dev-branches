@@ -20,6 +20,7 @@
 #include <atomic>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 class CBlockIndex;
 class CChainState;
@@ -37,6 +38,11 @@ struct DbWrapperParams;
 
 namespace instantsend {
 class InstantSendSigner;
+
+struct PendingISLockFromPeer {
+    NodeId node_id;
+    InstantSendLockPtr islock;
+};
 
 struct PendingState {
     bool m_pending_work{false};
@@ -69,9 +75,9 @@ private:
 
     mutable Mutex cs_pendingLocks;
     // Incoming and not verified yet
-    Uint256HashMap<std::pair<NodeId, instantsend::InstantSendLockPtr>> pendingInstantSendLocks GUARDED_BY(cs_pendingLocks);
+    Uint256HashMap<instantsend::PendingISLockFromPeer> pendingInstantSendLocks GUARDED_BY(cs_pendingLocks);
     // Tried to verify but there is no tx yet
-    Uint256HashMap<std::pair<NodeId, instantsend::InstantSendLockPtr>> pendingNoTxInstantSendLocks GUARDED_BY(cs_pendingLocks);
+    Uint256HashMap<instantsend::PendingISLockFromPeer> pendingNoTxInstantSendLocks GUARDED_BY(cs_pendingLocks);
 
     // TXs which are neither IS locked nor ChainLocked. We use this to determine for which TXs we need to retry IS
     // locking of child TXs
@@ -117,7 +123,7 @@ private:
         EXCLUSIVE_LOCKS_REQUIRED(!cs_nonLocked, !cs_pendingLocks, !cs_pendingRetry);
 
     Uint256HashSet ProcessPendingInstantSendLocks(const Consensus::LLMQParams& llmq_params, int signOffset, bool ban,
-                                                  const Uint256HashMap<std::pair<NodeId, instantsend::InstantSendLockPtr>>& pend,
+                                                  const std::vector<std::pair<uint256, instantsend::PendingISLockFromPeer>>& pend,
                                                   std::vector<std::pair<NodeId, MessageProcessingResult>>& peer_activity)
         EXCLUSIVE_LOCKS_REQUIRED(!cs_nonLocked, !cs_pendingLocks, !cs_pendingRetry);
     MessageProcessingResult ProcessInstantSendLock(NodeId from, const uint256& hash,

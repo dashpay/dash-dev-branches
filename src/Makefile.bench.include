@@ -81,7 +81,7 @@ bench_bench_dash_LDADD = \
   $(MINIUPNPC_LIBS) \
   $(NATPMP_LIBS) \
   $(GMP_LIBS) \
-  $(BACKTRACE_LIB)
+  $(BACKTRACE_LIBS)
 
 if ENABLE_ZMQ
 bench_bench_dash_LDADD += $(LIBBITCOIN_ZMQ) $(ZMQ_LIBS)

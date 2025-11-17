@@ -14,8 +14,9 @@
 #include <saltedhasher.h>
 #include <serialize.h>
 #include <sync.h>
-#include <util/threadinterrupt.h>
 #include <uint256.h>
+#include <util/threadinterrupt.h>
+#include <util/time.h>
 
 #include <atomic>
 #include <limits>
@@ -376,7 +377,7 @@ private:
     static constexpr int64_t MAX_SEND_FOR_RECOVERY_TIMEOUT{10000};
     static constexpr size_t MAX_MSGS_SIG_SHARES{32};
 
-    RecursiveMutex cs;
+    Mutex cs;
 
     std::thread workThread;
     CThreadInterrupt workInterrupt;
@@ -412,7 +413,7 @@ private:
     const CQuorumManager& qman;
     const CSporkManager& m_sporkman;
 
-    int64_t lastCleanupTime{0};
+    CleanupThrottler<NodeClock> cleanupThrottler;
     std::atomic<uint32_t> recoveredSigsCounter{0};
 
 public:
@@ -424,37 +425,40 @@ public:
                                const CQuorumManager& _qman, const CSporkManager& sporkman);
     ~CSigSharesManager() override;
 
-    void StartWorkerThread();
-    void StopWorkerThread();
-    void RegisterAsRecoveredSigsListener();
-    void UnregisterAsRecoveredSigsListener();
-    void InterruptWorkerThread();
+    void StartWorkerThread() EXCLUSIVE_LOCKS_REQUIRED(!cs);
+    void StopWorkerThread() EXCLUSIVE_LOCKS_REQUIRED(!cs);
+    void RegisterAsRecoveredSigsListener() EXCLUSIVE_LOCKS_REQUIRED(!cs);
+    void UnregisterAsRecoveredSigsListener() EXCLUSIVE_LOCKS_REQUIRED(!cs);
+    void InterruptWorkerThread() EXCLUSIVE_LOCKS_REQUIRED(!cs);
 
-    void ProcessMessage(const CNode& pnode, const std::string& msg_type, CDataStream& vRecv);
+    void ProcessMessage(const CNode& pnode, const std::string& msg_type, CDataStream& vRecv) EXCLUSIVE_LOCKS_REQUIRED(!cs);
 
     void AsyncSign(CQuorumCPtr quorum, const uint256& id, const uint256& msgHash)
-        EXCLUSIVE_LOCKS_REQUIRED(!cs_pendingSigns);
-    std::optional<CSigShare> CreateSigShare(const CQuorum& quorum, const uint256& id, const uint256& msgHash) const;
-    void ForceReAnnouncement(const CQuorum& quorum, Consensus::LLMQType llmqType, const uint256& id, const uint256& msgHash);
+        EXCLUSIVE_LOCKS_REQUIRED(!cs_pendingSigns, !cs);
+    std::optional<CSigShare> CreateSigShare(const CQuorum& quorum, const uint256& id, const uint256& msgHash) const
+        EXCLUSIVE_LOCKS_REQUIRED(!cs);
+    void ForceReAnnouncement(const CQuorum& quorum, Consensus::LLMQType llmqType, const uint256& id,
+                             const uint256& msgHash) EXCLUSIVE_LOCKS_REQUIRED(!cs);
 
-    [[nodiscard]] MessageProcessingResult HandleNewRecoveredSig(const CRecoveredSig& recoveredSig) override;
+    [[nodiscard]] MessageProcessingResult HandleNewRecoveredSig(const CRecoveredSig& recoveredSig) override
+        EXCLUSIVE_LOCKS_REQUIRED(!cs);
 
     static CDeterministicMNCPtr SelectMemberForRecovery(const CQuorum& quorum, const uint256& id, int attempt);
 
     bool AsyncSignIfMember(Consensus::LLMQType llmqType, CSigningManager& sigman, const uint256& id,
                            const uint256& msgHash, const uint256& quorumHash = uint256(), bool allowReSign = false,
-                           bool allowDiffMsgHashSigning = false)
-        EXCLUSIVE_LOCKS_REQUIRED(!cs_pendingSigns);
+                           bool allowDiffMsgHashSigning = false) EXCLUSIVE_LOCKS_REQUIRED(!cs_pendingSigns, !cs);
 
-    void NotifyRecoveredSig(const std::shared_ptr<const CRecoveredSig>& sig) const;
+    void NotifyRecoveredSig(const std::shared_ptr<const CRecoveredSig>& sig) const EXCLUSIVE_LOCKS_REQUIRED(!cs);
 
 private:
     // all of these return false when the currently processed message should be aborted (as each message actually contains multiple messages)
-    bool ProcessMessageSigSesAnn(const CNode& pfrom, const CSigSesAnn& ann);
-    bool ProcessMessageSigSharesInv(const CNode& pfrom, const CSigSharesInv& inv);
-    bool ProcessMessageGetSigShares(const CNode& pfrom, const CSigSharesInv& inv);
-    bool ProcessMessageBatchedSigShares(const CNode& pfrom, const CBatchedSigShares& batchedSigShares);
-    void ProcessMessageSigShare(NodeId fromId, const CSigShare& sigShare);
+    bool ProcessMessageSigSesAnn(const CNode& pfrom, const CSigSesAnn& ann) EXCLUSIVE_LOCKS_REQUIRED(!cs);
+    bool ProcessMessageSigSharesInv(const CNode& pfrom, const CSigSharesInv& inv) EXCLUSIVE_LOCKS_REQUIRED(!cs);
+    bool ProcessMessageGetSigShares(const CNode& pfrom, const CSigSharesInv& inv) EXCLUSIVE_LOCKS_REQUIRED(!cs);
+    bool ProcessMessageBatchedSigShares(const CNode& pfrom, const CBatchedSigShares& batchedSigShares)
+        EXCLUSIVE_LOCKS_REQUIRED(!cs);
+    void ProcessMessageSigShare(NodeId fromId, const CSigShare& sigShare) EXCLUSIVE_LOCKS_REQUIRED(!cs);
 
     static bool VerifySigSharesInv(Consensus::LLMQType llmqType, const CSigSharesInv& inv);
     static bool PreVerifyBatchedSigShares(const CActiveMasternodeManager& mn_activeman, const CQuorumManager& quorum_manager,
@@ -462,26 +466,29 @@ private:
 
     bool CollectPendingSigSharesToVerify(
         size_t maxUniqueSessions, std::unordered_map<NodeId, std::vector<CSigShare>>& retSigShares,
-        std::unordered_map<std::pair<Consensus::LLMQType, uint256>, CQuorumCPtr, StaticSaltedHasher>& retQuorums);
-    bool ProcessPendingSigShares();
+        std::unordered_map<std::pair<Consensus::LLMQType, uint256>, CQuorumCPtr, StaticSaltedHasher>& retQuorums)
+        EXCLUSIVE_LOCKS_REQUIRED(!cs);
+    bool ProcessPendingSigShares() EXCLUSIVE_LOCKS_REQUIRED(!cs);
 
     void ProcessPendingSigShares(
         const std::vector<CSigShare>& sigSharesToProcess,
-        const std::unordered_map<std::pair<Consensus::LLMQType, uint256>, CQuorumCPtr, StaticSaltedHasher>& quorums);
+        const std::unordered_map<std::pair<Consensus::LLMQType, uint256>, CQuorumCPtr, StaticSaltedHasher>& quorums)
+        EXCLUSIVE_LOCKS_REQUIRED(!cs);
 
-    void ProcessSigShare(const CSigShare& sigShare, const CQuorumCPtr& quorum);
-    void TryRecoverSig(const CQuorum& quorum, const uint256& id, const uint256& msgHash);
+    void ProcessSigShare(const CSigShare& sigShare, const CQuorumCPtr& quorum) EXCLUSIVE_LOCKS_REQUIRED(!cs);
+    void TryRecoverSig(const CQuorum& quorum, const uint256& id, const uint256& msgHash) EXCLUSIVE_LOCKS_REQUIRED(!cs);
 
-    bool GetSessionInfoByRecvId(NodeId nodeId, uint32_t sessionId, CSigSharesNodeState::SessionInfo& retInfo);
+    bool GetSessionInfoByRecvId(NodeId nodeId, uint32_t sessionId, CSigSharesNodeState::SessionInfo& retInfo)
+        EXCLUSIVE_LOCKS_REQUIRED(!cs);
     static CSigShare RebuildSigShare(const CSigSharesNodeState::SessionInfo& session, const std::pair<uint16_t, CBLSLazySignature>& in);
 
-    void Cleanup();
+    void Cleanup() EXCLUSIVE_LOCKS_REQUIRED(!cs);
     void RemoveSigSharesForSession(const uint256& signHash) EXCLUSIVE_LOCKS_REQUIRED(cs);
-    void RemoveBannedNodeStates();
+    void RemoveBannedNodeStates() EXCLUSIVE_LOCKS_REQUIRED(!cs);
 
-    void BanNode(NodeId nodeId);
+    void BanNode(NodeId nodeId) EXCLUSIVE_LOCKS_REQUIRED(!cs);
 
-    bool SendMessages();
+    bool SendMessages() EXCLUSIVE_LOCKS_REQUIRED(!cs);
     void CollectSigSharesToRequest(std::unordered_map<NodeId, Uint256HashMap<CSigSharesInv>>& sigSharesToRequest)
         EXCLUSIVE_LOCKS_REQUIRED(cs);
     void CollectSigSharesToSend(std::unordered_map<NodeId, Uint256HashMap<CBatchedSigShares>>& sigSharesToSend)
@@ -489,8 +496,8 @@ private:
     void CollectSigSharesToSendConcentrated(std::unordered_map<NodeId, std::vector<CSigShare>>& sigSharesToSend, const std::vector<CNode*>& vNodes) EXCLUSIVE_LOCKS_REQUIRED(cs);
     void CollectSigSharesToAnnounce(std::unordered_map<NodeId, Uint256HashMap<CSigSharesInv>>& sigSharesToAnnounce)
         EXCLUSIVE_LOCKS_REQUIRED(cs);
-    void SignPendingSigShares() EXCLUSIVE_LOCKS_REQUIRED(!cs_pendingSigns);
-    void WorkThreadMain() EXCLUSIVE_LOCKS_REQUIRED(!cs_pendingSigns);
+    void SignPendingSigShares() EXCLUSIVE_LOCKS_REQUIRED(!cs_pendingSigns, !cs);
+    void WorkThreadMain() EXCLUSIVE_LOCKS_REQUIRED(!cs_pendingSigns, !cs);
 };
 } // namespace llmq
 

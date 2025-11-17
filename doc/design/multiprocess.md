@@ -19,7 +19,7 @@ The `-debug=ipc` command line option can be used to see requests and responses b
 
 ## Installation
 
-The multiprocess feature requires [Cap'n Proto](https://capnproto.org/) and [libmultiprocess](https://github.com/chaincodelabs/libmultiprocess) as dependencies. A simple way to get starting using it without installing these dependencies manually is to use the [depends system](../depends) with the `MULTIPROCESS=1` [dependency option](../depends#dependency-options) passed to make:
+The multiprocess feature requires [Cap'n Proto](https://capnproto.org/) and [libmultiprocess](https://github.com/bitcoin-core/libmultiprocess) as dependencies. A simple way to get starting using it without installing these dependencies manually is to use the [depends system](../depends) with the `MULTIPROCESS=1` [dependency option](../depends#dependency-options) passed to make:
 
 ```
 cd <DASH_SOURCE_DIRECTORY>
@@ -32,7 +32,7 @@ DASHD=dash-node test/functional/test_runner.py
 
 The configure script will pick up settings and library locations from the depends directory, so there is no need to pass `--enable-multiprocess` as a separate flag when using the depends system (it's controlled by the `MULTIPROCESS=1` option).
 
-Alternately, you can install [Cap'n Proto](https://capnproto.org/) and [libmultiprocess](https://github.com/chaincodelabs/libmultiprocess) packages on your system, and just run `./configure --enable-multiprocess` without using the depends system. The configure script will be able to locate the installed packages via [pkg-config](https://www.freedesktop.org/wiki/Software/pkg-config/). See [Installation](https://github.com/chaincodelabs/libmultiprocess#installation) section of the libmultiprocess readme for install steps. See [build-unix.md](build-unix.md) and [build-osx.md](build-osx.md) for information about installing dependencies in general.
+Alternately, you can install [Cap'n Proto](https://capnproto.org/) and [libmultiprocess](https://github.com/bitcoin-core/libmultiprocess) packages on your system, and just run `./configure --enable-multiprocess` without using the depends system. The configure script will be able to locate the installed packages via [pkg-config](https://www.freedesktop.org/wiki/Software/pkg-config/). See [Installation](https://github.com/bitcoin-core/libmultiprocess#installation) section of the libmultiprocess readme for install steps. See [build-unix.md](build-unix.md) and [build-osx.md](build-osx.md) for information about installing dependencies in general.
 
 ## IPC implementation details
 
@@ -48,7 +48,7 @@ interface method invokes the implementation directly. When code is running in
 different processes, calling an interface method invokes a proxy interface
 implementation that communicates with a remote process and invokes the real
 implementation in the remote process. The
-[libmultiprocess](https://github.com/chaincodelabs/libmultiprocess) code
+[libmultiprocess](https://github.com/bitcoin-core/libmultiprocess) code
 generation tool internally generates proxy client classes and proxy server
 classes for this purpose that are thin wrappers around Cap'n Proto
 [client](https://capnproto.org/cxxrpc.html#clients) and
@@ -67,6 +67,6 @@ a corresponding thread in the invoked process responsible for executing all
 method calls from the source thread, without blocking I/O or holding up another
 call, and using the same thread local variables, locks, and callbacks between
 calls. The forwarding, tracking, and threading is implemented inside the
-[libmultiprocess](https://github.com/chaincodelabs/libmultiprocess) library
+[libmultiprocess](https://github.com/bitcoin-core/libmultiprocess) library
 which has the design goal of making calls between processes look like calls in
 the same process to the extent possible.

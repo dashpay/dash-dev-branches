@@ -90,7 +90,6 @@ ProposalWizard::ProposalWizard(interfaces::Node& node, WalletModel* walletModel,
     connect(m_ui->paymentAmount, &BitcoinAmountField::valueChanged, this, &ProposalWizard::updateLabels);
     connect(m_ui->btnNext1, &QPushButton::clicked, this, &ProposalWizard::onNextFromDetails);
     connect(m_ui->btnBack1, &QPushButton::clicked, this, &ProposalWizard::onBackToDetails);
-    connect(m_ui->btnValidate, &QPushButton::clicked, this, &ProposalWizard::onValidateJson);
     connect(m_ui->btnNext2, &QPushButton::clicked, this, &ProposalWizard::onNextFromReview);
     connect(m_ui->btnBack2, &QPushButton::clicked, this, &ProposalWizard::onBackToReview);
     connect(m_ui->btnPrepare, &QPushButton::clicked, this, &ProposalWizard::onPrepare);
@@ -199,6 +198,7 @@ void ProposalWizard::onNextFromDetails()
 {
     buildJsonAndHex();
     m_ui->stackedWidget->setCurrentIndex(1);
+    onValidateJson(); // Automatically validate when entering the review page
 }
 
 void ProposalWizard::onBackToDetails() { m_ui->stackedWidget->setCurrentIndex(0); }

@@ -246,7 +246,25 @@ static RPCHelpMan quorum_info()
         RPCResult{
             RPCResult::Type::OBJ, "", "",
             {
-                {RPCResult::Type::ELISION, "", ""}
+                {RPCResult::Type::NUM, "height", "Quorum Height"},
+                {RPCResult::Type::STR, "type", "Quorum type"},
+                GetRpcResult("quorumHash"),
+                GetRpcResult("quorumIndex"),
+                {RPCResult::Type::STR_HEX, "minedBlock", "Blockhash where the commitment was mined."},
+                {RPCResult::Type::NUM, "previousConsecutiveDKGFailures", "Number of previous consecutive DKG failures. Only present for rotation-enabled quorums."},
+                {RPCResult::Type::ARR, "members", "Members of quorum",
+                    {
+                        {RPCResult::Type::OBJ, "", "",
+                        {
+                            GetRpcResult("proTxHash"),
+                            GetRpcResult("service"),
+                            GetRpcResult("addresses"),
+                            GetRpcResult("pubKeyOperator"),
+                            {RPCResult::Type::BOOL, "valid", "True if member is valid for this DKG"},
+                            {RPCResult::Type::STR_HEX, "pubKeyShare", /*optional=*/true, "Share of BLS public key of the member. Only present if member is valid."}
+                        }},
+                    },
+                },
             },
         },
         RPCExamples{""},
@@ -296,7 +314,7 @@ static RPCHelpMan quorum_dkgstatus()
                         {RPCResult::Type::OBJ, "", "",
                         {
                             {RPCResult::Type::NUM, "llmqType", "Name of quorum"},
-                            {RPCResult::Type::NUM, "quorumIndex", "Relevant for rotation quorums only, 0 for non-rotating quorums"},
+                            GetRpcResult("quorumIndex"),
                             {RPCResult::Type::OBJ, "status", "",
                             {
                                 // TODO: list fields of output for RPC help instead ELISION
@@ -309,7 +327,7 @@ static RPCHelpMan quorum_dkgstatus()
                     // TODO: list fields of output for RPC help instead ELISION
                     {{RPCResult::Type::ELISION, "", ""}},
                 },
-                {RPCResult::Type::ARR, "mineableCommitments", "",
+                {RPCResult::Type::ARR, "minableCommitments", "",
                     // TODO: list fields of output for RPC help instead ELISION
                     {{RPCResult::Type::ELISION, "", ""}},
                 },
@@ -427,7 +445,7 @@ static RPCHelpMan quorum_memberof()
             {
                 {RPCResult::Type::OBJ, "", "Quorum Info",
                 {
-                    {RPCResult::Type::ELISION, "", "See for details help for `quorum info`"},
+                    {RPCResult::Type::ELISION, "", "See `help quorum info` for details"},
                     {RPCResult::Type::BOOL, "isValidMember", ""},
                     {RPCResult::Type::NUM, "memberIndex", ""},
                 }},

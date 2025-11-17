@@ -435,15 +435,17 @@ MessageProcessingResult CSigningManager::ProcessMessage(NodeId from, std::string
     return ret;
 }
 
-void CSigningManager::CollectPendingRecoveredSigsToVerify(
+bool CSigningManager::CollectPendingRecoveredSigsToVerify(
         size_t maxUniqueSessions,
         std::unordered_map<NodeId, std::list<std::shared_ptr<const CRecoveredSig>>>& retSigShares,
         std::unordered_map<std::pair<Consensus::LLMQType, uint256>, CQuorumCPtr, StaticSaltedHasher>& retQuorums)
 {
+    bool more_work{false};
+
     {
         LOCK(cs_pending);
         if (pendingRecoveredSigs.empty()) {
-            return;
+            return false;
         }
 
         // TODO: refactor it to remove duplicated code with `CSigSharesManager::CollectPendingSigSharesToVerify`
@@ -466,8 +468,12 @@ void CSigningManager::CollectPendingRecoveredSigsToVerify(
         }, rnd);
 
         if (retSigShares.empty()) {
-            return;
+            return false;
         }
+
+        more_work = std::any_of(pendingRecoveredSigs.begin(), pendingRecoveredSigs.end(),
+                                [](const auto& p) { return !p.second.empty(); }) ||
+                    !pendingReconstructedRecoveredSigs.empty();
     }
 
     for (auto& p : retSigShares) {
@@ -500,6 +506,8 @@ void CSigningManager::CollectPendingRecoveredSigsToVerify(
             ++it;
         }
     }
+
+    return more_work;
 }
 
 void CSigningManager::ProcessPendingReconstructedRecoveredSigs(PeerManager& peerman)
@@ -520,7 +528,7 @@ bool CSigningManager::ProcessPendingRecoveredSigs(PeerManager& peerman)
     ProcessPendingReconstructedRecoveredSigs(peerman);
 
     const size_t nMaxBatchSize{32};
-    CollectPendingRecoveredSigsToVerify(nMaxBatchSize, recSigsByNode, quorums);
+    bool more_work = CollectPendingRecoveredSigsToVerify(nMaxBatchSize, recSigsByNode, quorums);
     if (recSigsByNode.empty()) {
         return false;
     }
@@ -574,7 +582,7 @@ bool CSigningManager::ProcessPendingRecoveredSigs(PeerManager& peerman)
         }
     }
 
-    return recSigsByNode.size() >= nMaxBatchSize;
+    return more_work;
 }
 
 // signature must be verified already
@@ -637,8 +645,8 @@ void CSigningManager::TruncateRecoveredSig(Consensus::LLMQType llmqType, const u
 
 void CSigningManager::Cleanup()
 {
-    int64_t now = TicksSinceEpoch<std::chrono::milliseconds>(SystemClock::now());
-    if (now - lastCleanupTime < 5000) {
+    constexpr auto CLEANUP_INTERVAL{5000ms};
+    if (!cleanupThrottler.TryCleanup(CLEANUP_INTERVAL)) {
         return;
     }
 
@@ -646,8 +654,6 @@ void CSigningManager::Cleanup()
 
     db.CleanupOldRecoveredSigs(maxAge);
     db.CleanupOldVotes(maxAge);
-
-    lastCleanupTime = TicksSinceEpoch<std::chrono::milliseconds>(SystemClock::now());
 }
 
 void CSigningManager::RegisterRecoveredSigsListener(CRecoveredSigsListener* l)

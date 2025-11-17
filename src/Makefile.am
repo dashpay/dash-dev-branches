@@ -9,9 +9,9 @@ print-%: FORCE
 
 DIST_SUBDIRS = secp256k1
 
-AM_LDFLAGS = $(LIBTOOL_LDFLAGS) $(HARDENED_LDFLAGS) $(GPROF_LDFLAGS) $(SANITIZER_LDFLAGS) $(CORE_LDFLAGS)
-AM_CFLAGS = $(DEBUG_CFLAGS)
-AM_CXXFLAGS = $(DEBUG_CXXFLAGS) $(HARDENED_CXXFLAGS) $(WARN_CXXFLAGS) $(NOWARN_CXXFLAGS) $(ERROR_CXXFLAGS) $(GPROF_CXXFLAGS) $(SANITIZER_CXXFLAGS) $(CORE_CXXFLAGS)
+AM_LDFLAGS = $(LIBTOOL_LDFLAGS) $(HARDENED_LDFLAGS) $(GPROF_LDFLAGS) $(SANITIZER_LDFLAGS) $(CORE_LDFLAGS) $(BACKTRACE_LDFLAGS)
+AM_CFLAGS = $(DEBUG_CFLAGS) $(BACKTRACE_FLAGS)
+AM_CXXFLAGS = $(DEBUG_CXXFLAGS) $(HARDENED_CXXFLAGS) $(WARN_CXXFLAGS) $(NOWARN_CXXFLAGS) $(ERROR_CXXFLAGS) $(GPROF_CXXFLAGS) $(SANITIZER_CXXFLAGS) $(CORE_CXXFLAGS) $(BACKTRACE_FLAGS)
 AM_OBJCXXFLAGS = $(AM_CXXFLAGS)
 AM_CPPFLAGS = $(DEBUG_CPPFLAGS) $(HARDENED_CPPFLAGS) $(CORE_CPPFLAGS)
 AM_LIBTOOLFLAGS = --preserve-dup-deps
@@ -36,16 +36,10 @@ if TARGET_WINDOWS
 LDFLAGS_WRAP_EXCEPTIONS += -Wl,-wrap,_assert -Wl,-wrap,_wassert
 else
 LDFLAGS_WRAP_EXCEPTIONS += -Wl,-wrap,__assert_fail
-endif
-endif
-endif
-
-if TARGET_WINDOWS
-BACKTRACE_LIB = -ldbghelp -lbacktrace
-else
-BACKTRACE_LIB = -lbacktrace
-endif
-endif #ENABLE_STACKTRACES
+endif # TARGET_WINDOWS
+endif # CRASH_HOOKS_WRAPPED_CXX_ABI
+endif # ENABLE_CRASH_HOOKS
+endif # ENABLE_STACKTRACES
 
 BITCOIN_INCLUDES=-I$(builddir) -I$(srcdir)/$(MINISKETCH_INCLUDE_DIR_INT) -I$(srcdir)/secp256k1/include -I$(srcdir)/$(UNIVALUE_INCLUDE_DIR_INT) $(LEVELDB_CPPFLAGS)
 BITCOIN_INCLUDES+=-isystem$(srcdir)/dashbls/include -isystem$(srcdir)/dashbls/depends/relic/include -isystem$(srcdir)/dashbls/depends/minialloc/include
@@ -892,7 +886,7 @@ libbitcoin_consensus_a_SOURCES = \
   version.h
 
 # common: shared between dashd, and dash-qt and non-server tools
-libbitcoin_common_a_CPPFLAGS = $(AM_CPPFLAGS) $(BITCOIN_INCLUDES)
+libbitcoin_common_a_CPPFLAGS = $(AM_CPPFLAGS) $(BITCOIN_INCLUDES) $(BOOST_CPPFLAGS)
 libbitcoin_common_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
 libbitcoin_common_a_SOURCES = \
   base58.cpp \
@@ -1028,7 +1022,7 @@ bitcoin_bin_ldadd = \
   $(LIBMEMENV) \
   $(LIBSECP256K1)
 
-bitcoin_bin_ldadd += $(BACKTRACE_LIB) $(BDB_LIBS) $(MINIUPNPC_LIBS) $(NATPMP_LIBS) $(SQLITE_LIBS) $(EVENT_PTHREADS_LIBS) $(EVENT_LIBS) $(ZMQ_LIBS) $(GMP_LIBS)
+bitcoin_bin_ldadd += $(BACKTRACE_LIBS) $(BDB_LIBS) $(MINIUPNPC_LIBS) $(NATPMP_LIBS) $(SQLITE_LIBS) $(EVENT_PTHREADS_LIBS) $(EVENT_LIBS) $(ZMQ_LIBS) $(GMP_LIBS)
 
 dashd_SOURCES = $(bitcoin_daemon_sources) init/bitcoind.cpp
 dashd_CPPFLAGS = $(bitcoin_bin_cppflags)
@@ -1057,7 +1051,7 @@ dash_cli_LDADD = \
   $(LIBUNIVALUE) \
   $(LIBBITCOIN_UTIL) \
   $(LIBBITCOIN_CRYPTO)
-dash_cli_LDADD += $(BACKTRACE_LIB) $(EVENT_LIBS) $(GMP_LIBS)
+dash_cli_LDADD += $(BACKTRACE_LIBS) $(EVENT_LIBS) $(GMP_LIBS)
 #
 
 # dash-tx binary #
@@ -1079,7 +1073,7 @@ dash_tx_LDADD = \
   $(LIBDASHBLS) \
   $(LIBSECP256K1)
 
-dash_tx_LDADD += $(BACKTRACE_LIB) $(GMP_LIBS)
+dash_tx_LDADD += $(BACKTRACE_LIBS) $(GMP_LIBS)
 #
 
 # dash-wallet binary #
@@ -1097,7 +1091,7 @@ dash_wallet_LDADD = \
   $(LIBBITCOIN_CRYPTO) \
   $(LIBDASHBLS) \
   $(LIBSECP256K1) \
-  $(BACKTRACE_LIB) \
+  $(BACKTRACE_LIBS) \
   $(BOOST_LIBS) \
   $(BDB_LIBS) \
   $(SQLITE_LIBS) \

@@ -1094,6 +1094,9 @@ private:
     Mutex m_msg_process_queue_mutex;
     std::list<CNetMessage> m_msg_process_queue GUARDED_BY(m_msg_process_queue_mutex);
     size_t m_msg_process_queue_size GUARDED_BY(m_msg_process_queue_mutex){0};
+    std::list<CNetMessage> m_msg_quorum_queue GUARDED_BY(m_msg_process_queue_mutex);
+    size_t m_msg_quorum_queue_size GUARDED_BY(m_msg_process_queue_mutex){0};
+    size_t m_quorum_msg_count_since_normal GUARDED_BY(m_msg_process_queue_mutex){0};
 
     // Our address, as reported by the peer
     CService addrLocal GUARDED_BY(m_addr_local_mutex);
@@ -2001,5 +2004,25 @@ class CExplicitNetCleanup
 public:
     static void callCleanup();
 };
+
+// Helper function to determine if a message type should be prioritized in the quorum queue
+inline bool IsQuorumPriorityMessage(const std::string& msg_type)
+{
+    // LLMQ signing/data messages
+    if (msg_type == NetMsgType::QSIGSHARE ||
+        msg_type == NetMsgType::QBSIGSHARES ||
+        msg_type == NetMsgType::QSIGSHARESINV ||
+        msg_type == NetMsgType::QGETSIGSHARES ||
+        msg_type == NetMsgType::QSIGSESANN ||
+        msg_type == NetMsgType::QSIGREC) {
+        return true;
+    }
+    // High-level lock messages (ChainLocks, InstantSend locks)
+    if (msg_type == NetMsgType::CLSIG ||
+        msg_type == NetMsgType::ISDLOCK) {
+        return true;
+    }
+    return false;
+}
 
 #endif // BITCOIN_NET_H
