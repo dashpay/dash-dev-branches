@@ -55,7 +55,36 @@ struct CNodeStateStats {
     ServiceFlags their_services;
 };
 
-class PeerManager : public CValidationInterface, public NetEventsInterface
+class PeerManagerInternal
+{
+public:
+    virtual void PeerMisbehaving(const NodeId pnode, const int howmuch, const std::string& message = "") = 0;
+    virtual void PeerEraseObjectRequest(const NodeId nodeid, const CInv& inv) = 0;
+    virtual void PeerRelayInv(const CInv& inv) = 0;
+    virtual void PeerRelayInvFiltered(const CInv& inv, const CTransaction& relatedTx) = 0;
+    virtual void PeerRelayInvFiltered(const CInv& inv, const uint256& relatedTxHash) = 0;
+    virtual void PeerAskPeersForTransaction(const uint256& txid) = 0;
+};
+
+class NetHandler
+{
+public:
+    NetHandler(PeerManagerInternal* peer_manager) : m_peer_manager{Assert(peer_manager)} {}
+    virtual ~NetHandler() {
+        Interrupt();
+        Stop();
+    }
+
+    virtual void Start() {}
+    virtual void Stop() {}
+    virtual void Interrupt() {}
+    virtual void ProcessMessage(CNode& pfrom, const std::string& msg_type, CDataStream& vRecv) {}
+protected:
+    PeerManagerInternal* m_peer_manager;
+};
+
+
+class PeerManager : public CValidationInterface, public NetEventsInterface, public PeerManagerInternal
 {
 public:
     static std::unique_ptr<PeerManager> make(const CChainParams& chainparams, CConnman& connman, AddrMan& addrman,
@@ -133,6 +162,12 @@ public:
     virtual bool IsBanned(NodeId pnode) = 0;
 
     virtual size_t GetRequestedObjectCount(NodeId nodeid) const = 0;
+
+    virtual void AddExtraHandler(std::unique_ptr<NetHandler>&& handler) = 0;
+    virtual void RemoveHandlers() = 0;
+    virtual void StartHandlers() = 0;
+    virtual void StopHandlers() = 0;
+    virtual void InterruptHandlers() = 0;
 };
 
 #endif // BITCOIN_NET_PROCESSING_H

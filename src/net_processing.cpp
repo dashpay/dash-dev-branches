@@ -595,6 +595,11 @@ public:
                     const std::unique_ptr<ActiveContext>& active_ctx, CJWalletManager* const cj_walletman,
                     const std::unique_ptr<LLMQContext>& llmq_ctx, bool ignore_incoming_txs);
 
+    ~PeerManagerImpl()
+    {
+        RemoveHandlers();
+    }
+
     /** Overridden from CValidationInterface. */
     void BlockConnected(const std::shared_ptr<const CBlock>& pblock, const CBlockIndex* pindexConnected) override
         EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_recent_confirmed_transactions_mutex);
@@ -637,6 +642,21 @@ public:
     void UpdateLastBlockAnnounceTime(NodeId node, int64_t time_in_seconds) override;
     bool IsBanned(NodeId pnode) override EXCLUSIVE_LOCKS_REQUIRED(cs_main, !m_peer_mutex);
     size_t GetRequestedObjectCount(NodeId nodeid) const override EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
+
+    /** Implements external handlers logic */
+    void AddExtraHandler(std::unique_ptr<NetHandler>&& handler) override;
+    void RemoveHandlers() override;
+    void StartHandlers() override;
+    void StopHandlers() override;
+    void InterruptHandlers() override;
+
+    /** Implement PeerManagerInternal */
+    void PeerMisbehaving(const NodeId pnode, const int howmuch, const std::string& message = "") override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
+    void PeerEraseObjectRequest(const NodeId nodeid, const CInv& inv) override EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
+    void PeerRelayInv(const CInv& inv) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
+    void PeerRelayInvFiltered(const CInv& inv, const CTransaction& relatedTx) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
+    void PeerRelayInvFiltered(const CInv& inv, const uint256& relatedTxHash) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
+    void PeerAskPeersForTransaction(const uint256& txid) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
 private:
     void _RelayTransaction(const uint256& txid) EXCLUSIVE_LOCKS_REQUIRED(cs_main, !m_peer_mutex);
 
@@ -1067,6 +1087,8 @@ private:
     std::vector<std::pair<uint256, CTransactionRef>> vExtraTxnForCompact GUARDED_BY(g_msgproc_mutex);
     /** Offset into vExtraTxnForCompact to insert the next tx */
     size_t vExtraTxnForCompactIt GUARDED_BY(g_msgproc_mutex) = 0;
+
+    std::vector<std::unique_ptr<NetHandler>> m_handlers;
 };
 
 // Keeps track of the time (in microseconds) when transactions were requested last time
@@ -1623,6 +1645,46 @@ size_t PeerManagerImpl::GetRequestedObjectCount(NodeId nodeid) const
         return 0;
 
     return state->m_object_download.m_object_process_time.size();
+}
+
+void PeerManagerImpl::AddExtraHandler(std::unique_ptr<NetHandler>&& handler)
+{
+    assert(handler != nullptr);
+    if (auto i = dynamic_cast<CValidationInterface*>(handler.get()); i != nullptr) {
+        RegisterValidationInterface(i);
+    }
+    m_handlers.emplace_back(std::move(handler));
+}
+
+void PeerManagerImpl::RemoveHandlers()
+{
+    InterruptHandlers();
+    StopHandlers();
+    m_handlers.clear();
+}
+
+void PeerManagerImpl::StartHandlers()
+{
+    for (auto& handler : m_handlers) {
+        handler->Start();
+    }
+}
+
+void PeerManagerImpl::StopHandlers()
+{
+    for (auto& handler : m_handlers) {
+        if (auto i = dynamic_cast<CValidationInterface*>(handler.get()); i != nullptr) {
+            UnregisterValidationInterface(i);
+        }
+        handler->Stop();
+    }
+}
+
+void PeerManagerImpl::InterruptHandlers()
+{
+    for (auto& handler : m_handlers) {
+        handler->Interrupt();
+    }
 }
 
 void PeerManagerImpl::UpdateLastBlockAnnounceTime(NodeId node, int64_t time_in_seconds)
@@ -3521,19 +3583,6 @@ void PeerManagerImpl::PostProcessMessage(MessageProcessingResult&& result, NodeI
     for (const auto& dsq : result.m_dsq) {
         RelayDSQ(dsq);
     }
-    if (result.m_inv_filter) {
-        const auto& [inv, filter] = result.m_inv_filter.value();
-        if (std::holds_alternative<CTransactionRef>(filter)) {
-            RelayInvFiltered(inv, *std::get<CTransactionRef>(filter));
-        } else if (std::holds_alternative<uint256>(filter)) {
-            RelayInvFiltered(inv, std::get<uint256>(filter));
-        } else {
-            assert(false);
-        }
-    }
-    if (result.m_request_tx) {
-        AskPeersForTransaction(result.m_request_tx.value());
-    }
 }
 
 MessageProcessingResult PeerManagerImpl::ProcessPlatformBanMessage(NodeId node, std::string_view msg_type, CDataStream& vRecv)
@@ -5394,7 +5443,9 @@ void PeerManagerImpl::ProcessMessage(
             return; // CLSIG
         }
 
-        PostProcessMessage(m_llmq_ctx->isman->ProcessMessage(pfrom.GetId(), msg_type, vRecv), pfrom.GetId());
+        for (const auto& handler : m_handlers) {
+            handler->ProcessMessage(pfrom, msg_type, vRecv);
+        }
         return;
     }
 
@@ -6469,4 +6520,34 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
         }
     } // release cs_main
     return true;
+}
+
+void PeerManagerImpl::PeerMisbehaving(const NodeId pnode, const int howmuch, const std::string& message)
+{
+    Misbehaving(pnode, howmuch, message);
+}
+
+void PeerManagerImpl::PeerEraseObjectRequest(const NodeId nodeid, const CInv& inv)
+{
+    EraseObjectRequest(nodeid, inv);
+}
+
+void PeerManagerImpl::PeerRelayInv(const CInv& inv)
+{
+    RelayInv(inv);
+}
+
+void PeerManagerImpl::PeerRelayInvFiltered(const CInv& inv, const CTransaction& relatedTx)
+{
+    RelayInvFiltered(inv, relatedTx);
+}
+
+void PeerManagerImpl::PeerRelayInvFiltered(const CInv& inv, const uint256& relatedTxHash)
+{
+    RelayInvFiltered(inv, relatedTxHash);
+}
+
+void PeerManagerImpl::PeerAskPeersForTransaction(const uint256& txid)
+{
+    AskPeersForTransaction(txid);
 }

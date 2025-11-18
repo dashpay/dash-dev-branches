@@ -32,7 +32,7 @@ LLMQContext::LLMQContext(ChainstateManager& chainman, CDeterministicMNManager& d
                                                 db_params)},
     sigman{std::make_unique<llmq::CSigningManager>(chainman.ActiveChainstate(), *qman, db_params)},
     clhandler{std::make_unique<llmq::CChainLocksHandler>(chainman.ActiveChainstate(), *qman, sporkman, mempool, mn_sync)},
-    isman{std::make_unique<llmq::CInstantSendManager>(*clhandler, chainman.ActiveChainstate(), *qman, *sigman, sporkman,
+    isman{std::make_unique<llmq::CInstantSendManager>(*clhandler, chainman.ActiveChainstate(), *sigman, sporkman,
                                                       mempool, mn_sync, db_params)}
 {
     // Have to start it early to let VerifyDB check ChainLock signatures in coinbase
@@ -44,7 +44,6 @@ LLMQContext::~LLMQContext() {
 }
 
 void LLMQContext::Interrupt() {
-    isman->InterruptWorkerThread();
     sigman->InterruptWorkerThread();
 }
 
@@ -53,12 +52,10 @@ void LLMQContext::Start(PeerManager& peerman)
     qman->Start();
     sigman->StartWorkerThread(peerman);
     clhandler->Start(*isman);
-    isman->Start(peerman);
 }
 
 void LLMQContext::Stop()
 {
-    isman->Stop();
     clhandler->Stop();
     sigman->StopWorkerThread();
     qman->Stop();
