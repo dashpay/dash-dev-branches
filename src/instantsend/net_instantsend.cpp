@@ -42,7 +42,7 @@ void NetInstantSend::ProcessMessage(CNode& pfrom, const std::string& msg_type, C
             m_peer_manager->PeerMisbehaving(pfrom.GetId(), 1);
             return;
         }
-        m_is_manager.CacheBlockHeight(blockIndex->GetBlockHash(), blockIndex->nHeight);
+        m_is_manager.CacheBlockHeight(blockIndex);
         cycleHeightOpt = blockIndex->nHeight;
     }
     const int block_height = *cycleHeightOpt;
