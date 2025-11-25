@@ -8,7 +8,7 @@
 #include <llmq/quorums.h>
 #include <llmq/signhash.h>
 #include <llmq/signing_shares.h>
-#include <llmq/options.h>
+#include <llmq/params.h>
 
 #include <bls/bls_batchverifier.h>
 #include <chainparams.h>
