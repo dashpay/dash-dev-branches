@@ -55,7 +55,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 # Install Python to a system-wide location and set it as default
 # PYTHON_VERSION should match the value in .python-version
-ARG PYTHON_VERSION=3.9.18
+ARG PYTHON_VERSION=3.10.14
 ENV UV_PYTHON_INSTALL_DIR=/usr/local/python
 RUN uv python install ${PYTHON_VERSION}
 
@@ -78,9 +78,9 @@ RUN uv pip install --system --break-system-packages \
     jinja2 \
     lief==0.13.2 \
     multiprocess \
-    mypy==0.942 \
-    pyzmq==22.3.0 \
-    vulture==2.3
+    mypy==0.981 \
+    pyzmq==24.0.1 \
+    vulture==2.6
 
 # Install packages relied on by tests
 ARG DASH_HASH_VERSION=1.4.0
@@ -110,7 +110,7 @@ RUN set -ex; \
 ENV PATH="/opt/shellcheck:${PATH}"
 
 # Packages needed to be able to run sanitizer builds
-ARG LLVM_VERSION=18
+ARG LLVM_VERSION=19
 RUN set -ex; \
     . /etc/os-release; \
     curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key > /etc/apt/trusted.gpg.d/apt.llvm.org.asc; \
@@ -123,7 +123,7 @@ RUN set -ex; \
 ARG USER_ID=1000 \
     GROUP_ID=1000
 RUN set -ex; \
-    getent group ${GROUP_ID} || groupmod -g ${GROUP_ID} -n dash ubuntu; \
+    (getent group ${GROUP_ID} && usermod -g ${GROUP_ID} ubuntu) || groupmod -g ${GROUP_ID} -n dash ubuntu; \
     usermod -u ${USER_ID} -md /home/dash -l dash ubuntu; \
     chown ${USER_ID}:${GROUP_ID} -R /home/dash; \
     mkdir -p /src/dash && \

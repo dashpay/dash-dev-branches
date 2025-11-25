@@ -677,8 +677,7 @@ bool CDeterministicMNManager::ProcessBlock(const CBlock& block, gsl::not_null<co
             const auto opt_proTx = GetTxPayload<CProUpServTx>(tx);
             if (!opt_proTx) continue; // should not happen but does not matter
 
-            if (auto meta_info = m_mn_metaman.GetMetaInfo(opt_proTx->proTxHash, false);
-                !meta_info || !meta_info->SetPlatformBan(false, nHeight)) {
+            if (!m_mn_metaman.ResetPlatformBan(opt_proTx->proTxHash, nHeight)) {
                 LogPrint(BCLog::LLMQ, "%s -- MN %s is failed to Platform revived at height %d\n", __func__,
                          opt_proTx->proTxHash.ToString(), nHeight);
             }
@@ -1586,8 +1585,6 @@ CDeterministicMNManager::RecalcDiffsResult CDeterministicMNManager::RecalculateA
     const CBlockIndex* start_index, const CBlockIndex* stop_index, ChainstateManager& chainman,
     BuildListFromBlockFunc build_list_func, bool repair)
 {
-    AssertLockHeld(::cs_main);
-
     RecalcDiffsResult result;
     result.start_height = start_index->nHeight;
     result.stop_height = stop_index->nHeight;
@@ -1696,8 +1693,6 @@ CDeterministicMNManager::RecalcDiffsResult CDeterministicMNManager::RecalculateA
 std::vector<const CBlockIndex*> CDeterministicMNManager::CollectSnapshotBlocks(
     const CBlockIndex* start_index, const CBlockIndex* stop_index, const Consensus::Params& consensus_params)
 {
-    AssertLockHeld(::cs_main);
-
     std::vector<const CBlockIndex*> snapshot_blocks;
 
     // Add the starting snapshot (find the snapshot at or before start)
@@ -1749,8 +1744,6 @@ bool CDeterministicMNManager::VerifySnapshotPair(
     const CBlockIndex* from_index, const CBlockIndex* to_index, const CDeterministicMNList& from_snapshot,
     const CDeterministicMNList& to_snapshot, RecalcDiffsResult& result)
 {
-    AssertLockHeld(::cs_main);
-
     // Verify this snapshot pair by applying all stored diffs sequentially
     CDeterministicMNList test_list = from_snapshot;
 
@@ -1795,8 +1788,6 @@ std::vector<std::pair<uint256, CDeterministicMNListDiff>> CDeterministicMNManage
     const CBlockIndex* from_index, const CBlockIndex* to_index, const CDeterministicMNList& from_snapshot,
     const CDeterministicMNList& to_snapshot, BuildListFromBlockFunc build_list_func, RecalcDiffsResult& result)
 {
-    AssertLockHeld(::cs_main);
-
     CDeterministicMNList current_list = from_snapshot;
     // Temporary storage for recalculated diffs (one per block in this snapshot interval)
     std::vector<std::pair<uint256, CDeterministicMNListDiff>> temp_diffs;

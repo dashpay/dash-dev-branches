@@ -2039,7 +2039,29 @@ void CConnman::DisconnectNodes()
     // m_reconnections_mutex while holding m_nodes_mutex.
     decltype(m_reconnections) reconnections_to_add;
 
-    {
+    // Quick check without exclusive lock to avoid unnecessary locking
+    // Note: This is a best-effort optimization. If network is active and no nodes
+    // are marked for disconnect, we can skip the expensive exclusive lock.
+    // If network is inactive or nodes need cleanup, we must take the lock.
+    bool has_to_disconnect = false;
+    if (fNetworkActive) {
+        {
+            READ_LOCK(m_nodes_mutex);
+            for (CNode* pnode : m_nodes) {
+                if (pnode->fDisconnect) {
+                    has_to_disconnect = true;
+                    break;
+                }
+            }
+        }
+        // Only return early if network is active AND no nodes need disconnection
+        // AND no disconnected nodes need cleanup (checked below)
+        if (!has_to_disconnect && m_nodes_disconnected.empty()) {
+            return;
+        }
+    }
+
+    if (has_to_disconnect || !fNetworkActive) {
         LOCK(m_nodes_mutex);
 
         if (!fNetworkActive) {
@@ -2052,7 +2074,7 @@ void CConnman::DisconnectNodes()
             }
         }
 
-        // Disconnect unused nodes
+        // Disconnect unused nodes, if we have any
         for (auto it = m_nodes.begin(); it != m_nodes.end(); )
         {
             CNode* pnode = *it;
@@ -3382,9 +3404,9 @@ void CConnman::ThreadOpenMasternodeConnections(CDeterministicMNManager& dmnman, 
                         continue;
                     }
                     const auto addr2 = dmn->pdmnState->netInfo->GetPrimary();
-                    CNode* pnode = FindNodeMutable(addr2);
-                    if (pnode && pnode->m_masternode_connection) {
-                        // node is masternode, skip it
+                    CNode* pnode = FindNodeMutable(addr2, /*fExcludeDisconnecting=*/false);
+                    if (pnode && (pnode->m_masternode_connection || pnode->fDisconnect)) {
+                        // node is either a masternode or disconnecting, skip it
                         continue;
                     }
                     if (connectedNodes.count(addr2)) {
@@ -3403,7 +3425,7 @@ void CConnman::ThreadOpenMasternodeConnections(CDeterministicMNManager& dmnman, 
                         continue;
                     }
                     // back off connecting to an address if we already tried recently
-                    int64_t last_attempt = mn_metaman.GetMetaInfo(dmn->proTxHash)->GetLastOutboundAttempt();
+                    int64_t last_attempt = mn_metaman.GetLastOutboundAttempt(dmn->proTxHash);
                     if (nANow - last_attempt < chainParams.LLMQConnectionRetryTimeout()) {
                         continue;
                     }
@@ -3426,14 +3448,14 @@ void CConnman::ThreadOpenMasternodeConnections(CDeterministicMNManager& dmnman, 
                 bool connectedAndOutbound = connectedProRegTxHashes.count(dmn->proTxHash) && !connectedProRegTxHashes[dmn->proTxHash];
                 if (connectedAndOutbound) {
                     // we already have an outbound connection to this MN so there is no theed to probe it again
-                    mn_metaman.GetMetaInfo(dmn->proTxHash)->SetLastOutboundSuccess(nANow);
+                    mn_metaman.SetLastOutboundSuccess(dmn->proTxHash, nANow);
                     it = masternodePendingProbes.erase(it);
                     continue;
                 }
 
                 ++it;
 
-                int64_t lastAttempt = mn_metaman.GetMetaInfo(dmn->proTxHash)->GetLastOutboundAttempt();
+                int64_t lastAttempt = mn_metaman.GetLastOutboundAttempt(dmn->proTxHash);
                 // back off trying connecting to an address if we already tried recently
                 if (nANow - lastAttempt < chainParams.LLMQConnectionRetryTimeout()) {
                     continue;
@@ -3454,13 +3476,12 @@ void CConnman::ThreadOpenMasternodeConnections(CDeterministicMNManager& dmnman, 
                 // Check if we should connect to this masternode
                 // We already hold m_nodes_mutex here, so check m_masternode_connection directly
                 if (dmn && !connectedNodes.count(dmn->pdmnState->netInfo->GetPrimary())) {
-                    if (const CNode* pnode = FindNode(dmn->pdmnState->netInfo->GetPrimary())) {
-                        if (!pnode->m_masternode_connection) {
-                            LogPrint(BCLog::NET_NETCONN, "CConnman::%s -- opening pending masternode connection to %s, service=%s\n",
-                                                         _func_, dmn->proTxHash.ToString(),
-                                                         dmn->pdmnState->netInfo->GetPrimary().ToStringAddrPort());
-                            return dmn;
-                        }
+                    const CNode* pnode = FindNode(dmn->pdmnState->netInfo->GetPrimary(), /*fExcludeDisconnecting=*/false);
+                    if (pnode == nullptr || (!pnode->m_masternode_connection && !pnode->fDisconnect)) {
+                        LogPrint(BCLog::NET_NETCONN, "CConnman::%s -- opening pending masternode connection to %s, service=%s\n",
+                                                     _func_, dmn->proTxHash.ToString(),
+                                                     dmn->pdmnState->netInfo->GetPrimary().ToStringAddrPort());
+                        return dmn;
                     }
                 }
             }
@@ -3493,7 +3514,7 @@ void CConnman::ThreadOpenMasternodeConnections(CDeterministicMNManager& dmnman, 
 
         didConnect = true;
 
-        mn_metaman.GetMetaInfo(connectToDmn->proTxHash)->SetLastOutboundAttempt(nANow);
+        mn_metaman.SetLastOutboundAttempt(connectToDmn->proTxHash, nANow);
 
         OpenMasternodeConnection(CAddress(connectToDmn->pdmnState->netInfo->GetPrimary(), NODE_NETWORK), /*use_v2transport=*/GetLocalServices() & NODE_P2P_V2, isProbe);
         // should be in the list now if connection was opened
@@ -3506,7 +3527,7 @@ void CConnman::ThreadOpenMasternodeConnections(CDeterministicMNManager& dmnman, 
         if (!connected) {
             LogPrint(BCLog::NET_NETCONN, "CConnman::%s -- connection failed for masternode  %s, service=%s\n", __func__, connectToDmn->proTxHash.ToString(), connectToDmn->pdmnState->netInfo->GetPrimary().ToStringAddrPort());
             // Will take a few consequent failed attempts to PoSe-punish a MN.
-            if (mn_metaman.GetMetaInfo(connectToDmn->proTxHash)->OutboundFailedTooManyTimes()) {
+            if (mn_metaman.OutboundFailedTooManyTimes(connectToDmn->proTxHash)) {
                 LogPrint(BCLog::NET_NETCONN, "CConnman::%s -- failed to connect to masternode %s too many times\n", __func__, connectToDmn->proTxHash.ToString());
             }
         }

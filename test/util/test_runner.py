@@ -74,6 +74,11 @@ def bctest(testDir, testObj, buildenv):
     """
     # Get the exec names and arguments
     execprog = os.path.join(buildenv["BUILDDIR"], "src", testObj["exec"] + buildenv["EXEEXT"])
+    if testObj["exec"] == "./dash-util":
+        execprog = os.getenv("DASHUTIL", default=execprog)
+    elif testObj["exec"] == "./dash-tx":
+        execprog = os.getenv("DASHTX", default=execprog)
+
     execargs = testObj['args']
     execrun = [execprog] + execargs
 

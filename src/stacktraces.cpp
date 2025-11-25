@@ -167,6 +167,8 @@ static uint64_t ConvertAddress(uint64_t addr)
 static __attribute__((noinline)) std::vector<uint64_t> GetStackFrames(size_t skip, size_t max_frames, const CONTEXT* pContext = nullptr)
 {
 #ifdef ENABLE_STACKTRACES
+    volatile size_t skip_frames = skip;
+
     // We can't use libbacktrace for stack unwinding on Windows as it returns invalid addresses (like 0x1 or 0xffffffff)
     // dbghelp is not thread safe
     static StdMutex m;
@@ -205,7 +207,7 @@ static __attribute__((noinline)) std::vector<uint64_t> GetStackFrames(size_t ski
     stackframe.AddrStack.Offset = context.Rsp;
     stackframe.AddrStack.Mode = AddrModeFlat;
     if (!pContext) {
-        skip++; // skip this method
+        skip_frames = skip_frames + 1; // skip this method
     }
 #else
 #error unsupported architecture
@@ -223,7 +225,7 @@ static __attribute__((noinline)) std::vector<uint64_t> GetStackFrames(size_t ski
         if (!result) {
             break;
         }
-        if (i >= skip) {
+        if (i >= skip_frames) {
             uint64_t pc = ConvertAddress(stackframe.AddrPC.Offset);
             if (pc == 0) {
                 pc = stackframe.AddrPC.Offset;

@@ -19,7 +19,6 @@ Otherwise, you may choose from one of the following options to install Guix:
    - Installs any release
    - Binary installation only, requires high level of trust
 3. Using **Docker image** [↗︎ external instructions][install-docker]
-   - Maintained by pastapastapasta
    - Easy (automatically performs *some* setup)
    - Works wherever Docker images work
    - Installs any release
@@ -59,8 +58,8 @@ so you should log out and log back in.
 
 ## Option 3: Using Docker image
 
-Please refer to Docker's image
-[here](https://github.com/dashpay/dash/tree/master/contrib/guix/Dockerfile).
+Please refer to Docker image
+[here](https://github.com/dashpay/dash/tree/master/contrib/containers/guix/Dockerfile).
 
 ## Option 4: Using a distribution-maintained package
 

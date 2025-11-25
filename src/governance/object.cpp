@@ -147,14 +147,7 @@ bool CGovernanceObject::ProcessVote(CMasternodeMetaMan& mn_metaman, CGovernanceM
         return false;
     }
 
-    if (!mn_metaman.AddGovernanceVote(dmn->proTxHash, vote.GetParentHash())) {
-        std::string msg{strprintf("CGovernanceObject::%s -- Unable to add governance vote, MN outpoint = %s, "
-                                  "governance object hash = %s",
-            __func__, vote.GetMasternodeOutpoint().ToStringShort(), GetHash().ToString())};
-        LogPrint(BCLog::GOBJECT, "%s\n", msg);
-        exception = CGovernanceException(msg, GOVERNANCE_EXCEPTION_PERMANENT_ERROR);
-        return false;
-    }
+    mn_metaman.AddGovernanceVote(dmn->proTxHash, vote.GetParentHash());
 
     voteInstanceRef = vote_instance_t(vote.GetOutcome(), nVoteTimeUpdate, vote.GetTimestamp());
     fileVotes.AddVote(vote);

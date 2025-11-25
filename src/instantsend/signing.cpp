@@ -204,16 +204,28 @@ bool InstantSendSigner::CheckCanLock(const COutPoint& outpoint, bool printDebug,
         return false;
     }
 
-    const CBlockIndex* pindexMined;
-    int nTxAge;
-    {
-        LOCK(::cs_main);
-        pindexMined = m_chainstate.m_blockman.LookupBlockIndex(hashBlock);
-        nTxAge = m_chainstate.m_chain.Height() - pindexMined->nHeight + 1;
+    const auto blockHeight = m_isman.GetBlockHeight(hashBlock);
+    if (!blockHeight) {
+        if (printDebug) {
+            LogPrint(BCLog::INSTANTSEND, "%s -- txid=%s: failed to determine mined height for parent TX %s\n", __func__,
+                     txHash.ToString(), outpoint.hash.ToString());
+        }
+        return false;
     }
 
-    if (nTxAge < nInstantSendConfirmationsRequired &&
-        !m_clhandler.HasChainLock(pindexMined->nHeight, pindexMined->GetBlockHash())) {
+    const int tipHeight = m_isman.GetTipHeight();
+
+    if (tipHeight < *blockHeight) {
+        if (printDebug) {
+            LogPrint(BCLog::INSTANTSEND, "%s -- txid=%s: cached tip height %d is below block height %d for parent TX %s\n",
+                     __func__, txHash.ToString(), tipHeight, *blockHeight, outpoint.hash.ToString());
+        }
+        return false;
+    }
+
+    const int nTxAge = tipHeight - *blockHeight + 1;
+
+    if (nTxAge < nInstantSendConfirmationsRequired && !m_clhandler.HasChainLock(*blockHeight, hashBlock)) {
         if (printDebug) {
             LogPrint(BCLog::INSTANTSEND, "%s -- txid=%s: outpoint %s too new and not ChainLocked. nTxAge=%d, nInstantSendConfirmationsRequired=%d\n", __func__,
                      txHash.ToString(), outpoint.ToStringShort(), nTxAge, nInstantSendConfirmationsRequired);

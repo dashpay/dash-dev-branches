@@ -503,14 +503,23 @@ void CSigSharesManager::ProcessMessageSigShare(NodeId fromId, const CSigShare& s
         return;
     }
 
+    const auto signHash = sigShare.GetSignHash();
+    const bool alreadyRecovered = sigman.HasRecoveredSigForId(sigShare.getLlmqType(), sigShare.getId()) ||
+                                  sigman.HasRecoveredSigForSession(signHash);
+
     {
         LOCK(cs);
 
-        if (sigShares.Has(sigShare.GetKey())) {
+        if (alreadyRecovered) {
+            LogPrint(BCLog::LLMQ_SIGS, /* Continued */
+                     "CSigSharesManager::%s -- dropping sigShare for recovered session. signHash=%s, id=%s, "
+                     "msgHash=%s, member=%d, node=%d\n",
+                     __func__, signHash.ToString(), sigShare.getId().ToString(), sigShare.getMsgHash().ToString(),
+                     sigShare.getQuorumMember(), fromId);
             return;
         }
 
-        if (sigman.HasRecoveredSigForId(sigShare.getLlmqType(), sigShare.getId())) {
+        if (sigShares.Has(sigShare.GetKey())) {
             return;
         }
 
@@ -519,7 +528,7 @@ void CSigSharesManager::ProcessMessageSigShare(NodeId fromId, const CSigShare& s
     }
 
     LogPrint(BCLog::LLMQ_SIGS, "CSigSharesManager::%s -- signHash=%s, id=%s, msgHash=%s, member=%d, node=%d\n", __func__,
-             sigShare.GetSignHash().ToString(), sigShare.getId().ToString(), sigShare.getMsgHash().ToString(), sigShare.getQuorumMember(), fromId);
+             signHash.ToString(), sigShare.getId().ToString(), sigShare.getMsgHash().ToString(), sigShare.getQuorumMember(), fromId);
 }
 
 bool CSigSharesManager::PreVerifyBatchedSigShares(const CActiveMasternodeManager& mn_activeman, const CQuorumManager& quorum_manager,
@@ -1645,9 +1654,45 @@ void CSigSharesManager::SignPendingSigShares()
     }
 }
 
-std::optional<CSigShare> CSigSharesManager::CreateSigShare(const CQuorum& quorum, const uint256& id, const uint256& msgHash) const
+std::optional<CSigShare> CSigSharesManager::CreateSigShareForSingleMember(const CQuorum& quorum, const uint256& id, const uint256& msgHash) const
 {
     cxxtimer::Timer t(true);
+    auto activeMasterNodeProTxHash = m_mn_activeman.GetProTxHash();
+
+    int memberIdx = quorum.GetMemberIndex(activeMasterNodeProTxHash);
+    if (memberIdx == -1) {
+        // this should really not happen (IsValidMember gave true)
+        return std::nullopt;
+    }
+
+    CSigShare sigShare(quorum.params.type, quorum.qc->quorumHash, id, msgHash, uint16_t(memberIdx), {});
+    uint256 signHash = sigShare.buildSignHash().Get();
+
+    // TODO: This one should be SIGN by QUORUM key, not by OPERATOR key
+    // see TODO in CDKGSession::FinalizeSingleCommitment for details
+    auto bls_scheme = bls::bls_legacy_scheme.load();
+    sigShare.sigShare.Set(m_mn_activeman.Sign(signHash, bls_scheme), bls_scheme);
+
+    if (!sigShare.sigShare.Get().IsValid()) {
+        LogPrintf("CSigSharesManager::%s -- failed to sign sigShare. signHash=%s, id=%s, msgHash=%s, time=%s\n",
+                  __func__, signHash.ToString(), sigShare.getId().ToString(), sigShare.getMsgHash().ToString(),
+                  t.count());
+        return std::nullopt;
+    }
+
+    sigShare.UpdateKey();
+
+    LogPrint(BCLog::LLMQ_SIGS, /* Continued */
+             "CSigSharesManager::%s -- created sigShare. signHash=%s, id=%s, msgHash=%s, llmqType=%d, quorum=%s, "
+             "time=%s\n",
+             __func__, signHash.ToString(), sigShare.getId().ToString(), sigShare.getMsgHash().ToString(),
+             ToUnderlying(quorum.params.type), quorum.qc->quorumHash.ToString(), t.count());
+
+    return sigShare;
+}
+
+std::optional<CSigShare> CSigSharesManager::CreateSigShare(const CQuorum& quorum, const uint256& id, const uint256& msgHash) const
+{
     auto activeMasterNodeProTxHash = m_mn_activeman.GetProTxHash();
 
     if (!quorum.IsValidMember(activeMasterNodeProTxHash)) {
@@ -1655,37 +1700,9 @@ std::optional<CSigShare> CSigSharesManager::CreateSigShare(const CQuorum& quorum
     }
 
     if (quorum.params.is_single_member()) {
-        int memberIdx = quorum.GetMemberIndex(activeMasterNodeProTxHash);
-        if (memberIdx == -1) {
-            // this should really not happen (IsValidMember gave true)
-            return std::nullopt;
-        }
-
-        CSigShare sigShare(quorum.params.type, quorum.qc->quorumHash, id, msgHash, uint16_t(memberIdx), {});
-        uint256 signHash = sigShare.buildSignHash().Get();
-
-        // TODO: This one should be SIGN by QUORUM key, not by OPERATOR key
-        // see TODO in CDKGSession::FinalizeSingleCommitment for details
-        auto bls_scheme = bls::bls_legacy_scheme.load();
-        sigShare.sigShare.Set(m_mn_activeman.Sign(signHash, bls_scheme), bls_scheme);
-
-        if (!sigShare.sigShare.Get().IsValid()) {
-            LogPrintf("CSigSharesManager::%s -- failed to sign sigShare. signHash=%s, id=%s, msgHash=%s, time=%s\n",
-                      __func__, signHash.ToString(), sigShare.getId().ToString(), sigShare.getMsgHash().ToString(),
-                      t.count());
-            return std::nullopt;
-        }
-
-        sigShare.UpdateKey();
-
-        LogPrint(BCLog::LLMQ_SIGS, /* Continued */
-                 "CSigSharesManager::%s -- created sigShare. signHash=%s, id=%s, msgHash=%s, llmqType=%d, quorum=%s, "
-                 "time=%s\n",
-                 __func__, signHash.ToString(), sigShare.getId().ToString(), sigShare.getMsgHash().ToString(),
-                 ToUnderlying(quorum.params.type), quorum.qc->quorumHash.ToString(), t.count());
-
-        return sigShare;
+        return CreateSigShareForSingleMember(quorum, id, msgHash);
     }
+    cxxtimer::Timer t(true);
     const CBLSSecretKey& skShare = quorum.GetSkShare();
     if (!skShare.IsValid()) {
         LogPrint(BCLog::LLMQ_SIGS, "CSigSharesManager::%s -- we don't have our skShare for quorum %s\n", __func__, quorum.qc->quorumHash.ToString());

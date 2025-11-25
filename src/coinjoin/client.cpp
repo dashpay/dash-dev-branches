@@ -124,17 +124,11 @@ MessageProcessingResult CCoinJoinClientQueueManager::ProcessMessage(NodeId from,
             LogPrint(BCLog::COINJOIN, "DSQUEUE -- CoinJoin queue is ready, masternode=%s, queue=%s\n", dmn->proTxHash.ToString(), dsq.ToString());
             return ret;
         } else {
-            int64_t nLastDsq = m_mn_metaman.GetMetaInfo(dmn->proTxHash)->GetLastDsq();
-            int64_t nDsqThreshold = m_mn_metaman.GetDsqThreshold(dmn->proTxHash, tip_mn_list.GetValidMNsCount());
-            LogPrint(BCLog::COINJOIN, "DSQUEUE -- nLastDsq: %d  nDsqThreshold: %d  nDsqCount: %d\n", nLastDsq,
-                     nDsqThreshold, m_mn_metaman.GetDsqCount());
-            // don't allow a few nodes to dominate the queuing process
-            if (nLastDsq != 0 && nDsqThreshold > m_mn_metaman.GetDsqCount()) {
+            if (m_mn_metaman.IsMixingThresholdExceeded(dmn->proTxHash, tip_mn_list.GetValidMNsCount())) {
                 LogPrint(BCLog::COINJOIN, "DSQUEUE -- Masternode %s is sending too many dsq messages\n",
                          dmn->proTxHash.ToString());
                 return ret;
             }
-
             m_mn_metaman.AllowMixing(dmn->proTxHash);
 
             LogPrint(BCLog::COINJOIN, "DSQUEUE -- new CoinJoin queue, masternode=%s, queue=%s\n", dmn->proTxHash.ToString(), dsq.ToString());
@@ -1180,13 +1174,10 @@ bool CCoinJoinClientSession::StartNewQueue(CAmount nBalanceNeedsAnonymized, CCon
             continue;
         }
 
-        int64_t nLastDsq = m_mn_metaman.GetMetaInfo(dmn->proTxHash)->GetLastDsq();
-        int64_t nDsqThreshold = m_mn_metaman.GetDsqThreshold(dmn->proTxHash, nMnCount);
-        if (nLastDsq != 0 && nDsqThreshold > m_mn_metaman.GetDsqCount()) {
+        if (m_mn_metaman.IsMixingThresholdExceeded(dmn->proTxHash, nMnCount)) {
             WalletCJLogPrint(m_wallet, /* Continued */
-                             "CCoinJoinClientSession::StartNewQueue -- too early to mix with node," /* Continued */
-                             " masternode=%s, nLastDsq=%d, nDsqThreshold=%d, nDsqCount=%d\n",
-                             dmn->proTxHash.ToString(), nLastDsq, nDsqThreshold, m_mn_metaman.GetDsqCount());
+                             "CCoinJoinClientSession::StartNewQueue -- too early to mix with node masternode=%s\n",
+                             dmn->proTxHash.ToString());
             nTries++;
             continue;
         }

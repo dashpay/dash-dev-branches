@@ -1188,6 +1188,13 @@ static void PushInv(Peer& peer, const CInv& inv)
         return;
     }
 
+    // Skip ISDLOCK inv announcements for peers that want recsigs, as they can reconstruct
+    // the islock from the recsig
+    if (inv.type == MSG_ISDLOCK && peer.m_wants_recsigs) {
+        LogPrint(BCLog::NET, "%s -- skipping ISDLOCK inv (peer wants recsigs): %s peer=%d\n", __func__, inv.ToString(), peer.m_id);
+        return;
+    }
+
     LOCK(inv_relay->m_tx_inventory_mutex);
     if (inv_relay->m_tx_inventory_known_filter.contains(inv.hash)) {
         LogPrint(BCLog::NET, "%s -- skipping known inv: %s peer=%d\n", __func__, inv.ToString(), peer.m_id);
@@ -3535,7 +3542,7 @@ std::pair<bool /*ret*/, bool /*do_return*/> static ValidateDSTX(CDeterministicMN
         return {false, true};
     }
 
-    if (!mn_metaman.GetMetaInfo(dmn->proTxHash)->IsValidForMixingTxes()) {
+    if (!mn_metaman.IsValidForMixingTxes(dmn->proTxHash)) {
         LogPrint(BCLog::COINJOIN, "DSTX -- Masternode %s is sending too many transactions %s\n", dstx.masternodeOutpoint.ToStringShort(), hashTx.ToString());
         return {true, true};
         // TODO: Not an error? Could it be that someone is relaying old DSTXes
@@ -3653,10 +3660,8 @@ MessageProcessingResult PeerManagerImpl::ProcessPlatformBanMessage(NodeId node, 
     }
 
     // At this point, the outgoing message serialization version can't change.
-    const auto meta_info = m_mn_metaman.GetMetaInfo(ban_msg.m_protx_hash);
-    if (meta_info->SetPlatformBan(true, ban_msg.m_requested_height)) {
-        LogPrintf("PLATFORMBAN -- forward message to other nodes\n");
-        m_mn_metaman.RememberPlatformBan(hash, std::move(ban_msg));
+    if (m_mn_metaman.SetPlatformBan(hash, std::move(ban_msg))) {
+        LogPrintf("PLATFORMBAN -- hash: %s forward message to other nodes\n", hash.ToString());
         ret.m_inventory.emplace_back(MSG_PLATFORM_BAN, hash);
     }
     return ret;
@@ -6258,7 +6263,11 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
                     if (islock == nullptr) continue;
                     uint256 isLockHash{::SerializeHash(*islock)};
                     tx_relay->m_tx_inventory_known_filter.insert(isLockHash);
-                    queueAndMaybePushInv(CInv(MSG_ISDLOCK, isLockHash));
+                    // Skip ISDLOCK inv announcements for peers that want recsigs, as they can reconstruct
+                    // the islock from the recsig
+                    if (!peer->m_wants_recsigs) {
+                        queueAndMaybePushInv(CInv(MSG_ISDLOCK, isLockHash));
+                    }
                 }
 
                 // Send an inv for the best ChainLock we have
