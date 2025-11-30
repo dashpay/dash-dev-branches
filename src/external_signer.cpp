@@ -3,10 +3,10 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <chainparams.h>
+#include <common/run_command.h>
 #include <core_io.h>
 #include <psbt.h>
 #include <util/strencodings.h>
-#include <util/system.h>
 #include <external_signer.h>
 
 #include <algorithm>
@@ -28,7 +28,7 @@ bool ExternalSigner::Enumerate(const std::string& command, std::vector<ExternalS
     if (!result.isArray()) {
         throw std::runtime_error(strprintf("'%s' received invalid response, expected array of signers", command));
     }
-    for (UniValue signer : result.getValues()) {
+    for (const UniValue& signer : result.getValues()) {
         // Check for error
         const UniValue& error = signer.find_value("error");
         if (!error.isNull()) {
@@ -42,7 +42,7 @@ bool ExternalSigner::Enumerate(const std::string& command, std::vector<ExternalS
         if (fingerprint.isNull()) {
             throw std::runtime_error(strprintf("'%s' received invalid response, missing signer fingerprint", command));
         }
-        const std::string fingerprintStr = fingerprint.get_str();
+        const std::string& fingerprintStr = fingerprint.get_str();
         // Skip duplicate signer
         bool duplicate = false;
         for (const ExternalSigner& signer : signers) {
@@ -61,12 +61,12 @@ bool ExternalSigner::Enumerate(const std::string& command, std::vector<ExternalS
 
 UniValue ExternalSigner::DisplayAddress(const std::string& descriptor) const
 {
-    return RunCommandParseJSON(m_command + " --fingerprint \"" + m_fingerprint + "\"" + NetworkArg() + " displayaddress --desc \"" + descriptor + "\"");
+    return RunCommandParseJSON(m_command + " --fingerprint " + m_fingerprint + NetworkArg() + " displayaddress --desc " + descriptor);
 }
 
 UniValue ExternalSigner::GetDescriptors(const int account)
 {
-    return RunCommandParseJSON(m_command + " --fingerprint \"" + m_fingerprint + "\"" + NetworkArg() + " getdescriptors --account " + strprintf("%d", account));
+    return RunCommandParseJSON(m_command + " --fingerprint " + m_fingerprint + NetworkArg() + " getdescriptors --account " + strprintf("%d", account));
 }
 
 bool ExternalSigner::SignTransaction(PartiallySignedTransaction& psbtx, std::string& error)
@@ -89,8 +89,8 @@ bool ExternalSigner::SignTransaction(PartiallySignedTransaction& psbtx, std::str
         return false;
     }
 
-    const std::string command = m_command + " --stdin --fingerprint \"" + m_fingerprint + "\"" + NetworkArg();
-    const std::string stdinStr = "signtx \"" + EncodeBase64(ssTx.str()) + "\"";
+    const std::string command = m_command + " --stdin --fingerprint " + m_fingerprint + NetworkArg();
+    const std::string stdinStr = "signtx " + EncodeBase64(ssTx.str());
 
     const UniValue signer_result = RunCommandParseJSON(command, stdinStr);
 
