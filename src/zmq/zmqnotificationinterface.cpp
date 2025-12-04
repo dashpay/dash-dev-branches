@@ -4,13 +4,23 @@
 
 #include <zmq/zmqnotificationinterface.h>
 
+#include <logging.h>
 #include <netbase.h>
 #include <primitives/block.h>
+#include <primitives/transaction.h>
 #include <util/system.h>
+#include <validationinterface.h>
+#include <zmq/zmqabstractnotifier.h>
 #include <zmq/zmqpublishnotifier.h>
 #include <zmq/zmqutil.h>
 
 #include <zmq.h>
+
+#include <cassert>
+#include <map>
+#include <string>
+#include <utility>
+#include <vector>
 
 CZMQNotificationInterface::CZMQNotificationInterface() : pcontext(nullptr)
 {
@@ -241,7 +251,7 @@ void CZMQNotificationInterface::NotifyInstantSendDoubleSpendAttempt(const CTrans
     });
 }
 
-void CZMQNotificationInterface::NotifyRecoveredSig(const std::shared_ptr<const llmq::CRecoveredSig>& sig)
+void CZMQNotificationInterface::NotifyRecoveredSig(const std::shared_ptr<const llmq::CRecoveredSig>& sig, bool /*proactive_relay*/)
 {
     TryForEachAndRemoveFailed(notifiers, [&sig](CZMQAbstractNotifier* notifier) {
         return notifier->NotifyRecoveredSig(sig);

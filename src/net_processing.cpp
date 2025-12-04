@@ -285,12 +285,7 @@ struct Peer {
 
     struct TxRelay {
         mutable RecursiveMutex m_bloom_filter_mutex;
-        /** Whether the peer wishes to receive transaction announcements.
-         *
-         * This is initially set based on the fRelay flag in the received
-         * `version` message. If initially set to false, it can only be flipped
-         * to true if we have offered the peer NODE_BLOOM services and it sends
-         * us a `filterload` or `filterclear` message. See BIP37. */
+        /** Whether we relay transactions to this peer. */
         bool m_relay_txs GUARDED_BY(m_bloom_filter_mutex){false};
         /** A bloom filter for which transactions to announce to the peer. See BIP37. */
         std::unique_ptr<CBloomFilter> m_bloom_filter PT_GUARDED_BY(m_bloom_filter_mutex) GUARDED_BY(m_bloom_filter_mutex){nullptr};
@@ -632,7 +627,7 @@ public:
     void RelayInv(const CInv& inv) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
     void RelayInv(const CInv& inv, const int minProtoVersion) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
     void RelayTransaction(const uint256& txid) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
-    void RelayRecoveredSig(const uint256& sigHash) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
+    void RelayRecoveredSig(const llmq::CRecoveredSig& sig, bool proactive_relay) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
     void RelayDSQ(const CCoinJoinQueue& queue) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
     void SetBestHeight(int height) override { m_best_height = height; };
     void Misbehaving(const NodeId pnode, const int howmuch, const std::string& message = "") override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
@@ -657,6 +652,8 @@ public:
     void PeerRelayInvFiltered(const CInv& inv, const CTransaction& relatedTx) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
     void PeerRelayInvFiltered(const CInv& inv, const uint256& relatedTxHash) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
     void PeerAskPeersForTransaction(const uint256& txid) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
+    void PeerPostProcessMessage(MessageProcessingResult&& ret) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
+
 private:
     void _RelayTransaction(const uint256& txid) EXCLUSIVE_LOCKS_REQUIRED(cs_main, !m_peer_mutex);
 
@@ -2536,9 +2533,20 @@ void PeerManagerImpl::_RelayTransaction(const uint256& txid)
     };
 }
 
-void PeerManagerImpl::RelayRecoveredSig(const uint256& sigHash)
-{
-    const CInv inv{MSG_QUORUM_RECOVERED_SIG, sigHash};
+void PeerManagerImpl::RelayRecoveredSig(const llmq::CRecoveredSig& sig, bool proactive_relay) {
+    if (proactive_relay) {
+        // We were the peer that recovered this; avoid a bunch of `inv` -> `GetData` spam by proactively sending
+        m_connman.ForEachNode([this, &sig](CNode* pnode) -> bool {
+            // Skip nodes that don't want recovered signatures
+            PeerRef peer = GetPeerRef(pnode->GetId());
+            if (peer == nullptr || !peer->m_wants_recsigs) return true;
+            CNetMsgMaker msgMaker(pnode->GetCommonVersion());
+            m_connman.PushMessage(pnode, msgMaker.Make(NetMsgType::QSIGREC, sig));
+            return true;
+        });
+        return;
+    }
+    const CInv inv{MSG_QUORUM_RECOVERED_SIG, sig.GetHash()};
     READ_LOCK(m_peer_mutex);
     for (const auto& [_, peer] : m_peer_map) {
         if (peer->m_wants_recsigs) {
@@ -3817,11 +3825,12 @@ void PeerManagerImpl::ProcessMessage(
         }
         peer->m_starting_height = starting_height;
 
-        // We only initialize the m_tx_relay data structure if:
-        // - this isn't an outbound block-relay-only connection; and
+        // We only initialize the Peer::TxRelay m_relay_txs data structure if:
+        // - this isn't an outbound block-relay-only connection, and
         // - this isn't an outbound feeler connection, and
-        // - fRelay=true or we're offering NODE_BLOOM to this peer
-        //   (NODE_BLOOM means that the peer may turn on tx relay later)
+        // - fRelay=true (the peer wishes to receive transaction announcements)
+        //   or we're offering NODE_BLOOM to this peer. NODE_BLOOM means that
+        //   the peer may turn on transaction relay later.
         if (!pfrom.IsBlockOnlyConn() &&
             !pfrom.IsFeelerConn() &&
             (fRelay || (peer->m_our_services & NODE_BLOOM))) {
@@ -5434,7 +5443,6 @@ void PeerManagerImpl::ProcessMessage(
         PostProcessMessage(m_llmq_ctx->quorum_block_processor->ProcessMessage(pfrom, msg_type, vRecv), pfrom.GetId());
         PostProcessMessage(m_llmq_ctx->qdkgsman->ProcessMessage(pfrom, is_masternode, msg_type, vRecv), pfrom.GetId());
         PostProcessMessage(m_llmq_ctx->qman->ProcessMessage(pfrom, m_connman, msg_type, vRecv), pfrom.GetId());
-        PostProcessMessage(m_llmq_ctx->sigman->ProcessMessage(pfrom.GetId(), msg_type, vRecv), pfrom.GetId());
         PostProcessMessage(ProcessPlatformBanMessage(pfrom.GetId(), msg_type, vRecv), pfrom.GetId());
 
         if (msg_type == NetMsgType::CLSIG) {
@@ -6559,4 +6567,9 @@ void PeerManagerImpl::PeerRelayInvFiltered(const CInv& inv, const uint256& relat
 void PeerManagerImpl::PeerAskPeersForTransaction(const uint256& txid)
 {
     AskPeersForTransaction(txid);
+}
+
+void PeerManagerImpl::PeerPostProcessMessage(MessageProcessingResult&& ret)
+{
+    PostProcessMessage(std::move(ret), /*node=*/-1);
 }

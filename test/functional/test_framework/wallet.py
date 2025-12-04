@@ -186,10 +186,12 @@ class MiniWallet:
         txid: get the first utxo we find from a specific transaction
         """
         self._utxos = sorted(self._utxos, key=lambda k: (k['value'], -k['height']))  # Put the largest utxo last
+        blocks_height = self._test_node.getblockchaininfo()['blocks']
+        mature_coins = list(filter(lambda utxo: not utxo['coinbase'] or COINBASE_MATURITY - 1 <= blocks_height - utxo['height'], self._utxos))
         if txid:
             utxo_filter: Any = filter(lambda utxo: txid == utxo['txid'], self._utxos)
         else:
-            utxo_filter = reversed(self._utxos)  # By default the largest utxo
+            utxo_filter = reversed(mature_coins)  # By default the largest utxo
         if vout is not None:
             utxo_filter = filter(lambda utxo: vout == utxo['vout'], utxo_filter)
         index = self._utxos.index(next(utxo_filter))
@@ -201,7 +203,8 @@ class MiniWallet:
     def get_utxos(self, *, include_immature_coinbase=False, mark_as_spent=True):
         """Returns the list of all utxos and optionally mark them as spent"""
         if not include_immature_coinbase:
-            utxo_filter = filter(lambda utxo: not utxo['coinbase'] or COINBASE_MATURITY <= utxo['confirmations'], self._utxos)
+            blocks_height = self._test_node.getblockchaininfo()['blocks']
+            utxo_filter = filter(lambda utxo: not utxo['coinbase'] or COINBASE_MATURITY - 1 <= blocks_height - utxo['height'], self._utxos)
         else:
             utxo_filter = self._utxos
         utxos = deepcopy(list(utxo_filter))
@@ -224,15 +227,18 @@ class MiniWallet:
         Note that this method fails if there is no single internal utxo
         available that can cover the cost for the amount and the fixed fee
         (the utxo with the largest value is taken).
-
-        Returns a tuple (txid, n) referring to the created external utxo outpoint.
         """
         tx = self.create_self_transfer(fee_rate=0)["tx"]
         assert_greater_than_or_equal(tx.vout[0].nValue, amount + fee)
         tx.vout[0].nValue -= (amount + fee)           # change output -> MiniWallet
         tx.vout.append(CTxOut(amount, scriptPubKey))  # arbitrary output -> to be returned
         txid = self.sendrawtransaction(from_node=from_node, tx_hex=tx.serialize().hex())
-        return txid, 1
+        return {
+            "sent_vout": 1,
+            "txid": txid,
+            "hex": tx.serialize().hex(),
+            "tx": tx,
+        }
 
     def send_self_transfer_multi(self, *, from_node, **kwargs):
         """Call create_self_transfer_multi and send the transaction."""

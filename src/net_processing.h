@@ -64,6 +64,7 @@ public:
     virtual void PeerRelayInvFiltered(const CInv& inv, const CTransaction& relatedTx) = 0;
     virtual void PeerRelayInvFiltered(const CInv& inv, const uint256& relatedTxHash) = 0;
     virtual void PeerAskPeersForTransaction(const uint256& txid) = 0;
+    virtual void PeerPostProcessMessage(MessageProcessingResult&& ret) = 0;
 };
 
 class NetHandler
@@ -133,7 +134,7 @@ public:
     virtual void RelayTransaction(const uint256& txid) = 0;
 
     /** Relay recovered sigs to all interested peers */
-    virtual void RelayRecoveredSig(const uint256& sigHash) = 0;
+    virtual void RelayRecoveredSig(const llmq::CRecoveredSig& sig, bool proactive_relay) = 0;
 
     /** Set the best height */
     virtual void SetBestHeight(int height) = 0;
