@@ -683,9 +683,7 @@ static UniValue protx_register_common_wrapper(const JSONRPCRequest& request,
     std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
     if (!pwallet) return UniValue::VNULL;
 
-    if (action == ProTxRegisterAction::External || action == ProTxRegisterAction::Fund) {
-        EnsureWalletIsUnlocked(*pwallet);
-    }
+    EnsureWalletIsUnlocked(*pwallet);
 
     size_t paramIdx = 0;
 
@@ -1657,31 +1655,12 @@ static RPCHelpMan protx_listdiff()
                         {RPCResult::Type::NUM, "baseHeight", "Height of base (starting) block"},
                         {RPCResult::Type::NUM, "blockHeight", "Height of target (ending) block"},
                         {RPCResult::Type::ARR, "addedMNs", "Added masternodes",
-                            {
-                                {RPCResult::Type::OBJ, "", "",
-                                {
-                                    // TODO: list fields of output for RPC help instead ELISION
-                                    {RPCResult::Type::ELISION, "", ""}
-                                }},
-                            },
-                        },
+                            {CDeterministicMN::GetJsonHelp(/*key=*/"", /*optional=*/false)}},
                         {RPCResult::Type::ARR, "removedMns", "Removed masternodes",
-                            {
-                                {RPCResult::Type::STR_HEX, "protx", "ProTx of removed masternode"},
-                            },
-                        },
+                            {{RPCResult::Type::STR_HEX, "protx", "ProTx of removed masternode"}}},
                         {RPCResult::Type::ARR, "updatedMNs", "Updated masternodes",
-                            {
-                                {RPCResult::Type::OBJ, "", "",
-                                {
-                                    {RPCResult::Type::OBJ, "protx", "ProTx of updated masternode",
-                                    {
-                                        // TODO: list fields of output for RPC help instead ELISION
-                                        {RPCResult::Type::ELISION, "", ""}
-                                    }},
-                                }},
-                            },
-                        },
+                            {{RPCResult::Type::OBJ, "<protx_hash>", "",
+                                {CDeterministicMNStateDiff::GetJsonHelp(/*key=*/"", /*optional=*/false)}}}},
                     },
                 },
                 RPCExamples{""},
@@ -1718,7 +1697,6 @@ static RPCHelpMan protx_listdiff()
     for(const auto& mn : mnDiff.addedMNs) {
         jaddedMNs.push_back(mn->ToJson());
     }
-    // TODO: Use CDeterministicMN::GetJsonHelp() for mn
     ret.pushKV("addedMNs", jaddedMNs);
 
     UniValue jremovedMNs(UniValue::VARR);
@@ -1741,7 +1719,6 @@ static RPCHelpMan protx_listdiff()
         obj.pushKV(dmn->proTxHash.ToString(), stateDiff.ToJson(dmn->nType));
         jupdatedMNs.push_back(obj);
     }
-    // TODO: Use CDeterministicMNStateDiff::GetJsonHelp() for stateDiff
     ret.pushKV("updatedMNs", jupdatedMNs);
 
     return ret;

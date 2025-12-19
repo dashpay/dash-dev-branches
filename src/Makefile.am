@@ -133,13 +133,19 @@ endif
 if BUILD_BITCOIN_CLI
   bin_PROGRAMS += dash-cli
 endif
+
 if BUILD_BITCOIN_TX
   bin_PROGRAMS += dash-tx
 endif
+
 if ENABLE_WALLET
 if BUILD_BITCOIN_WALLET
   bin_PROGRAMS += dash-wallet
 endif
+endif
+
+if BUILD_BITCOIN_UTIL
+  bin_PROGRAMS += dash-util
 endif
 
 .PHONY: FORCE check-symbols check-security
@@ -220,8 +226,9 @@ BITCOIN_CORE_H = \
   dsnotificationinterface.h \
   governance/classes.h \
   governance/common.h \
-  governance/governance.h \
   governance/exceptions.h \
+  governance/governance.h \
+  governance/net_governance.h \
   governance/object.h \
   governance/signing.h \
   governance/validators.h \
@@ -311,6 +318,7 @@ BITCOIN_CORE_H = \
   node/miner.h \
   node/minisketchwrapper.h \
   node/psbt.h \
+  node/sync_manager.h \
   node/transaction.h \
   node/txreconciliation.h \
   node/interface_ui.h \
@@ -508,6 +516,7 @@ libbitcoin_node_a_SOURCES = \
   governance/classes.cpp \
   governance/exceptions.cpp \
   governance/governance.cpp \
+  governance/net_governance.cpp \
   governance/object.cpp \
   governance/signing.cpp \
   governance/validators.cpp \
@@ -567,6 +576,7 @@ libbitcoin_node_a_SOURCES = \
   node/miner.cpp \
   node/minisketchwrapper.cpp \
   node/psbt.cpp \
+  node/sync_manager.cpp \
   node/transaction.cpp \
   node/txreconciliation.cpp \
   node/interface_ui.cpp \
@@ -910,6 +920,7 @@ libbitcoin_common_a_SOURCES = \
   evo/netinfo.cpp \
   external_signer.cpp \
   governance/common.cpp \
+  governance/core_write.cpp \
   init/common.cpp \
   key.cpp \
   key_io.cpp \
@@ -1113,6 +1124,28 @@ dash_wallet_LDADD = \
 if TARGET_WINDOWS
 dash_wallet_SOURCES += dash-wallet-res.rc
 endif
+#
+
+# dash-util binary #
+dash_util_SOURCES = bitcoin-util.cpp
+dash_util_CPPFLAGS = $(AM_CPPFLAGS) $(BITCOIN_INCLUDES)
+dash_util_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+dash_util_LDFLAGS = $(LDFLAGS_WRAP_EXCEPTIONS) $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS)
+
+if TARGET_WINDOWS
+dash_util_SOURCES += bitcoin-util-res.rc
+endif
+
+dash_util_LDADD = \
+  $(LIBBITCOIN_COMMON) \
+  $(LIBBITCOIN_UTIL) \
+  $(LIBUNIVALUE) \
+  $(LIBBITCOIN_CONSENSUS) \
+  $(LIBBITCOIN_CRYPTO) \
+  $(LIBSECP256K1) \
+  $(BACKTRACE_LIBS)
+
+dash_util_LDADD += $(BOOST_LIBS)
 #
 
 # dashconsensus library #
