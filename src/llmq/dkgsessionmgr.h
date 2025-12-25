@@ -22,10 +22,10 @@ class CBLSIESEncryptedObject;
 
 class CActiveMasternodeManager;
 class CBlockIndex;
-class CChainState;
 class CDBWrapper;
 class CDeterministicMNManager;
 class CDKGDebugManager;
+class ChainstateManager;
 class CMasternodeMetaMan;
 class CSporkManager;
 class PeerManager;
@@ -51,12 +51,13 @@ private:
     std::unique_ptr<CDBWrapper> db{nullptr};
 
     CBLSWorker& blsWorker;
-    CChainState& m_chainstate;
     CDeterministicMNManager& m_dmnman;
     CDKGDebugManager& dkgDebugManager;
     CQuorumBlockProcessor& quorumBlockProcessor;
     CQuorumSnapshotManager& m_qsnapman;
+    const ChainstateManager& m_chainman;
     const CSporkManager& spork_manager;
+    const bool m_quorums_watch{false};
 
     //TODO name struct instead of std::pair
     std::map<std::pair<Consensus::LLMQType, int>, CDKGSessionHandler> dkgSessionHandlers;
@@ -84,11 +85,11 @@ public:
     CDKGSessionManager() = delete;
     CDKGSessionManager(const CDKGSessionManager&) = delete;
     CDKGSessionManager& operator=(const CDKGSessionManager&) = delete;
-    explicit CDKGSessionManager(CBLSWorker& _blsWorker, CChainState& chainstate, CDeterministicMNManager& dmnman,
+    explicit CDKGSessionManager(CBLSWorker& _blsWorker, CDeterministicMNManager& dmnman,
                                 CDKGDebugManager& _dkgDebugManager, CMasternodeMetaMan& mn_metaman,
                                 CQuorumBlockProcessor& _quorumBlockProcessor, CQuorumSnapshotManager& qsnapman,
-                                const CActiveMasternodeManager* const mn_activeman, const CSporkManager& sporkman,
-                                const util::DbWrapperParams& db_params);
+                                const CActiveMasternodeManager* const mn_activeman, const ChainstateManager& chainman,
+                                const CSporkManager& sporkman, const util::DbWrapperParams& db_params, bool quorums_watch);
     ~CDKGSessionManager();
 
     void StartThreads(CConnman& connman, PeerManager& peerman);

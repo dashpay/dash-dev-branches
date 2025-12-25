@@ -5,6 +5,7 @@
 #ifndef BITCOIN_QT_WALLETCONTROLLER_H
 #define BITCOIN_QT_WALLETCONTROLLER_H
 
+#include <interfaces/wallet.h>
 #include <qt/sendcoinsrecipient.h>
 #include <support/allocators/secure.h>
 #include <sync.h>
@@ -16,6 +17,7 @@
 #include <vector>
 
 #include <QMutex>
+#include <QPointer>
 #include <QThread>
 #include <QString>
 
@@ -96,7 +98,7 @@ protected:
     interfaces::Node& node() const { return m_wallet_controller->m_node; }
     QObject* worker() const { return m_wallet_controller->m_activity_worker; }
 
-    void showProgressDialog(const QString& title_text, const QString& label_text);
+    void showProgressDialog(const QString& title_text, const QString& label_text, bool show_minimized=false);
 
     WalletController* const m_wallet_controller;
     QWidget* const m_parent_widget;
@@ -152,7 +154,7 @@ class LoadWalletsActivity : public WalletControllerActivity
 public:
     LoadWalletsActivity(WalletController* wallet_controller, QWidget* parent_widget);
 
-    void load();
+    void load(bool show_loading_minimized);
 };
 
 class RestoreWalletActivity : public WalletControllerActivity
@@ -169,6 +171,26 @@ Q_SIGNALS:
 
 private:
     void finish();
+};
+
+class RescanWalletActivity : public WalletControllerActivity
+{
+    Q_OBJECT
+
+public:
+    RescanWalletActivity(WalletController* wallet_controller, QWidget* parent_widget);
+
+    void rescan(WalletModel* wallet_model, bool from_genesis);
+
+Q_SIGNALS:
+    void rescanComplete();
+    void rescanFailed();
+
+private:
+    void finish();
+
+    QPointer<WalletModel> m_rescan_wallet_model;
+    wallet::RescanStatus m_rescan_status{};
 };
 
 #endif // BITCOIN_QT_WALLETCONTROLLER_H

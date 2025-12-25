@@ -17,7 +17,6 @@
 class AddrMan;
 class CActiveMasternodeManager;
 class CCoinJoinQueue;
-class CCoinJoinServer;
 class CDeterministicMNManager;
 class CDSTXManager;
 class CGovernanceManager;
@@ -26,11 +25,15 @@ class CInv;
 class CJWalletManager;
 class CMasternodeMetaMan;
 class CMasternodeSync;
+class CNetMsgMaker;
 class CSporkManager;
 class CTransaction;
 class CTxMemPool;
 struct ActiveContext;
 struct LLMQContext;
+namespace llmq {
+struct ObserverContext;
+} // namespace llmq
 
 /** Default for -maxorphantxsize, maximum size in megabytes the orphan map can grow before entries are removed */
 static const unsigned int DEFAULT_MAX_ORPHAN_TRANSACTIONS_SIZE = 10; // this allows around 100 TXs of max size (and many more of normal size)
@@ -63,6 +66,8 @@ public:
     virtual void PeerRelayInv(const CInv& inv) = 0;
     virtual void PeerRelayInvFiltered(const CInv& inv, const CTransaction& relatedTx) = 0;
     virtual void PeerRelayInvFiltered(const CInv& inv, const uint256& relatedTxHash) = 0;
+    virtual void PeerRelayTransaction(const uint256& txid) = 0;
+    virtual void PeerRelayDSQ(const CCoinJoinQueue& queue) = 0;
     virtual void PeerAskPeersForTransaction(const uint256& txid) = 0;
     virtual size_t PeerGetRequestedObjectCount(NodeId nodeid) const = 0;
     virtual void PeerPostProcessMessage(MessageProcessingResult&& ret) = 0;
@@ -81,7 +86,14 @@ public:
     virtual void Stop() {}
     virtual void Interrupt() {}
     virtual void Schedule(CScheduler& scheduler) {}
+
     virtual void ProcessMessage(CNode& pfrom, const std::string& msg_type, CDataStream& vRecv) {}
+
+    // It returns true, if NetHandler has a responsibility about having this type of inventory and has corresponding data.
+    virtual bool AlreadyHave(const CInv& inv) { return false; }
+
+    // It should return true, if there's data has been pushed
+    virtual bool ProcessGetData(CNode& pfrom, const CInv& inv, CConnman& connman, const CNetMsgMaker& msgMaker) { return false; }
 protected:
     PeerManagerInternal* m_peer_manager;
 };
@@ -95,10 +107,11 @@ public:
                                              CTxMemPool& pool, CMasternodeMetaMan& mn_metaman, CMasternodeSync& mn_sync,
                                              CGovernanceManager& govman, CSporkManager& sporkman,
                                              const CActiveMasternodeManager* const mn_activeman,
-                                             const std::unique_ptr<CDeterministicMNManager>& dmnman,
                                              const std::unique_ptr<ActiveContext>& active_ctx,
-                                             CJWalletManager* const cj_walletman,
-                                             const std::unique_ptr<LLMQContext>& llmq_ctx, bool ignore_incoming_txs);
+                                             const std::unique_ptr<CDeterministicMNManager>& dmnman,
+                                             const std::unique_ptr<CJWalletManager>& cj_walletman,
+                                             const std::unique_ptr<LLMQContext>& llmq_ctx,
+                                             const std::unique_ptr<llmq::ObserverContext>& observer_ctx, bool ignore_incoming_txs);
     virtual ~PeerManager() { }
 
     /**

@@ -167,7 +167,7 @@ extern const std::map<uint64_t,std::string> WALLET_FLAG_CAVEATS;
  * Instantiating a ReserveDestination does not reserve an address. To do so,
  * GetReservedDestination() needs to be called on the object. Once an address has been
  * reserved, call KeepDestination() on the ReserveDestination object to make sure it is not
- * returned. Call ReturnDestination() to return the address so it can be re-used (for
+ * returned. Call ReturnDestination() to return the address so it can be reused (for
  * example, if the address was used in a new transaction
  * and that transaction was not completed and needed to be aborted).
  *
@@ -250,6 +250,14 @@ struct WalletTxHasher
     }
 };
 
+/** Status of a wallet rescan operation */
+enum class RescanStatus : uint8_t {
+    BUSY,        //!< Wallet is already rescanning
+    FAILURE,     //!< Rescan failed
+    SUCCESS,     //!< Rescan completed successfully
+    USER_ABORT,  //!< User aborted the rescan
+};
+
 class WalletRescanReserver; //forward declarations for ScanForWalletTransactions/RescanFromTime
 /**
  * A CWallet maintains a set of transactions and balances, and provides the ability to create new transactions.
@@ -262,7 +270,7 @@ private:
     //! if fOnlyMixingAllowed is true, only mixing should be allowed in unlocked wallet
     bool fOnlyMixingAllowed;
 
-    bool Unlock(const CKeyingMaterial& vMasterKeyIn, bool fForMixingOnly = false, bool accept_no_keys = false);
+    bool Unlock(const CKeyingMaterial& vMasterKeyIn, bool fForMixingOnly = false);
 
     std::atomic<bool> fAbortRescan{false}; // reset by WalletRescanReserver::reserve()
     std::atomic<bool> fScanningWallet{false}; // controlled by WalletRescanReserver
@@ -605,7 +613,7 @@ public:
 
     // Used to prevent concurrent calls to walletpassphrase RPC.
     Mutex m_unlock_mutex;
-    bool Unlock(const SecureString& strWalletPassphrase, bool fForMixingOnly = false, bool accept_no_keys = false);
+    bool Unlock(const SecureString& strWalletPassphrase, bool fForMixingOnly = false);
     bool ChangeWalletPassphrase(const SecureString& strOldWalletPassphrase, const SecureString& strNewWalletPassphrase);
     bool EncryptWallet(const SecureString& strWalletPassphrase);
 
@@ -1130,6 +1138,8 @@ bool AddWalletSetting(interfaces::Chain& chain, const std::string& wallet_name);
 bool RemoveWalletSetting(interfaces::Chain& chain, const std::string& wallet_name);
 
 bool DummySignInput(const SigningProvider& provider, CTxIn &tx_in, const CTxOut &txout, const CCoinControl* coin_control = nullptr);
+
+bool FillInputToWeight(CTxIn& txin, int64_t target_weight);
 } // namespace wallet
 
 #endif // BITCOIN_WALLET_WALLET_H

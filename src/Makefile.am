@@ -285,6 +285,7 @@ BITCOIN_CORE_H = \
   llmq/snapshot.h \
   llmq/types.h \
   llmq/utils.h \
+  llmq/observer/context.h \
   logging.h \
   logging/timer.h \
   mapport.h \
@@ -553,6 +554,7 @@ libbitcoin_node_a_SOURCES = \
   llmq/signing_shares.cpp \
   llmq/snapshot.cpp \
   llmq/utils.cpp \
+  llmq/observer/context.cpp \
   mapport.cpp \
   masternode/active/context.cpp \
   masternode/active/notificationinterface.cpp \
@@ -1130,7 +1132,7 @@ endif
 dash_util_SOURCES = bitcoin-util.cpp
 dash_util_CPPFLAGS = $(AM_CPPFLAGS) $(BITCOIN_INCLUDES)
 dash_util_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
-dash_util_LDFLAGS = $(LDFLAGS_WRAP_EXCEPTIONS) $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS)
+dash_util_LDFLAGS = $(LDFLAGS_WRAP_EXCEPTIONS) $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS) $(PTHREAD_FLAGS)
 
 if TARGET_WINDOWS
 dash_util_SOURCES += bitcoin-util-res.rc
