@@ -17,20 +17,21 @@ from typing import List
 HEADER_ID_PREFIX = 'BITCOIN_'
 HEADER_ID_SUFFIX = '_H'
 
-EXCLUDE_FILES_WITH_PREFIX = ['src/crypto/ctaes',
-                             'src/leveldb',
-                             'src/crc32c',
-                             'src/secp256k1',
-                             'src/minisketch',
-                             'src/tinyformat.h',
+EXCLUDE_FILES_WITH_PREFIX = ['rust/',
                              'src/bench/nanobench.h',
-                             'src/test/fuzz/FuzzedDataProvider.h',
                              'src/bls',
+                             'src/crc32c',
+                             'src/crypto/ctaes',
                              'src/crypto/x11/sph',
                              'src/ctpl_stl.h',
                              'src/dashbls',
                              'src/gsl',
-                             'src/immer']
+                             'src/immer',
+                             'src/leveldb',
+                             'src/minisketch',
+                             'src/secp256k1',
+                             'src/test/fuzz/FuzzedDataProvider.h',
+                             'src/tinyformat.h']
 
 
 def _get_header_file_lst() -> List[str]:
