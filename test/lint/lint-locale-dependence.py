@@ -57,13 +57,14 @@ KNOWN_VIOLATIONS = [
 ]
 
 REGEXP_EXTERNAL_DEPENDENCIES_EXCLUSIONS = [
+    "rust/",
     "src/crypto/ctaes/",
-    "src/leveldb/",
-    "src/secp256k1/",
-    "src/minisketch/",
-    "src/tinyformat.h",
     "src/dashbls/",
-    "src/immer/"
+    "src/immer/",
+    "src/leveldb/",
+    "src/minisketch/",
+    "src/secp256k1/",
+    "src/tinyformat.h",
 ]
 
 LOCALE_DEPENDENT_FUNCTIONS = [

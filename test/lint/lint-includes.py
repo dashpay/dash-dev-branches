@@ -15,13 +15,14 @@ import sys
 from subprocess import check_output, CalledProcessError
 
 
-EXCLUDED_DIRS = ["src/leveldb/",
+EXCLUDED_DIRS = ["rust/",
                  "src/crc32c/",
-                 "src/secp256k1/",
-                 "src/minisketch/",
+                 "src/crypto/x11/",
                  "src/dashbls/",
                  "src/immer/",
-                 "src/crypto/x11/"]
+                 "src/minisketch/",
+                 "src/secp256k1/",
+                 "src/leveldb/"]
 
 EXPECTED_BOOST_INCLUDES = ["boost/date_time/posix_time/posix_time.hpp",
                            "boost/hana/for_each.hpp",
