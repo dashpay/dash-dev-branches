@@ -16,17 +16,18 @@ import sys
 
 from subprocess import check_output
 
-EXCLUDED_DIRS = ["depends/patches/",
-                 "contrib/guix/patches/",
-                 "src/crypto/x11/",
-                 "src/leveldb/",
+EXCLUDED_DIRS = ["contrib/guix/patches/",
+                 "depends/patches/",
+                 "doc/release-notes/",
+                 "rust/",
                  "src/crc32c/",
-                 "src/secp256k1/",
-                 "src/minisketch/",
+                 "src/crypto/x11/",
                  "src/dashbls/",
                  "src/immer/",
-                 "doc/release-notes/",
-                 "src/qt/locale"]
+                 "src/leveldb/",
+                 "src/minisketch/",
+                 "src/qt/locale/",
+                 "src/secp256k1/"]
 
 def parse_args():
     """Parse command line arguments."""
