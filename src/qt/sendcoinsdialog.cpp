@@ -63,11 +63,7 @@ int getIndexForConfTarget(int target) {
 SendCoinsDialog::SendCoinsDialog(bool _fCoinJoin, QWidget* parent) :
     QDialog(parent, GUIUtil::dialog_flags),
     ui(new Ui::SendCoinsDialog),
-    clientModel(nullptr),
-    model(nullptr),
-    m_coin_control(new CCoinControl),
-    fNewRecipientAllowed(true),
-    fFeeMinimized(true)
+    m_coin_control(new CCoinControl)
 {
     ui->setupUi(this);
 
@@ -787,7 +783,7 @@ void SendCoinsDialog::setBalance(const interfaces::WalletBalances& balances)
         CAmount balance = 0;
         if (model->wallet().hasExternalSigner()) {
             ui->labelBalanceName->setText(tr("External balance:"));
-        } else if (model->wallet().privateKeysDisabled()) {
+        } else if (model->wallet().isLegacy() && model->wallet().privateKeysDisabled()) {
             balance = balances.watch_only_balance;
             ui->labelBalanceName->setText(tr("Watch-only balance:"));
         } else if (m_coin_control->IsUsingCoinJoin()) {
