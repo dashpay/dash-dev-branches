@@ -472,6 +472,7 @@ EOF
                                         DISTSRC="$(DISTSRC_BASE=/distsrc-base && distsrc_for_host "$HOST")" \
                                         OUTDIR="$(OUTDIR_BASE=/outdir-base && outdir_for_host "$HOST")" \
                                         DIST_ARCHIVE_BASE=/outdir-base/dist-archive \
+                                        GUIX_BUILD_CONTAINER=1 \
                                       bash -c "cd /dash && bash contrib/guix/libexec/build.sh"
     )
 
