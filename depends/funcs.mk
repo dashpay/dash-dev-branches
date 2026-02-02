@@ -305,6 +305,14 @@ vendor-$(1)-crates: $(native_rust_cached) $(SOURCES_PATH)/$($(1)_file_name)
 endif
 endef
 
+define download_rust_std_target
+([ -f "$(SOURCES_PATH)/rust-std-$(rust_stdlib_version)-$(1).tar.gz" ] && \
+  echo "Already have rust-std-$(rust_stdlib_version)-$(1).tar.gz" || \
+  (echo "Downloading rust-std-$(rust_stdlib_version)-$(1).tar.gz..." && \
+    $(build_DOWNLOAD) "$(SOURCES_PATH)/rust-std-$(rust_stdlib_version)-$(1).tar.gz" "$(rust_stdlib_download_path)/rust-std-$(rust_stdlib_version)-$(1).tar.gz")) && \
+echo "$(rust_stdlib_sha256_hash_$(1))  rust-std-$(rust_stdlib_version)-$(1).tar.gz" > "$(SOURCES_PATH)/download-stamps/.stamp_fetched-rust_stdlib-$(rust_stdlib_version)-$(rust_stdlib_sha256_hash_$(1)).hash"
+endef
+
 define download_rust_src_package
 ([ -f "$(SOURCES_PATH)/$($(1)_file_name)" ] && \
   echo "Already have $($(1)_file_name)" || \
