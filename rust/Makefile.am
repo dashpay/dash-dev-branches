@@ -63,6 +63,9 @@ endif # ENABLE_ONLINE_RUST
 
 include $(top_srcdir)/rust/Makefile.libs.include
 
+EXTRA_DIST = \
+	$(LIBRUST_CHIRP_FILES)
+
 all-local: $(CARGO_CONFIGURED) cargo-build-chirp cxxbridge-chirp
 
 cargo-build: $(CARGO_CONFIGURED) cargo-build-chirp
@@ -76,5 +79,11 @@ cargo-clean-config:
 	$(AM_V_at)rm -f $(top_srcdir)/.cargo/config
 
 clean-local: cargo-clean-chirp cxxbridge-clean-chirp clean-librustdeps-la cargo-clean-config
+
+dist-hook: cxxbridge-chirp
+	$(MKDIR_P) $(distdir)/chirp/gen/src
+	$(MKDIR_P) $(distdir)/chirp/gen/include/rust/chirp
+	cp $(LIBRUST_CHIRP_CPP) $(distdir)/chirp/gen/src/
+	cp $(LIBRUST_CHIRP_H) $(distdir)/chirp/gen/include/rust/chirp/
 
 .PHONY: cargo-build cargo-clean cargo-clean-config
