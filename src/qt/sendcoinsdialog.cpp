@@ -77,14 +77,14 @@ SendCoinsDialog::SendCoinsDialog(bool _fCoinJoin, QWidget* parent) :
                       ui->labelCoinControlChangeText,
                       ui->labelFeeHeadline,
                       ui->fallbackFeeWarningLabel
-                     }, {GUIUtil::g_font_registry.GetWeightBold()});
+                     }, {GUIUtil::FontWeight::Bold});
 
     GUIUtil::setFont({ui->labelBalance,
                       ui->labelBalanceName,
-                     }, {GUIUtil::g_font_registry.GetWeightBold(), 14});
+                     }, {GUIUtil::FontWeight::Bold, 14});
 
     GUIUtil::setFont({ui->labelCoinControlFeatures
-                     }, {GUIUtil::g_font_registry.GetWeightBold(), 16});
+                     }, {GUIUtil::FontWeight::Bold, 16});
 
     ui->checkBoxCoinControlChange->setEnabled(!_fCoinJoin);
     GUIUtil::setupAddressWidget(ui->lineEditCoinControlChange, this);
@@ -359,7 +359,7 @@ bool SendCoinsDialog::send(const QList<SendCoinsRecipient>& recipients, QString&
         // generate amount string with wallet name in case of multiwallet
         QString amount = BitcoinUnits::formatWithUnit(model->getOptionsModel()->getDisplayUnit(), rcp.amount);
         if (model->isMultiwallet()) {
-            amount.append(tr(" from wallet '%1'").arg(model->getWalletName()));
+            amount = tr("%1 from wallet '%2'").arg(amount, model->getWalletName());
         }
 
         // generate address string
