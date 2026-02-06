@@ -46,7 +46,7 @@ NO_NATPMP ?=
 MULTIPROCESS ?=
 LTO ?=
 NO_HARDEN ?=
-FALLBACK_DOWNLOAD_PATH ?= http://dash-depends-sources.s3-website-us-west-2.amazonaws.com
+FALLBACK_DOWNLOAD_PATH ?= https://dash-depends-sources.s3-us-west-2.amazonaws.com
 
 C_STANDARD ?= c11
 CXX_STANDARD ?= c++20
