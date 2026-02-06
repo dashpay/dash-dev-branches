@@ -87,15 +87,20 @@ def update_hash_in_file(makefile_path: Path, pattern: str, new_hash: str) -> Non
 def main() -> int:
     script_dir = Path(__file__).resolve().parent
     depends_dir = (script_dir / "../../depends").resolve()
-    makefile_path = depends_dir / "packages/native_rust.mk"
+    native_rust_path = depends_dir / "packages/native_rust.mk"
+    rust_stdlib_path = depends_dir / "packages/rust_stdlib.mk"
     sources_dir = depends_dir / "sources"
     stamps_dir = sources_dir / "download-stamps"
 
-    if not makefile_path.exists():
-        print(f"Error: {makefile_path} not found", file=sys.stderr)
+    if not native_rust_path.exists():
+        print(f"Error: {native_rust_path} not found", file=sys.stderr)
         return 1
 
-    rust_version = get_version(makefile_path)
+    if not rust_stdlib_path.exists():
+        print(f"Error: {rust_stdlib_path} not found", file=sys.stderr)
+        return 1
+
+    rust_version = get_version(native_rust_path)
 
     print(f"Rust version: {rust_version}\n")
     print("Updating native compiler hashes:")
@@ -104,17 +109,18 @@ def main() -> int:
         file_name = f"rust-{rust_version}-{rust_target}.tar.gz"
         url = f"https://static.rust-lang.org/dist/{file_name}"
         hash_value = download_and_hash(url, sources_dir / file_name)
-        update_hash_in_file(makefile_path, f"sha256_hash_{makefile_id}", hash_value)
+        update_hash_in_file(native_rust_path, f"sha256_hash_{makefile_id}", hash_value)
         write_stamp(stamps_dir, "native_rust", rust_version, hash_value, file_name)
         print(f"  Updated sha256_hash_{makefile_id}")
 
+    print("\nUpdating stdlib hashes:")
     for rust_target in CROSS_TARGETS:
         file_name = f"rust-std-{rust_version}-{rust_target}.tar.gz"
         url = f"https://static.rust-lang.org/dist/{file_name}"
         hash_value = download_and_hash(url, sources_dir / file_name)
-        update_hash_in_file(makefile_path, f"rust_std_sha256_hash_{rust_target}", hash_value)
-        write_stamp(stamps_dir, "native_rust", rust_version, hash_value, file_name)
-        print(f"  Updated rust_std_sha256_hash_{rust_target}")
+        update_hash_in_file(rust_stdlib_path, f"sha256_hash_{rust_target}", hash_value)
+        write_stamp(stamps_dir, "rust_stdlib", rust_version, hash_value, file_name)
+        print(f"  Updated sha256_hash_{rust_target}")
 
     print("\nDone!")
     return 0
