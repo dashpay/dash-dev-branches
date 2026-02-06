@@ -152,6 +152,18 @@ if test "${RUSTFLAGS+set}" != "set"; then
   RUSTFLAGS="-C embed-bitcode=yes -C relocation-model=pic"
 fi
 
+AC_ARG_ENABLE([online-rust],
+  [AS_HELP_STRING([--enable-online-rust],
+    [allow Cargo to fetch Rust dependencies from the internet (default is no, using vendored dependencies offline)])],
+  [enable_online_rust=$enableval],
+  [enable_online_rust=no])
+AM_CONDITIONAL([ENABLE_ONLINE_RUST], [test "$enable_online_rust" != "no"])
+if test "$enable_online_rust" = "no"; then
+  if test -z "$RUST_VENDORED_SOURCES"; then
+    AC_MSG_ERROR([Offline Rust builds require RUST_VENDORED_SOURCES to be specified, otherwise enable online builds with --enable-online-rust])
+  fi
+fi
+
 AC_ARG_ENABLE([wallet],
   [AS_HELP_STRING([--disable-wallet],
   [disable wallet (enabled by default)])],
@@ -2130,6 +2142,7 @@ AC_SUBST(RUST_MACOS_DEPLOYMENT_TARGET)
 AC_SUBST(RUST_NATIVE)
 AC_SUBST(RUST_OSX_SDK)
 AC_SUBST(RUST_TARGET)
+AC_SUBST(RUST_VENDORED_SOURCES)
 
 AC_SUBST(RELDFLAGS)
 AC_SUBST(CORE_LDFLAGS)
@@ -2290,4 +2303,5 @@ echo "  RUST_MACOS_DEPLOYMENT_TARGET = $RUST_MACOS_DEPLOYMENT_TARGET"
 echo "  RUST_NATIVE                  = $RUST_NATIVE"
 echo "  RUST_OSX_SDK                 = $RUST_OSX_SDK"
 echo "  RUST_TARGET                  = $RUST_TARGET"
+echo "  RUST_VENDORED_SOURCES        = $RUST_VENDORED_SOURCES"
 echo

@@ -24,3 +24,9 @@ linker = "x86_64-linux-gnu-gcc"
 # Windows
 [target.x86_64-pc-windows-gnu]
 linker = "x86_64-w64-mingw32-gcc"
+
+[source.crates-io]
+replace-with = "vendored-sources"
+
+[source.vendored-sources]
+# The directory for this source is set to RUST_VENDORED_SOURCES by rust/Makefile.am
