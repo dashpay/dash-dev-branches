@@ -5,6 +5,7 @@
 #include <qt/proposalmodel.h>
 
 #include <governance/classes.h>
+#include <governance/object.h>
 #include <governance/vote.h>
 
 #include <qt/guiutil_font.h>
@@ -20,19 +21,18 @@
 #include <algorithm>
 #include <cmath>
 
-Proposal::Proposal(ClientModel* _clientModel, const CGovernanceObject& _govObj,
+Proposal::Proposal(ClientModel& client_model, const CGovernanceObject& govObj,
                    const interfaces::GOV::GovernanceInfo& govInfo, int collateral_confs,
                    bool is_broadcast) :
-    clientModel{_clientModel},
     m_is_broadcast{is_broadcast},
-    m_block_height{_clientModel ? _clientModel->getNumBlocks() : 0},
+    m_block_height{client_model.getNumBlocks()},
     m_collateral_confs{collateral_confs},
     m_gov_info{govInfo},
-    govObj{_govObj},
     m_date_collateral{QDateTime::fromSecsSinceEpoch(govObj.GetCreationTime())},
     m_hash_collateral{QString::fromStdString(govObj.GetCollateralHash().ToString())},
     m_hash_object{QString::fromStdString(govObj.GetHash().ToString())},
     m_hash_parent{QString::fromStdString(govObj.Object().hashParent.ToString())},
+    m_json{QString::fromStdString(govObj.GetInnerJson().write(2))},
     m_objHash{govObj.GetHash()}
 {
     UniValue prop_data;
@@ -40,10 +40,8 @@ Proposal::Proposal(ClientModel* _clientModel, const CGovernanceObject& _govObj,
         return;
     }
 
-    if (clientModel) {
-        m_funded_height = clientModel->node().gov().getProposalFundedHeight(govObj.GetHash());
-        m_votes = clientModel->node().gov().getObjVotes(govObj, VOTE_SIGNAL_FUNDING);
-    }
+    m_funded_height = client_model.node().gov().getProposalFundedHeight(govObj.GetHash());
+    m_votes = client_model.node().gov().getObjVotes(govObj, VOTE_SIGNAL_FUNDING);
 
     if (const UniValue& titleValue = prop_data.find_value("name"); titleValue.isStr()) {
         m_title = QString::fromStdString(titleValue.get_str());
@@ -104,12 +102,6 @@ QString Proposal::toHtml(const BitcoinUnit& unit) const
     return ret;
 }
 
-QString Proposal::toJson() const
-{
-    const auto json = govObj.GetInnerJson();
-    return QString::fromStdString(json.write(2));
-}
-
 int Proposal::blocksUntilSuperblock() const
 {
     return m_gov_info.nextsuperblock - m_block_height;
@@ -149,15 +141,6 @@ ProposalStatus Proposal::status(bool is_fundable) const
         return ProposalStatus::Voting;
     }
     return is_fundable ? ProposalStatus::Passing : ProposalStatus::Unfunded;
-}
-
-bool Proposal::isActive() const
-{
-    if (!clientModel) {
-        return false;
-    }
-    std::string strError;
-    return clientModel->node().gov().getObjLocalValidity(govObj, strError, false);
 }
 
 ///
@@ -364,7 +347,7 @@ QVariant ProposalModel::headerData(int section, Qt::Orientation orientation, int
     }
 }
 
-void ProposalModel::append(std::unique_ptr<Proposal>&& proposal)
+void ProposalModel::append(std::shared_ptr<Proposal>&& proposal)
 {
     beginInsertRows({}, rowCount(), rowCount());
     m_data.push_back(std::move(proposal));
@@ -381,7 +364,7 @@ void ProposalModel::remove(int row)
     endRemoveRows();
 }
 
-void ProposalModel::reconcile(ProposalList&& proposals, std::unordered_set<uint256, StaticSaltedHasher>&& fundable_hashes)
+void ProposalModel::reconcile(Proposals&& proposals, Uint256HashSet&& fundable_hashes)
 {
     m_fundable_hashes = std::move(fundable_hashes);
 
