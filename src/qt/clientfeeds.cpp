@@ -14,7 +14,6 @@
 #include <qt/clientmodel.h>
 #include <qt/masternodemodel.h>
 #include <qt/proposalmodel.h>
-#include <qt/util.h>
 
 #include <QDebug>
 #include <QThread>
@@ -188,9 +187,7 @@ void MasternodeFeed::fetch()
             nNextPayment = nextPaymentIt->second;
         }
         auto entry = std::make_shared<MasternodeEntry>(dmn, collateralStr, nNextPayment);
-        ret->m_by_protx[dmn->getProTxHash()] = entry.get();
-        ret->m_by_service[util::make_array(dmn->getNetInfoPrimary().GetKey())] = entry.get();
-        ret->m_entries.push_back(std::move(entry));
+        ret->m_entries.emplace_back(std::move(entry));
     });
 
     ret->m_valid = true;
@@ -231,10 +228,14 @@ void ProposalFeed::fetch()
         }
         ret->m_proposals.emplace_back(std::make_shared<Proposal>(m_client_model, govObj, ret->m_gov_info, ret->m_gov_info.requiredConfs,
                                                                  /*is_broadcast=*/true));
+        const auto voters = m_client_model.node().gov().getObjUniqueVoters(govObj, VOTE_SIGNAL_FUNDING);
+        ret->m_max_regular_voters = std::max(ret->m_max_regular_voters, voters.m_regular);
+        ret->m_max_evo_voters = std::max(ret->m_max_evo_voters, voters.m_evo);
     }
 
     auto fundable{m_client_model.node().gov().getFundableProposalHashes()};
     ret->m_fundable_hashes = std::move(fundable.hashes);
+    ret->m_allocated = fundable.allocated;
 
     setData(std::move(ret));
 }

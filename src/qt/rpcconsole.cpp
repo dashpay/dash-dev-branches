@@ -13,13 +13,13 @@
 #include <qt/bantablemodel.h>
 #include <qt/clientfeeds.h>
 #include <qt/clientmodel.h>
+#include <qt/proposalinfo.h>
 #include <qt/guiutil_font.h>
 #include <qt/guiutil.h>
 #include <qt/informationwidget.h>
 #include <qt/masternodemodel.h>
 #include <qt/networkwidget.h>
 #include <qt/peertablesortproxy.h>
-#include <qt/util.h>
 #include <qt/walletcontroller.h>
 #include <qt/walletmodel.h>
 
@@ -606,6 +606,8 @@ RPCConsole::RPCConsole(interfaces::Node& node, QWidget* parent, Qt::WindowFlags 
     connect(pageButtons, QOverload<int>::of(&QButtonGroup::buttonClicked), this, &RPCConsole::showPage);
 #endif
 
+    // Governance tab is shown only when the governance system is active
+    ui->tabWidgetInfo->removeTab(ToUnderlying(InfoView::Governance));
     // Keep tabs compact; prevent Qt from stretching them to fill the bar width
     ui->tabWidgetInfo->tabBar()->setExpanding(false);
 
@@ -702,11 +704,16 @@ void RPCConsole::setClientModel(ClientModel *model, int bestblock_height, int64_
 
     ui->informationWidget->setClientModel(model);
     ui->networkWidget->setClientModel(model);
+    ui->proposalInfo->setClientModel(model);
     ui->trafficGraph->setClientModel(model);
     if (model && clientModel->getPeerTableModel() && clientModel->getBanTableModel()) {
         // Keep up to date with client
         connect(model, &ClientModel::numBlocksChanged, ui->informationWidget, &InformationWidget::setNumBlocks);
         m_feed_masternode = model->feedMasternode();
+
+        if (m_node.gov().isEnabled() && ui->tabWidgetInfo->indexOf(ui->tabGovernance) == -1) {
+            ui->tabWidgetInfo->insertTab(ToUnderlying(InfoView::Governance), ui->tabGovernance, tr("&Governance"));
+        }
 
         // set up peer table
         ui->peerWidget->setModel(model->peerTableSortProxy());
@@ -802,6 +809,11 @@ void RPCConsole::setClientModel(ClientModel *model, int bestblock_height, int64_
         startExecutor();
     }
     if (!model) {
+        // Remove governance tab so it is not duplicated if a new model is set later
+        const int gov_tab_idx{ui->tabWidgetInfo->indexOf(ui->tabGovernance)};
+        if (gov_tab_idx != -1) {
+            ui->tabWidgetInfo->removeTab(gov_tab_idx);
+        }
         // Client model is being set to 0, this means shutdown() is about to be called.
         thread.quit();
         thread.wait();
@@ -869,6 +881,7 @@ void RPCConsole::onWalletChanged()
         ui->btn_rescan1->setEnabled(false);
         ui->btn_rescan2->setEnabled(false);
     }
+    ui->proposalInfo->setWalletModel(wallet_model);
 }
 #endif
 
@@ -1277,12 +1290,12 @@ void RPCConsole::updateDetailWidget()
     }
     ui->peerMappedAS->setText(stats->nodeStats.m_mapped_as != 0 ? QString::number(stats->nodeStats.m_mapped_as) : ts.na);
 
-    const auto addr_key{util::make_array(stats->nodeStats.addr.GetKey())};
-    const MasternodeEntry* dmn = [&]() -> const MasternodeEntry* {
+    const auto addr_key{GUIUtil::MakeQByteArray(stats->nodeStats.addr.GetKey())};
+    const std::shared_ptr<MasternodeEntry> dmn = [&]() -> const std::shared_ptr<MasternodeEntry> {
         if (m_feed_masternode) {
             if (const auto data{m_feed_masternode->data()}; data) {
-                if (auto it = data->m_by_service.find(addr_key); it != data->m_by_service.end()) {
-                    return it.value();
+                for (const auto& mn : data->m_entries) {
+                    if (mn->serviceKey() == addr_key) return mn;
                 }
             }
         }
@@ -1479,6 +1492,12 @@ void RPCConsole::showOrHideBanTableIfRequired()
 void RPCConsole::setTabFocus(enum TabTypes tabType)
 {
     showPage(ToUnderlying(tabType));
+}
+
+void RPCConsole::setInfoView(InfoView view)
+{
+    setTabFocus(TabTypes::INFO);
+    showInfoView(ToUnderlying(view));
 }
 
 QString RPCConsole::tabTitle(TabTypes tab_type) const

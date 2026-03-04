@@ -23,7 +23,7 @@ on:
 jobs:
   build-amd64:
     name: Build container (amd64)
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.RUNNER_AMD64 || 'ubuntu-24.04' }}
     outputs:
       tag: ${{ steps.prepare.outputs.tag }}
       repo: ${{ steps.prepare.outputs.repo }}
@@ -69,7 +69,7 @@ jobs:
 
   build-arm64:
     name: Build container (arm64)
-    runs-on: ubuntu-24.04-arm
+    runs-on: ${{ vars.RUNNER_ARM64 || 'ubuntu-24.04-arm' }}
     outputs:
       digest: ${{ steps.build.outputs.digest }}
     steps:
@@ -113,7 +113,7 @@ jobs:
 
   create-manifest:
     name: Create multi-arch manifest
-    runs-on: ubuntu-24.04-arm
+    runs-on: ${{ vars.RUNNER_ARM64 || 'ubuntu-24.04-arm' }}
     needs: [build-amd64, build-arm64]
     steps:
       - name: Checkout code
