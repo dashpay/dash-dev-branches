@@ -391,9 +391,7 @@ class AssetLocksTest(DashTestFramework):
 
         assert_equal(node.getmempoolentry(txid)['fees']['base'], Decimal("0.0007"))
         is_id = node_wallet.sendtoaddress(node_wallet.getnewaddress(), 1)
-        self.bump_mocktime(30)
-        for node in self.nodes:
-            self.wait_for_instantlock(is_id, node)
+        self.wait_for_instantlock(is_id)
 
         rawtx = node.getrawtransaction(txid, 1)
         rawtx_is = node.getrawtransaction(is_id, 1)

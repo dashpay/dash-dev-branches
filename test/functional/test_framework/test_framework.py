@@ -1945,17 +1945,26 @@ class DashTestFramework(BitcoinTestFramework):
         return isdlock
 
     # due to privacy reasons random delay is used before sending transaction by network
-    # most times is just 2-5 seconds, but once in 1000 it's up to 1000 seconds.
-    # it's recommended to bump mocktime for 30 seconds before wait_for_instantlock
-    def wait_for_instantlock(self, txid, node, timeout=60):
+    # most times it's just 2-5 seconds, but once in 1000 times it's up to 10 seconds and has no bound from the top.
+    def wait_for_instantlock(self, *txids, nodes=None, timeout=60, skip_sync=False):
+        nodes = nodes or self.nodes
+
+        if not skip_sync:
+            self.bump_mocktime(30)
+            self.sync_mempools(nodes)
+
+        self.log.info(f"Expecting InstantLock for {list(txids)}")
 
         def check_instantlock():
             try:
-                return node.getrawtransaction(txid, True)["instantlock"]
+                return all(
+                    node.getrawtransaction(txid, True)["instantlock"]
+                    for txid in txids
+                    for node in nodes
+                )
             except Exception:
                 return False
 
-        self.log.info(f"Expecting InstantLock for {txid}")
         self.wait_until(check_instantlock, timeout=timeout)
 
     def wait_for_chainlocked_block(self, node, block_hash, expected=True, timeout=15):

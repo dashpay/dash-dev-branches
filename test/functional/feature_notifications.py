@@ -139,8 +139,7 @@ class NotificationsTest(DashTestFramework):
             tx_count = 10
             for _ in range(tx_count):
                 txid = self.nodes[0].sendtoaddress(self.nodes[1].getnewaddress(), 1)
-                self.bump_mocktime(30)
-                self.wait_for_instantlock(txid, self.nodes[0])
+                self.wait_for_instantlock(txid)
 
             # wait at most 10 seconds for expected number of files before reading the content
             self.bump_mocktime(30)

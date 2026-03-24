@@ -99,11 +99,7 @@ class LLMQ_IS_CL_Conflicts(DashTestFramework):
         rawtx4_txid = self.nodes[0].sendrawtransaction(rawtx4)
 
         # wait for transactions to propagate
-        self.bump_mocktime(30)
-        self.sync_mempools()
-        for node in self.nodes:
-            self.wait_for_instantlock(rawtx1_txid, node)
-            self.wait_for_instantlock(rawtx4_txid, node)
+        self.wait_for_instantlock(rawtx1_txid, rawtx4_txid)
 
         block = create_block_with_mnpayments(self.mninfo, self.nodes[0], [rawtx2_obj])
         if test_block_conflict:
@@ -160,10 +156,7 @@ class LLMQ_IS_CL_Conflicts(DashTestFramework):
         rawtx5 = self.nodes[0].signrawtransactionwithwallet(rawtx5)['hex']
         rawtx5_txid = self.nodes[0].sendrawtransaction(rawtx5)
         # wait for the transaction to propagate
-        self.bump_mocktime(30)
-        self.sync_mempools()
-        for node in self.nodes:
-            self.wait_for_instantlock(rawtx5_txid, node)
+        self.wait_for_instantlock(rawtx5_txid)
 
         if mine_confllicting:
             # Lets verify that the ISLOCKs got pruned and conflicting txes were mined but never confirmed
@@ -243,17 +236,15 @@ class LLMQ_IS_CL_Conflicts(DashTestFramework):
         # Should drop tx1 and accept tx2 because there is an isdlock waiting for it
         self.nodes[0].sendrawtransaction(rawtx2)
         # bump mocktime to force tx relay
-        self.bump_mocktime(60)
-        for node in self.nodes:
-            self.wait_for_instantlock(rawtx2_txid, node)
+        self.wait_for_instantlock(rawtx2_txid)
 
         # Should not allow competing txes now
         assert_raises_rpc_error(-26, "tx-txlock-conflict", self.nodes[0].sendrawtransaction, rawtx1)
 
         islock_tip = self.generate(self.nodes[0], 1)[0]
 
+        self.wait_for_instantlock(rawtx2_txid, skip_sync=True)
         for node in self.nodes:
-            self.wait_for_instantlock(rawtx2_txid, node)
             assert_equal(node.getrawtransaction(rawtx2_txid, True)['confirmations'], 1)
             assert_equal(node.getbestblockhash(), islock_tip)
 

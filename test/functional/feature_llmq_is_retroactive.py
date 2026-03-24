@@ -35,16 +35,6 @@ class LLMQ_IS_RetroactiveSigning(DashTestFramework):
         time.sleep(sleep)
         self.assert_no_instantlock(txid, node)
 
-    # random delay before tx is actually send by network could take up to 30 seconds
-    def wait_for_tx(self, txid, node, expected=True, timeout=60):
-        def check_tx():
-            try:
-                return node.getrawtransaction(txid)
-            except Exception:
-                return False
-        if self.wait_until(check_tx, timeout=timeout, do_assert=expected) and not expected:
-            raise AssertionError("waiting unexpectedly succeeded")
-
     def create_fund_sign_tx(self):
         rawtx = self.nodes[0].createrawtransaction([], {self.nodes[0].getnewaddress(): 1})
         rawtx = self.nodes[0].fundrawtransaction(rawtx)['hex']
@@ -67,6 +57,7 @@ class LLMQ_IS_RetroactiveSigning(DashTestFramework):
         # 3 nodes should be enough to create an IS lock even if nodes 4 and 5 (which have no tx itself)
         # are the only "neighbours" in intra-quorum connections for one of them.
         self.bump_mocktime(30)
+        self.sync_mempools(self.nodes[:3])
         self.sleep_and_assert_no_instantlock(txid, self.nodes[0])
         # Have to disable ChainLocks to avoid signing a block with a "safe" tx too early
         self.nodes[0].sporkupdate("SPORK_19_CHAINLOCKS_ENABLED", 4000000000)
@@ -74,7 +65,7 @@ class LLMQ_IS_RetroactiveSigning(DashTestFramework):
         # We have to wait in order to include tx in block
         self.bump_mocktime(10 * 60 + 1)
         block = self.generate(self.nodes[0], 1, sync_fun=self.no_op)[0]
-        self.wait_for_instantlock(txid, self.nodes[0])
+        self.wait_for_instantlock(txid, nodes=[self.nodes[0]], skip_sync=True)
         self.nodes[0].sporkupdate("SPORK_19_CHAINLOCKS_ENABLED", 0)
         self.wait_for_sporks_same()
         self.wait_for_chainlocked_block_all_nodes(block)
@@ -87,19 +78,17 @@ class LLMQ_IS_RetroactiveSigning(DashTestFramework):
         txid = self.nodes[0].sendtoaddress(self.nodes[0].getnewaddress(), 1)
         # 3 nodes should be enough to create an IS lock even if nodes 4 and 5 (which have no tx itself)
         # are the only "neighbours" in intra-quorum connections for one of them.
-        self.bump_mocktime(30)
-        self.wait_for_instantlock(txid, self.nodes[0])
+        self.wait_for_instantlock(txid, nodes=self.nodes[:3])
         block = self.generate(self.nodes[0], 1, sync_fun=self.no_op)[0]
         self.wait_for_chainlocked_block_all_nodes(block)
 
         self.log.info("testing normal signing with partially known TX")
         self.isolate_node(3)
         txid = self.nodes[0].sendtoaddress(self.nodes[0].getnewaddress(), 1)
-        # Make sure nodes 1 and 2 received the TX before we continue,
+        # Make sure connected nodes received the TX before we continue,
         # otherwise it might announce the TX to node 3 when reconnecting
         self.bump_mocktime(30)
-        self.wait_for_tx(txid, self.nodes[1])
-        self.wait_for_tx(txid, self.nodes[2])
+        self.sync_mempools(self.nodes[:3])
         self.reconnect_isolated_node(3, 0)
         # Make sure nodes actually try re-connecting quorum connections
         self.bump_mocktime(30)
@@ -110,7 +99,7 @@ class LLMQ_IS_RetroactiveSigning(DashTestFramework):
         self.nodes[3].sendrawtransaction(self.nodes[0].getrawtransaction(txid))
         # node 3 should vote on a tx now since it became aware of it via sendrawtransaction
         # and this should be enough to complete an IS lock
-        self.wait_for_instantlock(txid, self.nodes[0])
+        self.wait_for_instantlock(txid, nodes=[self.nodes[0]], skip_sync=True)
 
         self.log.info("testing retroactive signing with unknown TX")
         self.isolate_node(3)
@@ -126,11 +115,10 @@ class LLMQ_IS_RetroactiveSigning(DashTestFramework):
         self.log.info("testing retroactive signing with partially known TX")
         self.isolate_node(3)
         txid = self.nodes[0].sendtoaddress(self.nodes[0].getnewaddress(), 1)
-        # Make sure nodes 1 and 2 received the TX before we continue,
+        # Make sure connected nodes received the TX before we continue,
         # otherwise it might announce the TX to node 3 when reconnecting
         self.bump_mocktime(30)
-        self.wait_for_tx(txid, self.nodes[1])
-        self.wait_for_tx(txid, self.nodes[2])
+        self.sync_mempools(self.nodes[:3])
         self.reconnect_isolated_node(3, 0)
         # Make sure nodes actually try re-connecting quorum connections
         self.bump_mocktime(30)
@@ -159,10 +147,9 @@ class LLMQ_IS_RetroactiveSigning(DashTestFramework):
         rawtx_1 = self.create_fund_sign_tx()
         txid_single_node = self.nodes[3].sendrawtransaction(rawtx_1)
 
-        # Make sure nodes 1 and 2 received the TX before we continue
+        # Make sure connected nodes received the TX before we continue
         self.bump_mocktime(30)
-        self.wait_for_tx(txid_all_nodes, self.nodes[1])
-        self.wait_for_tx(txid_all_nodes, self.nodes[2])
+        self.sync_mempools(self.nodes[:3])
         # Make sure signing is done on nodes 1 and 2 (it's async)
         time.sleep(5)
         # Make the signing session for the IS lock timeout on nodes 1-3
@@ -174,10 +161,9 @@ class LLMQ_IS_RetroactiveSigning(DashTestFramework):
         self.wait_for_mnauth(self.nodes[3], 2)
 
         self.nodes[0].sendrawtransaction(rawtx_1)
-        # Make sure nodes 1 and 2 received the TX
+        # Make sure connected nodes received the TX
         self.bump_mocktime(30)
-        self.wait_for_tx(txid_single_node, self.nodes[1])
-        self.wait_for_tx(txid_single_node, self.nodes[2])
+        self.sync_mempools(self.nodes[:3])
         self.bump_mocktime(30)
 
         # Make sure signing is done on nodes 1 and 2 (it's async)
