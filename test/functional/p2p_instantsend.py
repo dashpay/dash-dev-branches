@@ -139,10 +139,7 @@ class InstantSendTest(DashTestFramework):
         receiver = self.nodes[self.receiver_idx]
         sender_addr = sender.getnewaddress()
         fund_id = self.nodes[0].sendtoaddress(sender_addr, 1)
-        self.bump_mocktime(30)
-        self.sync_mempools()
-        for node in self.nodes:
-            self.wait_for_instantlock(fund_id, node)
+        self.wait_for_instantlock(fund_id)
         tip = self.generate(self.nodes[0], 2)[-1]
         self.bump_mocktime(30)
         self.wait_for_chainlocked_block_all_nodes(tip)
@@ -199,10 +196,7 @@ class InstantSendTest(DashTestFramework):
 
         # send a TX — needs IS lock from all restarted MNs, no new blocks mined
         is_id = sender.sendtoaddress(receiver_addr, 0.5)
-        self.bump_mocktime(30)
-        self.sync_mempools()
-        for node in self.nodes:
-            self.wait_for_instantlock(is_id, node)
+        self.wait_for_instantlock(is_id)
         self.log.info("InstantSend lock succeeded after full restart")
 
         # clean up
