@@ -7,8 +7,13 @@
 #include <active/masternode.h>
 #include <bls/bls.h>
 #include <coinjoin/coinjoin.h>
+#include <coinjoin/common.h>
+#include <consensus/amount.h>
 
 #include <uint256.h>
+
+#include <climits>
+#include <cstdint>
 
 #include <boost/test/unit_test.hpp>
 
@@ -94,6 +99,50 @@ BOOST_AUTO_TEST_CASE(queue_timestamp_validation)
     // Test timestamp too far in past (outside COINJOIN_QUEUE_TIMEOUT = 30)
     q.nTime = current_time - 60; // 60 seconds ago
     BOOST_CHECK(q.IsTimeOutOfBounds(current_time));
+}
+
+BOOST_AUTO_TEST_CASE(queue_timestamp_extreme_values)
+{
+    CCoinJoinQueue q;
+    q.nDenom = CoinJoin::AmountToDenomination(CoinJoin::GetSmallestDenomination());
+    q.m_protxHash = uint256::ONE;
+
+    // Negative timestamps are rejected by the guard
+    q.nTime = INT64_MIN;
+    BOOST_CHECK(q.IsTimeOutOfBounds(INT64_MAX));
+
+    q.nTime = INT64_MAX;
+    BOOST_CHECK(q.IsTimeOutOfBounds(INT64_MIN));
+
+    q.nTime = INT64_MIN;
+    BOOST_CHECK(q.IsTimeOutOfBounds(INT64_MIN));
+
+    // Large positive timestamp with same value: zero diff, in bounds
+    q.nTime = INT64_MAX;
+    BOOST_CHECK(!q.IsTimeOutOfBounds(INT64_MAX));
+
+    // Zero vs extreme positive: huge gap, out of bounds
+    q.nTime = 0;
+    BOOST_CHECK(q.IsTimeOutOfBounds(INT64_MAX));
+
+    // Zero vs negative: rejected by guard
+    q.nTime = 0;
+    BOOST_CHECK(q.IsTimeOutOfBounds(INT64_MIN));
+}
+
+static_assert(CoinJoin::CalculateAmountPriority(MAX_MONEY) == -(MAX_MONEY / COIN));
+static_assert(CoinJoin::CalculateAmountPriority(static_cast<CAmount>(INT64_MAX)) == 0);
+static_assert(CoinJoin::CalculateAmountPriority(static_cast<CAmount>(-1)) == 0);
+
+BOOST_AUTO_TEST_CASE(calculate_amount_priority_guard)
+{
+    // Realistic amount: MAX_MONEY (21 million DASH)
+    BOOST_CHECK_EQUAL(CoinJoin::CalculateAmountPriority(MAX_MONEY), -(MAX_MONEY / COIN));
+
+    // Out-of-range amounts return 0
+    BOOST_CHECK_EQUAL(CoinJoin::CalculateAmountPriority(static_cast<CAmount>(INT64_MAX)), 0);
+    BOOST_CHECK_EQUAL(CoinJoin::CalculateAmountPriority(static_cast<CAmount>(-1)), 0);
+    BOOST_CHECK_EQUAL(CoinJoin::CalculateAmountPriority(MAX_MONEY + 1), 0);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

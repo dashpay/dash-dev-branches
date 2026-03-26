@@ -57,6 +57,7 @@ bool CCoinJoinQueue::CheckSignature(const CBLSPublicKey& blsPubKey) const
 
 bool CCoinJoinQueue::IsTimeOutOfBounds(int64_t current_time) const
 {
+    if (current_time < 0 || nTime < 0) return true;
     return current_time - nTime > COINJOIN_QUEUE_TIMEOUT ||
            nTime - current_time > COINJOIN_QUEUE_TIMEOUT;
 }
