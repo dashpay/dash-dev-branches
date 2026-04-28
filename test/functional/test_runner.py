@@ -198,6 +198,8 @@ BASE_SCRIPTS = [
     'wallet_createwallet.py --legacy-wallet',
     'wallet_createwallet.py --usecli',
     'wallet_createwallet.py --descriptors',
+    'wallet_dust_protection.py --legacy-wallet',
+    'wallet_dust_protection.py --descriptors',
     'wallet_reorgsrestore.py',
     'wallet_listtransactions.py --legacy-wallet',
     'wallet_listtransactions.py --descriptors',
@@ -926,6 +928,8 @@ class RPCCoverage():
         covered_cmds = set({'generate'})
         # TODO: implement functional tests for voteraw
         covered_cmds.add('voteraw')
+        # TODO: implement functional tests for importelectrumwallet
+        covered_cmds.add('importelectrumwallet')
         # TODO: implement functional tests for getmerkleblocks
         covered_cmds.add('getmerkleblocks')
 

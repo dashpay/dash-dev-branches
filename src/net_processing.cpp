@@ -56,12 +56,12 @@
 #include <llmq/context.h>
 #include <llmq/dkgsession.h>
 #include <llmq/dkgsessionmgr.h>
+#include <llmq/observer.h>
 #include <llmq/options.h>
 #include <llmq/quorumsman.h>
 #include <llmq/signhash.h>
 #include <llmq/signing.h>
 #include <llmq/snapshot.h>
-#include <llmq/observer/context.h>
 #include <masternode/meta.h>
 #include <masternode/sync.h>
 #include <msg_result.h>
@@ -1193,6 +1193,16 @@ static uint16_t GetHeadersLimit(const CNode& pfrom, bool compressed)
     return MAX_HEADERS_UNCOMPRESSED_RESULT;
 }
 
+// Returns true when peer is a verified masternode that has opted in to receive recsigs.
+// Such peers participate in the signing flow that populates creatingInstantSendLocks, so
+// they can reconstruct an ISDLOCK locally from the recsig and don't need the ISDLOCK inv.
+// Non-MN peers (e.g. nodes running with -watchquorums) also opt in to recsigs via
+// QSENDRECSIGS but still need ISDLOCK invs because they don't run the signing flow.
+static bool PeerReconstructsISLockFromRecsig(const CNode& pnode, const Peer& peer)
+{
+    return peer.m_wants_recsigs && !pnode.GetVerifiedProRegTxHash().IsNull();
+}
+
 static void PushInv(Peer& peer, const CInv& inv)
 {
     auto inv_relay = peer.GetInvRelay();
@@ -1201,13 +1211,6 @@ static void PushInv(Peer& peer, const CInv& inv)
     ASSERT_IF_DEBUG(inv.type != MSG_BLOCK);
     if (inv.type == MSG_BLOCK) {
         LogPrintf("%s -- WARNING: using PushInv for BLOCK inv, peer=%d\n", __func__, peer.m_id);
-        return;
-    }
-
-    // Skip ISDLOCK inv announcements for peers that want recsigs, as they can reconstruct
-    // the islock from the recsig
-    if (inv.type == MSG_ISDLOCK && peer.m_wants_recsigs) {
-        LogPrint(BCLog::NET, "%s -- skipping ISDLOCK inv (peer wants recsigs): %s peer=%d\n", __func__, inv.ToString(), peer.m_id);
         return;
     }
 
@@ -2541,6 +2544,11 @@ void PeerManagerImpl::RelayInvFiltered(const CInv& inv, const CTransaction& rela
                 return;
             }
         } // LOCK(tx_relay->m_bloom_filter_mutex)
+        if (inv.type == MSG_ISDLOCK && PeerReconstructsISLockFromRecsig(*pnode, *peer)) {
+            LogPrint(BCLog::NET, "%s -- skipping ISDLOCK inv (peer wants recsigs): %s peer=%d\n",
+                     __func__, inv.ToString(), peer->m_id);
+            return;
+        }
         PushInv(*peer, inv);
     });
 }
@@ -2566,6 +2574,11 @@ void PeerManagerImpl::RelayInvFiltered(const CInv& inv, const uint256& relatedTx
                 return;
             }
         } // LOCK(tx_relay->m_bloom_filter_mutex)
+        if (inv.type == MSG_ISDLOCK && PeerReconstructsISLockFromRecsig(*pnode, *peer)) {
+            LogPrint(BCLog::NET, "%s -- skipping ISDLOCK inv (peer wants recsigs): %s peer=%d\n",
+                     __func__, inv.ToString(), peer->m_id);
+            return;
+        }
         PushInv(*peer, inv);
     });
 }
@@ -5498,7 +5511,6 @@ void PeerManagerImpl::ProcessMessage(
         PostProcessMessage(m_sporkman.ProcessMessage(pfrom, m_connman, msg_type, vRecv), pfrom.GetId());
         PostProcessMessage(CMNAuth::ProcessMessage(pfrom, peer->m_their_services, m_connman, m_mn_metaman, (m_active_ctx ? m_active_ctx->nodeman.get() : nullptr), m_mn_sync, m_dmnman->GetListAtChainTip(), msg_type, vRecv), pfrom.GetId());
         PostProcessMessage(m_llmq_ctx->quorum_block_processor->ProcessMessage(pfrom, msg_type, vRecv), pfrom.GetId());
-        PostProcessMessage(m_llmq_ctx->qman->ProcessMessage(pfrom, m_connman, msg_type, vRecv), pfrom.GetId());
         PostProcessMessage(ProcessPlatformBanMessage(pfrom.GetId(), msg_type, vRecv), pfrom.GetId());
 
         if (msg_type == NetMsgType::CLSIG) {
@@ -6348,9 +6360,7 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
                     if (islock == nullptr) continue;
                     uint256 isLockHash{::SerializeHash(*islock)};
                     tx_relay->m_tx_inventory_known_filter.insert(isLockHash);
-                    // Skip ISDLOCK inv announcements for peers that want recsigs, as they can reconstruct
-                    // the islock from the recsig
-                    if (!peer->m_wants_recsigs) {
+                    if (!PeerReconstructsISLockFromRecsig(*pto, *peer)) {
                         queueAndMaybePushInv(CInv(MSG_ISDLOCK, isLockHash));
                     }
                 }

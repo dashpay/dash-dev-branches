@@ -69,7 +69,7 @@ class TestNode():
     To make things easier for the test writer, any unrecognised messages will
     be dispatched to the RPC connection."""
 
-    def __init__(self, i, datadir, extra_args_from_options, *, chain, rpchost, timewait, timeout_factor, bitcoind, bitcoin_cli, mocktime, coverage_dir, cwd, extra_conf=None, extra_args=None, use_cli=False, start_perf=False, use_valgrind=False, version=None, descriptors=False, v2transport=False):
+    def __init__(self, i, datadir, extra_args_from_options, *, chain, rpchost, timewait, timeout_factor, bitcoind, bitcoin_cli, mocktime, coverage_dir, cwd, extra_conf=None, extra_args=None, use_cli=False, start_perf=False, use_valgrind=False, version=None, descriptors=False, v2transport=False, uses_wallet=False):
         """
         Kwargs:
             start_perf (bool): If True, begin profiling the node with `perf` as soon as
@@ -114,7 +114,7 @@ class TestNode():
         if self.mocktime != 0:
             self.args.append(f"-mocktime={mocktime}")
 
-        if self.descriptors is None:
+        if uses_wallet is not None and not uses_wallet and self.descriptors is None:
             self.args.append("-disablewallet")
 
         # Use valgrind, expect for previous release binaries
@@ -453,8 +453,8 @@ class TestNode():
     def debug_log_path(self) -> Path:
         return self.chain_path / 'debug.log'
 
-    def debug_log_bytes(self) -> int:
-        with open(self.debug_log_path, encoding='utf-8') as dl:
+    def debug_log_size(self, **kwargs) -> int:
+        with open(self.debug_log_path, **kwargs) as dl:
             dl.seek(0, 2)
             return dl.tell()
 
@@ -466,13 +466,13 @@ class TestNode():
         assert_equal(type(unexpected_msgs), list)
 
         time_end = time.time() + timeout * self.timeout_factor
-        prev_size = self.debug_log_bytes()
+        prev_size = self.debug_log_size(encoding="utf-8")  # Must use same encoding that is used to read() below
 
         yield
 
         while True:
             found = True
-            with open(self.debug_log_path, encoding='utf-8') as dl:
+            with open(self.debug_log_path, encoding="utf-8", errors="replace") as dl:
                 dl.seek(prev_size)
                 log = dl.read()
             print_log = " - " + "\n - ".join(log.splitlines())
@@ -497,7 +497,7 @@ class TestNode():
             the number of log lines we encountered when matching
         """
         time_end = time.time() + timeout * self.timeout_factor
-        prev_size = self.debug_log_bytes()
+        prev_size = self.debug_log_size(mode="rb")  # Must use same mode that is used to read() below
 
         yield
 
