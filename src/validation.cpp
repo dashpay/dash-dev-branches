@@ -2187,18 +2187,6 @@ void StopScriptCheckWorkerThreads()
     scriptcheckqueue.StopWorkerThreads();
 }
 
-bool GetBlockHash(const CChain& active_chain, uint256& hashRet, int nBlockHeight)
-{
-    LOCK(cs_main);
-
-    if (active_chain.Tip() == nullptr) return false;
-    if (nBlockHeight < -1 || nBlockHeight > active_chain.Height()) return false;
-    if (nBlockHeight == -1) nBlockHeight = active_chain.Height();
-    hashRet = active_chain[nBlockHeight]->GetBlockHash();
-
-    return true;
-}
-
 /**
  * Threshold condition checker that triggers when unknown versionbits are seen on the network.
  */
@@ -2612,7 +2600,7 @@ bool CChainState::ConnectBlock(const CBlock& block, BlockValidationState& state,
 
     // DASH : CHECK TRANSACTIONS FOR INSTANTSEND
 
-    if (m_chain_helper->ShouldInstantSendRejectConflicts()) {
+    if (!IsInitialBlockDownload()) {
         // Require other nodes to comply, send them some data in case they are missing it.
         const bool has_chainlock = m_chain_helper->HasChainLock(pindex->nHeight, pindex->GetBlockHash());
         for (const auto& tx : block.vtx) {
