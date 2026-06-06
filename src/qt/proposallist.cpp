@@ -7,6 +7,7 @@
 #include <chainparams.h>
 #include <governance/common.h>
 #include <governance/governance.h>
+#include <governance/object.h>
 #include <governance/vote.h>
 #include <interfaces/node.h>
 #include <interfaces/wallet.h>
@@ -17,7 +18,6 @@
 #include <qt/clientfeeds.h>
 #include <qt/descriptiondialog.h>
 #include <qt/masternodemodel.h>
-#include <qt/guiutil_font.h>
 #include <qt/proposalcreate.h>
 #include <qt/proposallist.h>
 #include <qt/proposalmodel.h>
@@ -58,7 +58,7 @@ ProposalList::ProposalList(QWidget* parent) :
     ui->setupUi(this);
 
     GUIUtil::setFont({ui->label_count_2, ui->countLabel},
-                     {GUIUtil::FontWeight::Bold, 14});
+                     GUIUtil::FontWeight::Bold, 14);
 
     ui->govTableView->setContextMenuPolicy(Qt::CustomContextMenu);
     ui->govTableView->setModel(proposalModelProxy);

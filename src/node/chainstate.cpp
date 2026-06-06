@@ -35,10 +35,10 @@
 namespace node {
 std::optional<ChainstateLoadingError> LoadChainstate(bool fReset,
                                                      ChainstateManager& chainman,
-                                                     CGovernanceManager& govman,
                                                      CMasternodeMetaMan& mn_metaman,
                                                      CSporkManager& sporkman,
                                                      chainlock::Chainlocks& chainlocks,
+                                                     const CMasternodeSync& mn_sync,
                                                      std::unique_ptr<CChainstateHelper>& chain_helper,
                                                      std::unique_ptr<CDeterministicMNManager>& dmnman,
                                                      std::unique_ptr<CEvoDB>& evodb,
@@ -46,9 +46,6 @@ std::optional<ChainstateLoadingError> LoadChainstate(bool fReset,
                                                      CTxMemPool* mempool,
                                                      const fs::path& data_dir,
                                                      bool fPruneMode,
-                                                     bool is_addrindex_enabled,
-                                                     bool is_spentindex_enabled,
-                                                     bool is_timeindex_enabled,
                                                      const Consensus::Params& consensus_params,
                                                      bool fReindexChainState,
                                                      int64_t nBlockTreeDBCache,
@@ -82,7 +79,7 @@ std::optional<ChainstateLoadingError> LoadChainstate(bool fReset,
     pblocktree.reset();
     pblocktree.reset(new CBlockTreeDB(nBlockTreeDBCache, block_tree_db_in_memory, fReset));
 
-    DashChainstateSetup(chainman, govman, mn_metaman, sporkman, chainlocks, chain_helper,
+    DashChainstateSetup(chainman, mn_metaman, sporkman, chainlocks, mn_sync, chain_helper,
                         dmnman, *evodb, llmq_ctx, mempool, data_dir, dash_dbs_in_memory,
                         /*llmq_dbs_wipe=*/fReset || fReindexChainState, bls_threads, worker_count,
                         max_recsigs_age, consensus_params);
@@ -114,25 +111,6 @@ std::optional<ChainstateLoadingError> LoadChainstate(bool fReset,
             !chainman.m_blockman.LookupBlockIndex(consensus_params.hashDevnetGenesisBlock)) {
         return ChainstateLoadingError::ERROR_BAD_DEVNET_GENESIS_BLOCK;
     }
-
-    if (!fReset && !fReindexChainState) {
-        // Check for changed -addressindex state
-        if (!fAddressIndex && fAddressIndex != is_addrindex_enabled) {
-            return ChainstateLoadingError::ERROR_ADDRIDX_NEEDS_REINDEX;
-        }
-
-        // Check for changed -timestampindex state
-        if (!fTimestampIndex && fTimestampIndex != is_timeindex_enabled) {
-            return ChainstateLoadingError::ERROR_TIMEIDX_NEEDS_REINDEX;
-        }
-
-        // Check for changed -spentindex state
-        if (!fSpentIndex && fSpentIndex != is_spentindex_enabled) {
-            return ChainstateLoadingError::ERROR_SPENTIDX_NEEDS_REINDEX;
-        }
-    }
-
-    chainman.InitAdditionalIndexes();
 
     // Check for changed -prune state.  What we are concerned about is a user who has pruned blocks
     // in the past, but is now trying to run unpruned.
@@ -206,10 +184,10 @@ std::optional<ChainstateLoadingError> LoadChainstate(bool fReset,
 }
 
 void DashChainstateSetup(ChainstateManager& chainman,
-                         CGovernanceManager& govman,
                          CMasternodeMetaMan& mn_metaman,
                          CSporkManager& sporkman,
                          chainlock::Chainlocks& chainlocks,
+                         const CMasternodeSync& mn_sync,
                          std::unique_ptr<CChainstateHelper>& chain_helper,
                          std::unique_ptr<CDeterministicMNManager>& dmnman,
                          CEvoDB& evodb,
@@ -235,7 +213,7 @@ void DashChainstateSetup(ChainstateManager& chainman,
         mempool->ConnectManagers(dmnman.get(), llmq_ctx->isman.get());
     }
     chain_helper.reset();
-    chain_helper = std::make_unique<CChainstateHelper>(evodb, *dmnman, govman, *(llmq_ctx->isman), *(llmq_ctx->quorum_block_processor),
+    chain_helper = std::make_unique<CChainstateHelper>(evodb, *dmnman, mn_sync, *(llmq_ctx->isman), *(llmq_ctx->quorum_block_processor),
                                                        *(llmq_ctx->qsnapman), chainman, consensus_params, chainlocks,
                                                        *(llmq_ctx->qman));
 }

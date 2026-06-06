@@ -14,8 +14,8 @@
 class CChainstateHelper;
 class CDeterministicMNManager;
 class CEvoDB;
-class CGovernanceManager;
 class ChainstateManager;
+class CMasternodeSync;
 class CMasternodeMetaMan;
 class CSporkManager;
 class CTxMemPool;
@@ -34,9 +34,6 @@ enum class ChainstateLoadingError {
     ERROR_LOADING_BLOCK_DB,
     ERROR_BAD_GENESIS_BLOCK,
     ERROR_BAD_DEVNET_GENESIS_BLOCK,
-    ERROR_ADDRIDX_NEEDS_REINDEX,
-    ERROR_SPENTIDX_NEEDS_REINDEX,
-    ERROR_TIMEIDX_NEEDS_REINDEX,
     ERROR_PRUNED_NEEDS_REINDEX,
     ERROR_LOAD_GENESIS_BLOCK_FAILED,
     ERROR_CHAINSTATE_UPGRADE_FAILED,
@@ -77,10 +74,10 @@ enum class ChainstateLoadingError {
  */
 std::optional<ChainstateLoadingError> LoadChainstate(bool fReset,
                                                      ChainstateManager& chainman,
-                                                     CGovernanceManager& govman,
                                                      CMasternodeMetaMan& mn_metaman,
                                                      CSporkManager& sporkman,
                                                      chainlock::Chainlocks& chainlocks,
+                                                     const CMasternodeSync& mn_sync,
                                                      std::unique_ptr<CChainstateHelper>& chain_helper,
                                                      std::unique_ptr<CDeterministicMNManager>& dmnman,
                                                      std::unique_ptr<CEvoDB>& evodb,
@@ -88,9 +85,6 @@ std::optional<ChainstateLoadingError> LoadChainstate(bool fReset,
                                                      CTxMemPool* mempool,
                                                      const fs::path& data_dir,
                                                      bool fPruneMode,
-                                                     bool is_addrindex_enabled,
-                                                     bool is_spentindex_enabled,
-                                                     bool is_timeindex_enabled,
                                                      const Consensus::Params& consensus_params,
                                                      bool fReindexChainState,
                                                      int64_t nBlockTreeDBCache,
@@ -107,10 +101,10 @@ std::optional<ChainstateLoadingError> LoadChainstate(bool fReset,
 
 /** Initialize Dash-specific components during chainstate initialization */
 void DashChainstateSetup(ChainstateManager& chainman,
-                         CGovernanceManager& govman,
                          CMasternodeMetaMan& mn_metaman,
                          CSporkManager& sporkman,
                          chainlock::Chainlocks& chainlocks,
+                         const CMasternodeSync& mn_sync,
                          std::unique_ptr<CChainstateHelper>& chain_helper,
                          std::unique_ptr<CDeterministicMNManager>& dmnman,
                          CEvoDB& evodb,

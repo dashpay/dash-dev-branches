@@ -4,17 +4,15 @@
 
 #include <qt/proposalmodel.h>
 
-#include <governance/classes.h>
 #include <governance/object.h>
+#include <governance/superblock.h>
 #include <governance/vote.h>
-
-#include <qt/guiutil_font.h>
-
-#include <chainparams.h>
-#include <interfaces/node.h>
 
 #include <qt/clientmodel.h>
 #include <qt/guiutil.h>
+
+#include <chainparams.h>
+#include <interfaces/node.h>
 
 #include <univalue.h>
 

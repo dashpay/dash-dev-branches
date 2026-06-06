@@ -6,16 +6,13 @@
 #include <qt/forms/ui_proposalcreate.h>
 
 #include <governance/object.h>
-#include <governance/validators.h>
 #include <interfaces/node.h>
 #include <util/moneystr.h>
 #include <util/strencodings.h>
 
-#include <qt/descriptiondialog.h>
-#include <qt/guiutil_font.h>
-
 #include <qt/bitcoinamountfield.h>
 #include <qt/bitcoinunits.h>
+#include <qt/descriptiondialog.h>
 #include <qt/guiutil.h>
 #include <qt/optionsmodel.h>
 #include <qt/qvalidatedlineedit.h>
@@ -39,7 +36,7 @@ ProposalCreate::ProposalCreate(WalletModel* walletModel, QWidget* parent) :
     m_ui->setupUi(this);
     m_ui->labelError->setStyleSheet(GUIUtil::getThemedStyleQString(GUIUtil::ThemedStyle::TS_ERROR));
     m_ui->labelTotalValue->setFont(
-        GUIUtil::getScaledFont(GUIUtil::FontRegistry::DEFAULT_FONT_SIZE, /*bold=*/true, /*multiplier=*/1.05));
+        GUIUtil::getScaledFont(GUIUtil::defaultFontSize(), /*bold=*/true, /*multiplier=*/1.05));
 
     // Allow payment amount field to stretch horizontally
     if (auto* lineEdit = m_ui->paymentAmount->findChild<QLineEdit*>()) {
@@ -254,12 +251,12 @@ void ProposalCreate::validateFields()
     }
 
     buildJsonAndHex();
-    CProposalValidator validator(m_hex.toStdString());
-    if (validator.Validate()) {
+    std::string strValidationError;
+    if (governance::ValidateProposal(m_hex.toStdString(), strValidationError)) {
         m_ui->labelError->clear();
     } else {
         // Show first error only
-        QString errors = QString::fromStdString(validator.GetErrorMessages());
+        QString errors = QString::fromStdString(strValidationError);
         if (int semicolon = errors.indexOf(';'); semicolon > 0) {
             errors = errors.left(semicolon);
         }

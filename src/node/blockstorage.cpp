@@ -29,10 +29,6 @@ std::atomic_bool fReindex(false);
 bool fPruneMode = false;
 uint64_t nPruneTarget = 0;
 
-bool fAddressIndex = DEFAULT_ADDRESSINDEX;
-bool fTimestampIndex = DEFAULT_TIMESTAMPINDEX;
-bool fSpentIndex = DEFAULT_SPENTINDEX;
-
 bool CBlockIndexWorkComparator::operator()(const CBlockIndex* pa, const CBlockIndex* pb) const
 {
     // First sort by most total work, ...
@@ -331,7 +327,7 @@ bool BlockManager::WriteBlockIndexDB()
     std::vector<std::pair<int, const CBlockFileInfo*>> vFiles;
     vFiles.reserve(m_dirty_fileinfo.size());
     for (std::set<int>::iterator it = m_dirty_fileinfo.begin(); it != m_dirty_fileinfo.end();) {
-        vFiles.push_back(std::make_pair(*it, &m_blockfile_info[*it]));
+        vFiles.emplace_back(*it, &m_blockfile_info[*it]);
         m_dirty_fileinfo.erase(it++);
     }
     std::vector<const CBlockIndex*> vBlocks;
@@ -395,12 +391,12 @@ bool BlockManager::LoadBlockIndexDB()
     m_block_tree_db->ReadReindexing(fReindexing);
     if (fReindexing) fReindex = true;
 
-    // Check whether we have an address index
-    m_block_tree_db->ReadFlag("addressindex", fAddressIndex);
-    // Check whether we have a timestamp index
-    m_block_tree_db->ReadFlag("timestampindex", fTimestampIndex);
-    // Check whether we have a spent index
-    m_block_tree_db->ReadFlag("spentindex", fSpentIndex);
+    // Migrate old synchronous index data from block index database
+    // to async indexes in separate databases
+    if (!m_block_tree_db->MigrateOldIndexData()) {
+        return false;
+    }
+
     return true;
 }
 

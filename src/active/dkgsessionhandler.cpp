@@ -10,8 +10,10 @@
 #include <llmq/blockprocessor.h>
 #include <llmq/debug.h>
 #include <llmq/dkgsession.h>
+#include <llmq/net_quorum.h>
 #include <llmq/options.h>
 #include <llmq/utils.h>
+#include <masternode/meta.h>
 
 #include <deploymentstatus.h>
 #include <logging.h>
@@ -202,13 +204,13 @@ void ActiveDKGSessionHandler::SleepBeforePhase(QuorumPhase curPhase, const uint2
     double adjustedPhaseSleepTimePerMember = phaseSleepTimePerMember * randomSleepFactor;
 
     int64_t sleepTime = (int64_t)(adjustedPhaseSleepTimePerMember * curSession->GetMyMemberIndex().value_or(0));
-    int64_t endTime = TicksSinceEpoch<std::chrono::milliseconds>(SystemClock::now()) + sleepTime;
+    const auto endTime = SteadyClock::now() + std::chrono::milliseconds{sleepTime};
     int heightTmp{currentHeight.load()};
     int heightStart{heightTmp};
 
     LogPrint(BCLog::LLMQ_DKG, "ActiveDKGSessionHandler::%s -- %s qi[%d] - starting sleep for %d ms, curPhase=%d\n", __func__, params.name, quorumIndex, sleepTime, std23::to_underlying(curPhase));
 
-    while (TicksSinceEpoch<std::chrono::milliseconds>(SystemClock::now()) < endTime) {
+    while (SteadyClock::now() < endTime) {
         if (stopRequested) {
             LogPrint(BCLog::LLMQ_DKG, "ActiveDKGSessionHandler::%s -- %s qi[%d] - aborting due to stop/shutdown requested\n", __func__, params.name, quorumIndex);
             throw AbortPhaseException();
@@ -423,6 +425,50 @@ bool ProcessPendingMessageBatch(const CConnman& connman, CDKGSession& session, C
     return true;
 }
 
+static void AddQuorumProbeConnections(const Consensus::LLMQParams& llmqParams, CConnman& connman, CMasternodeMetaMan& mn_metaman,
+                               const CSporkManager& sporkman, const UtilParameters& util_params,
+                               const CDeterministicMNList& tip_mn_list, const uint256& myProTxHash)
+{
+    assert(mn_metaman.IsValid());
+
+    if (!IsQuorumPoseEnabled(llmqParams.type, sporkman)) {
+        return;
+    }
+
+    auto members = utils::GetAllQuorumMembers(llmqParams.type, util_params);
+    auto curTime = GetTime<std::chrono::seconds>().count();
+
+    Uint256HashSet probeConnections;
+    for (const auto& dmn : members) {
+        if (dmn->proTxHash == myProTxHash) {
+            continue;
+        }
+        auto lastOutbound = mn_metaman.GetLastOutboundSuccess(dmn->proTxHash);
+        if (curTime - lastOutbound < 10 * 60) {
+            // avoid re-probing nodes too often
+            continue;
+        }
+        probeConnections.emplace(dmn->proTxHash);
+    }
+
+    if (!probeConnections.empty()) {
+        if (LogAcceptDebug(BCLog::LLMQ)) {
+            std::string debugMsg = strprintf("%s -- adding masternodes probes for quorum %s:\n", __func__,
+                                             util_params.m_base_index->GetBlockHash().ToString());
+            for (const auto& c : probeConnections) {
+                auto dmn = tip_mn_list.GetValidMN(c);
+                if (!dmn) {
+                    debugMsg += strprintf("  %s (not in valid MN set anymore)\n", c.ToString());
+                } else {
+                    debugMsg += strprintf("  %s (%s)\n", c.ToString(),
+                                          dmn->pdmnState->netInfo->GetPrimary().ToStringAddrPort());
+                }
+            }
+            LogPrint(BCLog::NET_NETCONN, debugMsg.c_str()); /* Continued */
+        }
+        connman.AddPendingProbeConnections(probeConnections);
+    }
+}
 void ActiveDKGSessionHandler::HandleDKGRound(CConnman& connman, PeerManager& peerman)
 {
     WaitForNextPhase(std::nullopt, QuorumPhase::Initialized);
@@ -460,10 +506,10 @@ void ActiveDKGSessionHandler::HandleDKGRound(CConnman& connman, PeerManager& pee
     }
 
     const auto tip_mn_list = m_dmnman.GetListAtChainTip();
-    utils::EnsureQuorumConnections(params, connman, m_sporkman, {m_dmnman, m_qsnapman, m_chainman, pQuorumBaseBlockIndex},
+    llmq::EnsureQuorumConnections(params, connman, m_sporkman, {m_dmnman, m_qsnapman, m_chainman, pQuorumBaseBlockIndex},
                                    tip_mn_list, curSession->ProTx(), /*is_masternode=*/true, m_quorums_watch);
     if (curSession->AreWeMember()) {
-        utils::AddQuorumProbeConnections(params, connman, m_mn_metaman, m_sporkman,
+        AddQuorumProbeConnections(params, connman, m_mn_metaman, m_sporkman,
                                          {m_dmnman, m_qsnapman, m_chainman, pQuorumBaseBlockIndex}, tip_mn_list,
                                          curSession->ProTx());
     }

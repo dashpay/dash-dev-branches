@@ -6,12 +6,12 @@
 #include <qt/forms/ui_proposalresume.h>
 
 #include <governance/governance.h>
-
-#include <qt/guiutil_font.h>
-#include <qt/proposalmodel.h>
-
+#include <governance/object.h>
 #include <interfaces/node.h>
 #include <interfaces/wallet.h>
+
+#include <qt/guiutil.h>
+#include <qt/proposalmodel.h>
 
 #include <qt/bitcoinunits.h>
 #include <qt/clientmodel.h>
@@ -163,7 +163,7 @@ void ProposalResume::addProposal(const Governance::Object& proposal)
     entry.description->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     entry.description->setTextInteractionFlags(Qt::NoTextInteraction);
     entry.description->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
-    GUIUtil::registerWidget(entry.description, formatProposalHtml(proposal, -1));
+    GUIUtil::setStyledHtml(entry.description, formatProposalHtml(proposal, -1));
 
     // Create "Broadcast" action
     entry.broadcast_btn = new QPushButton(tr("Broadcast"), entry.container);
@@ -259,7 +259,7 @@ void ProposalResume::refreshConfirmations()
         const int confs = queryConfirmations(entry.proposal.collateralHash);
         if (confs != entry.collateral_confs) {
             entry.collateral_confs = confs;
-            GUIUtil::registerWidget(entry.description, formatProposalHtml(entry.proposal, confs));
+            GUIUtil::setStyledHtml(entry.description, formatProposalHtml(entry.proposal, confs));
             entry.broadcast_btn->setEnabled(confs >= m_relay_confs);
         }
         if (confs < m_relay_confs) {
