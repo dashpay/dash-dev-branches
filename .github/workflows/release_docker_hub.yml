@@ -3,6 +3,11 @@ name: Release to Docker Hub
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to build (e.g. v23.1.3-nightly.2026.06.14)'
+        required: true
 
 jobs:
   release:
@@ -29,7 +34,8 @@ jobs:
     - name: Set raw tag
       id: get_tag
       run: |
-        TAG=${{ github.event.release.tag_name }}
+        TAG=${{ github.event.release.tag_name || inputs.tag }}
+        echo "full_tag=${TAG}" >> $GITHUB_OUTPUT
         echo "build_tag=${TAG#v}" >> $GITHUB_OUTPUT
 
     - name: Set suffix
@@ -38,7 +44,7 @@ jobs:
       with:
         result-encoding: string
         script: |
-          const fullTag = '${{ github.event.release.tag_name }}';
+          const fullTag = '${{ steps.get_tag.outputs.full_tag }}';
           if (fullTag.includes('-')) {
             const [, fullSuffix] = fullTag.split('-');
             const [suffix] = fullSuffix.split('.');
@@ -53,10 +59,10 @@ jobs:
       with:
         images: dashpay/dashd
         tags: |
-          type=match,pattern=v(\d+),group=1
-          type=match,pattern=v(\d+.\d+),group=1
-          type=match,pattern=v(\d+.\d+.\d+),group=1
-          type=match,pattern=v(.*),group=1,suffix=
+          type=match,pattern=v(\d+),group=1,value=${{ steps.get_tag.outputs.full_tag }}
+          type=match,pattern=v(\d+.\d+),group=1,value=${{ steps.get_tag.outputs.full_tag }}
+          type=match,pattern=v(\d+.\d+.\d+),group=1,value=${{ steps.get_tag.outputs.full_tag }}
+          type=match,pattern=v(.*),group=1,suffix=,value=${{ steps.get_tag.outputs.full_tag }}
         flavor: |
           suffix=${{ steps.suffix.outputs.result }},onlatest=true
 
