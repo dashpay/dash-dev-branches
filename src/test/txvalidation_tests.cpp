@@ -1,14 +1,24 @@
-// Copyright (c) 2017 The Bitcoin Core developers
+// Copyright (c) 2017-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include <validation.h>
 #include <consensus/validation.h>
+#include <key_io.h>
+#include <policy/packages.h>
+#include <policy/policy.h>
 #include <primitives/transaction.h>
 #include <script/script.h>
+#include <script/standard.h>
 #include <test/util/setup_common.h>
+#include <validation.h>
 
 #include <boost/test/unit_test.hpp>
+
+
+struct TestChain100NoDIP0001Setup : public TestChain100Setup {
+    TestChain100NoDIP0001Setup()
+        : TestChain100Setup{CBaseChainParams::REGTEST, {"-testactivationheight=dip0001@2000"}} {}
+};
 
 
 BOOST_AUTO_TEST_SUITE(txvalidation_tests)
@@ -30,26 +40,19 @@ BOOST_FIXTURE_TEST_CASE(tx_mempool_reject_coinbase, TestChain100Setup)
 
     BOOST_CHECK(CTransaction(coinbaseTx).IsCoinBase());
 
-    CValidationState state;
-
     LOCK(cs_main);
 
     unsigned int initialPoolSize = m_node.mempool->size();
+    const MempoolAcceptResult result = m_node.chainman->ProcessTransaction(MakeTransactionRef(coinbaseTx));
 
-    BOOST_CHECK_EQUAL(
-            false,
-            AcceptToMemoryPool(*m_node.mempool, state, MakeTransactionRef(coinbaseTx),
-                nullptr /* pfMissingInputs */,
-                true /* bypass_limits */,
-                0 /* nAbsurdFee */));
+    BOOST_CHECK(result.m_result_type == MempoolAcceptResult::ResultType::INVALID);
 
     // Check that the transaction hasn't been added to mempool.
     BOOST_CHECK_EQUAL(m_node.mempool->size(), initialPoolSize);
 
     // Check that the validation state reflects the unsuccessful attempt.
-    BOOST_CHECK(state.IsInvalid());
-    BOOST_CHECK_EQUAL(state.GetRejectReason(), "coinbase");
-    BOOST_CHECK(state.GetReason() == ValidationInvalidReason::CONSENSUS);
+    BOOST_CHECK(result.m_state.IsInvalid());
+    BOOST_CHECK_EQUAL(result.m_state.GetRejectReason(), "coinbase");
+    BOOST_CHECK(result.m_state.GetResult() == TxValidationResult::TX_CONSENSUS);
 }
-
 BOOST_AUTO_TEST_SUITE_END()

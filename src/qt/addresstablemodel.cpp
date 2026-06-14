@@ -1,5 +1,5 @@
-// Copyright (c) 2011-2015 The Bitcoin Core developers
-// Copyright (c) 2014-2022 The Dash Core developers
+// Copyright (c) 2011-2021 The Bitcoin Core developers
+// Copyright (c) 2014-2025 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -30,7 +30,7 @@ struct AddressTableEntry
     QString label;
     QString address;
 
-    AddressTableEntry() {}
+    AddressTableEntry() = default;
     AddressTableEntry(Type _type, const QString &_label, const QString &_address):
         type(_type), label(_label), address(_address) {}
 };
@@ -55,7 +55,7 @@ struct AddressTableEntryLessThan
 static AddressTableEntry::Type translateTransactionType(const QString &strPurpose, bool isMine)
 {
     AddressTableEntry::Type addressType = AddressTableEntry::Hidden;
-    // "refund" addresses aren't shown, and change addresses aren't in mapAddressBook at all.
+    // "refund" addresses aren't shown, and change addresses aren't returned by getAddresses at all.
     if (strPurpose == "send")
         addressType = AddressTableEntry::Sending;
     else if (strPurpose == "receive")
@@ -195,42 +195,38 @@ QVariant AddressTableModel::data(const QModelIndex &index, int role) const
 
     AddressTableEntry *rec = static_cast<AddressTableEntry*>(index.internalPointer());
 
-    if(role == Qt::DisplayRole || role == Qt::EditRole)
-    {
-        switch(index.column())
-        {
+    const auto column = static_cast<ColumnIndex>(index.column());
+    if (role == Qt::DisplayRole || role == Qt::EditRole) {
+        switch (column) {
         case Label:
-            if(rec->label.isEmpty() && role == Qt::DisplayRole)
-            {
+            if (rec->label.isEmpty() && role == Qt::DisplayRole) {
                 return tr("(no label)");
-            }
-            else
-            {
+            } else {
                 return rec->label;
             }
         case Address:
             return rec->address;
-        }
-    }
-    else if (role == Qt::FontRole)
-    {
-        QFont font;
-        if(index.column() == Address)
-        {
-            font = GUIUtil::getFontNormal();
-        }
-        return font;
-    }
-    else if (role == TypeRole)
-    {
+        } // no default case, so the compiler can warn about missing cases
+        assert(false);
+    } else if (role == Qt::FontRole) {
+        switch (column) {
+        case Label:
+            return QFont();
+        case Address:
+            return GUIUtil::getFontNormal();
+        } // no default case, so the compiler can warn about missing cases
+        assert(false);
+    } else if (role == TypeRole) {
         switch(rec->type)
         {
         case AddressTableEntry::Sending:
             return Send;
         case AddressTableEntry::Receiving:
             return Receive;
-        default: break;
-        }
+        case AddressTableEntry::Hidden:
+            return {};
+        } // no default case, so the compiler can warn about missing cases
+        assert(false);
     }
     return QVariant();
 }
@@ -370,23 +366,21 @@ QString AddressTableModel::addRow(const QString &type, const QString &label, con
     else if(type == Receive)
     {
         // Generate a new address to associate with given label
-        CTxDestination dest;
-        if(!walletModel->wallet().getNewDestination(strLabel, dest))
-        {
+        auto op_dest = walletModel->wallet().getNewDestination(strLabel);
+        if (!op_dest) {
             WalletModel::UnlockContext ctx(walletModel->requestUnlock());
-            if(!ctx.isValid())
-            {
+            if (!ctx.isValid()) {
                 // Unlock wallet failed or was cancelled
                 editStatus = WALLET_UNLOCK_FAILURE;
                 return QString();
             }
-            if(!walletModel->wallet().getNewDestination(strLabel, dest))
-            {
+            op_dest = walletModel->wallet().getNewDestination(strLabel);
+            if (!op_dest) {
                 editStatus = KEY_GENERATION_FAILURE;
                 return QString();
             }
         }
-        strAddress = EncodeDestination(dest);
+        strAddress = EncodeDestination(*op_dest);
     }
     else
     {
@@ -452,3 +446,5 @@ void AddressTableModel::emitDataChanged(int idx)
 {
     Q_EMIT dataChanged(index(idx, 0, QModelIndex()), index(idx, columns.length()-1, QModelIndex()));
 }
+
+QString AddressTableModel::GetWalletDisplayName() const { return walletModel->getDisplayName(); };

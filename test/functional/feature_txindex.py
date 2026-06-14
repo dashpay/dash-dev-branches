@@ -7,15 +7,22 @@
 # Test txindex generation and fetching
 #
 
-import binascii
-
-from test_framework.messages import COutPoint, CTransaction, CTxIn, CTxOut
-from test_framework.script import CScript, OP_CHECKSIG, OP_DUP, OP_EQUALVERIFY, OP_HASH160
+from test_framework.messages import (
+    COutPoint,
+    CTransaction,
+    CTxIn,
+    CTxOut,
+)
+from test_framework.script_util import (
+    keyhash_to_p2pkh_script,
+)
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import assert_equal
 
 
 class TxIndexTest(BitcoinTestFramework):
+    def add_options(self, parser):
+        self.add_wallet_options(parser)
 
     def set_test_params(self):
         self.setup_clean_chain = True
@@ -40,16 +47,15 @@ class TxIndexTest(BitcoinTestFramework):
 
     def run_test(self):
         self.log.info("Mining blocks...")
-        self.nodes[0].generate(105)
-        self.sync_all()
+        self.generate(self.nodes[0], 105)
 
         chain_height = self.nodes[1].getblockcount()
         assert_equal(chain_height, 105)
 
         self.log.info("Testing transaction index...")
 
-        addressHash = binascii.unhexlify("C5E4FB9171C22409809A3E8047A29C83886E325D")
-        scriptPubKey = CScript([OP_DUP, OP_HASH160, addressHash, OP_EQUALVERIFY, OP_CHECKSIG])
+        addressHash = bytes.fromhex("C5E4FB9171C22409809A3E8047A29C83886E325D")
+        scriptPubKey = keyhash_to_p2pkh_script(addressHash)
         unspent = self.nodes[0].listunspent()
         tx = CTransaction()
         tx_fee_sat = 1000
@@ -60,8 +66,7 @@ class TxIndexTest(BitcoinTestFramework):
 
         signed_tx = self.nodes[0].signrawtransactionwithwallet(tx.serialize().hex())
         txid = self.nodes[0].sendrawtransaction(signed_tx["hex"], 0)
-        self.nodes[0].generate(1)
-        self.sync_all()
+        self.generate(self.nodes[0], 1)
 
         # Check verbose raw transaction results
         verbose = self.nodes[3].getrawtransaction(txid, 1)

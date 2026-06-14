@@ -1,5 +1,5 @@
-// Copyright (c) 2011-2014 The Bitcoin Core developers
-// Copyright (c) 2014-2022 The Dash Core developers
+// Copyright (c) 2011-2021 The Bitcoin Core developers
+// Copyright (c) 2014-2025 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -7,17 +7,21 @@
 #include <qt/forms/ui_openuridialog.h>
 
 #include <qt/guiutil.h>
-#include <qt/walletmodel.h>
+#include <qt/sendcoinsrecipient.h>
 
-#include <QUrl>
+#include <QAbstractButton>
+#include <QLineEdit>
 
-OpenURIDialog::OpenURIDialog(QWidget *parent) :
-    QDialog(parent),
-    ui(new Ui::OpenURIDialog)
+OpenURIDialog::OpenURIDialog(QWidget* parent) : QDialog(parent, GUIUtil::dialog_flags),
+                                                ui(new Ui::OpenURIDialog)
 {
     ui->setupUi(this);
+    GUIUtil::setIcon(ui->pasteButton, "editpaste");
+    QObject::connect(ui->pasteButton, &QAbstractButton::clicked, ui->uriEdit, &QLineEdit::paste);
+
     GUIUtil::updateFonts();
     GUIUtil::disableMacFocusRect(this);
+    GUIUtil::handleCloseWindowShortcut(this);
 }
 
 OpenURIDialog::~OpenURIDialog()
@@ -33,11 +37,19 @@ QString OpenURIDialog::getURI()
 void OpenURIDialog::accept()
 {
     SendCoinsRecipient rcp;
-    if(GUIUtil::parseBitcoinURI(getURI(), &rcp))
-    {
+    if (GUIUtil::parseBitcoinURI(getURI(), &rcp)) {
         /* Only accept value URIs */
         QDialog::accept();
     } else {
         ui->uriEdit->setValid(false);
+    }
+}
+
+void OpenURIDialog::changeEvent(QEvent* e)
+{
+    QDialog::changeEvent(e);
+    if (e->type() == QEvent::StyleChange) {
+        // Adjust button icon colors on theme changes
+        GUIUtil::setIcon(ui->pasteButton, "editpaste");
     }
 }

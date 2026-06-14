@@ -1,13 +1,13 @@
-// Copyright (c) 2011-2015 The Bitcoin Core developers
+// Copyright (c) 2011-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #ifndef BITCOIN_QT_BITCOINAMOUNTFIELD_H
 #define BITCOIN_QT_BITCOINAMOUNTFIELD_H
 
-#include <amount.h>
+#include <consensus/amount.h>
+#include <qt/bitcoinunits.h>
 
-#include <QValidator>
 #include <QWidget>
 
 class AmountLineEdit;
@@ -51,7 +51,7 @@ public:
     bool validate();
 
     /** Change unit used to display amount. */
-    void setDisplayUnit(int unit);
+    void setDisplayUnit(BitcoinUnit new_unit);
 
     /** Make field empty and ready for new input. */
     void clear();
@@ -72,7 +72,7 @@ protected:
     bool eventFilter(QObject *object, QEvent *event) override;
 
 private:
-    AmountLineEdit *amount;
+    AmountLineEdit* amount{nullptr};
     BitcoinUnits *units;
 
     void unitChanged(int idx);

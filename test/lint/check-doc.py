@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2015 The Bitcoin Core developers
+# Copyright (c) 2015-2020 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -15,7 +15,7 @@ import re
 
 FOLDER_GREP = 'src'
 FOLDER_TEST = 'src/test/'
-REGEX_ARG = r'(?:ForceSet|SoftSet|Get|Is)(?:Bool)?Args?(?:Set)?\("(-[^"]+)"'
+REGEX_ARG = r'\b(?:GetArg|GetArgs|GetBoolArg|GetIntArg|GetPathArg|IsArgSet|get_net)\("(-[^"]+)"'
 REGEX_DOC = r'AddArg\("(-[^"=]+?)(?:=|")'
 CMD_ROOT_DIR = '$(git rev-parse --show-toplevel)/{}'.format(FOLDER_GREP)
 CMD_GREP_ARGS = r"git grep --perl-regexp '{}' -- {} ':(exclude){}'".format(REGEX_ARG, CMD_ROOT_DIR, FOLDER_TEST)
@@ -23,7 +23,7 @@ CMD_GREP_WALLET_ARGS = r"git grep --function-context 'void WalletInit::AddWallet
 CMD_GREP_WALLET_HIDDEN_ARGS = r"git grep --function-context 'void DummyWalletInit::AddWalletOptions' -- {}".format(CMD_ROOT_DIR)
 CMD_GREP_DOCS = r"git grep --perl-regexp '{}' {}".format(REGEX_DOC, CMD_ROOT_DIR)
 # list unsupported, deprecated and duplicate args as they need no documentation
-SET_DOC_OPTIONAL = set(['-h', '-help', '-dbcrashratio', '-forcecompactdb', '-zapwallettxes'])
+SET_DOC_OPTIONAL = set(['-h', '-help', '-dbcrashratio', '-forcecompactdb'])
 
 
 def lint_missing_argument_documentation():

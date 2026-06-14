@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2015 The Bitcoin Core developers
+// Copyright (c) 2011-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -9,6 +9,7 @@
 #include <QValidator>
 
 class AppearanceWidget;
+class ClientModel;
 class OptionsModel;
 class QValidatedLineEdit;
 
@@ -51,6 +52,7 @@ public:
         TAB_APPEARANCE,
     };
 
+    void setClientModel(ClientModel* client_model);
     void setModel(OptionsModel *model);
     void setMapper();
     void setCurrentTab(OptionsDialog::Tab tab);
@@ -64,7 +66,7 @@ private Q_SLOTS:
     void on_okButton_clicked();
     void on_cancelButton_clicked();
 
-    void on_hideTrayIcon_stateChanged(int fState);
+    void on_showTrayIcon_stateChanged(int state);
 
     void togglePruneWarning(bool enabled);
     void showRestartWarning(bool fPersistent = false);
@@ -74,21 +76,26 @@ private Q_SLOTS:
     void updateDefaultProxyNets();
 
     void updateCoinJoinVisibility();
+    void updateCoinJoinDenomGoal();
+    void updateCoinJoinDenomHardCap();
 
     void updateWidth();
 
 Q_SIGNALS:
     void appearanceChanged();
     void proxyIpChecks(QValidatedLineEdit *pUiProxyIp, uint16_t nProxyPort);
+    void quitOnReset();
 
 private:
     Ui::OptionsDialog *ui;
-    OptionsModel *model;
-    QDataWidgetMapper *mapper;
-    QButtonGroup* pageButtons;
+    ClientModel* m_client_model{nullptr};
+    OptionsModel* model{nullptr};
+    QDataWidgetMapper* mapper{nullptr};
+    QButtonGroup* pageButtons{nullptr};
     QString previousTheme;
     AppearanceWidget* appearance;
     bool fCoinJoinEnabledPrev{false};
+    bool m_enable_wallet{false};
 
     void showEvent(QShowEvent* event) override;
 };

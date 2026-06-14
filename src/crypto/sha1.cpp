@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The Bitcoin Core developers
+// Copyright (c) 2014-2019 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -146,7 +146,7 @@ void Transform(uint32_t* s, const unsigned char* chunk)
 
 ////// SHA1
 
-CSHA1::CSHA1() : bytes(0)
+CSHA1::CSHA1()
 {
     sha1::Initialize(s);
 }

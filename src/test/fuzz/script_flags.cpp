@@ -1,33 +1,24 @@
-// Copyright (c) 2009-2019 The Bitcoin Core developers
+// Copyright (c) 2009-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include <pubkey.h>
+#include <consensus/amount.h>
+#include <primitives/transaction.h>
 #include <script/interpreter.h>
+#include <serialize.h>
 #include <streams.h>
-#include <version.h>
-
 #include <test/fuzz/fuzz.h>
+#include <test/util/script.h>
 
-/** Flags that are not forbidden by an assert */
-static bool IsValidFlagCombination(unsigned flags);
+#include <cassert>
+#include <ios>
+#include <utility>
+#include <vector>
 
-void initialize_script_flags()
+FUZZ_TARGET(script_flags)
 {
-    static const ECCVerifyHandle verify_handle;
-}
-
-FUZZ_TARGET_INIT(script_flags, initialize_script_flags)
-{
-    CDataStream ds(buffer, SER_NETWORK, INIT_PROTO_VERSION);
-    try {
-        int nVersion;
-        ds >> nVersion;
-        ds.SetVersion(nVersion);
-    } catch (const std::ios_base::failure&) {
-        return;
-    }
-
+    if (buffer.size() > 100'000) return;
+    DataStream ds{buffer};
     try {
         const CTransaction tx(deserialize, ds);
         const PrecomputedTransactionData txdata(tx);
@@ -48,7 +39,7 @@ FUZZ_TARGET_INIT(script_flags, initialize_script_flags)
                 prevout.nValue = 1;
             }
 
-            const TransactionSignatureChecker checker{&tx, i, prevout.nValue, txdata};
+            const TransactionSignatureChecker checker{&tx, i, prevout.nValue, txdata, MissingDataBehavior::ASSERT_FAIL};
 
             ScriptError serror;
             const bool ret = VerifyScript(tx.vin.at(i).scriptSig, prevout.scriptPubKey, verify_flags, checker, &serror);
@@ -71,10 +62,4 @@ FUZZ_TARGET_INIT(script_flags, initialize_script_flags)
     } catch (const std::ios_base::failure&) {
         return;
     }
-}
-
-static bool IsValidFlagCombination(unsigned flags)
-{
-    if (flags & SCRIPT_VERIFY_CLEANSTACK && ~flags & SCRIPT_VERIFY_P2SH) return false;
-    return true;
 }

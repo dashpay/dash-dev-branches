@@ -15,6 +15,7 @@
 #ifndef SRC_BLSSCHEMES_HPP_
 #define SRC_BLSSCHEMES_HPP_
 
+#include <array>
 #include <iostream>
 #include <vector>
 
@@ -39,6 +40,7 @@ class CoreMPL {
 public:
     CoreMPL() = delete;
     CoreMPL(const std::string& strId) : strCiphersuiteId(strId) {}
+    virtual ~CoreMPL() {}
     // Generates a private key from a seed, similar to HD key generation
     // (hashes the seed), and reduces it mod the group order
     virtual PrivateKey KeyGen(const vector<uint8_t>& seed);
@@ -64,8 +66,8 @@ public:
 
     virtual bool Verify(const G1Element& pubkey, const Bytes& message, const G2Element& signature);
 
-    virtual vector<uint8_t> Aggregate(const vector<vector<uint8_t>> &signatures);
-    virtual vector<uint8_t> Aggregate(const vector<Bytes>& signatures);
+    virtual std::array<uint8_t, G2Element::SIZE> Aggregate(const vector<vector<uint8_t>> &signatures);
+    virtual std::array<uint8_t, G2Element::SIZE> Aggregate(const vector<Bytes>& signatures);
 
     virtual G2Element Aggregate(const vector<G2Element> &signatures);
 
@@ -112,7 +114,7 @@ protected:
                       bool fLegacy);
 };
 
-class BasicSchemeMPL : public CoreMPL {
+class BasicSchemeMPL final : public CoreMPL {
 public:
     static const std::string CIPHERSUITE_ID;
     BasicSchemeMPL() : CoreMPL(BasicSchemeMPL::CIPHERSUITE_ID) {}
@@ -133,7 +135,7 @@ public:
                          const G2Element& signature) override;
 };
 
-class AugSchemeMPL : public CoreMPL {
+class AugSchemeMPL final : public CoreMPL {
 
 public:
     static const std::string CIPHERSUITE_ID;
@@ -186,7 +188,7 @@ public:
                          const G2Element& signature) override;
 };
 
-class PopSchemeMPL : public CoreMPL {
+class PopSchemeMPL final : public CoreMPL {
 
 public:
     static const std::string CIPHERSUITE_ID;
@@ -221,7 +223,7 @@ public:
 /**
  * This scheme reflects the Sign/Verify behaviour of older bls-signatures library versions (<0.1.29).
  */
-class LegacySchemeMPL : public CoreMPL {
+class LegacySchemeMPL final : public CoreMPL {
 
 public:
     LegacySchemeMPL() : CoreMPL(std::string{}) {}
@@ -242,7 +244,7 @@ public:
     bool Verify(const Bytes& pubkey, const Bytes& message, const Bytes& signature) final { throw std::runtime_error("Not supported in LegacySchemeMPL"); }
     bool Verify(const G1Element &pubkey, const Bytes& message, const G2Element &signature) final;
 
-    vector<uint8_t> Aggregate(const vector<vector<uint8_t>> &signatures) final { throw std::runtime_error("Not supported in LegacySchemeMPL"); }
+    std::array<uint8_t, G2Element::SIZE> Aggregate(const vector<vector<uint8_t>> &signatures) final { throw std::runtime_error("Not supported in LegacySchemeMPL"); }
 
     G2Element AggregateSecure(const std::vector<G1Element>& vecPublicKeys,
                               const std::vector<G2Element>& vecSignatures,

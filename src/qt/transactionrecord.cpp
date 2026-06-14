@@ -1,5 +1,5 @@
-// Copyright (c) 2011-2015 The Bitcoin Core developers
-// Copyright (c) 2014-2022 The Dash Core developers
+// Copyright (c) 2011-2021 The Bitcoin Core developers
+// Copyright (c) 2014-2025 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -11,9 +11,11 @@
 
 #include <wallet/ismine.h>
 
-#include <stdint.h>
+#include <cstdint>
 
-#include <QDateTime>
+using wallet::ISMINE_SPENDABLE;
+using wallet::ISMINE_WATCH_ONLY;
+using wallet::isminetype;
 
 /* Return positive answer if transaction should be shown in list.
  */
@@ -27,7 +29,8 @@ bool TransactionRecord::showTransaction()
 /*
  * Decompose CWallet transaction to model transaction records.
  */
-QList<TransactionRecord> TransactionRecord::decomposeTransaction(interfaces::Wallet& wallet, const interfaces::WalletTx& wtx)
+QList<TransactionRecord> TransactionRecord::decomposeTransaction(interfaces::Node& node, interfaces::Wallet& wallet, const interfaces::WalletTx& wtx,
+                                                                 bool dustProtectionEnabled, CAmount dustThreshold)
 {
     QList<TransactionRecord> parts;
     int64_t nTime = wtx.time;
@@ -36,10 +39,18 @@ QList<TransactionRecord> TransactionRecord::decomposeTransaction(interfaces::Wal
     CAmount nNet = nCredit - nDebit;
     uint256 hash = wtx.tx->GetHash();
     std::map<std::string, std::string> mapValue = wtx.value_map;
-    auto node = interfaces::MakeNode();
-    auto& coinJoinOptions = node->coinJoinOptions();
+    auto& coinJoinOptions = node.coinJoinOptions();
 
-    if (nNet > 0 || wtx.is_coinbase)
+    // Check if any inputs belong to this wallet (for dust detection)
+    bool isFromMe = false;
+    for (const isminetype mine : wtx.txin_is_mine) {
+        if (mine) {
+            isFromMe = true;
+            break;
+        }
+    }
+
+    if (nNet > 0 || wtx.is_coinbase || wtx.is_platform_transfer)
     {
         //
         // Credit
@@ -74,7 +85,31 @@ QList<TransactionRecord> TransactionRecord::decomposeTransaction(interfaces::Wal
                     // Generated
                     sub.type = TransactionRecord::Generated;
                 }
+                if (wtx.is_platform_transfer)
+                {
+                    // Withdrawal from platform
+                    sub.type = TransactionRecord::PlatformTransfer;
+                }
 
+                // Check for dust attack: external receive with small amount
+                // Only override if not already a special type (coinbase, platform transfer)
+                if (dustProtectionEnabled && !isFromMe && !wtx.is_coinbase && !wtx.is_platform_transfer &&
+                    sub.credit > 0 && sub.credit <= dustThreshold &&
+                    (sub.type == TransactionRecord::RecvWithAddress || sub.type == TransactionRecord::RecvFromOther))
+                {
+                    sub.type = TransactionRecord::DustReceive;
+                }
+
+                parts.append(sub);
+            }
+            else if (!wtx.is_coinbase && IsDataScript(txout.scriptPubKey))
+            {
+                TransactionRecord sub(hash, nTime);
+                sub.credit = txout.nValue;
+                sub.idx = i;
+                sub.involvesWatchAddress = false;
+                sub.strAddress = "";
+                sub.type = TransactionRecord::DataTransaction;
                 parts.append(sub);
             }
         }
@@ -211,7 +246,13 @@ QList<TransactionRecord> TransactionRecord::decomposeTransaction(interfaces::Wal
                     continue;
                 }
 
-                if (!std::get_if<CNoDestination>(&wtx.txout_address[nOut]))
+                if (IsDataScript(txout.scriptPubKey))
+                {
+                    sub.strAddress = "";
+                    sub.txDest = DecodeDestination(sub.strAddress);
+                    sub.type = TransactionRecord::DataTransaction;
+                }
+                else if (!std::get_if<CNoDestination>(&wtx.txout_address[nOut]))
                 {
                     // Sent to Dash Address
                     sub.type = TransactionRecord::SendToAddress;
@@ -257,7 +298,7 @@ QList<TransactionRecord> TransactionRecord::decomposeTransaction(interfaces::Wal
     return parts;
 }
 
-void TransactionRecord::updateStatus(const interfaces::WalletTxStatus& wtx, int numBlocks, int chainLockHeight, int64_t block_time)
+void TransactionRecord::updateStatus(const interfaces::WalletTxStatus& wtx, const uint256& block_hash, int numBlocks, int chainLockHeight, int64_t block_time)
 {
     // Determine transaction status
 
@@ -269,26 +310,13 @@ void TransactionRecord::updateStatus(const interfaces::WalletTxStatus& wtx, int 
         idx);
     status.countsForBalance = wtx.is_trusted && !(wtx.blocks_to_maturity > 0);
     status.depth = wtx.depth_in_main_chain;
-    status.cur_num_blocks = numBlocks;
+    status.m_cur_block_hash = block_hash;
     status.cachedChainLockHeight = chainLockHeight;
     status.lockedByChainLocks = wtx.is_chainlocked;
     status.lockedByInstantSend = wtx.is_islocked;
 
-    const bool up_to_date = ((int64_t)QDateTime::currentMSecsSinceEpoch() / 1000 - block_time < MAX_BLOCK_TIME_GAP);
-    if (up_to_date && !wtx.is_final) {
-        if (wtx.lock_time < LOCKTIME_THRESHOLD) {
-            status.status = TransactionStatus::OpenUntilBlock;
-            status.open_for = wtx.lock_time - numBlocks;
-        }
-        else
-        {
-            status.status = TransactionStatus::OpenUntilDate;
-            status.open_for = wtx.lock_time;
-        }
-    }
     // For generated transactions, determine maturity
-    else if(type == TransactionRecord::Generated)
-    {
+    if (type == TransactionRecord::Generated) {
         if (wtx.blocks_to_maturity > 0)
         {
             status.status = TransactionStatus::Immature;
@@ -331,9 +359,10 @@ void TransactionRecord::updateStatus(const interfaces::WalletTxStatus& wtx, int 
     status.needsUpdate = false;
 }
 
-bool TransactionRecord::statusUpdateNeeded(int numBlocks, int chainLockHeight) const
+bool TransactionRecord::statusUpdateNeeded(const uint256& block_hash, int chainLockHeight) const
 {
-    return status.cur_num_blocks != numBlocks || status.needsUpdate
+    assert(!block_hash.IsNull());
+    return status.m_cur_block_hash != block_hash || status.needsUpdate
         || (!status.lockedByChainLocks && status.cachedChainLockHeight != chainLockHeight);
 }
 

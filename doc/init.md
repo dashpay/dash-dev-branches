@@ -53,23 +53,23 @@ Paths
 
 All three configurations assume several paths that might need to be adjusted.
 
-Binary:              `/usr/bin/dashd`
-Configuration file:  `/etc/dashcore/dash.conf`
-Data directory:      `/var/lib/dashd`
-PID file:            `/var/run/dashd/dashd.pid` (OpenRC and Upstart) or `/run/dashd/dashd.pid` (systemd)
-Lock file:           `/var/lock/subsys/dashd` (CentOS)
+    Binary:              /usr/bin/dashd
+    Configuration file:  /etc/dashcore/dash.conf
+    Data directory:      /var/lib/dashd
+    PID file:            /var/run/dashd/dashd.pid (OpenRC and Upstart) or /run/dashd/dashd.pid (systemd)
+    Lock file:           /var/lock/subsys/dashd (CentOS)
 
-The configuration file, PID directory (if applicable) and data directory
-should all be owned by the dashcore user and group.  It is advised for security
-reasons to make the configuration file and data directory only readable by the
-dashcore user and group.  Access to dash-cli and other dashd rpc clients
-can then be controlled by group membership.
+The PID directory (if applicable) and data directory should both be owned by the
+dashcore user and group. It is advised for security reasons to make the
+configuration file and data directory only readable by the dashcore user and
+group. Access to dash-cli and other dashd rpc clients can then be
+controlled by group membership.
 
 NOTE: When using the systemd .service file, the creation of the aforementioned
 directories and the setting of their permissions is automatically handled by
 systemd. Directories are given a permission of 710, giving the dashcore user and group
 access to files under it _if_ the files themselves give permission to the
-dashcore user and group to do so (e.g. when `-sysperms` is specified). This does not allow
+dashcore user and group to do so. This does not allow
 for the listing of files under the directory.
 
 NOTE: It is not currently possible to override `datadir` in
@@ -83,10 +83,10 @@ OpenRC).
 
 ### macOS
 
-Binary:              `/usr/local/bin/dashd`
-Configuration file:  `~/Library/Application Support/DashCore/dash.conf`
-Data directory:      `~/Library/Application Support/DashCore`
-Lock file:           `~/Library/Application Support/DashCore/.lock`
+    Binary:              /usr/local/bin/dashd
+    Configuration file:  ~/Library/Application Support/DashCore/dash.conf
+    Data directory:      ~/Library/Application Support/DashCore
+    Lock file:           ~/Library/Application Support/DashCore/.lock
 
 Installing Service Configuration
 -----------------------------------

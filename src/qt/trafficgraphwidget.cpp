@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2015 The Bitcoin Core developers
+// Copyright (c) 2011-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -17,15 +17,9 @@
 #define XMARGIN                 10
 #define YMARGIN                 10
 
-#define DEFAULT_SAMPLE_HEIGHT    1.1f
-
-TrafficGraphWidget::TrafficGraphWidget(QWidget *parent) :
-    QWidget(parent),
-    timer(nullptr),
-    fMax(DEFAULT_SAMPLE_HEIGHT),
-    nMins(0),
-    clientModel(nullptr),
-    trafficGraphData(TrafficGraphData::Range_30m)
+TrafficGraphWidget::TrafficGraphWidget(QWidget* parent)
+    : QWidget(parent),
+      trafficGraphData(TrafficGraphData::Range_30m)
 {
     timer = new QTimer(this);
     connect(timer, &QTimer::timeout, this, &TrafficGraphWidget::updateRates);
@@ -98,7 +92,7 @@ void TrafficGraphWidget::paintEvent(QPaintEvent *)
     float val = pow(10.0f, base);
     float val2 = val;
 
-    const QString units     = tr("KB/s");
+    const QString units = tr("kB/s");
     const float yMarginText = 2.0;
 
     // draw lines
@@ -167,14 +161,14 @@ void TrafficGraphWidget::paintEvent(QPaintEvent *)
     const QString strReceived = tr("Received");
     const QString strSent = tr("Sent");
     // Get a bold font for the title and a normal one for the rest
-    QFont fontTotal = GUIUtil::getFont(GUIUtil::FontWeight::Bold, false, 16);
-    QFont fontInOut = GUIUtil::getFont(GUIUtil::FontWeight::Normal, false, 12);
+    QFont fontTotal = GUIUtil::getScaledFont(/*baseSize=*/16, /*bold=*/true);
+    QFont fontInOut = GUIUtil::getScaledFont(/*baseSize=*/12, /*bold=*/false);
     // Use font metrics to determine minimum rect sizes depending on the font scale
     QFontMetrics fmTotal(fontTotal);
     QFontMetrics fmInOut(fontInOut);
     const int nSizeMark = fmInOut.height() + 2 * nPadding;
-    const int nWidthText = fmInOut.width(strReceived) + 2 * nPadding;
-    const int nWidthBytes = fmInOut.width("1000 GB") + 2 * nPadding;
+    const int nWidthText = GUIUtil::TextWidth(fmInOut, strReceived) + 2 * nPadding;
+    const int nWidthBytes = GUIUtil::TextWidth(fmInOut, "1000 GB") + 2 * nPadding;
     const int nHeightTotals = fmTotal.height() + 2 * nPadding;
     const int nHeightInOut = fmInOut.height() + 2 * nPadding;
     const int nWidthStats = nSizeMark + nWidthText + nWidthBytes + 2 * nPadding;
@@ -233,7 +227,7 @@ void TrafficGraphWidget::updateRates()
     bool updated = trafficGraphData.update(clientModel->node().getTotalBytesRecv(),clientModel->node().getTotalBytesSent());
 
     if (updated){
-        float tmax = DEFAULT_SAMPLE_HEIGHT;
+        float tmax = default_sample_height;
         for (const TrafficSample& sample : trafficGraphData.getCurrentRangeQueueWithAverageBandwidth()) {
             if(sample.in > tmax) tmax = sample.in;
             if(sample.out > tmax) tmax = sample.out;
@@ -252,7 +246,7 @@ void TrafficGraphWidget::setGraphRangeMins(int value)
 void TrafficGraphWidget::clear()
 {
     trafficGraphData.clear();
-    fMax = DEFAULT_SAMPLE_HEIGHT;
+    fMax = default_sample_height;
     if(clientModel) {
         trafficGraphData.setLastBytes(clientModel->node().getTotalBytesRecv(), clientModel->node().getTotalBytesSent());
     }

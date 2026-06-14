@@ -1,13 +1,15 @@
-// Copyright (c) 2011-2015 The Bitcoin Core developers
+// Copyright (c) 2011-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #ifndef BITCOIN_QT_WALLETVIEW_H
 #define BITCOIN_QT_WALLETVIEW_H
 
-#include <amount.h>
-#include <qt/governancelist.h>
+#include <consensus/amount.h>
+
+#include <qt/bitcoinunits.h>
 #include <qt/masternodelist.h>
+#include <qt/proposallist.h>
 
 #include <QStackedWidget>
 
@@ -37,27 +39,27 @@ class WalletView : public QStackedWidget
     Q_OBJECT
 
 public:
-    explicit WalletView(QWidget* parent);
+    explicit WalletView(WalletModel* wallet_model, QWidget* parent);
     ~WalletView();
 
     /** Set the client model.
         The client model represents the part of the core that communicates with the P2P network, and is wallet-agnostic.
     */
     void setClientModel(ClientModel *clientModel);
-    WalletModel *getWalletModel() { return walletModel; }
-    /** Set the wallet model.
-        The wallet model represents a bitcoin wallet, and offers access to the list of transactions, address book and sending
-        functionality.
-    */
-    void setWalletModel(WalletModel *walletModel);
+    WalletModel* getWalletModel() const noexcept { return walletModel; }
 
     bool handlePaymentRequest(const SendCoinsRecipient& recipient);
 
     void showOutOfSyncWarning(bool fShow);
 
 private:
-    ClientModel *clientModel;
-    WalletModel *walletModel;
+    ClientModel* clientModel{nullptr};
+
+    //!
+    //! The wallet model represents a bitcoin wallet, and offers access to
+    //! the list of transactions, address book and sending functionality.
+    //!
+    WalletModel* const walletModel;
 
     OverviewPage *overviewPage;
     QWidget *transactionsPage;
@@ -66,8 +68,8 @@ private:
     SendCoinsDialog* coinJoinCoinsPage;
     AddressBookPage *usedSendingAddressesPage;
     AddressBookPage *usedReceivingAddressesPage;
-    MasternodeList *masternodeListPage;
-    GovernanceList* governanceListPage;
+    MasternodeList* masternodeListPage{nullptr};
+    ProposalList* proposalListPage{nullptr};
 
     TransactionView *transactionView;
 
@@ -106,6 +108,8 @@ public Q_SLOTS:
     void backupWallet();
     /** Change encrypted wallet passphrase */
     void changePassphrase();
+    /** Show wallet mnemonic/recovery phrase */
+    void showMnemonic();
     /** Ask for passphrase to unlock wallet temporarily */
     void unlockWallet(bool fAnonymizeOnly=false);
     /** Lock wallet */
@@ -116,31 +120,25 @@ public Q_SLOTS:
     /** Show used receiving addresses */
     void usedReceivingAddresses();
 
-    /** Re-emit encryption status signal */
-    void updateEncryptionStatus();
-
     /** Show progress dialog e.g. for rescan */
     void showProgress(const QString &title, int nProgress);
-
-    /** User has requested more information about the out of sync state */
-    void requestedSyncWarningInfo();
-
 
     /** Update selected DASH amount from transactionview */
     void trxAmount(QString amount);
 Q_SIGNALS:
+    void setPrivacy(bool privacy);
     void transactionClicked();
     void coinsSent();
     /**  Fired when a message should be reported to the user */
     void message(const QString &title, const QString &message, unsigned int style);
     /** Encryption status of wallet changed */
     void encryptionStatusChanged();
-    /** HD-Enabled status of wallet changed (only possible during startup) */
-    void hdEnabledStatusChanged();
     /** Notify that a new transaction appeared */
-    void incomingTransaction(const QString& date, int unit, const CAmount& amount, const QString& type, const QString& address, const QString& label, const QString& walletName);
+    void incomingTransaction(const QString& date, BitcoinUnit unit, const CAmount& amount, const QString& type, const QString& address, const QString& label, const QString& walletName);
     /** Notify that the out of sync warning icon has been pressed */
     void outOfSyncWarningClicked();
+    /** Request navigation to proposal info view */
+    void showProposalInfo();
 };
 
 #endif // BITCOIN_QT_WALLETVIEW_H

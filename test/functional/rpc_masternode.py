@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2020-2022 The Dash Core developers
+# Copyright (c) 2020-2025 The Dash Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 from test_framework.test_framework import DashTestFramework
@@ -12,8 +12,11 @@ Test "masternode" rpc subcommands
 '''
 
 class RPCMasternodeTest(DashTestFramework):
+    def add_options(self, parser):
+        self.add_wallet_options(parser)
+
     def set_test_params(self):
-        self.set_dash_test_params(4, 3, fast_dip3_enforcement=True)
+        self.set_dash_test_params(4, 3)
 
     def run_test(self):
         self.log.info("test that results from `winners` and `payments` RPCs match")
@@ -23,7 +26,7 @@ class RPCMasternodeTest(DashTestFramework):
         checked_0_operator_reward = False
         checked_non_0_operator_reward = False
         while not checked_0_operator_reward or not checked_non_0_operator_reward:
-            self.nodes[0].generate(1)
+            self.generate(self.nodes[0], 1, sync_fun=self.no_op)
             bi = self.nodes[0].getblockchaininfo()
             height = bi["blocks"]
             blockhash = bi["bestblockhash"]
@@ -32,17 +35,23 @@ class RPCMasternodeTest(DashTestFramework):
             assert_equal(len(payments), 1)
             payments_block = payments[0]
             payments_block_payees = payments_block["masternodes"][0]["payees"]
+
             payments_payee = ""
             for i in range(0, len(payments_block_payees)):
+                if i == 0:
+                    assert_equal(payments_block_payees[i]['script'], '6a')
+                    continue
+
                 payments_payee += payments_block_payees[i]["address"]
                 if i < len(payments_block_payees) - 1:
                     payments_payee += ", "
             assert_equal(payments_block["height"], height)
             assert_equal(payments_block["blockhash"], blockhash)
             assert_equal(winners_payee, payments_payee)
-            if len(payments_block_payees) == 1:
+            num_payees = len(payments_block_payees) - 1
+            if num_payees == 1:
                 checked_0_operator_reward = True
-            if len(payments_block_payees) > 1:
+            if num_payees > 1:
                 checked_non_0_operator_reward = True
 
         self.log.info("test various `payments` RPC options")
@@ -59,18 +68,38 @@ class RPCMasternodeTest(DashTestFramework):
 
         self.log.info("test that `masternode payments` results at chaintip match `getblocktemplate` results for that block")
         gbt_masternode = self.nodes[0].getblocktemplate()["masternode"]
-        self.nodes[0].generate(1)
+        self.generate(self.nodes[0], 1, sync_fun=self.no_op)
         payments_masternode = self.nodes[0].masternode("payments")[0]["masternodes"][0]
         for i in range(0, len(gbt_masternode)):
             assert_equal(gbt_masternode[i]["payee"], payments_masternode["payees"][i]["address"])
             assert_equal(gbt_masternode[i]["script"], payments_masternode["payees"][i]["script"])
             assert_equal(gbt_masternode[i]["amount"], payments_masternode["payees"][i]["amount"])
 
+        self.log.info("test that `masternode payments` results and `protx info` results match")
+        # we expect some masternodes to have 0 operator reward and some to have non-0 operator reward
+        checked_0_operator_reward = False
+        checked_non_0_operator_reward = False
+        while not checked_0_operator_reward or not checked_non_0_operator_reward:
+            payments_masternode = self.nodes[0].masternode("payments")[0]["masternodes"][0]
+            protx_info = self.nodes[0].protx("info", payments_masternode["proTxHash"])
+            if len(payments_masternode["payees"]) == 2:
+                assert_equal(protx_info["state"]["payoutAddress"], payments_masternode["payees"][1]["address"])
+                checked_0_operator_reward = True
+            else:
+                assert_equal(len(payments_masternode["payees"]), 3)
+                option1 = protx_info["state"]["payoutAddress"] == payments_masternode["payees"][1]["address"] and \
+                    protx_info["state"]["operatorPayoutAddress"] == payments_masternode["payees"][2]["address"]
+                option2 = protx_info["state"]["payoutAddress"] == payments_masternode["payees"][2]["address"] and \
+                    protx_info["state"]["operatorPayoutAddress"] == payments_masternode["payees"][1]["address"]
+                assert option1 or option2
+                checked_non_0_operator_reward = True
+            self.generate(self.nodes[0], 1, sync_fun=self.no_op)
+
         self.log.info("test that `masternode outputs` show correct list")
         addr1 = self.nodes[0].getnewaddress()
         addr2 = self.nodes[0].getnewaddress()
         self.nodes[0].sendmany('', {addr1: 1000, addr2: 1000})
-        self.nodes[0].generate(1)
+        self.generate(self.nodes[0], 1, sync_fun=self.no_op)
         # we have 3 masternodes that are running already and 2 new outputs we just created
         assert_equal(len(self.nodes[0].masternode("outputs")), 5)
 

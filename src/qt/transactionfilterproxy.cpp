@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2014 The Bitcoin Core developers
+// Copyright (c) 2011-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -7,23 +7,14 @@
 #include <qt/transactiontablemodel.h>
 #include <qt/transactionrecord.h>
 
+#include <algorithm>
 #include <cstdlib>
+#include <optional>
 
-// Earliest date that can be represented (far in the past)
-const QDateTime TransactionFilterProxy::MIN_DATE = QDateTime::fromTime_t(0);
-// Last date that can be represented (far in the future)
-const QDateTime TransactionFilterProxy::MAX_DATE = QDateTime::fromTime_t(0xFFFFFFFF);
-
-TransactionFilterProxy::TransactionFilterProxy(QObject *parent) :
-    QSortFilterProxyModel(parent),
-    dateFrom(MIN_DATE.toTime_t()),
-    dateTo(MAX_DATE.toTime_t()),
-    m_search_string(),
-    typeFilter(COMMON_TYPES),
-    watchOnlyFilter(WatchOnlyFilter_All),
-    minAmount(0),
-    limitRows(-1),
-    showInactive(true)
+TransactionFilterProxy::TransactionFilterProxy(QObject* parent)
+    : QSortFilterProxyModel(parent),
+      m_search_string(),
+      typeFilter(COMMON_TYPES)
 {
 }
 
@@ -44,9 +35,10 @@ bool TransactionFilterProxy::filterAcceptsRow(int sourceRow, const QModelIndex &
         return false;
     if (!involvesWatchAddress && watchOnlyFilter == WatchOnlyFilter_Yes)
         return false;
-    qint64 datetime = index.data(TransactionTableModel::DateRoleInt).toLongLong();
-    if (datetime < dateFrom || datetime > dateTo)
-        return false;
+
+    QDateTime datetime = index.data(TransactionTableModel::DateRole).toDateTime();
+    if (dateFrom && datetime < *dateFrom) return false;
+    if (dateTo && datetime > *dateTo) return false;
 
     QString address = index.data(TransactionTableModel::AddressRole).toString();
     QString label = index.data(TransactionTableModel::LabelRole).toString();
@@ -64,10 +56,10 @@ bool TransactionFilterProxy::filterAcceptsRow(int sourceRow, const QModelIndex &
     return true;
 }
 
-void TransactionFilterProxy::setDateRange(const QDateTime &from, const QDateTime &to)
+void TransactionFilterProxy::setDateRange(const std::optional<QDateTime>& from, const std::optional<QDateTime>& to)
 {
-    this->dateFrom = from.toTime_t();
-    this->dateTo = to.toTime_t();
+    dateFrom = from;
+    dateTo = to;
     invalidateFilter();
 }
 

@@ -1,33 +1,45 @@
-// Copyright (c) 2018-2022 The Dash Core developers
+// Copyright (c) 2018-2025 The Dash Core developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #ifndef BITCOIN_LLMQ_DKGSESSION_H
 #define BITCOIN_LLMQ_DKGSESSION_H
 
-#include <batchedlogger.h>
+#include <llmq/commitment.h>
+#include <protocol.h>
 
+#include <batchedlogger.h>
+#include <bls/bls.h>
 #include <bls/bls_ies.h>
 #include <bls/bls_worker.h>
+#include <evo/types.h>
+#include <util/std23.h>
 
-#include <llmq/commitment.h>
-#include <llmq/utils.h>
+#include <saltedhasher.h>
+
+#include <sync.h>
 
 #include <optional>
+#include <unordered_set>
 
-class UniValue;
-class CInv;
+class CActiveMasternodeManager;
 class CConnman;
-
-namespace llmq
-{
-
-class CFinalCommitment;
+class CDeterministicMN;
+class CMasternodeMetaMan;
+class CSporkManager;
+class PeerManager;
+namespace llmq {
+class ActiveDKGSession;
+class ActiveDKGSessionHandler;
 class CDKGDebugManager;
+class CDKGPendingMessages;
 class CDKGSession;
 class CDKGSessionManager;
-class CDKGPendingMessages;
+class CFinalCommitment;
+class CQuorumSnapshotManager;
+} // namespace llmq
 
+namespace llmq {
 class CDKGContribution
 {
 public:
@@ -42,7 +54,7 @@ public:
     template<typename Stream>
     inline void SerializeWithoutSig(Stream& s) const
     {
-        s << uint8_t(llmqType);
+        s << std23::to_underlying(llmqType);
         s << quorumHash;
         s << proTxHash;
         s << *vvec;
@@ -57,7 +69,7 @@ public:
     template<typename Stream>
     inline void Unserialize(Stream& s)
     {
-        BLSVerificationVector tmp1;
+        std::vector<CBLSPublicKey> tmp1;
         CBLSIESMultiRecipientObjects<CBLSSecretKey> tmp2;
 
         s >> llmqType;
@@ -67,7 +79,7 @@ public:
         s >> tmp2;
         s >> sig;
 
-        vvec = std::make_shared<BLSVerificationVector>(std::move(tmp1));
+        vvec = std::make_shared<std::vector<CBLSPublicKey>>(std::move(tmp1));
         contributions = std::make_shared<CBLSIESMultiRecipientObjects<CBLSSecretKey>>(std::move(tmp2));
     }
 
@@ -121,8 +133,15 @@ public:
     Consensus::LLMQType llmqType;
     uint256 quorumHash;
     uint256 proTxHash;
-    // TODO make this pair a struct with named fields
-    std::vector<std::pair<uint32_t, CBLSSecretKey>> contributions;
+    struct Contribution {
+        uint32_t index;
+        CBLSSecretKey key;
+        SERIALIZE_METHODS(Contribution, obj)
+        {
+            READWRITE(obj.index, obj.key);
+        }
+    };
+    std::vector<Contribution> contributions;
     CBLSSignature sig;
 
 public:
@@ -184,7 +203,7 @@ public:
 
     [[nodiscard]] uint256 GetSignHash() const
     {
-        return utils::BuildCommitmentHash(llmqType, quorumHash, validMembers, quorumPublicKey, quorumVvecHash);
+        return BuildCommitmentHash(llmqType, quorumHash, validMembers, quorumPublicKey, quorumVvecHash);
     }
 };
 
@@ -197,13 +216,13 @@ public:
     size_t idx;
     CBLSId id;
 
-    std::set<uint256> contributions;
-    std::set<uint256> complaints;
-    std::set<uint256> justifications;
-    std::set<uint256> prematureCommitments;
+    Uint256HashSet contributions;
+    Uint256HashSet complaints;
+    Uint256HashSet justifications;
+    Uint256HashSet prematureCommitments;
 
-    std::set<uint256> badMemberVotes;
-    std::set<uint256> complaintsFromOthers;
+    Uint256HashSet badMemberVotes;
+    Uint256HashSet complaintsFromOthers;
 
     bool bad{false};
     bool badConnection{false};
@@ -235,6 +254,12 @@ public:
     }
 };
 
+class CDKGLogger : public CBatchedLogger
+{
+public:
+    CDKGLogger(const CDKGSession& _quorumDkg, std::string_view _func, int source_line);
+};
+
 /**
  * The DKG session is a single instance of the DKG process. It is owned and called by CDKGSessionHandler, which passes
  * received DKG messages to the session. The session is not persistent and will loose it's state (the whole object is
@@ -251,63 +276,76 @@ public:
  */
 class CDKGSession
 {
-    friend class CDKGSessionHandler;
-    friend class CDKGSessionManager;
     friend class CDKGLogger;
 
-private:
-    const Consensus::LLMQParams& params;
+protected:
+    enum class MsgPhase : uint8_t {
+        Contribution,
+        Complaint,
+        Justification
+    };
 
+    struct ReceiveMessageState {
+        CDKGMember* member{nullptr};
+        uint256 hash{};
+        CInv inv{};
+        bool should_process{true};
+    };
+
+protected:
     CBLSWorker& blsWorker;
     CBLSWorkerCache cache;
-    CDKGSessionManager& dkgManager;
+    CDeterministicMNManager& m_dmnman;
     CDKGDebugManager& dkgDebugManager;
+    CDKGSessionManager& dkgManager;
+    CQuorumSnapshotManager& m_qsnapman;
+    const ChainstateManager& m_chainman;
+    const Consensus::LLMQParams& params;
+    const CBlockIndex* const m_quorum_base_block_index;
 
-    const CBlockIndex* m_quorum_base_block_index{nullptr};
+protected:
     int quorumIndex{0};
-
-private:
     std::vector<std::unique_ptr<CDKGMember>> members;
     std::map<uint256, size_t> membersMap;
-    std::set<uint256> relayMembers;
+    Uint256HashSet relayMembers;
     BLSVerificationVectorPtr vvecContribution;
-    BLSSecretKeyVector m_sk_contributions;
+    std::vector<CBLSSecretKey> m_sk_contributions;
 
-    BLSIdVector memberIds;
+    std::vector<CBLSId> memberIds;
     std::vector<BLSVerificationVectorPtr> receivedVvecs;
     // these are not necessarily verified yet. Only trust in what was written to the DB
-    BLSSecretKeyVector receivedSkContributions;
+    std::vector<CBLSSecretKey> receivedSkContributions;
     /// Contains the received unverified/encrypted DKG contributions
     std::vector<std::shared_ptr<CBLSIESMultiRecipientObjects<CBLSSecretKey>>> vecEncryptedContributions;
 
     uint256 myProTxHash;
     CBLSId myId;
-    CConnman& connman;
     std::optional<size_t> myIdx;
 
     // all indexed by msg hash
     // we expect to only receive a single vvec and contribution per member, but we must also be able to relay
     // conflicting messages as otherwise an attacker might be able to broadcast conflicting (valid+invalid) messages
     // and thus split the quorum. Such members are later removed from the quorum.
-    mutable CCriticalSection invCs;
+    mutable Mutex invCs;
     std::map<uint256, CDKGContribution> contributions GUARDED_BY(invCs);
     std::map<uint256, CDKGComplaint> complaints GUARDED_BY(invCs);
     std::map<uint256, CDKGJustification> justifications GUARDED_BY(invCs);
     std::map<uint256, CDKGPrematureCommitment> prematureCommitments GUARDED_BY(invCs);
 
-    mutable CCriticalSection cs_pending;
+    mutable Mutex cs_pending;
     std::vector<size_t> pendingContributionVerifications GUARDED_BY(cs_pending);
 
     // filled by ReceivePrematureCommitment and used by FinalizeCommitments
-    std::set<uint256> validCommitments GUARDED_BY(invCs);
+    Uint256HashSet validCommitments GUARDED_BY(invCs);
 
 public:
-    CDKGSession(const Consensus::LLMQParams& _params, CBLSWorker& _blsWorker, CDKGSessionManager& _dkgManager, CDKGDebugManager& _dkgDebugManager, CConnman& _connman) :
-        params(_params), blsWorker(_blsWorker), cache(_blsWorker), dkgManager(_dkgManager), dkgDebugManager(_dkgDebugManager), connman(_connman) {}
+    CDKGSession(CBLSWorker& _blsWorker, CDeterministicMNManager& dmnman, CDKGDebugManager& _dkgDebugManager,
+                CDKGSessionManager& _dkgManager, CQuorumSnapshotManager& qsnapman, const ChainstateManager& chainman,
+                const CBlockIndex* pQuorumBaseBlockIndex, const Consensus::LLMQParams& _params);
+    virtual ~CDKGSession();
 
-    bool Init(const CBlockIndex* pQuorumBaseBlockIndex, const std::vector<CDeterministicMNCPtr>& mns, const uint256& _myProTxHash, int _quorumIndex);
-
-    [[nodiscard]] std::optional<size_t> GetMyMemberIndex() const { return myIdx; }
+    // TODO: remove Init completely
+    bool Init(const uint256& _myProTxHash, int _quorumIndex);
 
     /**
      * The following sets of methods are for the first 4 phases handled in the session. The flow of message calls
@@ -323,58 +361,72 @@ public:
      */
 
     // Phase 1: contribution
-    void Contribute(CDKGPendingMessages& pendingMessages);
-    void SendContributions(CDKGPendingMessages& pendingMessages);
+    virtual void Contribute(CDKGPendingMessages& pendingMessages, PeerManager& peerman) {}
+    virtual void SendContributions(CDKGPendingMessages& pendingMessages, PeerManager& peerman) {}
     bool PreVerifyMessage(const CDKGContribution& qc, bool& retBan) const;
-    void ReceiveMessage(const CDKGContribution& qc, bool& retBan);
-    void VerifyPendingContributions() EXCLUSIVE_LOCKS_REQUIRED(cs_pending);
+    std::optional<CInv> ReceiveMessage(const CDKGContribution& qc) EXCLUSIVE_LOCKS_REQUIRED(!invCs, !cs_pending);
+    virtual void VerifyPendingContributions() EXCLUSIVE_LOCKS_REQUIRED(cs_pending) {}
 
     // Phase 2: complaint
-    void VerifyAndComplain(CDKGPendingMessages& pendingMessages);
-    void VerifyConnectionAndMinProtoVersions() const;
-    void SendComplaint(CDKGPendingMessages& pendingMessages);
+    virtual void VerifyAndComplain(CConnman& connman, CDKGPendingMessages& pendingMessages, PeerManager& peerman)
+        EXCLUSIVE_LOCKS_REQUIRED(!cs_pending) {}
+    virtual void VerifyConnectionAndMinProtoVersions(CConnman& connman) const {}
+    virtual void SendComplaint(CDKGPendingMessages& pendingMessages, PeerManager& peerman) {}
     bool PreVerifyMessage(const CDKGComplaint& qc, bool& retBan) const;
-    void ReceiveMessage(const CDKGComplaint& qc, bool& retBan);
+    std::optional<CInv> ReceiveMessage(const CDKGComplaint& qc) EXCLUSIVE_LOCKS_REQUIRED(!invCs);
 
     // Phase 3: justification
-    void VerifyAndJustify(CDKGPendingMessages& pendingMessages);
-    void SendJustification(CDKGPendingMessages& pendingMessages, const std::set<uint256>& forMembers);
+    virtual void VerifyAndJustify(CDKGPendingMessages& pendingMessages, PeerManager& peerman) EXCLUSIVE_LOCKS_REQUIRED(!invCs) {}
+    virtual void SendJustification(CDKGPendingMessages& pendingMessages, PeerManager& peerman, const Uint256HashSet& forMembers) {}
     bool PreVerifyMessage(const CDKGJustification& qj, bool& retBan) const;
-    void ReceiveMessage(const CDKGJustification& qj, bool& retBan);
+    std::optional<CInv> ReceiveMessage(const CDKGJustification& qj) EXCLUSIVE_LOCKS_REQUIRED(!invCs);
 
     // Phase 4: commit
-    void VerifyAndCommit(CDKGPendingMessages& pendingMessages);
-    void SendCommitment(CDKGPendingMessages& pendingMessages);
+    virtual void VerifyAndCommit(CDKGPendingMessages& pendingMessages, PeerManager& peerman) {}
+    virtual void SendCommitment(CDKGPendingMessages& pendingMessages, PeerManager& peerman) {}
     bool PreVerifyMessage(const CDKGPrematureCommitment& qc, bool& retBan) const;
-    void ReceiveMessage(const CDKGPrematureCommitment& qc, bool& retBan);
+    std::optional<CInv> ReceiveMessage(const CDKGPrematureCommitment& qc) EXCLUSIVE_LOCKS_REQUIRED(!invCs);
 
     // Phase 5: aggregate/finalize
-    std::vector<CFinalCommitment> FinalizeCommitments();
+    virtual std::vector<CFinalCommitment> FinalizeCommitments() EXCLUSIVE_LOCKS_REQUIRED(!invCs) { return {}; }
 
+    // All Phases 5-in-1 for single-node-quorum
+    virtual CFinalCommitment FinalizeSingleCommitment() { return {}; }
+
+    //! Look up a received message by hash. Used by CDKGSessionHandler subclasses to implement their Get* virtuals.
+    [[nodiscard]] bool GetContribution(const uint256& hash, CDKGContribution& ret) const EXCLUSIVE_LOCKS_REQUIRED(!invCs);
+    [[nodiscard]] bool GetComplaint(const uint256& hash, CDKGComplaint& ret) const EXCLUSIVE_LOCKS_REQUIRED(!invCs);
+    [[nodiscard]] bool GetJustification(const uint256& hash, CDKGJustification& ret) const EXCLUSIVE_LOCKS_REQUIRED(!invCs);
+    [[nodiscard]] bool GetPrematureCommitment(const uint256& hash, CDKGPrematureCommitment& ret) const EXCLUSIVE_LOCKS_REQUIRED(!invCs);
+
+public:
     [[nodiscard]] bool AreWeMember() const { return !myProTxHash.IsNull(); }
-    void MarkBadMember(size_t idx);
-
-    void RelayInvToParticipants(const CInv& inv) const;
-
-public:
     [[nodiscard]] CDKGMember* GetMember(const uint256& proTxHash) const;
+    [[nodiscard]] CDKGMember* GetMemberAtIndex(size_t index) const;
+    [[nodiscard]] std::optional<size_t> GetMyMemberIndex() const { return myIdx; }
+    [[nodiscard]] const Uint256HashSet& RelayMembers() const { return relayMembers; }
+    [[nodiscard]] const CBlockIndex* BlockIndex() const { return m_quorum_base_block_index; }
+    [[nodiscard]] const uint256& ProTx() const { return myProTxHash; }
+    [[nodiscard]] Consensus::LLMQType GetType() const { return params.type; }
 
-private:
+protected:
+    virtual bool MaybeDecrypt(const CBLSIESMultiRecipientObjects<CBLSSecretKey>& obj, size_t idx,
+                              CBLSSecretKey& ret_obj, int version)
+    {
+        return false;
+    }
+
     [[nodiscard]] bool ShouldSimulateError(DKGError::type type) const;
-};
 
-class CDKGLogger : public CBatchedLogger
-{
-public:
-    CDKGLogger(const CDKGSession& _quorumDkg, std::string_view _func) :
-        CDKGLogger(_quorumDkg.params.name, _quorumDkg.quorumIndex, _quorumDkg.m_quorum_base_block_index->GetBlockHash(), _quorumDkg.m_quorum_base_block_index->nHeight, _quorumDkg.AreWeMember(), _func){};
-    CDKGLogger(std::string_view _llmqTypeName, int _quorumIndex, const uint256& _quorumHash, int _height, bool _areWeMember, std::string_view _func) :
-        CBatchedLogger(BCLog::LLMQ_DKG, strprintf("QuorumDKG(type=%s, quorumIndex=%d, height=%d, member=%d, func=%s)", _llmqTypeName, _quorumIndex, _height, _areWeMember, _func)){};
+    template <typename MsgType>
+    [[nodiscard]] std::optional<ReceiveMessageState> ReceiveMessagePreamble(const MsgType& msg, MsgPhase phase, CDKGLogger& logger)
+        EXCLUSIVE_LOCKS_REQUIRED(invCs);
+
+    void MarkBadMember(size_t idx);
 };
 
 void SetSimulatedDKGErrorRate(DKGError::type type, double rate);
 double GetSimulatedErrorRate(DKGError::type type);
-
 } // namespace llmq
 
 #endif // BITCOIN_LLMQ_DKGSESSION_H

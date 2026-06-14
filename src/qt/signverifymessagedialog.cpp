@@ -1,5 +1,5 @@
-// Copyright (c) 2011-2015 The Bitcoin Core developers
-// Copyright (c) 2014-2022 The Dash Core developers
+// Copyright (c) 2011-2021 The Bitcoin Core developers
+// Copyright (c) 2014-2025 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -21,17 +21,19 @@
 #include <QClipboard>
 
 SignVerifyMessageDialog::SignVerifyMessageDialog(QWidget* parent) :
-    QDialog(parent),
-    ui(new Ui::SignVerifyMessageDialog),
-    model(nullptr),
-    pageButtons(nullptr)
+    QDialog(parent, GUIUtil::dialog_flags),
+    ui(new Ui::SignVerifyMessageDialog)
 {
     ui->setupUi(this);
 
     pageButtons = new QButtonGroup(this);
     pageButtons->addButton(ui->btnSignMessage, pageButtons->buttons().size());
     pageButtons->addButton(ui->btnVerifyMessage, pageButtons->buttons().size());
+#if (QT_VERSION >= QT_VERSION_CHECK(5, 15, 0))
+    connect(pageButtons, &QButtonGroup::idClicked, this, &SignVerifyMessageDialog::showPage);
+#else
     connect(pageButtons, QOverload<int>::of(&QButtonGroup::buttonClicked), this, &SignVerifyMessageDialog::showPage);
+#endif
 
     // These icons are needed on Mac also
     GUIUtil::setIcon(ui->addressBookButton_SM, "address-book");
@@ -56,6 +58,8 @@ SignVerifyMessageDialog::SignVerifyMessageDialog(QWidget* parent) :
     GUIUtil::updateFonts();
 
     GUIUtil::disableMacFocusRect(this);
+
+    GUIUtil::handleCloseWindowShortcut(this);
 }
 
 SignVerifyMessageDialog::~SignVerifyMessageDialog()
@@ -145,8 +149,8 @@ void SignVerifyMessageDialog::on_signMessageButton_SM_clicked()
         ui->statusLabel_SM->setText(tr("The entered address is invalid.") + QString(" ") + tr("Please check the address and try again."));
         return;
     }
-    const CKeyID* keyID = std::get_if<CKeyID>(&destination);
-    if (!keyID) {
+    const PKHash* pkhash = std::get_if<PKHash>(&destination);
+    if (!pkhash) {
         ui->addressIn_SM->setValid(false);
         ui->statusLabel_SM->setStyleSheet(GUIUtil::getThemedStyleQString(GUIUtil::ThemedStyle::TS_ERROR));
         ui->statusLabel_SM->setText(tr("The entered address does not refer to a key.") + QString(" ") + tr("Please check the address and try again."));
@@ -161,20 +165,27 @@ void SignVerifyMessageDialog::on_signMessageButton_SM_clicked()
         return;
     }
 
-    CKey key;
-    if (!model->wallet().getPrivKey(*keyID, key))
-    {
-        ui->statusLabel_SM->setStyleSheet(GUIUtil::getThemedStyleQString(GUIUtil::ThemedStyle::TS_ERROR));
-        ui->statusLabel_SM->setText(tr("Private key for the entered address is not available."));
-        return;
-    }
-
     const std::string& message = ui->messageIn_SM->document()->toPlainText().toStdString();
     std::string signature;
+    SigningResult res = model->wallet().signMessage(message, *pkhash, signature);
 
-    if (!MessageSign(key, message, signature)) {
+    QString error;
+    switch (res) {
+        case SigningResult::OK:
+            error = tr("No error");
+            break;
+        case SigningResult::PRIVATE_KEY_NOT_AVAILABLE:
+            error = tr("Private key for the entered address is not available.");
+            break;
+        case SigningResult::SIGNING_FAILED:
+            error = tr("Message signing failed.");
+            break;
+        // no default case, so the compiler can warn about missing cases
+    }
+
+    if (res != SigningResult::OK) {
         ui->statusLabel_SM->setStyleSheet(GUIUtil::getThemedStyleQString(GUIUtil::ThemedStyle::TS_ERROR));
-        ui->statusLabel_SM->setText(QString("<nobr>") + tr("Message signing failed.") + QString("</nobr>"));
+        ui->statusLabel_SM->setText(QString("<nobr>") + error + QString("</nobr>"));
         return;
     }
 

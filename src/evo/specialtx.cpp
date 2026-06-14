@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2022 The Dash Core developers
+// Copyright (c) 2018-2023 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -9,7 +9,7 @@
 
 uint256 CalcTxInputsHash(const CTransaction& tx)
 {
-    CHashWriter hw(CLIENT_VERSION, SER_GETHASH);
+    CHashWriter hw(SER_GETHASH, CLIENT_VERSION);
     for (const auto& in : tx.vin) {
         hw << in.prevout;
     }

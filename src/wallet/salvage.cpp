@@ -1,16 +1,17 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2020 The Bitcoin Core developers
+// Copyright (c) 2009-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <fs.h>
-#include <node/context.h>
 #include <streams.h>
 #include <util/translation.h>
+#include <wallet/bdb.h>
 #include <wallet/salvage.h>
 #include <wallet/wallet.h>
 #include <wallet/walletdb.h>
 
+namespace wallet {
 /* End of headers, beginning of key/value data */
 static const char *HEADER_END = "HEADER=END";
 /* End of key/value data */
@@ -22,17 +23,20 @@ static bool KeyFilter(const std::string& type)
     return WalletBatch::IsKeyType(type) || type == DBKeys::HDCHAIN;
 }
 
-bool RecoverDatabaseFile(const fs::path& file_path, bilingual_str& error, std::vector<bilingual_str>& warnings)
+bool RecoverDatabaseFile(const ArgsManager& args, const fs::path& file_path, bilingual_str& error, std::vector<bilingual_str>& warnings)
 {
     DatabaseOptions options;
     DatabaseStatus status;
+    ReadDatabaseArgs(args, options);
     options.require_existing = true;
     options.verify = false;
+    options.require_format = DatabaseFormat::BERKELEY;
     std::unique_ptr<WalletDatabase> database = MakeDatabase(file_path, options, status, error);
     if (!database) return false;
 
-    std::string filename;
-    std::shared_ptr<BerkeleyEnvironment> env = GetWalletEnv(file_path, filename);
+    BerkeleyDatabase& berkeley_database = static_cast<BerkeleyDatabase&>(*database);
+    std::string filename = berkeley_database.Filename();
+    std::shared_ptr<BerkeleyEnvironment> env = berkeley_database.env;
 
     if (!env->Open(error)) {
         return false;
@@ -99,7 +103,7 @@ bool RecoverDatabaseFile(const fs::path& file_path, bilingual_str& error, std::v
                 warnings.push_back(Untranslated("Salvage: WARNING: Number of keys in data does not match number of values."));
                 break;
             }
-            salvagedData.push_back(make_pair(ParseHex(keyHex), ParseHex(valueHex)));
+            salvagedData.emplace_back(ParseHex(keyHex), ParseHex(valueHex));
         }
     }
 
@@ -130,10 +134,9 @@ bool RecoverDatabaseFile(const fs::path& file_path, bilingual_str& error, std::v
         return false;
     }
 
-    NodeContext node;
-    auto chain = interfaces::MakeChain(node);
     DbTxn* ptxn = env->TxnBegin();
-    CWallet dummyWallet(chain.get(), "", CreateDummyWalletDatabase());
+    CWallet dummyWallet(/*chain=*/nullptr, /*coinjoin_loader=*/nullptr, "", gArgs, CreateDummyWalletDatabase());
+    dummyWallet.SetupLegacyScriptPubKeyMan();
     for (KeyValPair& row : salvagedData)
     {
         /* Filter for only private key type KV pairs to be added to the salvaged wallet */
@@ -154,8 +157,8 @@ bool RecoverDatabaseFile(const fs::path& file_path, bilingual_str& error, std::v
             warnings.push_back(strprintf(Untranslated("WARNING: WalletBatch::Recover skipping %s: %s"), strType, strErr));
             continue;
         }
-        Dbt datKey(&row.first[0], row.first.size());
-        Dbt datValue(&row.second[0], row.second.size());
+        Dbt datKey(row.first.data(), row.first.size());
+        Dbt datValue(row.second.data(), row.second.size());
         int ret2 = pdbCopy->put(ptxn, &datKey, &datValue, DB_NOOVERWRITE);
         if (ret2 > 0)
             fSuccess = false;
@@ -165,3 +168,4 @@ bool RecoverDatabaseFile(const fs::path& file_path, bilingual_str& error, std::v
 
     return fSuccess;
 }
+} // namespace wallet

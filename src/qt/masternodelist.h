@@ -1,98 +1,118 @@
-// Copyright (c) 2016-2021 The Dash Core developers
+// Copyright (c) 2016-2025 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #ifndef BITCOIN_QT_MASTERNODELIST_H
 #define BITCOIN_QT_MASTERNODELIST_H
 
-#include <primitives/transaction.h>
-#include <sync.h>
-#include <util/system.h>
+#include <qt/masternodemodel.h>
 
 #include <QMenu>
+#include <QSet>
+#include <QSortFilterProxyModel>
+#include <QString>
 #include <QTimer>
 #include <QWidget>
 
-#define MASTERNODELIST_UPDATE_SECONDS 3
-#define MASTERNODELIST_FILTER_COOLDOWN_SECONDS 3
-
-namespace Ui
-{
-class MasternodeList;
-}
-
-class CDeterministicMN;
-using CDeterministicMNCPtr = std::shared_ptr<const CDeterministicMN>;
+#include <atomic>
+#include <memory>
 
 class ClientModel;
+class MasternodeFeed;
 class WalletModel;
+struct MasternodeData;
+namespace interfaces {
+class MnList;
+using MnListPtr = std::shared_ptr<MnList>;
+} // namespace interfaces
+namespace Ui {
+class MasternodeList;
+} // namespace Ui
 
 QT_BEGIN_NAMESPACE
 class QModelIndex;
+class QThread;
 QT_END_NAMESPACE
+
+class MasternodeListSortFilterProxyModel : public QSortFilterProxyModel
+{
+    Q_OBJECT
+
+public:
+    enum class TypeFilter : uint8_t {
+        All,
+        Regular,
+        Evo,
+        COUNT
+    };
+
+    explicit MasternodeListSortFilterProxyModel(QObject* parent = nullptr) :
+        QSortFilterProxyModel(parent) {}
+
+    void forceInvalidateFilter() { invalidateFilter(); }
+    void setHideBanned(bool hide) { m_hide_banned = hide; }
+    void setMyMasternodeHashes(QSet<QString>&& hashes) { m_owned_mns = std::move(hashes); }
+    void setShowOwnedOnly(bool show) { m_show_owned_only = show; }
+    void setTypeFilter(TypeFilter type) { m_type_filter = type; }
+
+protected:
+    bool filterAcceptsRow(int source_row, const QModelIndex& source_parent) const override;
+    bool lessThan(const QModelIndex& lhs, const QModelIndex& rhs) const override;
+
+private:
+    bool m_hide_banned{false};
+    bool m_show_owned_only{false};
+    QSet<QString> m_owned_mns;
+    TypeFilter m_type_filter{TypeFilter::All};
+};
 
 /** Masternode Manager page widget */
 class MasternodeList : public QWidget
 {
     Q_OBJECT
 
-public:
-    explicit MasternodeList(QWidget* parent = 0);
-    ~MasternodeList();
+    Ui::MasternodeList* ui;
 
-    enum {
-        COLUMN_SERVICE,
-        COLUMN_STATUS,
-        COLUMN_POSE,
-        COLUMN_REGISTERED,
-        COLUMN_LAST_PAYMENT,
-        COLUMN_NEXT_PAYMENT,
-        COLUMN_PAYOUT_ADDRESS,
-        COLUMN_OPERATOR_REWARD,
-        COLUMN_COLLATERAL_ADDRESS,
-        COLUMN_OWNER_ADDRESS,
-        COLUMN_VOTING_ADDRESS,
-        COLUMN_PROTX_HASH,
-    };
+public:
+    explicit MasternodeList(QWidget* parent = nullptr);
+    ~MasternodeList() override;
 
     void setClientModel(ClientModel* clientModel);
     void setWalletModel(WalletModel* walletModel);
 
-private:
-    QMenu* contextMenuDIP3;
-    int64_t nTimeFilterUpdatedDIP3{0};
-    int64_t nTimeUpdatedDIP3{0};
-    bool fFilterUpdatedDIP3{true};
+protected:
+    void changeEvent(QEvent* event) override;
 
-    QTimer* timer;
-    Ui::MasternodeList* ui;
+private:
     ClientModel* clientModel{nullptr};
+    MasternodeFeed* m_feed{nullptr};
+    MasternodeListSortFilterProxyModel* m_proxy_model{nullptr};
+    MasternodeModel* m_model{nullptr};
+    QMenu* contextMenuDIP3{nullptr};
     WalletModel* walletModel{nullptr};
 
-    // Protects tableWidgetMasternodesDIP3
-    CCriticalSection cs_dip3list;
+    void setMasternodeList(MasternodeData&& data, QSet<QString>&& owned_mns);
 
-    QString strCurrentFilterDIP3;
-
-    bool mnListChanged{true};
-
-    CDeterministicMNCPtr GetSelectedDIP3MN();
-
-    void updateDIP3List();
+    const MasternodeEntry* GetSelectedEntry();
 
 Q_SIGNALS:
     void doubleClicked(const QModelIndex&);
 
 private Q_SLOTS:
-    void showContextMenuDIP3(const QPoint&);
-    void on_filterLineEditDIP3_textChanged(const QString& strFilterIn);
-    void on_checkBoxMyMasternodesOnly_stateChanged(int state);
-
-    void extraInfoDIP3_clicked();
-    void copyProTxHash_clicked();
     void copyCollateralOutpoint_clicked();
-
-    void handleMasternodeListChanged();
-    void updateDIP3ListScheduled();
+    void copyProTxHash_clicked();
+    void extraInfoDIP3_clicked();
+    void filterByCollateralAddress();
+    void filterByOwnerAddress();
+    void filterByPayoutAddress();
+    void filterByVotingAddress();
+    void on_checkBoxHideBanned_stateChanged(int state);
+    void on_checkBoxOwned_stateChanged(int state);
+    void on_comboBoxType_currentIndexChanged(int index);
+    void on_filterText_textChanged(const QString& strFilterIn);
+    void showContextMenuDIP3(const QPoint&);
+    void updateFilteredCount();
+    void updateMasternodeList();
 };
+
 #endif // BITCOIN_QT_MASTERNODELIST_H

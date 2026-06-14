@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2020 The Dash Core developers
+// Copyright (c) 2017-2023 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -75,10 +75,10 @@ private:
     SampleQueueMap sampleStash;
 
     GraphRange currentGraphRange;
-    int currentSampleCounter;
+    int currentSampleCounter{0};
 
-    quint64 nLastBytesIn;
-    quint64 nLastBytesOut;
+    quint64 nLastBytesIn{0};
+    quint64 nLastBytesOut{0};
 
     void update(GraphRange range, const TrafficSample &trafficSample);
 

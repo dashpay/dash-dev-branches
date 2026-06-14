@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2015 The Bitcoin Core developers
+// Copyright (c) 2011-2020 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -27,7 +27,6 @@ public:
         UnlockMixing,     /**< Ask passphrase and unlock only for mixing */
         Unlock,     /**< Ask passphrase and unlock */
         ChangePass, /**< Ask old passphrase + new passphrase twice */
-        Decrypt     /**< Ask passphrase and decrypt wallet */
     };
 
     explicit AskPassphraseDialog(Mode mode, QWidget *parent, SecureString* passphrase_out = nullptr);
@@ -40,8 +39,8 @@ public:
 private:
     Ui::AskPassphraseDialog *ui;
     Mode mode;
-    WalletModel *model;
-    bool fCapsLock;
+    WalletModel* model{nullptr};
+    bool fCapsLock{false};
     SecureString* m_passphrase_out;
 
 private Q_SLOTS:

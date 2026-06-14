@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2020 The Bitcoin Core developers
+// Copyright (c) 2009-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -13,7 +13,6 @@
 #include <util/system.h>
 #include <wallet/db.h>
 
-#include <atomic>
 #include <map>
 #include <memory>
 #include <string>
@@ -22,20 +21,11 @@
 
 struct bilingual_str;
 
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wsuggest-override"
-#endif
 #include <db_cxx.h>
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic pop
-#endif
 
-static const unsigned int DEFAULT_WALLET_DBLOGSIZE = 100;
-static const bool DEFAULT_WALLET_PRIVDB = true;
-
+namespace wallet {
 struct WalletDatabaseFileId {
-    u_int8_t value[DB_FILE_ID_LEN];
+    uint8_t value[DB_FILE_ID_LEN];
     bool operator==(const WalletDatabaseFileId& rhs) const;
 };
 
@@ -52,25 +42,26 @@ private:
 
 public:
     std::unique_ptr<DbEnv> dbenv;
-    std::map<std::string, std::reference_wrapper<BerkeleyDatabase>> m_databases;
+    std::map<fs::path, std::reference_wrapper<BerkeleyDatabase>> m_databases;
     std::unordered_map<std::string, WalletDatabaseFileId> m_fileids;
     std::condition_variable_any m_db_in_use;
+    bool m_use_shared_memory;
 
-    BerkeleyEnvironment(const fs::path& env_directory);
+    explicit BerkeleyEnvironment(const fs::path& env_directory, bool use_shared_memory);
     BerkeleyEnvironment();
     ~BerkeleyEnvironment();
     void Reset();
 
     bool IsMock() const { return fMockDb; }
     bool IsInitialized() const { return fDbEnvInit; }
-    fs::path Directory() const { return strPath; }
+    fs::path Directory() const { return fs::PathFromString(strPath); }
 
     bool Open(bilingual_str& error);
     void Close();
     void Flush(bool fShutdown);
     void CheckpointLSN(const std::string& strFile);
 
-    void CloseDb(const std::string& strFile);
+    void CloseDb(const fs::path& filename);
     void ReloadDbEnv();
 
     DbTxn* TxnBegin(int flags = DB_TXN_WRITE_NOSYNC)
@@ -83,11 +74,8 @@ public:
     }
 };
 
-/** Get BerkeleyEnvironment and database filename given a wallet path. */
-std::shared_ptr<BerkeleyEnvironment> GetWalletEnv(const fs::path& wallet_path, std::string& database_filename);
-
-/** Check format of database file */
-bool IsBerkeleyBtree(const fs::path& path);
+/** Get BerkeleyEnvironment given a directory path. */
+std::shared_ptr<BerkeleyEnvironment> GetBerkeleyEnv(const fs::path& env_directory, bool use_shared_memory);
 
 class BerkeleyBatch;
 
@@ -100,18 +88,17 @@ public:
     BerkeleyDatabase() = delete;
 
     /** Create DB handle to real database */
-    BerkeleyDatabase(std::shared_ptr<BerkeleyEnvironment> env, std::string filename) :
-        WalletDatabase(), env(std::move(env)), strFile(std::move(filename))
+    BerkeleyDatabase(std::shared_ptr<BerkeleyEnvironment> env, fs::path filename, const DatabaseOptions& options) :
+        WalletDatabase(), env(std::move(env)), m_filename(std::move(filename)), m_max_log_mb(options.max_log_mb)
     {
-        auto inserted = this->env->m_databases.emplace(strFile, std::ref(*this));
+        auto inserted = this->env->m_databases.emplace(m_filename, std::ref(*this));
         assert(inserted.second);
     }
 
     ~BerkeleyDatabase() override;
 
-    /** Open the database if it is not already opened.
-     *  Dummy function, doesn't do anything right now, but is needed for class abstraction */
-    void Open(const char* mode) override;
+    /** Open the database if it is not already opened. */
+    void Open() override;
 
     /** Rewrite the entire database on disk, with the exception of key pszSkip if non-zero
      */
@@ -145,8 +132,9 @@ public:
     bool Verify(bilingual_str& error);
 
     /** Return path to main database filename */
-    std::string Filename() override { return (env->Directory() / strFile).string(); }
+    std::string Filename() override { return fs::PathToString(env->Directory() / m_filename); }
 
+    std::string Format() override { return "bdb"; }
     /**
      * Pointer to shared database environment.
      *
@@ -161,15 +149,19 @@ public:
     /** Database pointer. This is initialized lazily and reset during flushes, so it can be null. */
     std::unique_ptr<Db> m_db;
 
-    std::string strFile;
+    fs::path m_filename;
+    int64_t m_max_log_mb;
 
     /** Make a BerkeleyBatch connected to this database */
-    std::unique_ptr<DatabaseBatch> MakeBatch(const char* mode = "r+", bool flush_on_close = true) override;
+    std::unique_ptr<DatabaseBatch> MakeBatch(bool flush_on_close = true) override;
+
+    virtual bool SupportsAutoBackup() override { return true; }
 };
 
 /** RAII class that provides access to a Berkeley database */
 class BerkeleyBatch : public DatabaseBatch
 {
+public:
     /** RAII class that automatically cleanses its data on destruction */
     class SafeDbt final
     {
@@ -184,7 +176,7 @@ class BerkeleyBatch : public DatabaseBatch
 
         // delegate to Dbt
         const void* get_data() const;
-        u_int32_t get_size() const;
+        uint32_t get_size() const;
 
         // conversion operator to access the underlying Dbt
         operator Dbt*();
@@ -195,19 +187,20 @@ private:
     bool WriteKey(CDataStream&& key, CDataStream&& value, bool overwrite = true) override;
     bool EraseKey(CDataStream&& key) override;
     bool HasKey(CDataStream&& key) override;
+    bool ErasePrefix(Span<const std::byte> prefix) override;
 
 protected:
-    Db* pdb;
+    Db* pdb{nullptr};
     std::string strFile;
-    DbTxn* activeTxn;
-    Dbc* m_cursor;
+    DbTxn* activeTxn{nullptr};
+    Dbc* m_cursor{nullptr};
     bool fReadOnly;
     bool fFlushOnClose;
     BerkeleyEnvironment *env;
     BerkeleyDatabase& m_database;
 
 public:
-    explicit BerkeleyBatch(BerkeleyDatabase& database, const char* pszMode = "r+", bool fFlushOnCloseIn=true);
+    explicit BerkeleyBatch(BerkeleyDatabase& database, const bool fReadOnly, bool fFlushOnCloseIn=true);
     ~BerkeleyBatch() override;
 
     BerkeleyBatch(const BerkeleyBatch&) = delete;
@@ -222,14 +215,17 @@ public:
     bool TxnBegin() override;
     bool TxnCommit() override;
     bool TxnAbort() override;
+    DbTxn* txn() const { return activeTxn; }
 };
 
 std::string BerkeleyDatabaseVersion();
 
-//! Check if Berkeley database exists at specified path.
-bool ExistsBerkeleyDatabase(const fs::path& path);
+/** Perform sanity check of runtime BDB version versus linked BDB version.
+ */
+bool BerkeleyDatabaseSanityCheck();
 
 //! Return object giving access to Berkeley database at specified path.
 std::unique_ptr<BerkeleyDatabase> MakeBerkeleyDatabase(const fs::path& path, const DatabaseOptions& options, DatabaseStatus& status, bilingual_str& error);
+} // namespace wallet
 
 #endif // BITCOIN_WALLET_BDB_H

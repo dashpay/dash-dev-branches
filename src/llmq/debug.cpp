@@ -1,45 +1,47 @@
-// Copyright (c) 2018-2022 The Dash Core developers
+// Copyright (c) 2018-2025 The Dash Core developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <llmq/debug.h>
 
+#include <evo/deterministicmns.h>
+#include <llmq/utils.h>
+#include <util/helpers.h>
+#include <util/std23.h>
+
 #include <chainparams.h>
 #include <timedata.h>
 #include <validation.h>
 
-#include <evo/deterministicmns.h>
-#include <llmq/utils.h>
-#include <util/irange.h>
-
 namespace llmq
 {
-UniValue CDKGDebugSessionStatus::ToJson(int quorumIndex, int detailLevel) const
+UniValue CDKGDebugSessionStatus::ToJson(CDeterministicMNManager& dmnman, CQuorumSnapshotManager& qsnapman,
+                                        const ChainstateManager& chainman, int quorumIndex, int detailLevel) const
 {
     UniValue ret(UniValue::VOBJ);
 
-    if (!Params().HasLLMQ(llmqType) || quorumHash.IsNull()) {
+    if (!Params().GetLLMQ(llmqType).has_value() || quorumHash.IsNull()) {
         return ret;
     }
 
     std::vector<CDeterministicMNCPtr> dmnMembers;
     if (detailLevel == 2) {
-        const CBlockIndex* pindex = WITH_LOCK(cs_main, return LookupBlockIndex(quorumHash));
+        const CBlockIndex* pindex = WITH_LOCK(::cs_main, return chainman.m_blockman.LookupBlockIndex(quorumHash));
         if (pindex != nullptr) {
-            dmnMembers = utils::GetAllQuorumMembers(llmqType, pindex);
+            dmnMembers = utils::GetAllQuorumMembers(llmqType, {dmnman, qsnapman, chainman, pindex});
         }
     }
 
-    ret.pushKV("llmqType", static_cast<uint8_t>(llmqType));
+    ret.pushKV("llmqType", std23::to_underlying(llmqType));
     ret.pushKV("quorumHash", quorumHash.ToString());
-    ret.pushKV("quorumHeight", (int)quorumHeight);
-    ret.pushKV("phase", (int)phase);
+    ret.pushKV("quorumHeight", quorumHeight);
+    ret.pushKV("phase", std23::to_underlying(phase));
 
-    ret.pushKV("sentContributions", sentContributions);
-    ret.pushKV("sentComplaint", sentComplaint);
-    ret.pushKV("sentJustification", sentJustification);
-    ret.pushKV("sentPrematureCommitment", sentPrematureCommitment);
-    ret.pushKV("aborted", aborted);
+    ret.pushKV("sentContributions", statusBits.sentContributions);
+    ret.pushKV("sentComplaint", statusBits.sentComplaint);
+    ret.pushKV("sentJustification", statusBits.sentJustification);
+    ret.pushKV("sentPrematureCommitment", statusBits.sentPrematureCommitment);
+    ret.pushKV("aborted", statusBits.aborted);
 
     struct ArrOrCount {
         int count{0};
@@ -59,10 +61,10 @@ UniValue CDKGDebugSessionStatus::ToJson(int quorumIndex, int detailLevel) const
             if (detailLevel == 0) {
                 v.count++;
             } else if (detailLevel == 1) {
-                v.arr.push_back((int)idx);
+                v.arr.push_back(idx);
             } else if (detailLevel == 2) {
                 UniValue a(UniValue::VOBJ);
-                a.pushKV("memberIndex", (int)idx);
+                a.pushKV("memberIndex", idx);
                 if (idx < dmnMembers.size()) {
                     a.pushKV("proTxHash", dmnMembers[idx]->proTxHash.ToString());
                 }
@@ -78,14 +80,14 @@ UniValue CDKGDebugSessionStatus::ToJson(int quorumIndex, int detailLevel) const
         }
     };
 
-    for (const auto i : irange::range(members.size())) {
+    for (const auto i : util::irange(members.size())) {
         const auto& m = members[i];
-        add(badMembers, i, m.bad);
-        add(weComplain, i, m.weComplain);
-        add(receivedContributions, i, m.receivedContribution);
-        add(receivedComplaints, i, m.receivedComplaint);
-        add(receivedJustifications, i, m.receivedJustification);
-        add(receivedPrematureCommitments, i, m.receivedPrematureCommitment);
+        add(badMembers, i, m.statusBits.bad);
+        add(weComplain, i, m.statusBits.weComplain);
+        add(receivedContributions, i, m.statusBits.receivedContribution);
+        add(receivedComplaints, i, m.statusBits.receivedComplaint);
+        add(receivedJustifications, i, m.statusBits.receivedJustification);
+        add(receivedPrematureCommitments, i, m.statusBits.receivedPrematureCommitment);
     }
     push(badMembers, "badMembers");
     push(weComplain, "weComplain");
@@ -105,25 +107,40 @@ UniValue CDKGDebugSessionStatus::ToJson(int quorumIndex, int detailLevel) const
     return ret;
 }
 
-CDKGDebugManager::CDKGDebugManager() = default;
-
-UniValue CDKGDebugStatus::ToJson(int detailLevel) const
+CDKGDebugManager::CDKGDebugManager(CDeterministicMNManager& dmnman, CQuorumSnapshotManager& qsnapman,
+                                   const ChainstateManager& chainman) :
+    m_dmnman{dmnman},
+    m_qsnapman{qsnapman},
+    m_chainman{chainman}
 {
-    UniValue ret(UniValue::VOBJ);
+}
 
-    ret.pushKV("time", nTime);
-    ret.pushKV("timeStr", FormatISO8601DateTime(nTime));
+CDKGDebugManager::~CDKGDebugManager() = default;
+
+size_t CDKGDebugManager::GetSessionCount() const
+{
+    return WITH_LOCK(cs_lockStatus, return localStatus.sessions.size());
+}
+
+UniValue CDKGDebugManager::ToJson(int detailLevel) const
+{
+    LOCK(cs_lockStatus);
+
+    UniValue ret(UniValue::VOBJ);
+    ret.pushKV("time", localStatus.nTime);
+    ret.pushKV("timeStr", FormatISO8601DateTime(localStatus.nTime));
 
     // TODO Support array of sessions
     UniValue sessionsArrJson(UniValue::VARR);
-    for (const auto& p : sessions) {
-        if (!Params().HasLLMQ(p.first.first)) {
+    for (const auto& p : localStatus.sessions) {
+        const auto& llmq_params_opt = Params().GetLLMQ(p.first.first);
+        if (!llmq_params_opt.has_value()) {
             continue;
         }
         UniValue s(UniValue::VOBJ);
-        s.pushKV("llmqType", std::string(GetLLMQParams(p.first.first).name));
+        s.pushKV("llmqType", std::string(llmq_params_opt->name));
         s.pushKV("quorumIndex", p.first.second);
-        s.pushKV("status", p.second.ToJson(p.first.second, detailLevel));
+        s.pushKV("status", p.second.ToJson(m_dmnman, m_qsnapman, m_chainman, p.first.second, detailLevel));
 
         sessionsArrJson.push_back(s);
     }
@@ -132,15 +149,9 @@ UniValue CDKGDebugStatus::ToJson(int detailLevel) const
     return ret;
 }
 
-void CDKGDebugManager::GetLocalDebugStatus(llmq::CDKGDebugStatus& ret) const
-{
-    LOCK(cs);
-    ret = localStatus;
-}
-
 void CDKGDebugManager::ResetLocalSessionStatus(Consensus::LLMQType llmqType, int quorumIndex)
 {
-    LOCK(cs);
+    LOCK(cs_lockStatus);
 
     auto it = localStatus.sessions.find(std::make_pair(llmqType, quorumIndex));
     if (it == localStatus.sessions.end()) {
@@ -153,7 +164,7 @@ void CDKGDebugManager::ResetLocalSessionStatus(Consensus::LLMQType llmqType, int
 
 void CDKGDebugManager::InitLocalSessionStatus(const Consensus::LLMQParams& llmqParams, int quorumIndex, const uint256& quorumHash, int quorumHeight)
 {
-    LOCK(cs);
+    LOCK(cs_lockStatus);
 
     auto it = localStatus.sessions.find(std::make_pair(llmqParams.type, quorumIndex));
     if (it == localStatus.sessions.end()) {
@@ -164,7 +175,7 @@ void CDKGDebugManager::InitLocalSessionStatus(const Consensus::LLMQParams& llmqP
     session.llmqType = llmqParams.type;
     session.quorumHash = quorumHash;
     session.quorumHeight = (uint32_t)quorumHeight;
-    session.phase = 0;
+    session.phase = QuorumPhase{0};
     session.statusBitset = 0;
     session.members.clear();
     session.members.resize((size_t)llmqParams.size);
@@ -172,7 +183,7 @@ void CDKGDebugManager::InitLocalSessionStatus(const Consensus::LLMQParams& llmqP
 
 void CDKGDebugManager::UpdateLocalSessionStatus(Consensus::LLMQType llmqType, int quorumIndex, std::function<bool(CDKGDebugSessionStatus& status)>&& func)
 {
-    LOCK(cs);
+    LOCK(cs_lockStatus);
 
     auto it = localStatus.sessions.find(std::make_pair(llmqType, quorumIndex));
     if (it == localStatus.sessions.end()) {
@@ -186,7 +197,7 @@ void CDKGDebugManager::UpdateLocalSessionStatus(Consensus::LLMQType llmqType, in
 
 void CDKGDebugManager::UpdateLocalMemberStatus(Consensus::LLMQType llmqType, int quorumIndex, size_t memberIdx, std::function<bool(CDKGDebugMemberStatus& status)>&& func)
 {
-    LOCK(cs);
+    LOCK(cs_lockStatus);
 
     auto it = localStatus.sessions.find(std::make_pair(llmqType, quorumIndex));
     if (it == localStatus.sessions.end()) {

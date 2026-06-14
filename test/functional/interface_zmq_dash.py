@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2018-2022 The Dash Core developers
+# Copyright (c) 2018-2025 The Dash Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Test the dash specific ZMQ notification interfaces."""
@@ -12,9 +12,16 @@ import random
 import struct
 import time
 
-from test_framework.test_framework import DashTestFramework
-from test_framework.mininode import P2PInterface
-from test_framework.util import assert_equal, assert_raises_rpc_error
+from test_framework.test_framework import (
+    DashTestFramework,
+    MasternodeInfo,
+)
+from test_framework.p2p import P2PInterface
+from test_framework.util import (
+    assert_equal,
+    assert_raises_rpc_error,
+    p2p_port,
+)
 from test_framework.messages import (
     CBlock,
     CGovernanceObject,
@@ -23,12 +30,11 @@ from test_framework.messages import (
     COutPoint,
     CRecoveredSig,
     CTransaction,
-    FromHex,
+    from_hex,
     hash256,
     msg_clsig,
     msg_inv,
     msg_isdlock,
-    msg_islock,
     msg_tx,
     MSG_TX,
     MSG_TYPE_MASK,
@@ -76,11 +82,11 @@ class TestP2PConn(P2PInterface):
         self.islocks = {}
         self.txes = {}
 
-    def send_islock(self, islock, deterministic):
+    def send_islock(self, islock):
         hash = uint256_from_str(hash256(islock.serialize()))
         self.islocks[hash] = islock
 
-        inv = msg_inv([CInv(31 if deterministic else 30, hash)])
+        inv = msg_inv([CInv(31, hash)])
         self.send_message(inv)
 
     def send_tx(self, tx):
@@ -99,17 +105,24 @@ class TestP2PConn(P2PInterface):
 
 
 class DashZMQTest (DashTestFramework):
+    def add_options(self, parser):
+        self.add_wallet_options(parser)
+
     def set_test_params(self):
+        self.set_dash_test_params(5, 4)
+
         # That's where the zmq publisher will listen for subscriber
-        self.address = "tcp://127.0.0.1:28333"
+        self.zmq_port_base = p2p_port(self.num_nodes + 1)
+        self.address = f"tcp://127.0.0.1:{self.zmq_port_base}"
+
         # node0 creates all available ZMQ publisher
-        node0_extra_args = ["-zmqpub%s=%s" % (pub.value, self.address) for pub in ZMQPublisher]
+        node0_extra_args = [f"-zmqpub{pub.value}={self.address}" for pub in ZMQPublisher]
         node0_extra_args.append("-whitelist=127.0.0.1")
         node0_extra_args.append("-watchquorums")  # have to watch quorums to receive recsigs and trigger zmq
 
-        extra_args = [[]] * 5
-        extra_args[0] = node0_extra_args
-        self.set_dash_test_params(5, 4, fast_dip3_enforcement=True, extra_args=extra_args)
+        #extra_args = [node0_extra_args, [], [], [], []]
+        self.extra_args[0] = node0_extra_args
+
         self.set_dash_llmq_test_params(4, 4)
 
     def skip_test_if_missing_module(self):
@@ -128,12 +141,13 @@ class DashZMQTest (DashTestFramework):
             # Setup the ZMQ subscriber context
             self.zmq_context = zmq.Context()
             # Initialize the network
-            self.activate_dip8()
             self.nodes[0].sporkupdate("SPORK_17_QUORUM_DKG_ENABLED", 0)
+            self.log.info("Test RPC hex getbestchainlock before any CL appeared")
+            assert_raises_rpc_error(-32603, "Unable to find any ChainLock", self.nodes[0].getbestchainlock)
             self.wait_for_sporks_same()
-            # Create an LLMQ for testing
-            self.quorum_type = 100  # llmq_test
-            self.quorum_hash = self.mine_quorum()
+
+            self.mine_cycle_quorum()
+
             self.sync_blocks()
             self.wait_for_chainlocked_block_all_nodes(self.nodes[0].getbestblockhash())
             # Wait a moment to avoid subscribing to recovered sig in the test before the one from the chainlock
@@ -144,22 +158,13 @@ class DashZMQTest (DashTestFramework):
             self.test_chainlock_publishers()
             self.test_governance_publishers()
             self.test_getzmqnotifications()
-            self.test_instantsend_publishers(False)
-            self.activate_dip0024()
-            self.log.info("Activated DIP0024 at height:" + str(self.nodes[0].getblockcount()))
-            # Test for CL 8 blocks after dip24 activation because along with dip24, the BLS scheme is activted
-            self.generate_blocks(8)
+            self.test_instantsend_publishers()
             self.wait_for_chainlocked_block_all_nodes(self.nodes[0].getbestblockhash())
-            self.test_instantsend_publishers(False)
+            self.test_instantsend_publishers()
             # At this point, we need to move forward 3 cycles (3 x 24 blocks) so the first 3 quarters can be created (without DKG sessions)
-            self.move_to_next_cycle()
-            self.test_instantsend_publishers(False)
-            self.move_to_next_cycle()
-            self.test_instantsend_publishers(False)
-            self.move_to_next_cycle()
-            self.test_instantsend_publishers(False)
+            self.generate(self.nodes[0], 24)
             self.mine_cycle_quorum()
-            self.test_instantsend_publishers(True)
+            self.test_instantsend_publishers()
         finally:
             # Destroy the ZMQ context.
             self.log.debug("Destroying ZMQ context")
@@ -167,9 +172,8 @@ class DashZMQTest (DashTestFramework):
 
     def generate_blocks(self, num_blocks):
         mninfos_online = self.mninfo.copy()
-        nodes = [self.nodes[0]] + [mn.node for mn in mninfos_online]
-        self.nodes[0].generate(num_blocks)
-        self.sync_blocks(nodes)
+        nodes = [self.nodes[0]] + [mn.get_node(self) for mn in mninfos_online]
+        self.generate(self.nodes[0], num_blocks, sync_fun=lambda: self.sync_blocks(nodes))
 
     def subscribe(self, publishers):
         import zmq
@@ -190,7 +194,8 @@ class DashZMQTest (DashTestFramework):
 
         def validate_recovered_sig(request_id, msg_hash):
             # Make sure the recovered sig exists by RPC
-            rpc_recovered_sig = self.get_recovered_sig(request_id, msg_hash)
+            self.wait_for_recovered_sig(request_id, msg_hash)
+            rpc_recovered_sig = self.mninfo[0].get_node(self).quorum('getrecsig', 100, request_id, msg_hash)
             # Validate hashrecoveredsig
             zmq_recovered_sig_hash = self.subscribers[ZMQPublisher.hash_recovered_sig].receive().read(32).hex()
             assert_equal(zmq_recovered_sig_hash, msg_hash)
@@ -211,7 +216,7 @@ class DashZMQTest (DashTestFramework):
         # Subscribe to recovered signature messages
         self.subscribe(recovered_sig_publishers)
         # Generate a ChainLock and make sure this leads to valid recovered sig ZMQ messages
-        rpc_last_block_hash = self.nodes[0].generate(1)[0]
+        rpc_last_block_hash = self.generate(self.nodes[0], 1, sync_fun=self.no_op)[0]
         self.wait_for_chainlocked_block_all_nodes(rpc_last_block_hash)
         height = self.nodes[0].getblockcount()
         rpc_request_id = hash256(ser_string(b"clsig") + struct.pack("<I", height))[::-1].hex()
@@ -219,8 +224,9 @@ class DashZMQTest (DashTestFramework):
         # Sign an arbitrary and make sure this leads to valid recovered sig ZMQ messages
         sign_id = uint256_to_string(random.getrandbits(256))
         sign_msg_hash = uint256_to_string(random.getrandbits(256))
-        for mn in self.get_quorum_masternodes(self.quorum_hash):
-            mn.node.quorum("sign", self.quorum_type, sign_id, sign_msg_hash)
+        quorumHash = self.nodes[0].quorum("selectquorum", 100, sign_id)["quorumHash"]
+        for mn in self.get_quorum_masternodes(quorumHash): # type: MasternodeInfo
+            mn.get_node(self).quorum("sign", 100, sign_id, sign_msg_hash)
         validate_recovered_sig(sign_id, sign_msg_hash)
         # Unsubscribe from recovered signature messages
         self.unsubscribe(recovered_sig_publishers)
@@ -235,7 +241,7 @@ class DashZMQTest (DashTestFramework):
         # Subscribe to ChainLock messages
         self.subscribe(chain_lock_publishers)
         # Generate ChainLock
-        generated_hash = self.nodes[0].generate(1)[0]
+        generated_hash = self.generate(self.nodes[0], 1, sync_fun=self.no_op)[0]
         self.wait_for_chainlocked_block_all_nodes(generated_hash)
         rpc_best_chain_lock = self.nodes[0].getbestchainlock()
         rpc_best_chain_lock_hash = rpc_best_chain_lock["blockhash"]
@@ -264,10 +270,11 @@ class DashZMQTest (DashTestFramework):
         assert_equal(uint256_to_string(zmq_chain_lock.blockHash), rpc_chain_lock_hash)
         assert_equal(zmq_chain_locked_block.hash, rpc_chain_lock_hash)
         assert_equal(zmq_chain_lock.sig.hex(), rpc_best_chain_lock_sig)
+        assert_equal(zmq_chain_lock.serialize().hex(), self.nodes[0].getbestchainlock()['hex'])
         # Unsubscribe from ChainLock messages
         self.unsubscribe(chain_lock_publishers)
 
-    def test_instantsend_publishers(self, deterministic):
+    def test_instantsend_publishers(self):
         import zmq
         instantsend_publishers = [
             ZMQPublisher.hash_tx_lock,
@@ -286,9 +293,10 @@ class DashZMQTest (DashTestFramework):
         # Create two raw TXs, they will conflict with each other
         rpc_raw_tx_1 = self.create_raw_tx(self.nodes[0], self.nodes[0], 1, 1, 100)
         rpc_raw_tx_2 = self.create_raw_tx(self.nodes[0], self.nodes[0], 1, 1, 100)
+        assert_equal(['None'], self.nodes[0].getislocks([rpc_raw_tx_1['txid']]))
         # Send the first transaction and wait for the InstantLock
         rpc_raw_tx_1_hash = self.nodes[0].sendrawtransaction(rpc_raw_tx_1['hex'])
-        self.wait_for_instantlock(rpc_raw_tx_1_hash, self.nodes[0])
+        self.wait_for_instantlock(rpc_raw_tx_1_hash)
         # Validate hashtxlock
         zmq_tx_lock_hash = self.subscribers[ZMQPublisher.hash_tx_lock].receive().read(32).hex()
         assert_equal(zmq_tx_lock_hash, rpc_raw_tx_1['txid'])
@@ -303,8 +311,10 @@ class DashZMQTest (DashTestFramework):
         zmq_tx_lock_tx.deserialize(zmq_tx_lock_sig_stream)
         assert zmq_tx_lock_tx.is_valid()
         assert_equal(zmq_tx_lock_tx.hash, rpc_raw_tx_1['txid'])
-        zmq_tx_lock = msg_isdlock() if deterministic else msg_islock()
+        zmq_tx_lock = msg_isdlock()
         zmq_tx_lock.deserialize(zmq_tx_lock_sig_stream)
+        assert_equal(rpc_raw_tx_1['txid'], self.nodes[0].getislocks([rpc_raw_tx_1['txid']])[0]['txid'])
+        assert_equal(zmq_tx_lock.serialize().hex(), self.nodes[0].getislocks([rpc_raw_tx_1['txid']])[0]['hex'])
         assert_equal(uint256_to_string(zmq_tx_lock.txid), rpc_raw_tx_1['txid'])
         # Try to send the second transaction. This must throw an RPC error because it conflicts with rpc_raw_tx_1
         # which already got the InstantSend lock.
@@ -324,10 +334,10 @@ class DashZMQTest (DashTestFramework):
         assert zmq_double_spend_tx_1.is_valid()
         assert_equal(zmq_double_spend_tx_1.hash, rpc_raw_tx_1['txid'])
         # No islock notifications when tx is not received yet
-        self.nodes[0].generate(1)
+        self.generate(self.nodes[0], 1, sync_fun=self.no_op)
         rpc_raw_tx_3 = self.create_raw_tx(self.nodes[0], self.nodes[0], 1, 1, 100)
-        islock = self.create_islock(rpc_raw_tx_3['hex'], deterministic)
-        self.test_node.send_islock(islock, deterministic)
+        isdlock = self.create_isdlock(rpc_raw_tx_3['hex'])
+        self.test_node.send_islock(isdlock)
         # Validate NO hashtxlock
         time.sleep(1)
         try:
@@ -337,8 +347,8 @@ class DashZMQTest (DashTestFramework):
             # this is expected
             pass
         # Now send the tx itself
-        self.test_node.send_tx(FromHex(msg_tx(), rpc_raw_tx_3['hex']))
-        self.wait_for_instantlock(rpc_raw_tx_3['txid'], self.nodes[0])
+        self.test_node.send_tx(from_hex(msg_tx(),rpc_raw_tx_3['hex']))
+        self.wait_for_instantlock(rpc_raw_tx_3['txid'])
         # Validate hashtxlock
         zmq_tx_lock_hash = self.subscribers[ZMQPublisher.hash_tx_lock].receive().read(32).hex()
         assert_equal(zmq_tx_lock_hash, rpc_raw_tx_3['txid'])
@@ -371,9 +381,8 @@ class DashZMQTest (DashTestFramework):
         }
         proposal_hex = ''.join(format(x, '02x') for x in json.dumps(proposal_data).encode())
         collateral = self.nodes[0].gobject("prepare", "0", proposal_rev, proposal_time, proposal_hex)
-        self.wait_for_instantlock(collateral, self.nodes[0])
-        self.nodes[0].generate(6)
-        self.sync_blocks()
+        self.wait_for_instantlock(collateral)
+        self.generate(self.nodes[0], 6, sync_fun=lambda: self.sync_blocks())
         rpc_proposal_hash = self.nodes[0].gobject("submit", "0", proposal_rev, proposal_time, proposal_hex, collateral)
         # Validate hashgovernanceobject
         zmq_governance_object_hash = self.subscribers[ZMQPublisher.hash_governance_object].receive().read(32).hex()

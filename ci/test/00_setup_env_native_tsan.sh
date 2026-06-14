@@ -1,20 +1,35 @@
 #!/usr/bin/env bash
 #
-# Copyright (c) 2019 The Bitcoin Core developers
+# Copyright (c) 2019-2021 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 export LC_ALL=C.UTF-8
 
-export PACKAGES="clang llvm python3-zmq qtbase5-dev qttools5-dev-tools libevent-dev bsdmainutils libboost-filesystem-dev libboost-test-dev libboost-thread-dev libdb5.3++-dev libminiupnpc-dev libzmq3-dev libqrencode-dev"
-export DEP_OPTS="NO_UPNP=1 DEBUG=1"
+export CONTAINER_NAME=ci_native_tsan
+case "$(uname -m)" in
+  aarch64)
+    export HOST=aarch64-linux-gnu
+    ;;
+  x86_64)
+    export HOST=x86_64-pc-linux-gnu
+    ;;
+  *)
+    if command -v dpkg >/dev/null 2>&1; then
+      arch="$(dpkg --print-architecture)"
+      if [ "${arch}" = "arm64" ]; then
+        export HOST=aarch64-linux-gnu
+      elif [ "${arch}" = "amd64" ]; then
+        export HOST=x86_64-pc-linux-gnu
+      fi
+    fi
+    ;;
+esac
+export PACKAGES="clang-19 llvm-19 libclang-rt-19-dev libc++abi-19-dev libc++-19-dev python3-zmq"
+export DEP_OPTS="CC=clang-19 CXX='clang++-19 -stdlib=libc++'"
 export TEST_RUNNER_EXTRA="--extended --exclude feature_pruning,feature_dbcrash,wallet_multiwallet.py" # Temporarily suppress ASan heap-use-after-free (see issue #14163)
-export RUN_BENCH=true
+export TEST_RUNNER_EXTRA="${TEST_RUNNER_EXTRA} --timeout-factor=4"  # Increase timeout because sanitizers slow down
 export GOAL="install"
-export BITCOIN_CONFIG="--enable-zmq --enable-reduce-exports --enable-crash-hooks --with-sanitizers=thread"
-export CPPFLAGS="-DDEBUG_LOCKORDER -DENABLE_DASH_DEBUG -DARENA_DEBUG"
+export BITCOIN_CONFIG="--enable-zmq --with-sanitizers=thread CC=clang-19 CXX=clang++-19 CXXFLAGS='-g'"
+export CPPFLAGS="-DARENA_DEBUG -DDEBUG_LOCKORDER -DDEBUG_LOCKCONTENTION"
 export PYZMQ=true
-
-# xenial comes with old clang versions that can not parse the sanitizer suppressions files
-# Remove unparseable lines as a hacky workaround
-sed -i '/^implicit-/d' "${BASE_ROOT_DIR}/test/sanitizer_suppressions/ubsan"

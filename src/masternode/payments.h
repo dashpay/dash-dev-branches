@@ -1,46 +1,66 @@
-// Copyright (c) 2014-2023 The Dash Core developers
+// Copyright (c) 2014-2024 The Dash Core developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #ifndef BITCOIN_MASTERNODE_PAYMENTS_H
 #define BITCOIN_MASTERNODE_PAYMENTS_H
 
-#include <amount.h>
+#include <consensus/amount.h>
 
 #include <string>
 #include <vector>
 
-class CGovernanceManager;
-class CMasternodePayments;
 class CBlock;
+class CBlockIndex;
+class CDeterministicMNManager;
+class ChainstateManager;
 class CTransaction;
-struct CMutableTransaction;
-class CSporkManager;
 class CTxOut;
-class CMasternodeSync;
 
-/// TODO: all 4 functions do not belong here really, they should be refactored/moved somewhere (main.cpp ?)
-bool IsBlockValueValid(const CSporkManager& sporkManager, CGovernanceManager& governanceManager, const CMasternodeSync& mn_sync,
-                       const CBlock& block, int nBlockHeight, CAmount blockReward, std::string& strErrorRet);
-bool IsBlockPayeeValid(const CSporkManager& sporkManager, CGovernanceManager& governanceManager,
-                       const CTransaction& txNew, int nBlockHeight, CAmount blockReward);
-void FillBlockPayments(const CSporkManager& sporkManager, CGovernanceManager& governanceManager,
-                       CMutableTransaction& txNew, int nBlockHeight, CAmount blockReward, std::vector<CTxOut>& voutMasternodePaymentsRet, std::vector<CTxOut>& voutSuperblockPaymentsRet);
+struct CMutableTransaction;
 
-extern CMasternodePayments mnpayments;
+namespace governance {
+class SuperblockManager;
+}
+namespace Consensus { struct Params; }
 
-//
-// Masternode Payments Class
-// Keeps track of who should get paid for which blocks
-//
+/**
+ * This helper returns amount that should be reallocated to platform
+ * It is calculated based on total amount of masternode rewards (not block reward)
+ */
+CAmount PlatformShare(const CAmount masternodeReward);
 
-class CMasternodePayments
+class CMNPaymentsProcessor
 {
-public:
-    static bool GetBlockTxOuts(int nBlockHeight, CAmount blockReward, std::vector<CTxOut>& voutMasternodePaymentsRet);
-    static bool IsTransactionValid(const CTransaction& txNew, int nBlockHeight, CAmount blockReward);
+private:
+    CDeterministicMNManager& m_dmnman;
+    governance::SuperblockManager& m_superblocks;
+    const ChainstateManager& m_chainman;
+    const Consensus::Params& m_consensus_params;
 
-    static bool GetMasternodeTxOuts(int nBlockHeight, CAmount blockReward, std::vector<CTxOut>& voutMasternodePaymentsRet);
+private:
+    [[nodiscard]] bool GetBlockTxOuts(const CBlockIndex* pindexPrev, const CAmount blockSubsidy, const CAmount feeReward,
+                                      std::vector<CTxOut>& voutMasternodePaymentsRet);
+    [[nodiscard]] bool GetMasternodeTxOuts(const CBlockIndex* pindexPrev, const CAmount blockSubsidy, const CAmount feeReward,
+                                      std::vector<CTxOut>& voutMasternodePaymentsRet);
+    [[nodiscard]] bool IsTransactionValid(const CTransaction& txNew, const CBlockIndex* pindexPrev, const CAmount blockSubsidy,
+                                          const CAmount feeReward);
+    [[nodiscard]] bool IsOldBudgetBlockValueValid(const CBlock& block, const int nBlockHeight, const CAmount blockReward, std::string& strErrorRet);
+
+public:
+    explicit CMNPaymentsProcessor(CDeterministicMNManager& dmnman, governance::SuperblockManager& superblocks,
+                                  const ChainstateManager& chainman, const Consensus::Params& consensus_params) :
+        m_dmnman{dmnman},
+        m_superblocks{superblocks},
+        m_chainman{chainman},
+        m_consensus_params{consensus_params}
+    {
+    }
+
+    bool IsBlockValueValid(const CBlock& block, const int nBlockHeight, const CAmount blockReward, std::string& strErrorRet, const bool check_superblock);
+    bool IsBlockPayeeValid(const CTransaction& txNew, const CBlockIndex* pindexPrev, const CAmount blockSubsidy, const CAmount feeReward, const bool check_superblock);
+    void FillBlockPayments(CMutableTransaction& txNew, const CBlockIndex* pindexPrev, const CAmount blockSubsidy, const CAmount feeReward,
+                           std::vector<CTxOut>& voutMasternodePaymentsRet, std::vector<CTxOut>& voutSuperblockPaymentsRet);
 };
 
 #endif // BITCOIN_MASTERNODE_PAYMENTS_H

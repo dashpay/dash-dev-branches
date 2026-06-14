@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2018 The Bitcoin Core developers
+# Copyright (c) 2018-2020 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Test the getblockfilter RPC."""
@@ -15,14 +15,14 @@ class GetBlockFilterTest(BitcoinTestFramework):
     def set_test_params(self):
         self.setup_clean_chain = True
         self.num_nodes = 2
-        self.extra_args = [["-blockfilterindex"], []]
+        self.extra_args = [["-blockfilterindex"], ["-blockfilterindex=0", "-peerblockfilters=0"]]
 
     def run_test(self):
         # Create two chains by disconnecting nodes 0 & 1, mining, then reconnecting
         self.disconnect_nodes(0, 1)
 
-        self.nodes[0].generate(3)
-        self.nodes[1].generate(4)
+        self.generate(self.nodes[0], 3, sync_fun=self.no_op)
+        self.generate(self.nodes[1], 4, sync_fun=self.no_op)
 
         assert_equal(self.nodes[0].getblockcount(), 3)
         chain0_hashes = [self.nodes[0].getblockhash(block_height) for block_height in range(4)]
@@ -55,7 +55,7 @@ class GetBlockFilterTest(BitcoinTestFramework):
         assert_raises_rpc_error(-5, "Unknown filtertype", self.nodes[0].getblockfilter, genesis_hash, "unknown")
 
         # Test getblockfilter fails on node without compact block filter index
-        self.restart_node(0, extra_args=["-blockfilterindex=0"])
+        self.restart_node(0, extra_args=["-blockfilterindex=0", "-peerblockfilters=0"])
         for filter_type in FILTER_TYPES:
             assert_raises_rpc_error(-1, "Index is not enabled for filtertype {}".format(filter_type),
                                     self.nodes[0].getblockfilter, genesis_hash, filter_type)

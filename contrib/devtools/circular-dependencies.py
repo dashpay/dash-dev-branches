@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-# Copyright (c) 2018 The Bitcoin Core developers
+# Copyright (c) 2018-2020 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 import sys
 import re
-from multiprocess import Pool
+from multiprocess import Pool # type: ignore[import]
+from typing import Dict, List, Set
 
 MAPPING = {
     'core_read.cpp': 'core_io.cpp',
@@ -34,7 +35,7 @@ def module_name(path):
 
 if __name__=="__main__":
     files = dict()
-    deps = dict()
+    deps: Dict[str, Set[str]] = dict()
 
     RE = re.compile("^#include <(.*)>")
 
@@ -48,7 +49,7 @@ if __name__=="__main__":
 
     def handle_module2(module):
         # Build the transitive closure of dependencies of module
-        closure = dict()
+        closure: Dict[str, List[str]] = dict()
         for dep in deps[module]:
             closure[dep] = []
         while True:
@@ -90,7 +91,7 @@ if __name__=="__main__":
     # Loop to find the shortest (remaining) circular dependency
 
     def shortest_c_dep():
-        have_cycle = False
+        have_cycle: bool = False
 
         sorted_keys = None
 

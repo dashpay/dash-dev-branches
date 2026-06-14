@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copyright (c) 2018-2022 The Dash Core developers
+# Copyright (c) 2018-2025 The Dash Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 #
@@ -13,14 +13,20 @@ PASS_ARGS="$*"
 
 source ./ci/dash/matrix.sh
 
-if [ "$RUN_INTEGRATION_TESTS" != "true" ]; then
+if [ "$RUN_FUNCTIONAL_TESTS" != "true" ]; then
   echo "Skipping integration tests"
   exit 0
 fi
 
-export LD_LIBRARY_PATH=$BASE_BUILD_DIR/depends/$HOST/lib
+export LD_LIBRARY_PATH=$DEPENDS_DIR/$HOST/lib
 
-cd build-ci/dashcore-$BUILD_TARGET
+if [ "$DOWNLOAD_PREVIOUS_RELEASES" = "true" ]; then
+  echo "Downloading previous releases..."
+  # shellcheck disable=SC2086
+  ./test/get_previous_releases.py -b -t "$PREVIOUS_RELEASES_DIR"
+fi
+
+cd "build-ci/dashcore-$BUILD_TARGET"
 
 if [ "$SOCKETEVENTS" = "" ]; then
   # Let's switch socketevents mode to some random mode
@@ -37,28 +43,30 @@ echo "Using socketevents mode: $SOCKETEVENTS"
 EXTRA_ARGS="--dashd-arg=-socketevents=$SOCKETEVENTS"
 
 set +e
-./test/functional/test_runner.py --ci --combinedlogslen=4000 ${TEST_RUNNER_EXTRA} --failfast --nocleanup --tmpdir=$(pwd)/testdatadirs $PASS_ARGS $EXTRA_ARGS
+# shellcheck disable=SC2086
+LD_LIBRARY_PATH="$DEPENDS_DIR/$HOST/lib" ./test/functional/test_runner.py --ci --attempts=3 --ansi --combinedlogslen=4000 --timeout-factor="${TEST_RUNNER_TIMEOUT_FACTOR}" ${TEST_RUNNER_EXTRA} --failfast --nocleanup --tmpdir="$(pwd)/testdatadirs" $PASS_ARGS $EXTRA_ARGS
 RESULT=$?
 set -e
 
 echo "Collecting logs..."
-BASEDIR=$(ls testdatadirs)
+BASEDIR="$(ls testdatadirs)"
 if [ "$BASEDIR" != "" ]; then
   mkdir testlogs
-  TESTDATADIRS=$(ls testdatadirs/$BASEDIR)
+  TESTDATADIRS=$(ls "testdatadirs/$BASEDIR")
   for d in $TESTDATADIRS; do
     [[ "$d" ]] || break # found nothing
     [[ "$d" != "cache" ]] || continue # skip cache dir
-    mkdir testlogs/$d
-    PYTHONIOENCODING=UTF-8 ./test/functional/combine_logs.py -c ./testdatadirs/$BASEDIR/$d > ./testlogs/$d/combined.log
-    PYTHONIOENCODING=UTF-8 ./test/functional/combine_logs.py --html ./testdatadirs/$BASEDIR/$d > ./testlogs/$d/combined.html
-    cd testdatadirs/$BASEDIR/$d
+    mkdir "testlogs/$d"
+    PYTHONIOENCODING=UTF-8 ./test/functional/combine_logs.py -c "./testdatadirs/$BASEDIR/$d" > "./testlogs/$d/combined.log"
+    # Disabled creation of combined.html: 40% smaller CI job artifacts
+    # PYTHONIOENCODING=UTF-8 ./test/functional/combine_logs.py --html ./testdatadirs/$BASEDIR/$d > ./testlogs/$d/combined.html
+    cd "testdatadirs/$BASEDIR/$d"
     LOGFILES="$(find . -name 'debug.log' -or -name "test_framework.log")"
     cd ../../..
     for f in $LOGFILES; do
-      d2="testlogs/$d/$(dirname $f)"
-      mkdir -p $d2
-      cp testdatadirs/$BASEDIR/$d/$f $d2/
+      d2="testlogs/$d/$(dirname "$f")"
+      mkdir -p "$d2"
+      mv "testdatadirs/$BASEDIR/$d/$f" "$d2/"
     done
   done
 fi

@@ -10,7 +10,8 @@ import os
 import sys
 import subprocess
 import hashlib
-from PIL import Image  # pip3 install Pillow
+# pip3 install Pillow
+from PIL import Image # type: ignore[import]
 
 def file_hash(filename):
     '''Return hash of raw file contents'''
@@ -27,7 +28,7 @@ def content_hash(filename):
 pngcrush = 'pngcrush'
 git = 'git'
 folders = [
-    "src/qt/res/movies",
+    "src/qt/res/animation",
     "src/qt/res/icons",
     "src/qt/res/images",
     "share/pixmaps"
@@ -49,7 +50,7 @@ for folder in folders:
             try:
                 subprocess.call([pngcrush, "-brute", "-ow", "-rem", "gAMA", "-rem", "cHRM", "-rem", "iCCP", "-rem", "sRGB", "-rem", "alla", "-rem", "text", file_path],
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except:
+            except Exception:
                 print("pngcrush is not installed, aborting...")
                 sys.exit(0)
 

@@ -28,7 +28,9 @@ jobs:
             perf
             test
             build
+            guix
             ci
+            lint
             chore
             revert
             trivial
@@ -36,6 +38,7 @@ jobs:
           # Configure which scopes are allowed (newline delimited).
           scopes: |
             consensus
+            interfaces
             log
             mining
             net
@@ -43,6 +46,7 @@ jobs:
             rest
             rpc
             scripts
+            stats
             utils
             wallet
             zmq

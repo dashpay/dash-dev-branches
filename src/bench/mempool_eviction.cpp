@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2015 The Bitcoin Core developers
+// Copyright (c) 2011-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -16,8 +16,8 @@ static void AddTx(const CTransactionRef& tx, const CAmount& nFee, CTxMemPool& po
     unsigned int sigOps = 1;
     LockPoints lp;
     pool.addUnchecked(CTxMemPoolEntry(
-                                        tx, nFee, nTime, nHeight,
-                                        spendsCoinbase, sigOps, lp));
+        tx, nFee, nTime, nHeight,
+        spendsCoinbase, sigOps, lp));
 }
 
 // Right now this is only testing eviction performance in an extremely small
@@ -25,7 +25,7 @@ static void AddTx(const CTransactionRef& tx, const CAmount& nFee, CTxMemPool& po
 // unique transactions for a more meaningful performance measurement.
 static void MempoolEviction(benchmark::Bench& bench)
 {
-    RegTestingSetup test_setup;
+    const auto testing_setup = MakeNoLogFileContext<const TestingSetup>();
 
     CMutableTransaction tx1 = CMutableTransaction();
     tx1.vin.resize(1);
@@ -97,7 +97,7 @@ static void MempoolEviction(benchmark::Bench& bench)
     tx7.vout[1].scriptPubKey = CScript() << OP_7 << OP_EQUAL;
     tx7.vout[1].nValue = 10 * COIN;
 
-    CTxMemPool pool;
+    CTxMemPool& pool = *Assert(testing_setup->m_node.mempool);
     // Create transaction references outside the "hot loop"
     const CTransactionRef tx1_r{MakeTransactionRef(tx1)};
     const CTransactionRef tx2_r{MakeTransactionRef(tx2)};
@@ -122,4 +122,4 @@ static void MempoolEviction(benchmark::Bench& bench)
     });
 }
 
-BENCHMARK(MempoolEviction);
+BENCHMARK(MempoolEviction, benchmark::PriorityLevel::HIGH);

@@ -385,6 +385,7 @@ QGroupBox
 QGroupBox {
     background-color:red;
     color: red;
+    font-size: 16px;
     padding-top: 20px;
 }
 
@@ -728,6 +729,48 @@ QPushButton - Special case, tabbar replacement buttons
     border-radius: 0px;
     border-bottom: 2px solid red;
     background-color:transparent;
+}
+
+/******************************************************
+QTabWidget - Info sub-tab segmented control
+******************************************************/
+
+QTabWidget#tabWidgetInfo::pane {
+    border: none;
+    margin-top: 6px;
+}
+
+QTabWidget#tabWidgetInfo QTabBar::tab {
+    background-color: transparent;
+    border: 1px solid red;
+    border-right: none;
+    padding: 3px 12px;
+    color: red;
+}
+
+QTabWidget#tabWidgetInfo QTabBar::tab:first {
+    border-top-left-radius: 4px;
+    border-bottom-left-radius: 4px;
+}
+
+QTabWidget#tabWidgetInfo QTabBar::tab:last {
+    border-right: 1px solid red;
+    border-top-right-radius: 4px;
+    border-bottom-right-radius: 4px;
+}
+
+QTabWidget#tabWidgetInfo QTabBar::tab:only-one {
+    border-right: 1px solid red;
+    border-radius: 4px;
+}
+
+QTabWidget#tabWidgetInfo QTabBar::tab:selected {
+    background-color: red;
+    color: white;
+}
+
+QTabWidget#tabWidgetInfo QTabBar::tab:hover:!selected {
+    background-color: rgba(255, 0, 0, 25);
 }
 
 /******************************************************
@@ -1181,6 +1224,31 @@ QDialog#CoinControlDialog .CoinControlTreeWidget#treeWidget::separator {
 }
 
 /******************************************************
+CreateWalletDialog
+******************************************************/
+
+QDialog#CreateWalletDialog QToolButton#advanced_toggle_button {
+    border: 0px;
+    border-radius: 8px;
+    max-height: 26px;
+    min-height: 26px;
+    padding-left: 12px;
+    padding-right: 12px;
+    padding-top: 4px;
+    padding-bottom: 4px;
+}
+
+QDialog#CreateWalletDialog QGroupBox#groupBox {
+    border-radius: 8px;
+    padding: 2px 12px 12px 12px;
+    margin-top: 0px;
+}
+
+QDialog#CreateWalletDialog QGroupBox#groupBox::title {
+    padding: 0px;
+}
+
+/******************************************************
 EditAddressDialog
 ******************************************************/
 
@@ -1223,6 +1291,47 @@ MasternodeList QLabel#countLabelDIP3 {
 }
 
 /******************************************************
+MnemonicVerificationDialog
+******************************************************/
+
+QDialog#MnemonicVerificationDialog QLabel#warningLabel {
+    font-size: 17px;
+    font-weight: 700;
+}
+
+QDialog#MnemonicVerificationDialog QLabel#instructionLabel {
+    font-size: 14px;
+}
+
+QDialog#MnemonicVerificationDialog QLabel#verificationLabel {
+    margin-top: 0px;
+    margin-bottom: 4px;
+}
+
+QDialog#MnemonicVerificationDialog QLabel#word1Status,
+QDialog#MnemonicVerificationDialog QLabel#word2Status,
+QDialog#MnemonicVerificationDialog QLabel#word3Status {
+    font-weight: 700;
+    min-width: 18px;
+}
+
+QDialog#MnemonicVerificationDialog QScrollArea#mnemonicScroll {
+    border-radius: 8px;
+    border: 1px solid;
+}
+
+QDialog#MnemonicVerificationDialog QScrollArea#mnemonicScroll QWidget#mnemonicGridWidget QLabel {
+    font-family: monospace;
+    font-size: 13pt;
+}
+
+QDialog#MnemonicVerificationDialog QLineEdit#word1Edit,
+QDialog#MnemonicVerificationDialog QLineEdit#word2Edit,
+QDialog#MnemonicVerificationDialog QLineEdit#word3Edit {
+    max-width: 320px;
+}
+
+/******************************************************
 ModalOverlay
 ******************************************************/
 
@@ -1257,6 +1366,13 @@ QDialog#OpenURIDialog {
 }
 
 QDialog#OpenURIDialog QLabel#label { /* URI Label */
+}
+
+QDialog#OpenURIDialog .QToolButton { /* General Settings for Pay To Icons */
+    background-color: #00000000;
+    margin-left: 5px;
+    margin-right: 5px;
+    border: 0;
 }
 
 /******************************************************
@@ -1315,6 +1431,10 @@ QWidget#OverviewPage QLabel#labelAlerts {
      border-radius: 5px;
      padding: 5px;
  }
+
+QWidget#no_wallet_group {
+    border: 0;
+}
 
 /******************************************************
 OverviewPage Balances
@@ -1540,8 +1660,39 @@ QWidget .QFrame#frame_2 .QLabel#labelTransactionsStatus { /* Recent Transactions
 
 QWidget .QFrame#frame_2 QListView { /* Transaction List */
     background: #00000000;
-    max-width: 430px;
     margin-right: 10px;
+}
+
+/******************************************************
+ProposalCreate
+******************************************************/
+QDialog#ProposalCreate #labelError {
+    margin-left: 8px;
+}
+
+/******************************************************
+ProposalResume
+******************************************************/
+
+QDialog#ProposalResume #scrollArea {
+    background: transparent;
+}
+
+QDialog#ProposalResume #scrollContents {
+    background-color: red;
+    border: 1px solid red;
+    border-radius: 4px;
+}
+
+QDialog#ProposalResume #proposalEntry {
+    background-color: red;
+    border: 1px solid red;
+    border-radius: 4px;
+}
+
+QDialog#ProposalResume #proposalEntry QTextEdit {
+    background: transparent;
+    border: none;
 }
 
 /******************************************************
@@ -1577,32 +1728,32 @@ RPCConsole
 QWidget#RPCConsole { /* RPC Console Dialog Box */
 }
 
-QWidget#RPCConsole QLabel#label_9,
-QWidget#RPCConsole QLabel#labelNetwork,
-QWidget#RPCConsole QLabel#label_10,
-QWidget#RPCConsole QLabel#labelMempoolTitle,
-QWidget#RPCConsole QLabel#label_repair_header,
-QWidget#RPCConsole QLabel#peerHeading,
-QWidget#RPCConsole QLabel#banHeading {
+QWidget#RPCConsole QLabel#label_alerts {
+    background-color: #c79304;
+    color: #222222;
+    border-radius: 5px;
+    padding: 5px;
 }
 
-QWidget#RPCConsole QLabel#labelNetwork,
-QWidget#RPCConsole QLabel#label_10,
-QWidget#RPCConsole QLabel#labelMempoolTitle { /* Margin between Network and Block Chain headers */
+QWidget#InformationWidget QLabel#label_10,
+QWidget#InformationWidget QLabel#labelMempoolTitle,
+QWidget#InformationWidget QLabel#labelNetwork,
+QWidget#NetworkWidget QLabel#labelChainLocks,
+QWidget#NetworkWidget QLabel#labelCreditPool,
+QWidget#NetworkWidget QLabel#labelInstantSend,
+QWidget#NetworkWidget QLabel#labelMasternodes,
+QWidget#NetworkWidget QLabel#labelQuorums,
+QWidget#ProposalInfo QLabel#labelNode,
+QWidget#ProposalInfo QLabel#labelParticipation,
+QWidget#ProposalInfo QLabel#labelProposals {
     qproperty-alignment: 'AlignLeft | AlignBottom';
     min-height: 25px;
-    margin-top: 10px;
-    margin-left: -4px;
 }
 
 QWidget#RPCConsole  QLabel#banHeading { /* Peers Info Header */
     min-height: 30px;
     margin-left: -3px;
     margin-bottom: 15px;
-}
-
-QWidget#RPCConsole QPushButton#openDebugLogfileButton {
-    max-width: 60px;
 }
 
 QWidget#RPCConsole QTextEdit#messagesWidget { /* Console Messages Window */
@@ -1687,7 +1838,7 @@ QDialog#SendCoinsDialog .QScrollArea#scrollArea .QWidget#scrollAreaWidgetContent
     background-color: #00000000;
 }
 
-QDialog#SendCoinsDialog QLabel#labelBalanceText,
+QDialog#SendCoinsDialog QLabel#labelBalanceName,
 QDialog#SendCoinsDialog QLabel#labelBalance {
     qproperty-alignment: 'AlignLeading | AlignLeft';
     min-height: 20px;
@@ -1710,7 +1861,7 @@ QDialog#SendCoinsDialog QPushButton#sendButton {
 SendCoinsEntry
 ******************************************************/
 
-QStackedWidget#SendCoinsEntry .QFrame#SendCoins > .QLabel { /* Send Coin Entry Labels */
+QWidget#SendCoinsEntry .QFrame#SendCoins > .QLabel { /* Send Coin Entry Labels */
     background-color: #00000000;
     min-width: 50px;
     min-height: 25px;
@@ -1718,30 +1869,29 @@ QStackedWidget#SendCoinsEntry .QFrame#SendCoins > .QLabel { /* Send Coin Entry L
     padding-right: 5px;
 }
 
-QStackedWidget#SendCoinsEntry .QFrame#SendCoins .QLabel#amountLabel {
+QWidget#SendCoinsEntry .QFrame#SendCoins .QLabel#amountLabel {
 }
 
-QStackedWidget#SendCoinsEntry .QValidatedLineEdit#payTo { /* Pay To Input Field */
+QWidget#SendCoinsEntry .QValidatedLineEdit#payTo { /* Pay To Input Field */
 }
 
-QStackedWidget#SendCoinsEntry .QToolButton { /* General Settings for Pay To Icons */
+QWidget#SendCoinsEntry .QToolButton { /* General Settings for Pay To Icons */
     background-color: #00000000;
     margin-left: 5px;
     margin-right: 5px;
     border: 0;
 }
 
-QStackedWidget#SendCoinsEntry .QToolButton#addressBookButton { /* Address Book Button */
+QWidget#SendCoinsEntry .QToolButton#addressBookButton { /* Address Book Button */
     margin-left: 10px;
 }
 
-QStackedWidget#SendCoinsEntry .QToolButton#addressBookButton,
-QStackedWidget#SendCoinsEntry .QToolButton#pasteButton,
-QStackedWidget#SendCoinsEntry .QToolButton#deleteButton,
-QStackedWidget#SendCoinsEntry .QToolButton#deleteButton_is {
+QWidget#SendCoinsEntry .QToolButton#addressBookButton,
+QWidget#SendCoinsEntry .QToolButton#pasteButton,
+QWidget#SendCoinsEntry .QToolButton#deleteButton {
 }
 
-QStackedWidget#SendCoinsEntry .QLineEdit#addAsLabel { /* Pay To Input Field */
+QWidget#SendCoinsEntry .QLineEdit#addAsLabel { /* Pay To Input Field */
 }
 
 /******************************************************

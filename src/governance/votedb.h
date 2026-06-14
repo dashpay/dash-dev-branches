@@ -1,17 +1,21 @@
-// Copyright (c) 2014-2021 The Dash Core developers
+// Copyright (c) 2014-2024 The Dash Core developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #ifndef BITCOIN_GOVERNANCE_VOTEDB_H
 #define BITCOIN_GOVERNANCE_VOTEDB_H
 
-#include <list>
-#include <map>
-
 #include <governance/vote.h>
 #include <serialize.h>
-#include <streams.h>
 #include <uint256.h>
+
+#include <list>
+#include <map>
+#include <set>
+#include <vector>
+
+class CDataStream;
+class CDeterministicMNList;
 
 /**
  * Represents the collection of votes associated with a given CGovernanceObject
@@ -29,7 +33,7 @@ public: // Types
     using vote_m_t = std::map<uint256, vote_l_t::iterator>;
 
 private:
-    int nMemoryVotes;
+    int nMemoryVotes{0};
 
     vote_l_t listVotes;
 
@@ -63,7 +67,7 @@ public:
     std::vector<CGovernanceVote> GetVotes() const;
 
     void RemoveVotesFromMasternode(const COutPoint& outpointMasternode);
-    std::set<uint256> RemoveInvalidVotes(const COutPoint& outpointMasternode, bool fProposal);
+    std::set<uint256> RemoveInvalidVotes(const CDeterministicMNList& tip_mn_list, const COutPoint& outpointMasternode, bool fProposal);
 
     SERIALIZE_METHODS(CGovernanceObjectVoteFile, obj)
     {

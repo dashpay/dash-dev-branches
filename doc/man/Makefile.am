@@ -15,3 +15,13 @@ endif
 if BUILD_BITCOIN_TX
   dist_man1_MANS+=dash-tx.1
 endif
+
+if BUILD_BITCOIN_UTIL
+  dist_man1_MANS+=dash-util.1
+endif
+
+if ENABLE_WALLET
+if BUILD_BITCOIN_WALLET
+  dist_man1_MANS+=dash-wallet.1
+endif
+endif

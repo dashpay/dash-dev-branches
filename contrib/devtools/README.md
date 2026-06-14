@@ -76,18 +76,33 @@ year rather than two hyphenated years.
 If the file already has a copyright for `The Dash Core developers`, the
 script will exit.
 
-gen-manpages.sh
+gen-manpages.py
 ===============
 
 A small script to automatically create manpages in ../../doc/man by running the release binaries with the -help option.
 This requires help2man which can be found at: https://www.gnu.org/software/help2man/
 
 With in-tree builds this tool can be run from any directory within the
-repostitory. To use this tool with out-of-tree builds set `BUILDDIR`. For
+repository. To use this tool with out-of-tree builds set `BUILDDIR`. For
 example:
 
 ```bash
-BUILDDIR=$PWD/build contrib/devtools/gen-manpages.sh
+BUILDDIR=$PWD/build contrib/devtools/gen-manpages.py
+```
+
+gen-dash-conf.sh
+===================
+
+Generates a dash.conf file in `contrib/debian/examples/` by parsing the output from `dashd --help`. This script is run during the
+release process to include a dash.conf with the release binaries and can also be run by users to generate a file locally.
+When generating a file as part of the release process, make sure to commit the changes after running the script.
+
+With in-tree builds this tool can be run from any directory within the
+repository. To use this tool with out-of-tree builds set `BUILDDIR`. For
+example:
+
+```bash
+BUILDDIR=$PWD/build contrib/devtools/gen-dash-conf.sh
 ```
 
 github-merge.py
@@ -155,35 +170,6 @@ optimize-pngs.py
 
 A script to optimize png files in the dash
 repository (requires pngcrush).
-
-security-check.py and test-security-check.py
-============================================
-
-Perform basic security checks on a series of executables.
-
-symbol-check.py
-===============
-
-A script to check that the executables produced by Gitian only contain
-certain symbols and are only linked against allowed libraries.
-
-For Linux this means checking for allowed gcc, glibc and libstdc++ version symbols.
-This makes sure they are still compatible with the minimum supported distribution versions.
-
-For macOS we check that the executables are only linked against libraries we allow.
-
-Example usage after a Gitian build:
-
-    find ../gitian-builder/build -type f -executable | xargs python3 contrib/devtools/symbol-check.py
-
-If no errors occur the return value will be 0 and the output will be empty.
-
-If there are any errors the return value will be 1 and output like this will be printed:
-
-    .../64/test_dash: symbol memcpy from unsupported version GLIBC_2.14
-    .../64/test_dash: symbol __fdelt_chk from unsupported version GLIBC_2.15
-    .../64/test_dash: symbol std::out_of_range::~out_of_range() from unsupported version GLIBCXX_3.4.15
-    .../64/test_dash: symbol _ZNSt8__detail15_List_nod from unsupported version GLIBCXX_3.4.15
 
 update-translations.py
 ======================

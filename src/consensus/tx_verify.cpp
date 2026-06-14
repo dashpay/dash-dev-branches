@@ -1,18 +1,20 @@
-// Copyright (c) 2017-2017 The Bitcoin Core developers
+// Copyright (c) 2017-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <consensus/tx_verify.h>
 
-#include <consensus/consensus.h>
-#include <primitives/transaction.h>
-#include <script/interpreter.h>
-#include <consensus/validation.h>
-
-// TODO remove the following dependencies
 #include <chain.h>
 #include <coins.h>
+#include <consensus/consensus.h>
+#include <consensus/validation.h>
+#include <evo/assetlocktx.h>
+#include <primitives/transaction.h>
+#include <script/interpreter.h>
+#include <tinyformat.h>
+#include <util/check.h>
 #include <util/moneystr.h>
+
 
 bool IsFinalTx(const CTransaction &tx, int nBlockHeight, int64_t nBlockTime)
 {
@@ -75,7 +77,7 @@ std::pair<int, int64_t> CalculateSequenceLocks(const CTransaction &tx, int flags
         int nCoinHeight = prevHeights[txinIndex];
 
         if (txin.nSequence & CTxIn::SEQUENCE_LOCKTIME_TYPE_FLAG) {
-            int64_t nCoinTime = block.GetAncestor(std::max(nCoinHeight-1, 0))->GetMedianTimePast();
+            const int64_t nCoinTime{Assert(block.GetAncestor(std::max(nCoinHeight - 1, 0)))->GetMedianTimePast()};
             // NOTE: Subtract 1 to maintain nLockTime semantics
             // BIP 68 relative lock times have the semantics of calculating
             // the first block or time at which the transaction would be
@@ -144,7 +146,7 @@ unsigned int GetP2SHSigOpCount(const CTransaction& tx, const CCoinsViewCache& in
     return nSigOps;
 }
 
-unsigned int GetTransactionSigOpCount(const CTransaction& tx, const CCoinsViewCache& inputs, int flags)
+unsigned int GetTransactionSigOpCount(const CTransaction& tx, const CCoinsViewCache& inputs, uint32_t flags)
 {
     unsigned int nSigOps = GetLegacySigOpCount(tx);
 
@@ -158,11 +160,16 @@ unsigned int GetTransactionSigOpCount(const CTransaction& tx, const CCoinsViewCa
     return nSigOps;
 }
 
-bool Consensus::CheckTxInputs(const CTransaction& tx, CValidationState& state, const CCoinsViewCache& inputs, int nSpendHeight, CAmount& txfee)
+bool Consensus::CheckTxInputs(const CTransaction& tx, TxValidationState& state, const CCoinsViewCache& inputs, int nSpendHeight, CAmount& txfee)
 {
+    if (bool isAssetUnlockTx = (tx.IsSpecialTxVersion() && tx.nType == TRANSACTION_ASSET_UNLOCK); isAssetUnlockTx) {
+        return GetAssetUnlockFee(tx, txfee, state);
+    }
+
     // are the actual inputs available?
     if (!inputs.HaveInputs(tx)) {
-        return state.Invalid(ValidationInvalidReason::TX_MISSING_INPUTS, false, REJECT_INVALID, "bad-txns-inputs-missingorspent", strprintf("%s: inputs missing/spent", __func__));
+        return state.Invalid(TxValidationResult::TX_MISSING_INPUTS, "bad-txns-inputs-missingorspent",
+                         strprintf("%s: inputs missing/spent", __func__));
     }
 
     CAmount nValueIn = 0;
@@ -173,25 +180,27 @@ bool Consensus::CheckTxInputs(const CTransaction& tx, CValidationState& state, c
 
         // If prev is coinbase, check that it's matured
         if (coin.IsCoinBase() && nSpendHeight - coin.nHeight < COINBASE_MATURITY) {
-            return state.Invalid(ValidationInvalidReason::TX_PREMATURE_SPEND, false, REJECT_INVALID, "bad-txns-premature-spend-of-coinbase", strprintf("tried to spend coinbase at depth %d", nSpendHeight - coin.nHeight));
+            return state.Invalid(TxValidationResult::TX_PREMATURE_SPEND, "bad-txns-premature-spend-of-coinbase",
+                strprintf("tried to spend coinbase at depth %d", nSpendHeight - coin.nHeight));
         }
 
         // Check for negative or overflow input values
         nValueIn += coin.out.nValue;
         if (!MoneyRange(coin.out.nValue) || !MoneyRange(nValueIn)) {
-            return state.Invalid(ValidationInvalidReason::CONSENSUS, false, REJECT_INVALID, "bad-txns-inputvalues-outofrange");
+            return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-txns-inputvalues-outofrange");
         }
     }
 
     const CAmount value_out = tx.GetValueOut();
     if (nValueIn < value_out) {
-        return state.Invalid(ValidationInvalidReason::CONSENSUS, false, REJECT_INVALID, "bad-txns-in-belowout", strprintf("value in (%s) < value out (%s)", FormatMoney(nValueIn), FormatMoney(value_out)));
+        return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-txns-in-belowout",
+            strprintf("value in (%s) < value out (%s)", FormatMoney(nValueIn), FormatMoney(value_out)));
     }
 
     // Tally transaction fees
     const CAmount txfee_aux = nValueIn - value_out;
     if (!MoneyRange(txfee_aux)) {
-        return state.Invalid(ValidationInvalidReason::CONSENSUS, false, REJECT_INVALID, "bad-txns-fee-outofrange");
+        return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-txns-fee-outofrange");
     }
 
     txfee = txfee_aux;

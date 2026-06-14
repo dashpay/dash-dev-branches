@@ -1,4 +1,4 @@
-// Copyright (c) 2018 The Bitcoin Core developers
+// Copyright (c) 2018-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -7,8 +7,8 @@
 #include <bech32.h>
 #include <util/strencodings.h>
 
-#include <vector>
 #include <string>
+#include <vector>
 
 
 static void Bech32Encode(benchmark::Bench& bench)
@@ -18,7 +18,7 @@ static void Bech32Encode(benchmark::Bench& bench)
     tmp.reserve(1 + 32 * 8 / 5);
     ConvertBits<8, 5, true>([&](unsigned char c) { tmp.push_back(c); }, v.begin(), v.end());
     bench.run([&] {
-        bech32::Encode("bc", tmp);
+        bech32::Encode(bech32::Encoding::BECH32, "bc", tmp);
     });
 }
 
@@ -32,5 +32,5 @@ static void Bech32Decode(benchmark::Bench& bench)
 }
 
 
-BENCHMARK(Bech32Encode);
-BENCHMARK(Bech32Decode);
+BENCHMARK(Bech32Encode, benchmark::PriorityLevel::HIGH);
+BENCHMARK(Bech32Decode, benchmark::PriorityLevel::HIGH);

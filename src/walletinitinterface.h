@@ -1,4 +1,4 @@
-// Copyright (c) 2017 The Bitcoin Core developers
+// Copyright (c) 2017-2020 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -6,8 +6,15 @@
 #define BITCOIN_WALLETINITINTERFACE_H
 
 class ArgsManager;
-
+namespace interfaces {
+class WalletLoader;
+namespace CoinJoin {
+class Loader;
+} // namespace CoinJoin
+} // namespace interfaces
+namespace node {
 struct NodeContext;
+} // namespace node
 
 class WalletInitInterface {
 public:
@@ -18,12 +25,12 @@ public:
     /** Check wallet parameter interaction */
     virtual bool ParameterInteraction() const = 0;
     /** Add wallets that should be opened to list of chain clients. */
-    virtual void Construct(NodeContext& node) const = 0;
+    virtual void Construct(node::NodeContext& node) const = 0;
 
     // Dash Specific WalletInitInterface
-    virtual void AutoLockMasternodeCollaterals() const = 0;
-    virtual void InitCoinJoinSettings() const = 0;
-    virtual bool InitAutoBackup() const = 0;
+    virtual void AutoLockMasternodeCollaterals(interfaces::WalletLoader& wallet_loader) const = 0;
+    virtual void InitCoinJoinSettings(interfaces::CoinJoin::Loader& coinjoin_loader, interfaces::WalletLoader& wallet_loader) const = 0;
+    virtual void InitAutoBackup() const = 0;
 
     virtual ~WalletInitInterface() {}
 };

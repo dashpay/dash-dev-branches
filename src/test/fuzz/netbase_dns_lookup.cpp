@@ -6,61 +6,52 @@
 #include <netbase.h>
 #include <test/fuzz/FuzzedDataProvider.h>
 #include <test/fuzz/fuzz.h>
-#include <test/fuzz/util.h>
+#include <test/fuzz/util/net.h>
 
 #include <cstdint>
 #include <string>
 #include <vector>
 
-namespace {
-FuzzedDataProvider* fuzzed_data_provider_ptr = nullptr;
-
-std::vector<CNetAddr> fuzzed_dns_lookup_function(const std::string& name, bool allow_lookup)
-{
-    std::vector<CNetAddr> resolved_addresses;
-    while (fuzzed_data_provider_ptr->ConsumeBool()) {
-        resolved_addresses.push_back(ConsumeNetAddr(*fuzzed_data_provider_ptr));
-    }
-    return resolved_addresses;
-}
-} // namespace
-
 FUZZ_TARGET(netbase_dns_lookup)
 {
     FuzzedDataProvider fuzzed_data_provider{buffer.data(), buffer.size()};
-    fuzzed_data_provider_ptr = &fuzzed_data_provider;
     const std::string name = fuzzed_data_provider.ConsumeRandomLengthString(512);
     const unsigned int max_results = fuzzed_data_provider.ConsumeIntegral<unsigned int>();
     const bool allow_lookup = fuzzed_data_provider.ConsumeBool();
     const uint16_t default_port = fuzzed_data_provider.ConsumeIntegral<uint16_t>();
-    {
+
+    auto fuzzed_dns_lookup_function = [&](const std::string&, bool) {
         std::vector<CNetAddr> resolved_addresses;
-        if (LookupHost(name, resolved_addresses, max_results, allow_lookup, fuzzed_dns_lookup_function)) {
-            for (const CNetAddr& resolved_address : resolved_addresses) {
-                assert(!resolved_address.IsInternal());
-            }
+        LIMITED_WHILE(fuzzed_data_provider.ConsumeBool(), 10000) {
+            resolved_addresses.push_back(ConsumeNetAddr(fuzzed_data_provider));
+        }
+        return resolved_addresses;
+    };
+
+    {
+        const std::vector<CNetAddr> resolved_addresses{LookupHost(name, max_results, allow_lookup, fuzzed_dns_lookup_function)};
+        for (const CNetAddr& resolved_address : resolved_addresses) {
+            assert(!resolved_address.IsInternal());
         }
         assert(resolved_addresses.size() <= max_results || max_results == 0);
     }
     {
-        CNetAddr resolved_address;
-        if (LookupHost(name, resolved_address, allow_lookup, fuzzed_dns_lookup_function)) {
-            assert(!resolved_address.IsInternal());
+        const std::optional<CNetAddr> resolved_address{LookupHost(name, allow_lookup, fuzzed_dns_lookup_function)};
+        if (resolved_address.has_value()) {
+            assert(!resolved_address.value().IsInternal());
         }
     }
     {
-        std::vector<CService> resolved_services;
-        if (Lookup(name, resolved_services, default_port, allow_lookup, max_results, fuzzed_dns_lookup_function)) {
-            for (const CNetAddr& resolved_service : resolved_services) {
-                assert(!resolved_service.IsInternal());
-            }
+        const std::vector<CService> resolved_services{Lookup(name, default_port, allow_lookup, max_results, fuzzed_dns_lookup_function)};
+        for (const CNetAddr& resolved_service : resolved_services) {
+            assert(!resolved_service.IsInternal());
         }
         assert(resolved_services.size() <= max_results || max_results == 0);
     }
     {
-        CService resolved_service;
-        if (Lookup(name, resolved_service, default_port, allow_lookup, fuzzed_dns_lookup_function)) {
-            assert(!resolved_service.IsInternal());
+        const std::optional<CService> resolved_service{Lookup(name, default_port, allow_lookup, fuzzed_dns_lookup_function)};
+        if (resolved_service.has_value()) {
+            assert(!resolved_service.value().IsInternal());
         }
     }
     {
@@ -68,10 +59,6 @@ FUZZ_TARGET(netbase_dns_lookup)
         assert(!resolved_service.IsInternal());
     }
     {
-        CSubNet resolved_subnet;
-        if (LookupSubNet(name, resolved_subnet, fuzzed_dns_lookup_function)) {
-            assert(resolved_subnet.IsValid());
-        }
+        (void)LookupSubNet(name);
     }
-    fuzzed_data_provider_ptr = nullptr;
 }

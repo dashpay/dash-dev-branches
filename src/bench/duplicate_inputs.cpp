@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2018 The Bitcoin Core developers
+// Copyright (c) 2011-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -13,10 +13,9 @@
 #include <validation.h>
 
 
-
 static void DuplicateInputs(benchmark::Bench& bench)
 {
-    RegTestingSetup test_setup;
+    const auto testing_setup = MakeNoLogFileContext<const TestingSetup>();
 
     const CScript SCRIPT_PUB{CScript(OP_TRUE)};
 
@@ -26,7 +25,7 @@ static void DuplicateInputs(benchmark::Bench& bench)
     CMutableTransaction coinbaseTx{};
     CMutableTransaction naughtyTx{};
 
-    CBlockIndex* pindexPrev = ::ChainActive().Tip();
+    CBlockIndex* pindexPrev = testing_setup->m_node.chainman->ActiveChain().Tip();
     assert(pindexPrev != nullptr);
     block.nBits = GetNextWorkRequired(pindexPrev, &block, chainparams.GetConsensus());
     block.nNonce = 0;
@@ -37,14 +36,14 @@ static void DuplicateInputs(benchmark::Bench& bench)
     coinbaseTx.vin[0].prevout.SetNull();
     coinbaseTx.vout.resize(1);
     coinbaseTx.vout[0].scriptPubKey = SCRIPT_PUB;
-    coinbaseTx.vout[0].nValue = GetBlockSubsidy(block.nBits, nHeight, chainparams.GetConsensus());
+    coinbaseTx.vout[0].nValue = GetBlockSubsidyInner(block.nBits, nHeight, chainparams.GetConsensus(), /*fV20Active=*/ false);
     coinbaseTx.vin[0].scriptSig = CScript() << nHeight << OP_0;
 
     naughtyTx.vout.resize(1);
     naughtyTx.vout[0].nValue = 0;
     naughtyTx.vout[0].scriptPubKey = SCRIPT_PUB;
 
-    uint64_t n_inputs = (((MaxBlockSize() / ::GetSerializeSize(CTransaction(), PROTOCOL_VERSION)) - (CTransaction(coinbaseTx).GetTotalSize() + CTransaction(naughtyTx).GetTotalSize())) / 41) - 100;
+    uint64_t n_inputs = (((MaxBlockSize() / ::GetSerializeSize(CMutableTransaction(), PROTOCOL_VERSION)) - (CTransaction(coinbaseTx).GetTotalSize() + CTransaction(naughtyTx).GetTotalSize())) / 41) - 100;
     for (uint64_t x = 0; x < (n_inputs - 1); ++x) {
         naughtyTx.vin.emplace_back(GetRandHash(), 0, CScript(), 0);
     }
@@ -56,10 +55,10 @@ static void DuplicateInputs(benchmark::Bench& bench)
     block.hashMerkleRoot = BlockMerkleRoot(block);
 
     bench.minEpochIterations(10).run([&] {
-        CValidationState cvstate{};
+        BlockValidationState cvstate{};
         assert(!CheckBlock(block, cvstate, chainparams.GetConsensus(), false, false));
         assert(cvstate.GetRejectReason() == "bad-txns-inputs-duplicate");
     });
 }
 
-BENCHMARK(DuplicateInputs);
+BENCHMARK(DuplicateInputs, benchmark::PriorityLevel::HIGH);

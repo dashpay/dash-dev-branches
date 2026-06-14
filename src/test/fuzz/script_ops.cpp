@@ -14,51 +14,46 @@
 FUZZ_TARGET(script_ops)
 {
     FuzzedDataProvider fuzzed_data_provider(buffer.data(), buffer.size());
-    CScript script = ConsumeScript(fuzzed_data_provider);
-    while (fuzzed_data_provider.remaining_bytes() > 0) {
-        switch (fuzzed_data_provider.ConsumeIntegralInRange(0, 7)) {
-        case 0: {
-            CScript s = ConsumeScript(fuzzed_data_provider);
-            script = std::move(s);
-            break;
-        }
-        case 1: {
-            const CScript& s = ConsumeScript(fuzzed_data_provider);
-            script = s;
-            break;
-        }
-        case 2:
-            script << fuzzed_data_provider.ConsumeIntegral<int64_t>();
-            break;
-        case 3:
-            script << ConsumeOpcodeType(fuzzed_data_provider);
-            break;
-        case 4:
-            script << ConsumeScriptNum(fuzzed_data_provider);
-            break;
-        case 5:
-            script << ConsumeRandomLengthByteVector(fuzzed_data_provider);
-            break;
-        case 6:
-            script.clear();
-            break;
-        case 7: {
-            (void)script.GetSigOpCount(false);
-            (void)script.GetSigOpCount(true);
-            (void)script.GetSigOpCount(script);
-            (void)script.IsPayToScriptHash();
-            (void)script.IsPushOnly();
-            (void)script.IsUnspendable();
-            {
-                CScript::const_iterator pc = script.begin();
-                opcodetype opcode;
-                (void)script.GetOp(pc, opcode);
-                std::vector<uint8_t> data;
-                (void)script.GetOp(pc, opcode, data);
-                (void)script.IsPushOnly(pc);
-            }
-            break;
-        }
-        }
+    CScript script_mut = ConsumeScript(fuzzed_data_provider);
+    LIMITED_WHILE(fuzzed_data_provider.remaining_bytes() > 0, 1000000) {
+        CallOneOf(
+            fuzzed_data_provider,
+            [&] {
+                CScript s = ConsumeScript(fuzzed_data_provider);
+                script_mut = std::move(s);
+            },
+            [&] {
+                const CScript& s = ConsumeScript(fuzzed_data_provider);
+                script_mut = s;
+            },
+            [&] {
+                script_mut << fuzzed_data_provider.ConsumeIntegral<int64_t>();
+            },
+            [&] {
+                script_mut << ConsumeOpcodeType(fuzzed_data_provider);
+            },
+            [&] {
+                script_mut << ConsumeScriptNum(fuzzed_data_provider);
+            },
+            [&] {
+                script_mut << ConsumeRandomLengthByteVector(fuzzed_data_provider);
+            },
+            [&] {
+                script_mut.clear();
+            });
+    }
+    const CScript& script = script_mut;
+    (void)script.GetSigOpCount(false);
+    (void)script.GetSigOpCount(true);
+    (void)script.GetSigOpCount(script);
+    (void)script.IsPushOnly();
+    (void)script.IsUnspendable();
+    {
+        CScript::const_iterator pc = script.begin();
+        opcodetype opcode;
+        (void)script.GetOp(pc, opcode);
+        std::vector<uint8_t> data;
+        (void)script.GetOp(pc, opcode, data);
+        (void)script.IsPushOnly(pc);
     }
 }

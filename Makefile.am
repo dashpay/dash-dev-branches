@@ -4,8 +4,8 @@
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 # Pattern rule to print variables, e.g. make print-top_srcdir
-print-%:
-	@echo $* = $($*)
+print-%: FORCE
+	@echo '$*'='$($*)'
 
 ACLOCAL_AMFLAGS = -I build-aux/m4
 SUBDIRS = src
@@ -13,9 +13,7 @@ if ENABLE_MAN
 SUBDIRS += doc/man
 endif
 .PHONY: deploy FORCE
-.INTERMEDIATE: $(OSX_TEMP_ISO) $(COVERAGE_INFO)
-
-export PYTHONPATH
+.INTERMEDIATE: $(COVERAGE_INFO)
 
 if BUILD_BITCOIN_LIBS
 pkgconfigdir = $(libdir)/pkgconfig
@@ -24,9 +22,13 @@ endif
 
 BITCOIND_BIN=$(top_builddir)/src/$(BITCOIN_DAEMON_NAME)$(EXEEXT)
 BITCOIN_QT_BIN=$(top_builddir)/src/qt/$(BITCOIN_GUI_NAME)$(EXEEXT)
+BITCOIN_TEST_BIN=$(top_builddir)/src/test/$(BITCOIN_TEST_NAME)$(EXEEXT)
 BITCOIN_CLI_BIN=$(top_builddir)/src/$(BITCOIN_CLI_NAME)$(EXEEXT)
 BITCOIN_TX_BIN=$(top_builddir)/src/$(BITCOIN_TX_NAME)$(EXEEXT)
+BITCOIN_UTIL_BIN=$(top_builddir)/src/$(BITCOIN_UTIL_NAME)$(EXEEXT)
 BITCOIN_WALLET_BIN=$(top_builddir)/src/$(BITCOIN_WALLET_TOOL_NAME)$(EXEEXT)
+BITCOIN_NODE_BIN=$(top_builddir)/src/$(BITCOIN_MP_NODE_NAME)$(EXEEXT)
+BITCOIN_GUI_BIN=$(top_builddir)/src/$(BITCOIN_MP_GUI_NAME)$(EXEEXT)
 BITCOIN_WIN_INSTALLER=$(PACKAGE)-$(PACKAGE_VERSION)-win64-setup$(EXEEXT)
 
 empty :=
@@ -34,44 +36,39 @@ space := $(empty) $(empty)
 
 OSX_APP=Dash-Qt.app
 OSX_VOLNAME = $(subst $(space),-,$(PACKAGE_NAME))
-OSX_DMG = $(OSX_VOLNAME).dmg
-OSX_TEMP_ISO = $(OSX_DMG:.dmg=).temp.iso
-OSX_BACKGROUND_SVG=background.svg
-OSX_BACKGROUND_IMAGE=background.tiff
-OSX_BACKGROUND_IMAGE_DPIS=36 72
-OSX_DSSTORE_GEN=$(top_srcdir)/contrib/macdeploy/custom_dsstore.py
+OSX_ZIP = $(OSX_VOLNAME).zip
 OSX_DEPLOY_SCRIPT=$(top_srcdir)/contrib/macdeploy/macdeployqtplus
-OSX_FANCY_PLIST=$(top_srcdir)/contrib/macdeploy/fancy.plist
 OSX_INSTALLER_ICONS=$(top_srcdir)/src/qt/res/icons/dash.icns
 OSX_PLIST=$(top_builddir)/share/qt/Info.plist #not installed
-OSX_QT_TRANSLATIONS = ar,bg,ca,cs,da,de,es,fa,fi,fr,gd,gl,he,hu,it,ja,ko,lt,lv,pl,pt,ru,sk,sl,sv,uk,zh_CN,zh_TW
 
 DIST_CONTRIB = \
            $(top_srcdir)/contrib/debian/copyright \
-	       $(top_srcdir)/contrib/linearize/linearize-data.py \
-	       $(top_srcdir)/contrib/linearize/linearize-hashes.py
+           $(top_srcdir)/test/sanitizer_suppressions/lsan \
+           $(top_srcdir)/test/sanitizer_suppressions/tsan \
+           $(top_srcdir)/test/sanitizer_suppressions/ubsan \
+           $(top_srcdir)/contrib/linearize/linearize-data.py \
+           $(top_srcdir)/contrib/linearize/linearize-hashes.py
+
 DIST_SHARE = \
   $(top_srcdir)/share/genbuild.sh \
   $(top_srcdir)/share/rpcauth
 
-BIN_CHECKS=$(top_srcdir)/contrib/devtools/symbol-check.py \
-           $(top_srcdir)/contrib/devtools/security-check.py
+BIN_CHECKS=$(top_srcdir)/contrib/guix/symbol-check.py \
+           $(top_srcdir)/contrib/guix/security-check.py \
+           $(top_srcdir)/contrib/devtools/utils.py
 
 WINDOWS_PACKAGING = $(top_srcdir)/share/pixmaps/dash.ico \
   $(top_srcdir)/share/pixmaps/nsis-header.bmp \
   $(top_srcdir)/share/pixmaps/nsis-wizard.bmp \
   $(top_srcdir)/doc/README_windows.txt
 
-OSX_PACKAGING = $(OSX_DEPLOY_SCRIPT) $(OSX_FANCY_PLIST) $(OSX_INSTALLER_ICONS) \
-  $(top_srcdir)/contrib/macdeploy/$(OSX_BACKGROUND_SVG) \
-  $(OSX_DSSTORE_GEN) \
-  $(top_srcdir)/contrib/macdeploy/detached-sig-apply.sh \
+OSX_PACKAGING = $(OSX_DEPLOY_SCRIPT) $(OSX_INSTALLER_ICONS) \
   $(top_srcdir)/contrib/macdeploy/detached-sig-create.sh
 
-COVERAGE_INFO = baseline.info \
+COVERAGE_INFO = $(COV_TOOL_WRAPPER) baseline.info \
   test_dash_filtered.info total_coverage.info \
   baseline_filtered.info functional_test.info functional_test_filtered.info \
-  test_dash_coverage.info test_dash.info
+  test_dash_coverage.info test_dash.info fuzz.info fuzz_filtered.info fuzz_coverage.info
 
 dist-hook:
 	-$(GIT) archive --format=tar HEAD -- src/clientversion.cpp | $(AMTAR) -C $(top_distdir) -xf -
@@ -81,9 +78,11 @@ $(BITCOIN_WIN_INSTALLER): all-recursive
 	$(MKDIR_P) $(top_builddir)/release
 	STRIPPROG="$(STRIP)" $(INSTALL_STRIP_PROGRAM) $(BITCOIND_BIN) $(top_builddir)/release
 	STRIPPROG="$(STRIP)" $(INSTALL_STRIP_PROGRAM) $(BITCOIN_QT_BIN) $(top_builddir)/release
+	STRIPPROG="$(STRIP)" $(INSTALL_STRIP_PROGRAM) $(BITCOIN_TEST_BIN) $(top_builddir)/release
 	STRIPPROG="$(STRIP)" $(INSTALL_STRIP_PROGRAM) $(BITCOIN_CLI_BIN) $(top_builddir)/release
 	STRIPPROG="$(STRIP)" $(INSTALL_STRIP_PROGRAM) $(BITCOIN_TX_BIN) $(top_builddir)/release
 	STRIPPROG="$(STRIP)" $(INSTALL_STRIP_PROGRAM) $(BITCOIN_WALLET_BIN) $(top_builddir)/release
+	STRIPPROG="$(STRIP)" $(INSTALL_STRIP_PROGRAM) $(BITCOIN_UTIL_BIN) $(top_builddir)/release
 	@test -f $(MAKENSIS) && echo 'OutFile "$@"' | cat $(top_builddir)/share/setup.nsi - | $(MAKENSIS) -V2 - || \
 	  echo error: could not build $@
 	@echo built $@
@@ -120,55 +119,25 @@ OSX_APP_BUILT=$(OSX_APP)/Contents/PkgInfo $(OSX_APP)/Contents/Resources/empty.lp
   $(OSX_APP)/Contents/Resources/dash.icns $(OSX_APP)/Contents/Info.plist \
   $(OSX_APP)/Contents/MacOS/Dash-Qt $(OSX_APP)/Contents/Resources/Base.lproj/InfoPlist.strings
 
-osx_volname:
-	echo $(OSX_VOLNAME) >$@
-
 if BUILD_DARWIN
-$(OSX_DMG): $(OSX_APP_BUILT) $(OSX_PACKAGING) $(OSX_BACKGROUND_IMAGE)
-	$(PYTHON) $(OSX_DEPLOY_SCRIPT) $(OSX_APP) -add-qt-tr $(OSX_QT_TRANSLATIONS) -translations-dir=$(QT_TRANSLATION_DIR) -dmg -fancy $(OSX_FANCY_PLIST) -verbose 2 -volname $(OSX_VOLNAME)
+$(OSX_ZIP): $(OSX_APP_BUILT) $(OSX_PACKAGING)
+	$(PYTHON) $(OSX_DEPLOY_SCRIPT) $(OSX_APP) $(OSX_VOLNAME) -translations-dir=$(QT_TRANSLATION_DIR) -zip
 
-$(OSX_BACKGROUND_IMAGE).png: contrib/macdeploy/$(OSX_BACKGROUND_SVG)
-	sed 's/PACKAGE_NAME/$(PACKAGE_NAME)/' < "$<" | $(RSVG_CONVERT) -f png -d 36 -p 36 -o $@
-$(OSX_BACKGROUND_IMAGE)@2x.png: contrib/macdeploy/$(OSX_BACKGROUND_SVG)
-	sed 's/PACKAGE_NAME/$(PACKAGE_NAME)/' < "$<" | $(RSVG_CONVERT) -f png -d 72 -p 72 -o $@
-$(OSX_BACKGROUND_IMAGE): $(OSX_BACKGROUND_IMAGE).png $(OSX_BACKGROUND_IMAGE)@2x.png
-	tiffutil -cathidpicheck $^ -out $@
-
-deploydir: $(OSX_DMG)
+deploydir: $(OSX_ZIP)
 else !BUILD_DARWIN
 APP_DIST_DIR=$(top_builddir)/dist
-APP_DIST_EXTRAS=$(APP_DIST_DIR)/.background/$(OSX_BACKGROUND_IMAGE) $(APP_DIST_DIR)/.DS_Store $(APP_DIST_DIR)/Applications
 
-$(APP_DIST_DIR)/Applications:
-	@rm -f $@
-	@cd $(@D); $(LN_S) /Applications $(@F)
-
-$(APP_DIST_EXTRAS): $(APP_DIST_DIR)/$(OSX_APP)/Contents/MacOS/Dash-Qt
-
-$(OSX_TEMP_ISO): $(APP_DIST_EXTRAS)
-	$(XORRISOFS) -D -l -V "$(OSX_VOLNAME)" -no-pad -r -dir-mode 0755 -o $@ dist
-
-$(OSX_DMG): $(OSX_TEMP_ISO)
-	$(DMG) dmg "$<" "$@"
-
-dpi%.$(OSX_BACKGROUND_IMAGE): contrib/macdeploy/$(OSX_BACKGROUND_SVG)
-	sed 's/PACKAGE_NAME/$(PACKAGE_NAME)/' < "$<" | $(RSVG_CONVERT) -f png -d $* -p $* | $(IMAGEMAGICK_CONVERT) - $@
-OSX_BACKGROUND_IMAGE_DPIFILES := $(foreach dpi,$(OSX_BACKGROUND_IMAGE_DPIS),dpi$(dpi).$(OSX_BACKGROUND_IMAGE))
-$(APP_DIST_DIR)/.background/$(OSX_BACKGROUND_IMAGE): $(OSX_BACKGROUND_IMAGE_DPIFILES)
-	$(MKDIR_P) $(@D)
-	$(TIFFCP) -c none $(OSX_BACKGROUND_IMAGE_DPIFILES) $@
-
-$(APP_DIST_DIR)/.DS_Store: $(OSX_DSSTORE_GEN)
-	$(PYTHON) $< "$@" "$(OSX_VOLNAME)"
+$(OSX_ZIP): deploydir
+	if [ -n "$(SOURCE_DATE_EPOCH)" ]; then find $(APP_DIST_DIR) -exec touch -d @$(SOURCE_DATE_EPOCH) {} +; fi
+	cd $(APP_DIST_DIR) && find . | sort | $(ZIP) -X@ $@
 
 $(APP_DIST_DIR)/$(OSX_APP)/Contents/MacOS/Dash-Qt: $(OSX_APP_BUILT) $(OSX_PACKAGING)
-	INSTALLNAMETOOL=$(INSTALLNAMETOOL)  OTOOL=$(OTOOL) STRIP=$(STRIP) $(PYTHON) $(OSX_DEPLOY_SCRIPT) $(OSX_APP) -translations-dir=$(QT_TRANSLATION_DIR) -add-qt-tr $(OSX_QT_TRANSLATIONS) -verbose 2
+	OBJDUMP=$(OBJDUMP) $(PYTHON) $(OSX_DEPLOY_SCRIPT) $(OSX_APP) $(OSX_VOLNAME) -translations-dir=$(QT_TRANSLATION_DIR)
 
-deploydir: $(APP_DIST_EXTRAS)
+deploydir: $(APP_DIST_DIR)/$(OSX_APP)/Contents/MacOS/Dash-Qt
 endif !BUILD_DARWIN
 
-appbundle: $(OSX_APP_BUILT)
-deploy: $(OSX_DMG)
+deploy: $(OSX_ZIP)
 endif
 
 $(BITCOIN_QT_BIN): FORCE
@@ -183,7 +152,16 @@ $(BITCOIN_CLI_BIN): FORCE
 $(BITCOIN_TX_BIN): FORCE
 	$(MAKE) -C src $(@F)
 
+$(BITCOIN_UTIL_BIN): FORCE
+	$(MAKE) -C src $(@F)
+
 $(BITCOIN_WALLET_BIN): FORCE
+	$(MAKE) -C src $(@F)
+
+$(BITCOIN_NODE_BIN): FORCE
+	$(MAKE) -C src $(@F)
+
+$(BITCOIN_GUI_BIN): FORCE
 	$(MAKE) -C src $(@F)
 
 if USE_LCOV
@@ -197,15 +175,30 @@ LCOV_FILTER_PATTERN = \
 	-p "src/leveldb/" \
 	-p "src/crc32c/" \
 	-p "src/bench/" \
-	-p "src/univalue" \
 	-p "src/crypto/ctaes" \
+	-p "src/minisketch" \
 	-p "src/secp256k1" \
 	-p "depends"
 
-baseline.info:
+DIR_FUZZ_SEED_CORPUS ?= qa-assets/fuzz_seed_corpus
+
+$(COV_TOOL_WRAPPER):
+	@echo 'exec $(COV_TOOL) "$$@"' > $(COV_TOOL_WRAPPER)
+	@chmod +x $(COV_TOOL_WRAPPER)
+
+baseline.info: $(COV_TOOL_WRAPPER)
 	$(LCOV) -c -i -d $(abs_builddir)/src -o $@
 
 baseline_filtered.info: baseline.info
+	$(abs_builddir)/contrib/filter-lcov.py $(LCOV_FILTER_PATTERN) $< $@
+	$(LCOV) -a $@ $(LCOV_OPTS) -o $@
+
+fuzz.info: baseline_filtered.info
+	@TIMEOUT=15 test/fuzz/test_runner.py $(DIR_FUZZ_SEED_CORPUS) -l DEBUG
+	$(LCOV) -c $(LCOV_OPTS) -d $(abs_builddir)/src --t fuzz-tests -o $@
+	$(LCOV) -z $(LCOV_OPTS) -d $(abs_builddir)/src
+
+fuzz_filtered.info: fuzz.info
 	$(abs_builddir)/contrib/filter-lcov.py $(LCOV_FILTER_PATTERN) $< $@
 	$(LCOV) -a $@ $(LCOV_OPTS) -o $@
 
@@ -227,11 +220,18 @@ functional_test_filtered.info: functional_test.info
 	$(abs_builddir)/contrib/filter-lcov.py $(LCOV_FILTER_PATTERN) $< $@
 	$(LCOV) -a $@ $(LCOV_OPTS) -o $@
 
+fuzz_coverage.info: fuzz_filtered.info
+	$(LCOV) -a $(LCOV_OPTS) baseline_filtered.info -a fuzz_filtered.info -o $@ | $(GREP) "\%" | $(AWK) '{ print substr($$3,2,50) "/" $$5 }' > coverage_percent.txt
+
 test_dash_coverage.info: baseline_filtered.info test_dash_filtered.info
 	$(LCOV) -a $(LCOV_OPTS) baseline_filtered.info -a test_dash_filtered.info -o $@
 
 total_coverage.info: test_dash_filtered.info functional_test_filtered.info
 	$(LCOV) -a $(LCOV_OPTS) baseline_filtered.info -a test_dash_filtered.info -a functional_test_filtered.info -o $@ | $(GREP) "\%" | $(AWK) '{ print substr($$3,2,50) "/" $$5 }' > coverage_percent.txt
+
+fuzz.coverage/.dirstamp: fuzz_coverage.info
+	$(GENHTML) -s $(LCOV_OPTS) $< -o $(@D)
+	@touch $@
 
 test_dash.coverage/.dirstamp:  test_dash_coverage.info
 	$(GENHTML) -s $(LCOV_OPTS) $< -o $(@D)
@@ -240,6 +240,8 @@ test_dash.coverage/.dirstamp:  test_dash_coverage.info
 total.coverage/.dirstamp: total_coverage.info
 	$(GENHTML) -s $(LCOV_OPTS) $< -o $(@D)
 	@touch $@
+
+cov_fuzz: fuzz.coverage/.dirstamp
 
 cov: test_dash.coverage/.dirstamp total.coverage/.dirstamp
 
@@ -254,7 +256,7 @@ EXTRA_DIST += \
     test/fuzz
 
 EXTRA_DIST += \
-    test/util/bitcoin-util-test.py \
+    test/util/test_runner.py \
     test/util/data/bitcoin-util-test.json \
     test/util/data/blanktxv1.hex \
     test/util/data/blanktxv1.json \
@@ -296,7 +298,7 @@ EXTRA_DIST += \
     test/util/data/txcreatesignv2.hex \
     test/util/rpcauth-test.py
 
-CLEANFILES = $(OSX_DMG) $(BITCOIN_WIN_INSTALLER)
+CLEANFILES = $(OSX_ZIP) $(BITCOIN_WIN_INSTALLER)
 
 DISTCHECK_CONFIGURE_FLAGS = --enable-man
 
@@ -316,6 +318,6 @@ clean-docs:
 	rm -rf doc/doxygen
 
 clean-local: clean-docs
-	rm -rf coverage_percent.txt test_dash.coverage/ total.coverage/ test/tmp/ cache/ $(OSX_APP)
+	rm -rf coverage_percent.txt test_dash.coverage/ total.coverage/ fuzz.coverage/ test/tmp/ cache/ $(OSX_APP)
 	rm -rf test/functional/__pycache__ test/functional/test_framework/__pycache__ test/cache share/rpcauth/__pycache__
-	rm -rf osx_volname dist/ dpi36.background.tiff dpi72.background.tiff
+	rm -rf dist/

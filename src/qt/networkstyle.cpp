@@ -1,5 +1,5 @@
-// Copyright (c) 2014 The Bitcoin Core developers
-// Copyright (c) 2014-2022 The Dash Core developers
+// Copyright (c) 2014-2020 The Bitcoin Core developers
+// Copyright (c) 2014-2025 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -12,6 +12,8 @@
 #include <tinyformat.h>
 #include <util/system.h>
 
+#include <chainparamsbase.h>
+
 #include <QApplication>
 
 static const struct {
@@ -19,12 +21,13 @@ static const struct {
     const char *appName;
     const int iconColorHueShift;
     const int iconColorSaturationReduction;
+    const char *macIconPath;
     const std::string titleAddText;
 } network_styles[] = {
-    {"main", QAPP_APP_NAME_DEFAULT, 0, 0, ""},
-    {"test", QAPP_APP_NAME_TESTNET, 190, 20, QT_TRANSLATE_NOOP("SplashScreen", "[testnet]")},
-    {"devnet", QAPP_APP_NAME_DEVNET, 190, 20, "[devnet: %s]"},
-    {"regtest", QAPP_APP_NAME_REGTEST, 160, 30, "[regtest]"}
+    {"main",    QAPP_APP_NAME_DEFAULT, 0,   0,  ":/icons/dash_macos_mainnet",  ""},
+    {"test",    QAPP_APP_NAME_TESTNET, 190, 20, ":/icons/dash_macos_testnet",  ""},
+    {"devnet",  QAPP_APP_NAME_DEVNET,  35,  15, ":/icons/dash_macos_devnet",   "[devnet: %s]"},
+    {"regtest", QAPP_APP_NAME_REGTEST, 160, 30, ":/icons/dash_macos_regtest",  ""},
 };
 
 void NetworkStyle::rotateColor(QColor& col, const int iconColorHueShift, const int iconColorSaturationReduction)
@@ -60,7 +63,8 @@ void NetworkStyle::rotateColors(QImage& img, const int iconColorHueShift, const 
 }
 
 // titleAddText needs to be const char* for tr()
-NetworkStyle::NetworkStyle(const QString &_appName, const int iconColorHueShift, const int iconColorSaturationReduction, const char *_titleAddText):
+NetworkStyle::NetworkStyle(const QString &_appName, const int iconColorHueShift, const int iconColorSaturationReduction,
+                           const char *_macIconPath, const char *_titleAddText):
     appName(_appName),
     titleAddText(qApp->translate("SplashScreen", _titleAddText)),
     badgeColor(QColor(0, 141, 228)) // default badge color is the original Dash's blue, regardless of the current theme
@@ -84,10 +88,19 @@ NetworkStyle::NetworkStyle(const QString &_appName, const int iconColorHueShift,
     appIcon             = QIcon(appIconPixmap);
     trayAndWindowIcon   = QIcon(appIconPixmap.scaled(QSize(256,256)));
     splashImage         = QPixmap(":/images/splash");
+
+#ifdef Q_OS_MACOS
+    if (_macIconPath) {
+        m_macos_icon = QIcon(QPixmap(_macIconPath));
+    }
+    m_macos_tray = QIcon(QPixmap(":/icons/dash_macos_tray"));
+    m_macos_tray->setIsMask(true);
+#endif // Q_OS_MACOS
 }
 
-const NetworkStyle *NetworkStyle::instantiate(const QString &networkId)
+const NetworkStyle* NetworkStyle::instantiate(const std::string& networkId)
 {
+    std::string titleAddText = networkId == CBaseChainParams::MAIN ? "" : strprintf("[%s]", networkId);
     for (const auto& network_style : network_styles)
     {
         if (networkId == network_style.networkId)
@@ -95,7 +108,7 @@ const NetworkStyle *NetworkStyle::instantiate(const QString &networkId)
             std::string appName = network_style.appName;
             std::string titleAddText = network_style.titleAddText;
 
-            if (networkId == QString(CBaseChainParams::DEVNET.c_str())) {
+            if (networkId == CBaseChainParams::DEVNET.c_str()) {
                 appName = strprintf(appName, gArgs.GetDevNetName());
                 titleAddText = strprintf(titleAddText, gArgs.GetDevNetName());
             }
@@ -104,6 +117,7 @@ const NetworkStyle *NetworkStyle::instantiate(const QString &networkId)
                     appName.c_str(),
                     network_style.iconColorHueShift,
                     network_style.iconColorSaturationReduction,
+                    network_style.macIconPath,
                     titleAddText.c_str());
         }
     }

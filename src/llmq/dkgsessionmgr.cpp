@@ -1,19 +1,30 @@
-// Copyright (c) 2018-2022 The Dash Core developers
+// Copyright (c) 2018-2025 The Dash Core developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include <llmq/debug.h>
 #include <llmq/dkgsessionmgr.h>
-#include <llmq/quorums.h>
-#include <llmq/utils.h>
 
+#include <bls/bls_ies.h>
 #include <evo/deterministicmns.h>
+#include <llmq/dkgsessionhandler.h>
+#include <llmq/options.h>
+#include <llmq/params.h>
+#include <llmq/utils.h>
+#include <msg_result.h>
+#include <spork.h>
+#include <unordered_lru_cache.h>
+#include <util/helpers.h>
+#include <util/std23.h>
 
 #include <chainparams.h>
-#include <net_processing.h>
-#include <spork.h>
-#include <util/irange.h>
+#include <dbwrapper.h>
+#include <deploymentstatus.h>
 #include <validation.h>
+
+static bool IsQuorumDKGEnabled(const CSporkManager& sporkman)
+{
+    return sporkman.IsSporkActive(SPORK_17_QUORUM_DKG_ENABLED);
+}
 
 namespace llmq
 {
@@ -21,128 +32,31 @@ static const std::string DB_VVEC = "qdkg_V";
 static const std::string DB_SKCONTRIB = "qdkg_S";
 static const std::string DB_ENC_CONTRIB = "qdkg_E";
 
-CDKGSessionManager::CDKGSessionManager(CConnman& _connman, CBLSWorker& _blsWorker, CDKGDebugManager& _dkgDebugManager, CQuorumBlockProcessor& _quorumBlockProcessor, CSporkManager& sporkManager, bool unitTests, bool fWipe) :
-        db(std::make_unique<CDBWrapper>(unitTests ? "" : (GetDataDir() / "llmq/dkgdb"), 1 << 20, unitTests, fWipe)),
-        blsWorker(_blsWorker), connman(_connman), dkgDebugManager(_dkgDebugManager), quorumBlockProcessor(_quorumBlockProcessor),spork_manager(sporkManager)
+CDKGSessionManager::CDKGSessionManager(CDeterministicMNManager& dmnman, CQuorumSnapshotManager& qsnapman,
+                                       const ChainstateManager& chainman, const CSporkManager& sporkman,
+                                       const util::DbWrapperParams& db_params, bool quorums_watch) :
+    m_dmnman{dmnman},
+    m_qsnapman{qsnapman},
+    m_chainman{chainman},
+    m_sporkman{sporkman},
+    m_quorums_watch{quorums_watch},
+    db{util::MakeDbWrapper({db_params.path / "llmq" / "dkgdb", db_params.memory, db_params.wipe, /*cache_size=*/1 << 20})}
 {
-    if (!fMasternodeMode && !utils::IsWatchQuorumsEnabled()) {
-        // Regular nodes do not care about any DKG internals, bail out
-        return;
-    }
-
-    MigrateDKG();
-
-    const Consensus::Params& consensus_params = Params().GetConsensus();
-    for (const auto& params : consensus_params.llmqs) {
-        auto session_count = (params.type == consensus_params.llmqTypeDIP0024InstantSend) ? params.signingActiveQuorumCount : 1;
-        for (const auto i : irange::range(session_count)) {
-            dkgSessionHandlers.emplace(std::piecewise_construct,
-                                       std::forward_as_tuple(params.type, i),
-                                       std::forward_as_tuple(params, blsWorker, *this, dkgDebugManager, quorumBlockProcessor, connman, i));
-        }
-    }
 }
 
-void CDKGSessionManager::MigrateDKG()
+CDKGSessionManager::~CDKGSessionManager() = default;
+
+void CDKGSessionManager::StartThreads(CConnman& connman, PeerManager& peerman)
 {
-    if (!db->IsEmpty()) return;
-
-    LogPrint(BCLog::LLMQ, "CDKGSessionManager::%d -- start\n", __func__);
-
-    CDBBatch batch(*db);
-    auto oldDb = std::make_unique<CDBWrapper>(GetDataDir() / "llmq", 8 << 20);
-    std::unique_ptr<CDBIterator> pcursor(oldDb->NewIterator());
-
-    auto start_vvec = std::make_tuple(DB_VVEC, (Consensus::LLMQType)0, uint256(), uint256());
-    pcursor->Seek(start_vvec);
-
-    while (pcursor->Valid()) {
-        decltype(start_vvec) k;
-        BLSVerificationVector v;
-
-        if (!pcursor->GetKey(k) || std::get<0>(k) != DB_VVEC) {
-            break;
-        }
-        if (!pcursor->GetValue(v)) {
-            break;
-        }
-
-        batch.Write(k, v);
-
-        if (batch.SizeEstimate() >= (1 << 24)) {
-            db->WriteBatch(batch);
-            batch.Clear();
-        }
-
-        pcursor->Next();
-    }
-
-    auto start_contrib = std::make_tuple(DB_SKCONTRIB, (Consensus::LLMQType)0, uint256(), uint256());
-    pcursor->Seek(start_contrib);
-
-    while (pcursor->Valid()) {
-        decltype(start_contrib) k;
-        CBLSSecretKey v;
-
-        if (!pcursor->GetKey(k) || std::get<0>(k) != DB_SKCONTRIB) {
-            break;
-        }
-        if (!pcursor->GetValue(v)) {
-            break;
-        }
-
-        batch.Write(k, v);
-
-        if (batch.SizeEstimate() >= (1 << 24)) {
-            db->WriteBatch(batch);
-            batch.Clear();
-        }
-
-        pcursor->Next();
-    }
-
-    auto start_enc_contrib = std::make_tuple(DB_ENC_CONTRIB, (Consensus::LLMQType)0, uint256(), uint256());
-    pcursor->Seek(start_enc_contrib);
-
-    while (pcursor->Valid()) {
-        decltype(start_enc_contrib) k;
-        CBLSIESMultiRecipientObjects<CBLSSecretKey> v;
-
-        if (!pcursor->GetKey(k) || std::get<0>(k) != DB_ENC_CONTRIB) {
-            break;
-        }
-        if (!pcursor->GetValue(v)) {
-            break;
-        }
-
-        batch.Write(k, v);
-
-        if (batch.SizeEstimate() >= (1 << 24)) {
-            db->WriteBatch(batch);
-            batch.Clear();
-        }
-
-        pcursor->Next();
-    }
-
-    db->WriteBatch(batch);
-    pcursor.reset();
-    oldDb.reset();
-
-    LogPrint(BCLog::LLMQ, "CDKGSessionManager::%d -- done\n", __func__);
-}
-
-void CDKGSessionManager::StartThreads()
-{
-    for (auto& it : dkgSessionHandlers) {
-        it.second.StartThread();
+    for (auto& [_, dkgType] : dkgSessionHandlers) {
+        Assert(dkgType)->StartThread(connman, peerman);
     }
 }
 
 void CDKGSessionManager::StopThreads()
 {
-    for (auto& it : dkgSessionHandlers) {
-        it.second.StopThread();
+    for (auto& [_, dkgType] : dkgSessionHandlers) {
+        Assert(dkgType)->StopThread();
     }
 }
 
@@ -152,41 +66,49 @@ void CDKGSessionManager::UpdatedBlockTip(const CBlockIndex* pindexNew, bool fIni
 
     if (fInitialDownload)
         return;
-    if (!deterministicMNManager->IsDIP3Enforced(pindexNew->nHeight))
+    if (!DeploymentDIP0003Enforced(pindexNew->nHeight, Params().GetConsensus()))
         return;
-    if (!IsQuorumDKGEnabled(spork_manager))
+    if (!IsQuorumDKGEnabled(m_sporkman))
         return;
 
-    for (auto& qt : dkgSessionHandlers) {
-        qt.second.UpdatedBlockTip(pindexNew);
+    for (auto& [_, dkgType] : dkgSessionHandlers) {
+        Assert(dkgType)->UpdatedBlockTip(pindexNew);
     }
 }
 
-void CDKGSessionManager::ProcessMessage(CNode* pfrom, const CQuorumManager& quorum_manager, const std::string& msg_type, CDataStream& vRecv)
+MessageProcessingResult CDKGSessionManager::ProcessMessage(CNode& pfrom, bool is_masternode, std::string_view msg_type,
+                                                           CDataStream& vRecv)
 {
     static Mutex cs_indexedQuorumsCache;
-    static std::map<Consensus::LLMQType, unordered_lru_cache<uint256, int, StaticSaltedHasher>> indexedQuorumsCache GUARDED_BY(cs_indexedQuorumsCache);
+    static std::map<Consensus::LLMQType, Uint256LruHashMap<int>> indexedQuorumsCache GUARDED_BY(cs_indexedQuorumsCache);
 
-    if (!IsQuorumDKGEnabled(spork_manager))
-        return;
+    if (!IsQuorumDKGEnabled(m_sporkman))
+        return {};
 
     if (msg_type != NetMsgType::QCONTRIB
         && msg_type != NetMsgType::QCOMPLAINT
         && msg_type != NetMsgType::QJUSTIFICATION
         && msg_type != NetMsgType::QPCOMMITMENT
         && msg_type != NetMsgType::QWATCH) {
-        return;
+        return {};
     }
 
     if (msg_type == NetMsgType::QWATCH) {
-        pfrom->qwatch = true;
-        return;
+        if (!is_masternode) {
+            // non-masternodes should never receive this
+            return MisbehavingError{10};
+        }
+        pfrom.qwatch = true;
+        return {};
+    }
+
+    if (!is_masternode && !m_quorums_watch) {
+        // regular non-watching nodes should never receive any of these
+        return MisbehavingError{10};
     }
 
     if (vRecv.empty()) {
-        LOCK(cs_main);
-        Misbehaving(pfrom->GetId(), 100);
-        return;
+        return MisbehavingError{100};
     }
 
     Consensus::LLMQType llmqType;
@@ -196,12 +118,12 @@ void CDKGSessionManager::ProcessMessage(CNode* pfrom, const CQuorumManager& quor
     vRecv.Rewind(sizeof(uint256));
     vRecv.Rewind(sizeof(uint8_t));
 
-    if (!Params().HasLLMQ(llmqType)) {
-        LOCK(cs_main);
-        LogPrintf("CDKGSessionManager -- invalid llmqType [%d]\n", uint8_t(llmqType));
-        Misbehaving(pfrom->GetId(), 100);
-        return;
+    const auto& llmq_params_opt = Params().GetLLMQ(llmqType);
+    if (!llmq_params_opt.has_value()) {
+        LogPrintf("CDKGSessionManager -- invalid llmqType [%d]\n", std23::to_underlying(llmqType));
+        return MisbehavingError{100};
     }
+    const auto& llmq_params = llmq_params_opt.value();
 
     int quorumIndex{-1};
 
@@ -209,65 +131,56 @@ void CDKGSessionManager::ProcessMessage(CNode* pfrom, const CQuorumManager& quor
     {
         LOCK(cs_indexedQuorumsCache);
         if (indexedQuorumsCache.empty()) {
-            utils::InitQuorumsCache(indexedQuorumsCache);
+            utils::InitQuorumsCache(indexedQuorumsCache, m_chainman.GetConsensus());
         }
         indexedQuorumsCache[llmqType].get(quorumHash, quorumIndex);
     }
 
     // No luck, try to compute
     if (quorumIndex == -1) {
-        CBlockIndex* pQuorumBaseBlockIndex = WITH_LOCK(cs_main, return LookupBlockIndex(quorumHash));
+        const CBlockIndex* pQuorumBaseBlockIndex = WITH_LOCK(::cs_main,
+                                                             return m_chainman.m_blockman.LookupBlockIndex(quorumHash));
         if (pQuorumBaseBlockIndex == nullptr) {
-            LOCK(cs_main);
             LogPrintf("CDKGSessionManager -- unknown quorumHash %s\n", quorumHash.ToString());
             // NOTE: do not insta-ban for this, we might be lagging behind
-            Misbehaving(pfrom->GetId(), 10);
-            return;
+            return MisbehavingError{10};
         }
 
-        if (!utils::IsQuorumTypeEnabled(llmqType, quorum_manager, pQuorumBaseBlockIndex->pprev)) {
-            LOCK(cs_main);
-            LogPrintf("CDKGSessionManager -- llmqType [%d] quorums aren't active\n", uint8_t(llmqType));
-            Misbehaving(pfrom->GetId(), 100);
-            return;
+        if (!m_chainman.IsQuorumTypeEnabled(llmqType, pQuorumBaseBlockIndex->pprev)) {
+            LogPrintf("CDKGSessionManager -- llmqType [%d] quorums aren't active\n", std23::to_underlying(llmqType));
+            return MisbehavingError{100};
         }
 
-        const Consensus::LLMQParams& llmqParams = GetLLMQParams(llmqType);
-        quorumIndex = pQuorumBaseBlockIndex->nHeight % llmqParams.dkgInterval;
-        int quorumIndexMax = utils::IsQuorumRotationEnabled(llmqType, pQuorumBaseBlockIndex) ?
-                llmqParams.signingActiveQuorumCount - 1 : 0;
+        quorumIndex = pQuorumBaseBlockIndex->nHeight % llmq_params.dkgInterval;
+        int quorumIndexMax = IsQuorumRotationEnabled(llmq_params, pQuorumBaseBlockIndex) ?
+                llmq_params.signingActiveQuorumCount - 1 : 0;
 
         if (quorumIndex > quorumIndexMax) {
-            LOCK(cs_main);
             LogPrintf("CDKGSessionManager -- invalid quorumHash %s\n", quorumHash.ToString());
-            Misbehaving(pfrom->GetId(), 100);
-            return;
+            return MisbehavingError{100};
         }
 
-        if (!dkgSessionHandlers.count(std::make_pair(llmqType, quorumIndex))) {
-            LOCK(cs_main);
+        if (!dkgSessionHandlers.count({llmqType, quorumIndex})) {
             LogPrintf("CDKGSessionManager -- no session handlers for quorumIndex [%d]\n", quorumIndex);
-            Misbehaving(pfrom->GetId(), 100);
-            return;
+            return MisbehavingError{100};
         }
     }
 
     assert(quorumIndex != -1);
     WITH_LOCK(cs_indexedQuorumsCache, indexedQuorumsCache[llmqType].insert(quorumHash, quorumIndex));
-    dkgSessionHandlers.at(std::make_pair(llmqType, quorumIndex)).ProcessMessage(pfrom, msg_type, vRecv);
+    return Assert(dkgSessionHandlers.at({llmqType, quorumIndex}))->ProcessMessage(pfrom.GetId(), msg_type, vRecv);
 }
 
 bool CDKGSessionManager::AlreadyHave(const CInv& inv) const
 {
-    if (!IsQuorumDKGEnabled(spork_manager))
+    if (!IsQuorumDKGEnabled(m_sporkman))
         return false;
 
-    for (const auto& p : dkgSessionHandlers) {
-        const auto& dkgType = p.second;
-        if (dkgType.pendingContributions.HasSeen(inv.hash)
-            || dkgType.pendingComplaints.HasSeen(inv.hash)
-            || dkgType.pendingJustifications.HasSeen(inv.hash)
-            || dkgType.pendingPrematureCommitments.HasSeen(inv.hash)) {
+    for (const auto& [_, dkgType] : dkgSessionHandlers) {
+        if (Assert(dkgType)->pendingContributions.HasSeen(inv.hash)
+            || dkgType->pendingComplaints.HasSeen(inv.hash)
+            || dkgType->pendingJustifications.HasSeen(inv.hash)
+            || dkgType->pendingPrematureCommitments.HasSeen(inv.hash)) {
             return true;
         }
     }
@@ -276,19 +189,15 @@ bool CDKGSessionManager::AlreadyHave(const CInv& inv) const
 
 bool CDKGSessionManager::GetContribution(const uint256& hash, CDKGContribution& ret) const
 {
-    if (!IsQuorumDKGEnabled(spork_manager))
+    if (!IsQuorumDKGEnabled(m_sporkman))
         return false;
 
-    for (const auto& p : dkgSessionHandlers) {
-        const auto& dkgType = p.second;
-        LOCK(dkgType.cs);
-        if (dkgType.phase < QuorumPhase::Initialized || dkgType.phase > QuorumPhase::Contribute) {
+    for (const auto& [_, dkgType] : dkgSessionHandlers) {
+        const auto dkgPhase = Assert(dkgType)->GetPhase();
+        if (dkgPhase < QuorumPhase::Initialized || dkgPhase > QuorumPhase::Contribute) {
             continue;
         }
-        LOCK(dkgType.curSession->invCs);
-        auto it = dkgType.curSession->contributions.find(hash);
-        if (it != dkgType.curSession->contributions.end()) {
-            ret = it->second;
+        if (dkgType->GetContribution(hash, ret)) {
             return true;
         }
     }
@@ -297,19 +206,15 @@ bool CDKGSessionManager::GetContribution(const uint256& hash, CDKGContribution& 
 
 bool CDKGSessionManager::GetComplaint(const uint256& hash, CDKGComplaint& ret) const
 {
-    if (!IsQuorumDKGEnabled(spork_manager))
+    if (!IsQuorumDKGEnabled(m_sporkman))
         return false;
 
-    for (const auto& p : dkgSessionHandlers) {
-        const auto& dkgType = p.second;
-        LOCK(dkgType.cs);
-        if (dkgType.phase < QuorumPhase::Contribute || dkgType.phase > QuorumPhase::Complain) {
+    for (const auto& [_, dkgType] : dkgSessionHandlers) {
+        const auto dkgPhase = Assert(dkgType)->GetPhase();
+        if (dkgPhase < QuorumPhase::Contribute || dkgPhase > QuorumPhase::Complain) {
             continue;
         }
-        LOCK(dkgType.curSession->invCs);
-        auto it = dkgType.curSession->complaints.find(hash);
-        if (it != dkgType.curSession->complaints.end()) {
-            ret = it->second;
+        if (dkgType->GetComplaint(hash, ret)) {
             return true;
         }
     }
@@ -318,19 +223,15 @@ bool CDKGSessionManager::GetComplaint(const uint256& hash, CDKGComplaint& ret) c
 
 bool CDKGSessionManager::GetJustification(const uint256& hash, CDKGJustification& ret) const
 {
-    if (!IsQuorumDKGEnabled(spork_manager))
+    if (!IsQuorumDKGEnabled(m_sporkman))
         return false;
 
-    for (const auto& p : dkgSessionHandlers) {
-        const auto& dkgType = p.second;
-        LOCK(dkgType.cs);
-        if (dkgType.phase < QuorumPhase::Complain || dkgType.phase > QuorumPhase::Justify) {
+    for (const auto& [_, dkgType] : dkgSessionHandlers) {
+        const auto dkgPhase = Assert(dkgType)->GetPhase();
+        if (dkgPhase < QuorumPhase::Complain || dkgPhase > QuorumPhase::Justify) {
             continue;
         }
-        LOCK(dkgType.curSession->invCs);
-        auto it = dkgType.curSession->justifications.find(hash);
-        if (it != dkgType.curSession->justifications.end()) {
-            ret = it->second;
+        if (dkgType->GetJustification(hash, ret)) {
             return true;
         }
     }
@@ -339,19 +240,15 @@ bool CDKGSessionManager::GetJustification(const uint256& hash, CDKGJustification
 
 bool CDKGSessionManager::GetPrematureCommitment(const uint256& hash, CDKGPrematureCommitment& ret) const
 {
-    if (!IsQuorumDKGEnabled(spork_manager))
+    if (!IsQuorumDKGEnabled(m_sporkman))
         return false;
 
-    for (const auto& p : dkgSessionHandlers) {
-        const auto& dkgType = p.second;
-        LOCK(dkgType.cs);
-        if (dkgType.phase < QuorumPhase::Justify || dkgType.phase > QuorumPhase::Commit) {
+    for (const auto& [_, dkgType] : dkgSessionHandlers) {
+        const auto dkgPhase = Assert(dkgType)->GetPhase();
+        if (dkgPhase < QuorumPhase::Justify || dkgPhase > QuorumPhase::Commit) {
             continue;
         }
-        LOCK(dkgType.curSession->invCs);
-        auto it = dkgType.curSession->prematureCommitments.find(hash);
-        if (it != dkgType.curSession->prematureCommitments.end() && dkgType.curSession->validCommitments.count(hash)) {
-            ret = it->second;
+        if (dkgType->GetPrematureCommitment(hash, ret)) {
             return true;
         }
     }
@@ -360,7 +257,12 @@ bool CDKGSessionManager::GetPrematureCommitment(const uint256& hash, CDKGPrematu
 
 void CDKGSessionManager::WriteVerifiedVvecContribution(Consensus::LLMQType llmqType, const CBlockIndex* pQuorumBaseBlockIndex, const uint256& proTxHash, const BLSVerificationVectorPtr& vvec)
 {
-    db->Write(std::make_tuple(DB_VVEC, llmqType, pQuorumBaseBlockIndex->GetBlockHash(), proTxHash), *vvec);
+    CDataStream s(SER_DISK, CLIENT_VERSION);
+    WriteCompactSize(s, vvec->size());
+    for (auto& pubkey : *vvec) {
+        s << CBLSPublicKeyVersionWrapper(pubkey, false);
+    }
+    db->Write(std::make_tuple(DB_VVEC, llmqType, pQuorumBaseBlockIndex->GetBlockHash(), proTxHash), s);
 }
 
 void CDKGSessionManager::WriteVerifiedSkContribution(Consensus::LLMQType llmqType, const CBlockIndex* pQuorumBaseBlockIndex, const uint256& proTxHash, const CBLSSecretKey& skContribution)
@@ -373,10 +275,9 @@ void CDKGSessionManager::WriteEncryptedContributions(Consensus::LLMQType llmqTyp
     db->Write(std::make_tuple(DB_ENC_CONTRIB, llmqType, pQuorumBaseBlockIndex->GetBlockHash(), proTxHash), contributions);
 }
 
-bool CDKGSessionManager::GetVerifiedContributions(Consensus::LLMQType llmqType, const CBlockIndex* pQuorumBaseBlockIndex, const std::vector<bool>& validMembers, std::vector<uint16_t>& memberIndexesRet, std::vector<BLSVerificationVectorPtr>& vvecsRet, BLSSecretKeyVector& skContributionsRet) const
+bool CDKGSessionManager::GetVerifiedContributions(Consensus::LLMQType llmqType, const CBlockIndex* pQuorumBaseBlockIndex, const std::vector<bool>& validMembers, std::vector<uint16_t>& memberIndexesRet, std::vector<BLSVerificationVectorPtr>& vvecsRet, std::vector<CBLSSecretKey>& skContributionsRet) const
 {
-    LOCK(contributionsCacheCs);
-    auto members = utils::GetAllQuorumMembers(llmqType, pQuorumBaseBlockIndex);
+    auto members = utils::GetAllQuorumMembers(llmqType, {m_dmnman, m_qsnapman, m_chainman, pQuorumBaseBlockIndex});
 
     memberIndexesRet.clear();
     vvecsRet.clear();
@@ -384,20 +285,35 @@ bool CDKGSessionManager::GetVerifiedContributions(Consensus::LLMQType llmqType, 
     memberIndexesRet.reserve(members.size());
     vvecsRet.reserve(members.size());
     skContributionsRet.reserve(members.size());
-    for (const auto i : irange::range(members.size())) {
+
+    // NOTE: the `cs_main` should not be locked under scope of `contributionsCacheCs`
+    LOCK(contributionsCacheCs);
+    for (const auto i : util::irange(members.size())) {
         if (validMembers[i]) {
             const uint256& proTxHash = members[i]->proTxHash;
             ContributionsCacheKey cacheKey = {llmqType, pQuorumBaseBlockIndex->GetBlockHash(), proTxHash};
             auto it = contributionsCache.find(cacheKey);
             if (it == contributionsCache.end()) {
-                auto vvecPtr = std::make_shared<BLSVerificationVector>();
-                CBLSSecretKey skContribution;
-                if (!db->Read(std::make_tuple(DB_VVEC, llmqType, pQuorumBaseBlockIndex->GetBlockHash(), proTxHash), *vvecPtr)) {
+                CDataStream s(SER_DISK, CLIENT_VERSION);
+                if (!db->ReadDataStream(std::make_tuple(DB_VVEC, llmqType, pQuorumBaseBlockIndex->GetBlockHash(), proTxHash), s)) {
+                    LogPrint(BCLog::LLMQ, "%s -- this node does not have vvec for llmq=%d block=%s protx=%s\n",
+                             __func__, std23::to_underlying(llmqType), pQuorumBaseBlockIndex->GetBlockHash().ToString(),
+                             proTxHash.ToString());
                     return false;
                 }
+                size_t vvec_size = ReadCompactSize(s);
+                CBLSPublicKey pubkey;
+                std::vector<CBLSPublicKey> qv;
+                for ([[maybe_unused]] size_t _ : util::irange(vvec_size)) {
+                    s >> CBLSPublicKeyVersionWrapper(pubkey, false);
+                    qv.emplace_back(pubkey);
+                }
+                auto vvecPtr = std::make_shared<std::vector<CBLSPublicKey>>(std::move(qv));
+
+                CBLSSecretKey skContribution;
                 db->Read(std::make_tuple(DB_SKCONTRIB, llmqType, pQuorumBaseBlockIndex->GetBlockHash(), proTxHash), skContribution);
 
-                it = contributionsCache.emplace(cacheKey, ContributionsCacheEntry{GetTimeMillis(), vvecPtr, skContribution}).first;
+                it = contributionsCache.emplace(cacheKey, ContributionsCacheEntry{SteadyClock::now(), vvecPtr, skContribution}).first;
             }
 
             memberIndexesRet.emplace_back(i);
@@ -410,13 +326,13 @@ bool CDKGSessionManager::GetVerifiedContributions(Consensus::LLMQType llmqType, 
 
 bool CDKGSessionManager::GetEncryptedContributions(Consensus::LLMQType llmqType, const CBlockIndex* pQuorumBaseBlockIndex, const std::vector<bool>& validMembers, const uint256& nProTxHash, std::vector<CBLSIESEncryptedObject<CBLSSecretKey>>& vecRet) const
 {
-    auto members = utils::GetAllQuorumMembers(llmqType, pQuorumBaseBlockIndex);
+    auto members = utils::GetAllQuorumMembers(llmqType, {m_dmnman, m_qsnapman, m_chainman, pQuorumBaseBlockIndex});
 
     vecRet.clear();
     vecRet.reserve(members.size());
 
     size_t nRequestedMemberIdx{std::numeric_limits<size_t>::max()};
-    for (const auto i : irange::range(members.size())) {
+    for (const auto i : util::irange(members.size())) {
         // cppcheck-suppress useStlAlgorithm
         if (members[i]->proTxHash == nProTxHash) {
             nRequestedMemberIdx = i;
@@ -424,13 +340,15 @@ bool CDKGSessionManager::GetEncryptedContributions(Consensus::LLMQType llmqType,
         }
     }
     if (nRequestedMemberIdx == std::numeric_limits<size_t>::max()) {
+        LogPrint(BCLog::LLMQ, "CDKGSessionManager::%s -- not a member, nProTxHash=%s\n", __func__, nProTxHash.ToString());
         return false;
     }
 
-    for (const auto i : irange::range(members.size())) {
+    for (const auto i : util::irange(members.size())) {
         if (validMembers[i]) {
             CBLSIESMultiRecipientObjects<CBLSSecretKey> encryptedContributions;
             if (!db->Read(std::make_tuple(DB_ENC_CONTRIB, llmqType, pQuorumBaseBlockIndex->GetBlockHash(), members[i]->proTxHash), encryptedContributions)) {
+                LogPrint(BCLog::LLMQ, "CDKGSessionManager::%s -- can't read from db, nProTxHash=%s\n", __func__, nProTxHash.ToString());
                 return false;
             }
             vecRet.emplace_back(encryptedContributions.Get(nRequestedMemberIdx));
@@ -442,7 +360,7 @@ bool CDKGSessionManager::GetEncryptedContributions(Consensus::LLMQType llmqType,
 void CDKGSessionManager::CleanupCache() const
 {
     LOCK(contributionsCacheCs);
-    auto curTime = GetTimeMillis();
+    const auto curTime = SteadyClock::now();
     for (auto it = contributionsCache.begin(); it != contributionsCache.end(); ) {
         if (curTime - it->second.entryTime > MAX_CONTRIBUTION_CACHE_TIME) {
             it = contributionsCache.erase(it);
@@ -461,10 +379,7 @@ void CDKGSessionManager::CleanupOldContributions() const
     const auto prefixes = {DB_VVEC, DB_SKCONTRIB, DB_ENC_CONTRIB};
 
     for (const auto& params : Params().GetConsensus().llmqs) {
-        // For how many blocks recent DKG info should be kept
-        const size_t MAX_STORE_DEPTH = 2 * params.signingActiveQuorumCount * params.dkgInterval;
-
-        LogPrint(BCLog::LLMQ, "CDKGSessionManager::%s -- looking for old entries for llmq type %d\n", __func__, uint8_t(params.type));
+        LogPrint(BCLog::LLMQ, "CDKGSessionManager::%s -- looking for old entries for llmq type %d\n", __func__, std23::to_underlying(params.type));
 
         CDBBatch batch(*db);
         size_t cnt_old{0}, cnt_all{0};
@@ -474,14 +389,15 @@ void CDKGSessionManager::CleanupOldContributions() const
             decltype(start) k;
 
             pcursor->Seek(start);
-            LOCK(cs_main);
+            LOCK(::cs_main);
             while (pcursor->Valid()) {
                 if (!pcursor->GetKey(k) || std::get<0>(k) != prefix || std::get<1>(k) != params.type) {
                     break;
                 }
                 cnt_all++;
-                const CBlockIndex* pindexQuorum = LookupBlockIndex(std::get<2>(k));
-                if (pindexQuorum == nullptr || ::ChainActive().Tip()->nHeight - pindexQuorum->nHeight > MAX_STORE_DEPTH) {
+                const CBlockIndex* pindexQuorum = m_chainman.m_blockman.LookupBlockIndex(std::get<2>(k));
+                if (pindexQuorum == nullptr ||
+                    m_chainman.ActiveHeight() - pindexQuorum->nHeight > params.max_store_depth()) {
                     // not found or too old
                     batch.Erase(k);
                     cnt_old++;
@@ -497,10 +413,4 @@ void CDKGSessionManager::CleanupOldContributions() const
         }
     }
 }
-
-bool IsQuorumDKGEnabled(const CSporkManager& sporkManager)
-{
-    return sporkManager.IsSporkActive(SPORK_17_QUORUM_DKG_ENABLED);
-}
-
 } // namespace llmq

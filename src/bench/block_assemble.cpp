@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2017 The Bitcoin Core developers
+// Copyright (c) 2011-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -6,8 +6,10 @@
 #include <consensus/consensus.h>
 #include <consensus/validation.h>
 #include <script/standard.h>
-#include <test/util.h>
+#include <test/util/mining.h>
+#include <test/util/script.h>
 #include <test/util/setup_common.h>
+#include <test/util/wallet.h>
 #include <txmempool.h>
 #include <validation.h>
 
@@ -16,7 +18,7 @@
 
 static void AssembleBlock(benchmark::Bench& bench)
 {
-    RegTestingSetup test_setup;
+    const auto test_setup = MakeNoLogFileContext<const TestingSetup>();
     const CScript redeemScript = CScript() << OP_DROP << OP_TRUE;
     const CScript SCRIPT_PUB =
         CScript() << OP_HASH160 << ToByteVector(CScriptID(redeemScript))
@@ -30,25 +32,24 @@ static void AssembleBlock(benchmark::Bench& bench)
     std::array<CTransactionRef, NUM_BLOCKS - COINBASE_MATURITY + 1> txs;
     for (size_t b{0}; b < NUM_BLOCKS; ++b) {
         CMutableTransaction tx;
-        tx.vin.push_back(MineBlock(test_setup.m_node, SCRIPT_PUB));
+        tx.vin.emplace_back(MineBlock(test_setup->m_node, SCRIPT_PUB));
         tx.vin.back().scriptSig = scriptSig;
         tx.vout.emplace_back(1337, SCRIPT_PUB);
         if (NUM_BLOCKS - b >= COINBASE_MATURITY)
             txs.at(b) = MakeTransactionRef(tx);
     }
     {
-        LOCK(::cs_main); // Required for ::AcceptToMemoryPool.
+        LOCK(::cs_main);
 
         for (const auto& txr : txs) {
-            CValidationState state;
-            bool ret{::AcceptToMemoryPool(*test_setup.m_node.mempool, state, txr, nullptr /* pfMissingInputs */, false /* bypass_limits */, /* nAbsurdFee */ 0)};
-            assert(ret);
+            const MempoolAcceptResult res = test_setup->m_node.chainman->ProcessTransaction(txr);
+            assert(res.m_result_type == MempoolAcceptResult::ResultType::VALID);
         }
     }
 
     bench.minEpochIterations(700).run([&] {
-        PrepareBlock(test_setup.m_node, SCRIPT_PUB);
+        PrepareBlock(test_setup->m_node, SCRIPT_PUB);
     });
 }
 
-BENCHMARK(AssembleBlock);
+BENCHMARK(AssembleBlock, benchmark::PriorityLevel::HIGH);

@@ -1,9 +1,11 @@
-// Copyright (c) 2018 The Bitcoin Core developers
+// Copyright (c) 2018-2020 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <qt/bitcoin.h>
 
+#include <common/url.h>
+#include <compat/compat.h>
 #include <util/translation.h>
 
 #include <QCoreApplication>
@@ -15,5 +17,9 @@
 extern const std::function<std::string(const char*)> G_TRANSLATION_FUN = [](const char* psz) {
     return QCoreApplication::translate("dash-core", psz).toStdString();
 };
+UrlDecodeFn* const URL_DECODE = urlDecode;
 
-int main(int argc, char* argv[]) { return GuiMain(argc, argv); }
+MAIN_FUNCTION
+{
+    return GuiMain(argc, argv);
+}

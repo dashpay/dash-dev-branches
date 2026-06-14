@@ -1,4 +1,4 @@
-// Copyright (c) 2019 The Bitcoin Core developers
+// Copyright (c) 2019-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -12,19 +12,48 @@
 
 class ArgsManager;
 class BanMan;
+class CActiveMasternodeManager;
+class AddrMan;
+class CBlockPolicyEstimator;
 class CConnman;
-class CScheduler;
-class CTxMemPool;
+class CDeterministicMNManager;
+class CDSTXManager;
+class CChainstateHelper;
 class ChainstateManager;
-struct LLMQContext;
-class PeerLogicValidation;
 class CEvoDB;
+class CGovernanceManager;
+class CJWalletManager;
+class CMasternodeMetaMan;
+class CMasternodeSync;
+class CNetFulfilledRequestManager;
+class CScheduler;
+class CSporkManager;
+class CTxMemPool;
+class NetGroupManager;
+class PeerManager;
+struct ActiveContext;
+struct LLMQContext;
+
+namespace chainlock {
+class Chainlocks;
+class ChainlockHandler;
+} // namespace chainlock
+
 namespace interfaces {
 class Chain;
 class ChainClient;
-class WalletClient;
+class Init;
+class WalletLoader;
+namespace CoinJoin {
+class Loader;
+} // namspace CoinJoin
 } // namespace interfaces
 
+namespace llmq {
+struct ObserverContext;
+} // namespace llmq
+
+namespace node {
 //! NodeContext struct containing references to chain state and connection
 //! state.
 //!
@@ -36,10 +65,15 @@ class WalletClient;
 //! any member functions. It should just be a collection of references that can
 //! be used without pulling in unwanted dependencies or functionality.
 struct NodeContext {
+    //! Init interface for initializing current process and connecting to other processes.
+    interfaces::Init* init{nullptr};
+    std::unique_ptr<AddrMan> addrman;
     std::unique_ptr<CConnman> connman;
-    CTxMemPool* mempool{nullptr}; // Currently a raw pointer because the memory is not managed by this struct
-    std::unique_ptr<PeerLogicValidation> peer_logic;
-    ChainstateManager* chainman{nullptr}; // Currently a raw pointer because the memory is not managed by this struct
+    std::unique_ptr<CTxMemPool> mempool;
+    std::unique_ptr<const NetGroupManager> netgroupman;
+    std::unique_ptr<CBlockPolicyEstimator> fee_estimator;
+    std::unique_ptr<PeerManager> peerman;
+    std::unique_ptr<ChainstateManager> chainman;
     std::unique_ptr<BanMan> banman;
     ArgsManager* args{nullptr}; // Currently a raw pointer because the memory is not managed by this struct
     std::unique_ptr<interfaces::Chain> chain;
@@ -47,13 +81,27 @@ struct NodeContext {
     std::vector<std::unique_ptr<interfaces::ChainClient>> chain_clients;
     //! Reference to chain client that should used to load or create wallets
     //! opened by the gui.
-    interfaces::WalletClient* wallet_client{nullptr};
+    interfaces::WalletLoader* wallet_loader{nullptr};
+    std::unique_ptr<interfaces::CoinJoin::Loader> coinjoin_loader{nullptr};
     std::unique_ptr<CScheduler> scheduler;
     std::function<void()> rpc_interruption_point = [] {};
-    //! Dash
-    std::unique_ptr<LLMQContext> llmq_ctx;
-
+    //! Dash managers
+    std::unique_ptr<CJWalletManager> cj_walletman;
+    std::unique_ptr<CDSTXManager> dstxman;
     std::unique_ptr<CEvoDB> evodb;
+    std::unique_ptr<CChainstateHelper> chain_helper;
+    std::unique_ptr<CDeterministicMNManager> dmnman;
+    std::unique_ptr<CGovernanceManager> govman;
+    std::unique_ptr<CMasternodeMetaMan> mn_metaman;
+    std::unique_ptr<CMasternodeSync> mn_sync;
+    std::unique_ptr<CNetFulfilledRequestManager> netfulfilledman;
+    std::unique_ptr<CSporkManager> sporkman;
+    std::unique_ptr<chainlock::Chainlocks> chainlocks;
+    std::unique_ptr<chainlock::ChainlockHandler> clhandler;
+    //! Dash contexts
+    std::unique_ptr<ActiveContext> active_ctx;
+    std::unique_ptr<LLMQContext> llmq_ctx;
+    std::unique_ptr<llmq::ObserverContext> observer_ctx;
 
     //! Declare default constructor and destructor that are not inline, so code
     //! instantiating the NodeContext struct doesn't need to #include class
@@ -61,5 +109,6 @@ struct NodeContext {
     NodeContext();
     ~NodeContext();
 };
+} // namespace node
 
 #endif // BITCOIN_NODE_CONTEXT_H

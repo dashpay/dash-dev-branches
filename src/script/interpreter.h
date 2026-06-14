@@ -1,22 +1,25 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2016 The Bitcoin Core developers
+// Copyright (c) 2009-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #ifndef BITCOIN_SCRIPT_INTERPRETER_H
 #define BITCOIN_SCRIPT_INTERPRETER_H
 
-#include <script/script_error.h>
+#include <consensus/amount.h>
 #include <primitives/transaction.h>
+#include <script/script_error.h> // IWYU pragma: export
+#include <span.h>
+#include <uint256.h>
 
+#include <cstddef>
+#include <cstdint>
 #include <vector>
-#include <stdint.h>
 
 class CPubKey;
 class CScript;
-class CTransaction;
-class CTxOut;
-class uint256;
+class CScriptNum;
+class XOnlyPubKey;
 
 /** Signature hash types/flags */
 enum
@@ -32,8 +35,7 @@ enum
  *  All flags are intended to be soft forks: the set of acceptable scripts under
  *  flags (A | B) is a subset of the acceptable scripts under flag (A).
  */
-enum
-{
+enum : uint32_t {
     SCRIPT_VERIFY_NONE      = 0,
 
     // Evaluate P2SH subscripts (BIP16).
@@ -96,12 +98,19 @@ enum
     //
     SCRIPT_VERIFY_NULLFAIL = (1U << 14),
 
-    // Enable the opcodes listed in DIP0020 (OP_CAT, OP_AND, OP_OR, OP_XOR, OP_DIV, OP_MOD, OP_SPLIT, OP_BIN2NUM, OP_NUM2BIN, OP_CHECKDATASIG, OP_CHECKDATASIGVERIFY).
-    SCRIPT_ENABLE_DIP0020_OPCODES = (1U << 15),
+    // DIP0020_OPCODES - ignored.
+    // Was used to enable the opcodes listed in DIP0020
+    // (OP_CAT, OP_AND, OP_OR, OP_XOR, OP_DIV, OP_MOD, OP_SPLIT, OP_BIN2NUM,
+    // OP_NUM2BIN, OP_CHECKDATASIG, OP_CHECKDATASIGVERIFY).
+    // SCRIPT_ENABLE_DIP0020_OPCODES = (1U << 15),
 
     // Making OP_CODESEPARATOR and FindAndDelete fail
     //
     SCRIPT_VERIFY_CONST_SCRIPTCODE = (1U << 16),
+
+    // Constants to point to the highest flag in use. Add new flags above this line.
+    //
+    SCRIPT_VERIFY_END_MARKER
 };
 
 bool CheckSignatureEncoding(const std::vector<unsigned char> &vchSig, unsigned int flags, ScriptError* serror);
@@ -115,7 +124,7 @@ struct PrecomputedTransactionData
     PrecomputedTransactionData() = default;
 
     template <class T>
-    void Init(const T& tx, std::vector<CTxOut>&& spent_outputs);
+    void Init(const T& tx, std::vector<CTxOut>&& spent_outputs, bool force = false);
 
     template <class T>
     explicit PrecomputedTransactionData(const T& tx);
@@ -150,11 +159,21 @@ public:
     virtual ~BaseSignatureChecker() {}
 };
 
+/** Enum to specify what *TransactionSignatureChecker's behavior should be
+ *  when dealing with missing transaction data.
+ */
+enum class MissingDataBehavior
+{
+    ASSERT_FAIL,  //!< Abort execution through assertion failure (for consensus code)
+    FAIL,         //!< Just act as if the signature was invalid
+};
+
 template <class T>
 class GenericTransactionSignatureChecker : public BaseSignatureChecker
 {
 private:
     const T* txTo;
+    const MissingDataBehavior m_mdb;
     unsigned int nIn;
     const CAmount amount;
     const PrecomputedTransactionData* txdata;
@@ -163,8 +182,8 @@ protected:
     virtual bool VerifySignature(const std::vector<unsigned char>& vchSig, const CPubKey& vchPubKey, const uint256& sighash) const;
 
 public:
-    GenericTransactionSignatureChecker(const T* txToIn, unsigned int nInIn, const CAmount& amountIn) : txTo(txToIn), nIn(nInIn), amount(amountIn), txdata(nullptr) {}
-    GenericTransactionSignatureChecker(const T* txToIn, unsigned int nInIn, const CAmount& amountIn, const PrecomputedTransactionData& txdataIn) : txTo(txToIn), nIn(nInIn), amount(amountIn), txdata(&txdataIn) {}
+    GenericTransactionSignatureChecker(const T* txToIn, unsigned int nInIn, const CAmount& amountIn, MissingDataBehavior mdb) : txTo(txToIn), m_mdb(mdb), nIn(nInIn), amount(amountIn), txdata(nullptr) {}
+    GenericTransactionSignatureChecker(const T* txToIn, unsigned int nInIn, const CAmount& amountIn, const PrecomputedTransactionData& txdataIn, MissingDataBehavior mdb) : txTo(txToIn), m_mdb(mdb), nIn(nInIn), amount(amountIn), txdata(&txdataIn) {}
     bool CheckSig(const std::vector<unsigned char>& scriptSig, const std::vector<unsigned char>& vchPubKey, const CScript& scriptCode, SigVersion sigversion) const override;
     bool CheckLockTime(const CScriptNum& nLockTime) const override;
     bool CheckSequence(const CScriptNum& nSequence) const override;
@@ -172,6 +191,28 @@ public:
 
 using TransactionSignatureChecker = GenericTransactionSignatureChecker<CTransaction>;
 using MutableTransactionSignatureChecker = GenericTransactionSignatureChecker<CMutableTransaction>;
+
+class DeferringSignatureChecker : public BaseSignatureChecker
+{
+protected:
+    const BaseSignatureChecker& m_checker;
+
+public:
+    DeferringSignatureChecker(const BaseSignatureChecker& checker) : m_checker(checker) {}
+
+    bool CheckSig(const std::vector<unsigned char>& scriptSig, const std::vector<unsigned char>& vchPubKey, const CScript& scriptCode, SigVersion sigversion) const override
+    {
+        return m_checker.CheckSig(scriptSig, vchPubKey, scriptCode, sigversion);
+    }
+    bool CheckLockTime(const CScriptNum& nLockTime) const override
+    {
+        return m_checker.CheckLockTime(nLockTime);
+    }
+    bool CheckSequence(const CScriptNum& nSequence) const override
+    {
+        return m_checker.CheckSequence(nSequence);
+    }
+};
 
 bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& script, unsigned int flags, const BaseSignatureChecker& checker, SigVersion sigversion, ScriptError* error = nullptr);
 bool VerifyScript(const CScript& scriptSig, const CScript& scriptPubKey, unsigned int flags, const BaseSignatureChecker& checker, ScriptError* error = nullptr);

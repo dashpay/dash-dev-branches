@@ -1,5 +1,5 @@
-// Copyright (c) 2011-2015 The Bitcoin Core developers
-// Copyright (c) 2014-2022 The Dash Core developers
+// Copyright (c) 2011-2021 The Bitcoin Core developers
+// Copyright (c) 2014-2025 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -21,11 +21,9 @@
 #include <QPushButton>
 
 AskPassphraseDialog::AskPassphraseDialog(Mode _mode, QWidget *parent, SecureString* passphrase_out) :
-    QDialog(parent),
+    QDialog(parent, GUIUtil::dialog_flags),
     ui(new Ui::AskPassphraseDialog),
     mode(_mode),
-    model(nullptr),
-    fCapsLock(false),
     m_passphrase_out(passphrase_out)
 {
     ui->setupUi(this);
@@ -73,14 +71,6 @@ AskPassphraseDialog::AskPassphraseDialog(Mode _mode, QWidget *parent, SecureStri
             ui->passEdit3->hide();
             setWindowTitle(tr("Unlock wallet"));
             break;
-        case Decrypt:   // Ask passphrase
-            ui->warningLabel->setText(tr("This operation needs your wallet passphrase to decrypt the wallet."));
-            ui->passLabel2->hide();
-            ui->passEdit2->hide();
-            ui->passLabel3->hide();
-            ui->passEdit3->hide();
-            setWindowTitle(tr("Decrypt wallet"));
-            break;
         case ChangePass: // Ask old passphrase + new passphrase x2
             setWindowTitle(tr("Change passphrase"));
             ui->warningLabel->setText(tr("Enter the old passphrase and new passphrase for the wallet."));
@@ -91,6 +81,8 @@ AskPassphraseDialog::AskPassphraseDialog(Mode _mode, QWidget *parent, SecureStri
     connect(ui->passEdit1, &QLineEdit::textChanged, this, &AskPassphraseDialog::textChanged);
     connect(ui->passEdit2, &QLineEdit::textChanged, this, &AskPassphraseDialog::textChanged);
     connect(ui->passEdit3, &QLineEdit::textChanged, this, &AskPassphraseDialog::textChanged);
+
+    GUIUtil::handleCloseWindowShortcut(this);
 }
 
 AskPassphraseDialog::~AskPassphraseDialog()
@@ -112,11 +104,10 @@ void AskPassphraseDialog::accept()
     oldpass.reserve(MAX_PASSPHRASE_SIZE);
     newpass1.reserve(MAX_PASSPHRASE_SIZE);
     newpass2.reserve(MAX_PASSPHRASE_SIZE);
-    // TODO: get rid of this .c_str() by implementing SecureString::operator=(std::string)
-    // Alternately, find a way to make this input mlock()'d to begin with.
-    oldpass.assign(ui->passEdit1->text().toStdString().c_str());
-    newpass1.assign(ui->passEdit2->text().toStdString().c_str());
-    newpass2.assign(ui->passEdit3->text().toStdString().c_str());
+
+    oldpass.assign(std::string_view{ui->passEdit1->text().toStdString()});
+    newpass1.assign(std::string_view{ui->passEdit2->text().toStdString()});
+    newpass2.assign(std::string_view{ui->passEdit3->text().toStdString()});
 
     secureClearPassFields();
 
@@ -146,8 +137,7 @@ void AskPassphraseDialog::accept()
                                          "</b></qt>");
                 } else {
                     assert(model != nullptr);
-                    if(model->setWalletEncrypted(true, newpass1))
-                    {
+                    if (model->setWalletEncrypted(newpass1)) {
                         if (model->wallet().hdEnabled()) {
                             QMessageBox::warning(this, tr("Wallet encrypted"),
                                             "<qt>" +
@@ -169,9 +159,7 @@ void AskPassphraseDialog::accept()
                                             "will become useless as soon as you start using the new, encrypted wallet.") +
                                             "</b></qt>");
                         }
-                    }
-                    else
-                    {
+                    } else {
                         QMessageBox::critical(this, tr("Wallet encryption failed"),
                                              tr("Wallet encryption failed due to an internal error. Your wallet was not encrypted."));
                     }
@@ -194,8 +182,19 @@ void AskPassphraseDialog::accept()
         try {
             if(!model->setWalletLocked(false, oldpass, mode == UnlockMixing))
             {
-                QMessageBox::critical(this, tr("Wallet unlock failed"),
-                                      tr("The passphrase entered for the wallet decryption was incorrect."));
+                // Check if the passphrase has a null character (see #27067 for details)
+                if (oldpass.find('\0') == std::string::npos) {
+                    QMessageBox::critical(this, tr("Wallet unlock failed"),
+                                          tr("The passphrase entered for the wallet decryption was incorrect."));
+                } else {
+                    QMessageBox::critical(this, tr("Wallet unlock failed"),
+                                          tr("The passphrase entered for the wallet decryption is incorrect. "
+                                             "It contains a null character (ie - a zero byte). "
+                                             "If the passphrase was set with a version of this software prior to 23.0, "
+                                             "please try again with only the characters up to — but not including — "
+                                             "the first null character. If this is successful, please set a new "
+                                             "passphrase to avoid this issue in the future."));
+                }
             }
             else
             {
@@ -203,17 +202,6 @@ void AskPassphraseDialog::accept()
             }
         } catch (const std::runtime_error& e) {
             QMessageBox::critical(this, tr("Wallet unlock failed"), e.what());
-        }
-        break;
-    case Decrypt:
-        if(!model->setWalletEncrypted(false, oldpass))
-        {
-            QMessageBox::critical(this, tr("Wallet decryption failed"),
-                                  tr("The passphrase entered for the wallet decryption was incorrect."));
-        }
-        else
-        {
-            QDialog::accept(); // Success
         }
         break;
     case ChangePass:
@@ -227,8 +215,18 @@ void AskPassphraseDialog::accept()
             }
             else
             {
-                QMessageBox::critical(this, tr("Wallet encryption failed"),
-                                     tr("The passphrase entered for the wallet decryption was incorrect."));
+                // Check if the old passphrase had a null character (see #27067 for details)
+                if (oldpass.find('\0') == std::string::npos) {
+                    QMessageBox::critical(this, tr("Passphrase change failed"),
+                                          tr("The passphrase entered for the wallet decryption was incorrect."));
+                } else {
+                    QMessageBox::critical(this, tr("Passphrase change failed"),
+                                          tr("The old passphrase entered for the wallet decryption is incorrect. "
+                                             "It contains a null character (ie - a zero byte). "
+                                             "If the passphrase was set with a version of this software prior to 23.0, "
+                                             "please try again with only the characters up to — but not including — "
+                                             "the first null character."));
+                }
             }
         }
         else
@@ -251,7 +249,6 @@ void AskPassphraseDialog::textChanged()
         break;
     case UnlockMixing: // Old passphrase x1
     case Unlock: // Old passphrase x1
-    case Decrypt:
         acceptable = !ui->passEdit1->text().isEmpty();
         break;
     case ChangePass: // Old passphrase x1, new passphrase x2

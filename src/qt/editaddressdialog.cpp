@@ -1,5 +1,5 @@
-// Copyright (c) 2011-2014 The Bitcoin Core developers
-// Copyright (c) 2014-2022 The Dash Core developers
+// Copyright (c) 2011-2021 The Bitcoin Core developers
+// Copyright (c) 2014-2023 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -12,12 +12,11 @@
 #include <QDataWidgetMapper>
 #include <QMessageBox>
 
-EditAddressDialog::EditAddressDialog(Mode _mode, QWidget *parent) :
-    QDialog(parent),
-    ui(new Ui::EditAddressDialog),
-    mapper(nullptr),
-    mode(_mode),
-    model(nullptr)
+
+EditAddressDialog::EditAddressDialog(Mode _mode, QWidget* parent)
+    : QDialog(parent, GUIUtil::dialog_flags),
+      ui(new Ui::EditAddressDialog),
+      mode(_mode)
 {
     ui->setupUi(this);
 
@@ -45,6 +44,8 @@ EditAddressDialog::EditAddressDialog(Mode _mode, QWidget *parent) :
     GUIUtil::ItemDelegate* delegate = new GUIUtil::ItemDelegate(mapper);
     connect(delegate, &GUIUtil::ItemDelegate::keyEscapePressed, this, &EditAddressDialog::reject);
     mapper->setItemDelegate(delegate);
+
+    GUIUtil::handleCloseWindowShortcut(this);
 }
 
 EditAddressDialog::~EditAddressDialog()

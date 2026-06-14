@@ -1,19 +1,18 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2019 The Bitcoin Core developers
+// Copyright (c) 2009-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #ifndef BITCOIN_SCRIPT_SIGNINGPROVIDER_H
 #define BITCOIN_SCRIPT_SIGNINGPROVIDER_H
 
-#include <hdchain.h>
+#include <attributes.h>
 #include <key.h>
 #include <pubkey.h>
+#include <script/keyorigin.h>
 #include <script/script.h>
 #include <script/standard.h>
 #include <sync.h>
-
-struct KeyOriginInfo;
 
 /** An interface to be implemented by keystores that support signing. */
 class SigningProvider
@@ -56,9 +55,9 @@ struct FlatSigningProvider final : public SigningProvider
     bool GetPubKey(const CKeyID& keyid, CPubKey& pubkey) const override;
     bool GetKeyOrigin(const CKeyID& keyid, KeyOriginInfo& info) const override;
     bool GetKey(const CKeyID& keyid, CKey& key) const override;
-};
 
-FlatSigningProvider Merge(const FlatSigningProvider& a, const FlatSigningProvider& b);
+    FlatSigningProvider& Merge(FlatSigningProvider&& b) LIFETIMEBOUND;
+};
 
 /** Fillable signing provider that keeps keys in an address->secret map */
 class FillableSigningProvider : public SigningProvider
@@ -67,11 +66,57 @@ protected:
     using KeyMap = std::map<CKeyID, CKey>;
     using ScriptMap = std::map<CScriptID, CScript>;
 
+    /**
+     * Map of key id to unencrypted private keys known by the signing provider.
+     * Map may be empty if the provider has another source of keys, like an
+     * encrypted store.
+     */
     KeyMap mapKeys GUARDED_BY(cs_KeyStore);
+
+    /**
+     * Map of script id to scripts known by the signing provider.
+     *
+     * This map originally just held P2SH redeemScripts, and was used by wallet
+     * code to look up script ids referenced in "OP_HASH160 <script id>
+     * OP_EQUAL" P2SH outputs. Later in 605e8473a7d it was extended to hold
+     * P2WSH witnessScripts as well, and used to look up nested scripts
+     * referenced in "OP_0 <script hash>" P2WSH outputs. Later in commits
+     * f4691ab3a9d and 248f3a76a82, it was extended once again to hold segwit
+     * "OP_0 <key or script hash>" scriptPubKeys, in order to give the wallet a
+     * way to distinguish between segwit outputs that it generated addresses for
+     * and wanted to receive payments from, and segwit outputs that it never
+     * generated addresses for, but it could spend just because of having keys.
+     * (Before segwit activation it was also important to not treat segwit
+     * outputs to arbitrary wallet keys as payments, because these could be
+     * spent by anyone without even needing to sign with the keys.)
+     *
+     * Some of the scripts stored in mapScripts are memory-only and
+     * intentionally not saved to disk. Specifically, scripts added by
+     * ImplicitlyLearnRelatedKeyScripts(pubkey) calls are not written to disk so
+     * future wallet code can have flexibility to be more selective about what
+     * transaction outputs it recognizes as payments, instead of having to treat
+     * all outputs spending to keys it knows as payments. By contrast,
+     * mapScripts entries added by AddCScript(script),
+     * LearnRelatedScripts(pubkey, type), and LearnAllRelatedScripts(pubkey)
+     * calls are saved because they are all intentionally used to receive
+     * payments.
+     *
+     * The FillableSigningProvider::mapScripts script map should not be confused
+     * with LegacyScriptPubKeyMan::setWatchOnly script set. The two collections
+     * can hold the same scripts, but they serve different purposes. The
+     * setWatchOnly script set is intended to expand the set of outputs the
+     * wallet considers payments. Every output with a script it contains is
+     * considered to belong to the wallet, regardless of whether the script is
+     * solvable or signable. By contrast, the scripts in mapScripts are only
+     * used for solving, and to restrict which outputs are considered payments
+     * by the wallet. An output with a script in mapScripts, unlike
+     * setWatchOnly, is not automatically considered to belong to the wallet if
+     * it can't be solved and signed for.
+     */
     ScriptMap mapScripts GUARDED_BY(cs_KeyStore);
 
 public:
-    mutable CCriticalSection cs_KeyStore;
+    mutable RecursiveMutex cs_KeyStore;
 
     virtual bool AddKeyPubKey(const CKey& key, const CPubKey &pubkey);
     virtual bool AddKey(const CKey &key) { return AddKeyPubKey(key, key.GetPubKey()); }
@@ -84,5 +129,8 @@ public:
     virtual std::set<CScriptID> GetCScripts() const;
     virtual bool GetCScript(const CScriptID &hash, CScript& redeemScriptOut) const override;
 };
+
+/** Return the CKeyID of the key involved in a script (if there is a unique one). */
+CKeyID GetKeyForDestination(const SigningProvider& store, const CTxDestination& dest);
 
 #endif // BITCOIN_SCRIPT_SIGNINGPROVIDER_H

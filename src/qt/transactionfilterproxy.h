@@ -1,14 +1,20 @@
-// Copyright (c) 2011-2014 The Bitcoin Core developers
+// Copyright (c) 2011-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #ifndef BITCOIN_QT_TRANSACTIONFILTERPROXY_H
 #define BITCOIN_QT_TRANSACTIONFILTERPROXY_H
 
-#include <amount.h>
+#include <consensus/amount.h>
+#include <qt/transactionrecord.h>
 
 #include <QDateTime>
 #include <QSortFilterProxyModel>
+
+#include <optional>
+
+/** Helper function to convert transaction type enum to bit field */
+constexpr quint32 TransactionTypeToBit(int type) { return 1u << type; }
 
 /** Filter the transaction list according to pre-specified rules. */
 class TransactionFilterProxy : public QSortFilterProxyModel
@@ -18,16 +24,20 @@ class TransactionFilterProxy : public QSortFilterProxyModel
 public:
     explicit TransactionFilterProxy(QObject *parent = nullptr);
 
-    /** Earliest date that can be represented (far in the past) */
-    static const QDateTime MIN_DATE;
-    /** Last date that can be represented (far in the future) */
-    static const QDateTime MAX_DATE;
+    /** Types to exclude from common transaction lists (CoinJoin internal transactions and dust) */
+    static constexpr quint32 EXCLUDED_TYPES =
+        TransactionTypeToBit(TransactionRecord::CoinJoinCollateralPayment) |
+        TransactionTypeToBit(TransactionRecord::CoinJoinCreateDenominations) |
+        TransactionTypeToBit(TransactionRecord::CoinJoinMakeCollaterals) |
+        TransactionTypeToBit(TransactionRecord::CoinJoinMixing) |
+        TransactionTypeToBit(TransactionRecord::DustReceive) |
+        TransactionTypeToBit(TransactionRecord::RecvWithCoinJoin);
     /** Type filter bit field (all types) */
-    static const quint32 ALL_TYPES = 0xFFFFFFFF;
-    /** Type filter bit field (all types but Darksend-SPAM) */
-    static const quint32 COMMON_TYPES = 4223;
+    static constexpr quint32 ALL_TYPES = 0xFFFFFFFF;
+    /** Type filter bit field (all types except excluded) */
+    static constexpr quint32 COMMON_TYPES = ALL_TYPES & ~EXCLUDED_TYPES;
 
-    static quint32 TYPE(int type) { return 1<<type; }
+    static constexpr quint32 TYPE(int type) { return TransactionTypeToBit(type); }
 
     enum WatchOnlyFilter
     {
@@ -36,7 +46,8 @@ public:
         WatchOnlyFilter_No
     };
 
-    void setDateRange(const QDateTime &from, const QDateTime &to);
+    /** Filter transactions between date range. Use std::nullopt for open range. */
+    void setDateRange(const std::optional<QDateTime>& from, const std::optional<QDateTime>& to);
     void setSearchString(const QString &);
     /**
       @note Type filter takes a bit field created with TYPE() or ALL_TYPES
@@ -57,14 +68,14 @@ protected:
     bool filterAcceptsRow(int source_row, const QModelIndex & source_parent) const override;
 
 private:
-    qint64 dateFrom;
-    qint64 dateTo;
+    std::optional<QDateTime> dateFrom;
+    std::optional<QDateTime> dateTo;
     QString m_search_string;
     quint32 typeFilter;
-    WatchOnlyFilter watchOnlyFilter;
-    CAmount minAmount;
-    int limitRows;
-    bool showInactive;
+    WatchOnlyFilter watchOnlyFilter{WatchOnlyFilter_All};
+    CAmount minAmount{0};
+    int limitRows{-1};
+    bool showInactive{true};
 };
 
 #endif // BITCOIN_QT_TRANSACTIONFILTERPROXY_H

@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-# Copyright (c) 2018-2022 The Dash Core developers
+# Copyright (c) 2018-2024 The Dash Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import wait_until
 
 '''
 '''
@@ -13,10 +12,10 @@ class SporkTest(BitcoinTestFramework):
     def set_test_params(self):
         self.num_nodes = 3
         self.setup_clean_chain = True
+        self.disable_mocktime = True
         self.extra_args = [["-sporkkey=cP4EKFyJsHT39LDqgdcB43Y3YXjNyjb5Fuas1GQSeAtjnZWmZEQK"], [], []]
 
     def setup_network(self):
-        self.disable_mocktime()
         self.setup_nodes()
         # connect only 2 first nodes at start
         self.connect_nodes(0, 1)
@@ -43,7 +42,7 @@ class SporkTest(BitcoinTestFramework):
         # check spork propagation for connected nodes
         spork_new_state = not spork_default_state
         self.set_test_spork_state(self.nodes[0], spork_new_state)
-        wait_until(lambda: self.get_test_spork_state(self.nodes[1]), sleep=0.1, timeout=10)
+        self.wait_until(lambda: self.get_test_spork_state(self.nodes[1]), timeout=10)
 
         # restart nodes to check spork persistence
         self.stop_node(0)
@@ -54,11 +53,14 @@ class SporkTest(BitcoinTestFramework):
         assert self.get_test_spork_state(self.nodes[1]) == spork_new_state
 
         # Generate one block to kick off masternode sync, which also starts sporks syncing for node2
-        self.nodes[1].generate(1)
+        self.generate(self.nodes[1], 1, sync_fun=self.no_op)
 
         # connect new node and check spork propagation after restoring from cache
         self.connect_nodes(1, 2)
-        wait_until(lambda: self.get_test_spork_state(self.nodes[2]), sleep=0.1, timeout=10)
+        self.wait_until(lambda: self.get_test_spork_state(self.nodes[2]), timeout=10)
+
+        assert "" not in self.nodes[0].spork('show').keys()
+
 
 if __name__ == '__main__':
     SporkTest().main()

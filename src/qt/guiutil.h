@@ -1,26 +1,37 @@
-// Copyright (c) 2011-2015 The Bitcoin Core developers
+// Copyright (c) 2011-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #ifndef BITCOIN_QT_GUIUTIL_H
 #define BITCOIN_QT_GUIUTIL_H
 
-#include <amount.h>
+#include <consensus/amount.h>
 #include <fs.h>
+#include <net.h>
+#include <netaddress.h>
+#include <util/check.h>
+
+#include <qt/bitcoinunits.h>
 #include <qt/guiconstants.h>
 
+#include <QApplication>
 #include <QEvent>
-#include <QHeaderView>
 #include <QItemDelegate>
-#include <QMessageBox>
+#include <QLabel>
+#include <QMetaObject>
 #include <QObject>
 #include <QProgressBar>
 #include <QString>
-#include <QTableView>
-#include <QLabel>
+
+#include <cassert>
+#include <chrono>
+#include <cstdint>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
 
 class QValidatedLineEdit;
-class OptionsModel;
 class SendCoinsRecipient;
 
 namespace interfaces
@@ -31,11 +42,17 @@ class Node;
 QT_BEGIN_NAMESPACE
 class QAbstractButton;
 class QAbstractItemView;
+class QAction;
 class QButtonGroup;
 class QDateTime;
+class QDialog;
 class QFont;
+class QKeySequence;
 class QLineEdit;
+class QMenu;
+class QPoint;
 class QProgressDialog;
+class QTextEdit;
 class QUrl;
 class QWidget;
 QT_END_NAMESPACE
@@ -44,6 +61,9 @@ QT_END_NAMESPACE
  */
 namespace GUIUtil
 {
+    /** Default value for the `-uiplatform` arg ("macosx" / "windows" / "other"). */
+    std::string defaultUIPlatform();
+
     /* Enumeration of possible "colors" */
     enum class ThemedColor {
         /* Transaction list -- TX status decoration - default color */
@@ -80,9 +100,11 @@ namespace GUIUtil
     enum class ThemedStyle {
         /* Invalid field background style */
         TS_INVALID,
+        /* Warning text style */
+        TS_WARNING,
         /* Failed operation text style */
         TS_ERROR,
-        /* Failed operation text style */
+        /* Successful operation text style */
         TS_SUCCESS,
         /* Command text style */
         TS_COMMAND,
@@ -105,15 +127,26 @@ namespace GUIUtil
     void setIcon(QAbstractButton* button, const QString& strIcon, ThemedColor color, ThemedColor colorAlternative, const QSize& size);
     void setIcon(QAbstractButton* button, const QString& strIcon, ThemedColor color = ThemedColor::BLUE, const QSize& size = QSize(BUTTON_ICONSIZE, BUTTON_ICONSIZE));
 
+    // Use this flags to prevent a "What's This" button in the title bar of the dialog on Windows.
+    constexpr auto dialog_flags = Qt::WindowTitleHint | Qt::WindowSystemMenuHint | Qt::WindowCloseButtonHint;
+
     // Create human-readable string from date
     QString dateTimeStr(const QDateTime &datetime);
     QString dateTimeStr(qint64 nTime);
 
+    // Return a monospace font
+    QFont fixedPitchFont(bool use_embedded_font = false);
+
     // Set up widget for address
     void setupAddressWidget(QValidatedLineEdit *widget, QWidget *parent, bool fAllowURI = false);
 
-    // Setup appearance settings if not done yet
-    void setupAppearance(QWidget* parent, OptionsModel* model);
+    /**
+     * Connects an additional shortcut to a QAbstractButton. Works around the
+     * one shortcut limitation of the button's shortcut property.
+     * @param[in] button    QAbstractButton to assign shortcut to
+     * @param[in] shortcut  QKeySequence to use as shortcut
+     */
+    void AddButtonShortcut(QAbstractButton* button, const QKeySequence& shortcut);
 
     // Parse "dash:" URI into recipient object, return true on successful parsing
     bool parseBitcoinURI(const QUrl &uri, SendCoinsRecipient *out);
@@ -123,6 +156,9 @@ namespace GUIUtil
 
     // Returns true if given address+amount meets "dust" definition
     bool isDust(interfaces::Node& node, const QString& address, const CAmount& amount);
+
+    // Format a CAmount as a string with unit name (and truncate to a given number of decimal places).
+    QString formatAmount(BitcoinUnit unit, CAmount amount, bool is_signed = false, std::optional<uint8_t> truncate = std::nullopt);
 
     // HTML escaping for rich text controls
     QString HtmlEscape(const QString& str, bool fMultiLine=false);
@@ -134,21 +170,91 @@ namespace GUIUtil
        @param[in] role    Data role to extract from the model
        @see  TransactionView::copyLabel, TransactionView::copyAmount, TransactionView::copyAddress
      */
-    void copyEntryData(QAbstractItemView *view, int column, int role=Qt::EditRole);
+    void copyEntryData(const QAbstractItemView *view, int column, int role=Qt::EditRole);
 
     /** Return a field of the currently selected entry as a QString. Does nothing if nothing
         is selected.
        @param[in] column  Data column to extract from the model
        @see  TransactionView::copyLabel, TransactionView::copyAmount, TransactionView::copyAddress
      */
-    QList<QModelIndex> getEntryData(QAbstractItemView *view, int column);
+    QList<QModelIndex> getEntryData(const QAbstractItemView *view, int column);
+
+    /** Returns true if the specified field of the currently selected view entry is not empty.
+       @param[in] column  Data column to extract from the model
+       @param[in] role    Data role to extract from the model
+       @see  TransactionView::contextualMenu
+     */
+    bool hasEntryData(const QAbstractItemView *view, int column, int role);
 
     void setClipboard(const QString& str);
+
+    enum class FontWeight : uint8_t {
+        Normal,
+        Bold,
+    };
+
+    /** Load Dash-specific application fonts. Returns false if any failed to load. */
+    bool loadFonts();
+    /** True once loadFonts() has completed successfully. */
+    bool fontsLoaded();
+    /** Set the application-wide default font (depends on active font/theme). */
+    void setApplicationFont();
+
+    /** Defaults for the `-font-*` CLI options (used in arg help and as persistence fallbacks). */
+    int defaultFontScale();
+    int defaultFontSize();
+    QString defaultFontFamily();
+
+    /** Switch the active font family. Registers `font_name` if unknown and applies it to qApp.
+     *  Empty `font_name` means "use defaultFontFamily()". No-op if loadFonts() hasn't run. */
+    bool setActiveFont(const QString& font_name = {});
+    QString activeFont();
+    /** Known fonts and their "selectable in UI" flag, in registration order. */
+    const std::vector<std::pair<QString, /*selectable=*/bool>>& knownFonts();
+
+    void setFontScale(int font_scale);
+    int fontScale();
+
+    /* Weight operations expressed as caller-friendly arg ints 0..8 -- the format used by
+     * `-font-weight-*` CLI args and QSettings persistence. */
+    int currentWeightArg(FontWeight slot);
+    /** Default-best-match weight for `slot`. Valid before loadFonts() too. */
+    int defaultWeightArg(FontWeight slot);
+    /** Apply a weight. Returns false if `arg` is out of 0..8 or unsupported by the active
+     *  font (no state change in that case). */
+    bool setWeightFromArg(FontWeight slot, int arg);
+    /** Active font's supported weight args, low-to-high. */
+    std::vector<int> supportedWeightArgs();
+
+    /** Register `widgets` to receive the given font attributes on the next updateFonts() pass.
+     *  Uses the currently active font family unless one is given explicitly. */
+    void setFont(const std::vector<QWidget*>& widgets, FontWeight weight, double point_size = -1, bool is_italic = false);
+    void setFont(const std::vector<QWidget*>& widgets, const QString& font, FontWeight weight, double point_size = -1, bool is_italic = false);
+    /** Re-apply fonts to all widgets previously registered via setFont(). */
+    void updateFonts();
+
+    /** Get the default bold / normal QFont. */
+    QFont getFontBold();
+    QFont getFontNormal();
+    /** Get a scaled font with the given base size, weight, and optional multiplier. */
+    QFont getScaledFont(double baseSize, bool bold, double multiplier = 1);
+
+    /** Set HTML content on a QTextEdit with font-aware styling. Captures the widget's base
+     *  point size on first call so re-application on font/theme changes preserves it. */
+    void setStyledHtml(QTextEdit* widget, const QString& html);
 
     /**
      * Determine default data directory for operating system.
      */
     QString getDefaultDataDirectory();
+
+    /**
+     * Extract first suffix from filter pattern "Description (*.foo)" or "Description (*.foo *.bar ...).
+     *
+     * @param[in] filter Filter specification such as "Comma Separated Files (*.csv)"
+     * @return QString
+     */
+    QString ExtractFirstSuffixFromFilter(const QString& filter);
 
     /** Get save filename, mimics QFileDialog::getSaveFileName, except that it appends a default suffix
         when no suffix is provided by the user.
@@ -189,6 +295,9 @@ namespace GUIUtil
 
     // Activate, show and raise the widget
     void bringToFront(QWidget* w);
+
+    // Set shortcut to close window
+    void handleCloseWindowShortcut(QWidget* w);
 
     // Open debug.log
     void openDebugLogfile();
@@ -232,45 +341,6 @@ namespace GUIUtil
         bool eventFilter(QObject* watched, QEvent* event) override;
     };
 
-    /**
-     * Makes a QTableView last column feel as if it was being resized from its left border.
-     * Also makes sure the column widths are never larger than the table's viewport.
-     * In Qt, all columns are resizable from the right, but it's not intuitive resizing the last column from the right.
-     * Usually our second to last columns behave as if stretched, and when on stretch mode, columns aren't resizable
-     * interactively or programmatically.
-     *
-     * This helper object takes care of this issue.
-     *
-     */
-    class TableViewLastColumnResizingFixer: public QObject
-    {
-        Q_OBJECT
-
-        public:
-            TableViewLastColumnResizingFixer(QTableView* table, int lastColMinimumWidth, int allColsMinimumWidth, QObject *parent);
-            void stretchColumnWidth(int column);
-
-        private:
-            QTableView* tableView;
-            int lastColumnMinimumWidth;
-            int allColumnsMinimumWidth;
-            int lastColumnIndex;
-            int columnCount;
-            int secondToLastColumnIndex;
-
-            void adjustTableColumnsWidth();
-            int getAvailableWidthForColumn(int column);
-            int getColumnsWidth();
-            void connectViewHeadersSignals();
-            void disconnectViewHeadersSignals();
-            void setViewHeaderResizeMode(int logicalIndex, QHeaderView::ResizeMode resizeMode);
-            void resizeColumn(int nColumnIndex, int width);
-
-        private Q_SLOTS:
-            void on_sectionResized(int logicalIndex, int oldSize, int newSize);
-            void on_geometriesChanged();
-    };
-
     bool GetStartOnSystemStartup();
     bool SetStartOnSystemStartup(bool fAutoStart);
 
@@ -282,13 +352,13 @@ namespace GUIUtil
     bool isStyleSheetDirectoryCustom();
 
     /** Return a list of all required css files */
-    const std::vector<QString> listStyleSheets();
+    std::vector<QString> listStyleSheets();
 
     /** Return a list of all theme css files */
-    const std::vector<QString> listThemes();
+    std::vector<QString> listThemes();
 
     /** Return the name of the default theme `*/
-    const QString getDefaultTheme();
+    QString getDefaultTheme();
 
     /** Check if the given theme name is valid or not */
     bool isValidTheme(const QString& strTheme);
@@ -296,90 +366,6 @@ namespace GUIUtil
     /** Sets the stylesheet of the whole app and updates it if the
     related css files has been changed and -debug-ui mode is active. */
     void loadStyleSheet(bool fForceUpdate = false);
-
-    enum class FontFamily {
-        SystemDefault,
-        Montserrat,
-    };
-
-    FontFamily fontFamilyFromString(const QString& strFamily);
-    QString fontFamilyToString(FontFamily family);
-
-    /** set/get font family: GUIUtil::fontFamily */
-    FontFamily getFontFamilyDefault();
-    FontFamily getFontFamily();
-    void setFontFamily(FontFamily family);
-
-    enum class FontWeight {
-        Normal, // Font weight for normal text
-        Bold,   // Font weight for bold text
-    };
-
-    /** Convert weight value from args (0-8) to QFont::Weight */
-    bool weightFromArg(int nArg, QFont::Weight& weight);
-    /** Convert QFont::Weight to an arg value (0-8) */
-    int weightToArg(const QFont::Weight weight);
-    /** Convert GUIUtil::FontWeight to QFont::Weight */
-    QFont::Weight toQFontWeight(FontWeight weight);
-
-    /** set/get normal font weight: GUIUtil::fontWeightNormal */
-    QFont::Weight getFontWeightNormalDefault();
-    QFont::Weight getFontWeightNormal();
-    void setFontWeightNormal(QFont::Weight weight);
-
-    /** set/get bold font weight: GUIUtil::fontWeightBold */
-    QFont::Weight getFontWeightBoldDefault();
-    QFont::Weight getFontWeightBold();
-    void setFontWeightBold(QFont::Weight weight);
-
-    /** set/get font scale: GUIUtil::fontScale */
-    int getFontScaleDefault();
-    int getFontScale();
-    void setFontScale(int nScale);
-
-    /** get font size with GUIUtil::fontScale applied */
-    double getScaledFontSize(int nSize);
-
-    /** Load dash specific appliciation fonts */
-    bool loadFonts();
-    /** Check if the fonts have been loaded successfully */
-    bool fontsLoaded();
-
-    /** Set an application wide default font, depends on the selected theme */
-    void setApplicationFont();
-
-    /** Workaround to set correct font styles in all themes since there is a bug in macOS which leads to
-        issues loading variations of montserrat in css it also keeps track of the set fonts to update on
-        theme changes. */
-    void setFont(const std::vector<QWidget*>& vecWidgets, FontWeight weight, int nPointSize = -1, bool fItalic = false);
-
-    /** Update the font of all widgets where a custom font has been set with
-        GUIUtil::setFont */
-    void updateFonts();
-
-    /** Get a properly weighted QFont object with the selected font. */
-    QFont getFont(FontFamily family, QFont::Weight qWeight, bool fItalic = false, int nPointSize = -1);
-    QFont getFont(QFont::Weight qWeight, bool fItalic = false, int nPointSize = -1);
-    QFont getFont(FontWeight weight, bool fItalic = false, int nPointSize = -1);
-
-    /** Get the default normal QFont */
-    QFont getFontNormal();
-
-    /** Get the default bold QFont */
-    QFont getFontBold();
-
-    /** Return supported normal default for the current font family */
-    QFont::Weight getSupportedFontWeightNormalDefault();
-    /** Return supported bold default for the current font family */
-    QFont::Weight getSupportedFontWeightBoldDefault();
-    /** Return supported weights for the current font family */
-    std::vector<QFont::Weight> getSupportedWeights();
-    /** Convert an index to a weight in the supported weights vector */
-    QFont::Weight supportedWeightFromIndex(int nIndex);
-    /** Convert a weight to an index in the supported weights vector */
-    int supportedWeightToIndex(QFont::Weight weight);
-    /** Check if a weight is supported by the current font family */
-    bool isSupportedWeight(QFont::Weight weight);
 
     /** Return the name of the currently active theme.*/
     QString getActiveTheme();
@@ -400,25 +386,37 @@ namespace GUIUtil
     /** Update shortcuts for individual buttons in QButtonGroup based on their visibility. */
     void updateButtonGroupShortcuts(QButtonGroup* buttonGroup);
 
-    /* Convert QString to OS specific boost path through UTF-8 */
-    fs::path qstringToBoostPath(const QString &path);
+    /** Convert QString to OS specific boost path through UTF-8 */
+    fs::path QStringToPath(const QString &path);
 
-    /* Convert OS specific boost path to QString through UTF-8 */
-    QString boostPathToQString(const fs::path &path);
+    /** Convert OS specific boost path to QString through UTF-8 */
+    QString PathToQString(const fs::path &path);
 
-    /* Convert seconds into a QString with days, hours, mins, secs */
-    QString formatDurationStr(int secs);
+    /** Convert enum Network to QString */
+    QString NetworkToQString(Network net);
 
-    /* Format CNodeStats.nServices bitmask into a user-readable string */
+    /** Convert enum ConnectionType to QString */
+    QString ConnectionTypeToQString(ConnectionType conn_type, bool prepend_direction);
+
+    /** Convert seconds into a QString with days, hours, mins, secs */
+    QString formatDurationStr(std::chrono::seconds dur);
+
+    /** Convert peer connection time to a QString denominated in the most relevant unit. */
+    QString FormatPeerAge(std::chrono::seconds time_connected);
+
+    /** Format CNodeStats.nServices bitmask into a user-readable string */
     QString formatServicesStr(quint64 mask);
 
-    /* Format a CNodeStats.m_ping_usec into a user-readable string or display N/A, if 0*/
-    QString formatPingTime(int64_t ping_usec);
+    /** Format a CNodeStats.m_last_ping_time into a user-readable string or display N/A, if 0 */
+    QString formatPingTime(std::chrono::microseconds ping_time);
 
-    /* Format a CNodeCombinedStats.nTimeOffset into a user-readable string. */
+    /** Format a CNodeCombinedStats.nTimeOffset into a user-readable string */
     QString formatTimeOffset(int64_t nTimeOffset);
 
     QString formatNiceTimeOffset(qint64 secs);
+
+    /** Convert a block count to a human-readable duration using the given block spacing. */
+    QString formatBlockDuration(int blocks, int64_t spacing_seconds);
 
     QString formatBytes(uint64_t bytes);
 
@@ -471,7 +469,7 @@ namespace GUIUtil
     /**
      * Returns the distance in pixels appropriate for drawing a subsequent character after text.
      *
-     * In Qt 5.12 and before the QFontMetrics::width() is used and it is deprecated since Qt 13.0.
+     * In Qt 5.12 and before the QFontMetrics::width() is used and it is deprecated since Qt 5.13.
      * In Qt 5.11 the QFontMetrics::horizontalAdvance() was introduced.
      */
     int TextWidth(const QFontMetrics& fm, const QString& text);
@@ -480,6 +478,120 @@ namespace GUIUtil
      * Writes to debug.log short info about the used Qt and the host system.
      */
     void LogQtInfo();
+
+    /**
+     * Call QMenu::popup() only on supported QT_QPA_PLATFORM.
+     */
+    void PopupMenu(QMenu* menu, const QPoint& point, QAction* at_action = nullptr);
+
+    /**
+     * Returns the start-moment of the day in local time.
+     *
+     * QDateTime::QDateTime(const QDate& date) is deprecated since Qt 5.15.
+     * QDate::startOfDay() was introduced in Qt 5.14.
+     */
+    QDateTime StartOfDay(const QDate& date);
+
+    /**
+     * Returns true if pixmap has been set.
+     *
+     * QPixmap* QLabel::pixmap() is deprecated since Qt 5.15.
+     */
+    bool HasPixmap(const QLabel* label);
+    QImage GetImage(const QLabel* label);
+
+    /**
+     * Splits the string into substrings wherever separator occurs, and returns
+     * the list of those strings. Empty strings do not appear in the result.
+     *
+     * QString::split() signature differs in different Qt versions:
+     *  - QString::SplitBehavior is deprecated since Qt 5.15
+     *  - Qt::SplitBehavior was introduced in Qt 5.14
+     * If {QString|Qt}::SkipEmptyParts behavior is required, use this
+     * function instead of QString::split().
+     */
+    template <typename SeparatorType>
+    QStringList SplitSkipEmptyParts(const QString& string, const SeparatorType& separator)
+    {
+    #if (QT_VERSION >= QT_VERSION_CHECK(5, 14, 0))
+        return string.split(separator, Qt::SkipEmptyParts);
+    #else
+        return string.split(separator, QString::SkipEmptyParts);
+    #endif
+    }
+
+
+    /**
+     * Replaces a plain text link with an HTML tagged one.
+     */
+    QString MakeHtmlLink(const QString& source, const QString& link);
+
+    void PrintSlotException(
+        const std::exception* exception,
+        const QObject* sender,
+        const QObject* receiver);
+
+    /**
+     * A drop-in replacement of QObject::connect function
+     * (see: https://doc.qt.io/qt-5/qobject.html#connect-3), that
+     * guaranties that all exceptions are handled within the slot.
+     *
+     * NOTE: This function is incompatible with Qt private signals.
+     */
+    template <typename Sender, typename Signal, typename Receiver, typename Slot>
+    auto ExceptionSafeConnect(
+        Sender sender, Signal signal, Receiver receiver, Slot method,
+        Qt::ConnectionType type = Qt::AutoConnection)
+    {
+        return QObject::connect(
+            sender, signal, receiver,
+            [sender, receiver, method](auto&&... args) {
+                bool ok{true};
+                try {
+                    (receiver->*method)(std::forward<decltype(args)>(args)...);
+                } catch (const NonFatalCheckError& e) {
+                    PrintSlotException(&e, sender, receiver);
+                    ok = QMetaObject::invokeMethod(
+                        qApp, "handleNonFatalException",
+                        blockingGUIThreadConnection(),
+                        Q_ARG(QString, QString::fromStdString(e.what())));
+                } catch (const std::exception& e) {
+                    PrintSlotException(&e, sender, receiver);
+                    ok = QMetaObject::invokeMethod(
+                        qApp, "handleRunawayException",
+                        blockingGUIThreadConnection(),
+                        Q_ARG(QString, QString::fromStdString(e.what())));
+                } catch (...) {
+                    PrintSlotException(nullptr, sender, receiver);
+                    ok = QMetaObject::invokeMethod(
+                        qApp, "handleRunawayException",
+                        blockingGUIThreadConnection(),
+                        Q_ARG(QString, "Unknown failure occurred."));
+                }
+                assert(ok);
+            },
+            type);
+    }
+
+    /**
+     * Shows a QDialog instance asynchronously, and deletes it on close.
+     */
+    void ShowModalDialogAsynchronously(QDialog* dialog);
+
+    inline bool IsEscapeOrBack(int key)
+    {
+        if (key == Qt::Key_Escape) return true;
+#ifdef Q_OS_ANDROID
+        if (key == Qt::Key_Back) return true;
+#endif // Q_OS_ANDROID
+        return false;
+    }
+
+    template <typename T1>
+    inline QByteArray MakeQByteArray(const T1& data)
+    {
+        return QByteArray(reinterpret_cast<const char*>(data.data()), data.size());
+    }
 } // namespace GUIUtil
 
 #endif // BITCOIN_QT_GUIUTIL_H

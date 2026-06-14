@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2022 The Dash Core developers
+// Copyright (c) 2018-2024 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -11,30 +11,27 @@
 #include <uint256.h>
 #include <version.h>
 
+#include <optional>
 #include <vector>
 
 template <typename T>
-inline bool GetTxPayload(const std::vector<unsigned char>& payload, T& obj)
+std::optional<T> GetTxPayload(const std::vector<unsigned char>& payload)
 {
     CDataStream ds(payload, SER_NETWORK, PROTOCOL_VERSION);
     try {
+        T obj;
         ds >> obj;
+        return ds.empty() ? std::make_optional(std::move(obj)) : std::nullopt;
     } catch (const std::exception& e) {
-        return false;
+        return std::nullopt;
     }
-    return ds.empty();
 }
-template <typename T>
-inline bool GetTxPayload(const CMutableTransaction& tx, T& obj, bool assert_type = true)
+template <typename T, typename TxType>
+std::optional<T> GetTxPayload(const TxType& tx, bool assert_type = true)
 {
-    if (assert_type) { ASSERT_IF_DEBUG(tx.nType == obj.SPECIALTX_TYPE); }
-    return tx.nType == obj.SPECIALTX_TYPE && GetTxPayload(tx.vExtraPayload, obj);
-}
-template <typename T>
-inline bool GetTxPayload(const CTransaction& tx, T& obj, bool assert_type = true)
-{
-    if (assert_type) { ASSERT_IF_DEBUG(tx.nType == obj.SPECIALTX_TYPE); }
-    return tx.nType == obj.SPECIALTX_TYPE && GetTxPayload(tx.vExtraPayload, obj);
+    if (assert_type) { ASSERT_IF_DEBUG(tx.nType == T::SPECIALTX_TYPE); }
+    if (tx.nType != T::SPECIALTX_TYPE) return std::nullopt;
+    return GetTxPayload<T>(tx.vExtraPayload);
 }
 
 template <typename T>
@@ -42,7 +39,7 @@ void SetTxPayload(CMutableTransaction& tx, const T& payload)
 {
     CDataStream ds(SER_NETWORK, PROTOCOL_VERSION);
     ds << payload;
-    tx.vExtraPayload.assign(ds.begin(), ds.end());
+    tx.vExtraPayload.assign(UCharCast(ds.data()), UCharCast(ds.data() + ds.size()));
 }
 
 uint256 CalcTxInputsHash(const CTransaction& tx);

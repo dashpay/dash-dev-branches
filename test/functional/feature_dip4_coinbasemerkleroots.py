@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2015-2022 The Dash Core developers
+# Copyright (c) 2015-2025 The Dash Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -12,12 +12,19 @@ Checks DIP4 merkle roots in coinbases
 
 from io import BytesIO
 
-from test_framework.messages import CBlock, CBlockHeader, CCbTx, CMerkleBlock, FromHex, hash256, msg_getmnlistd, QuorumId, ser_uint256
-from test_framework.mininode import P2PInterface
-from test_framework.test_framework import DashTestFramework
-from test_framework.util import assert_equal, wait_until
+from test_framework.messages import CBlock, CBlockHeader, CCbTx, CMerkleBlock, from_hex, hash256, msg_getmnlistd, QuorumId, ser_uint256
+from test_framework.p2p import P2PInterface
+from test_framework.test_framework import (
+    DashTestFramework,
+    MasternodeInfo,
+)
+from test_framework.util import assert_equal
 
+DIP0008_HEIGHT = 432
+DIP0024_HEIGHT = 900
+V20_HEIGHT = 900
 
+# TODO: this helper used in many tests, find a new home for it
 class TestP2PConn(P2PInterface):
     def __init__(self):
         super().__init__()
@@ -29,7 +36,7 @@ class TestP2PConn(P2PInterface):
     def wait_for_mnlistdiff(self, timeout=30):
         def received_mnlistdiff():
             return self.last_mnlistdiff is not None
-        return wait_until(received_mnlistdiff, timeout=timeout)
+        self.wait_until(received_mnlistdiff, timeout=timeout)
 
     def getmnlistdiff(self, baseBlockHash, blockHash):
         msg = msg_getmnlistd(baseBlockHash, blockHash)
@@ -40,11 +47,31 @@ class TestP2PConn(P2PInterface):
 
 
 class LLMQCoinbaseCommitmentsTest(DashTestFramework):
+    def add_options(self, parser):
+        self.add_wallet_options(parser)
+
     def set_test_params(self):
-        extra_args = [["-vbparams=dip0024:999999999999:999999999999"]] * 4 # disable dip0024
-        self.set_dash_test_params(4, 3, extra_args=extra_args, fast_dip3_enforcement=True)
+        self.extra_args = [[ f'-testactivationheight=dip0008@{DIP0008_HEIGHT}', f'-testactivationheight=dip0024@{DIP0024_HEIGHT}', "-vbparams=testdummy:999999999999:999999999999" ]] * 4
+        self.set_dash_test_params(4, 3, extra_args = self.extra_args)
+        self.delay_v20_and_mn_rr(height=V20_HEIGHT)
+
+    def remove_masternode(self, idx):
+        mn: MasternodeInfo = self.mninfo[idx]
+        rawtx = self.nodes[0].createrawtransaction([{"txid": mn.collateral_txid, "vout": mn.collateral_vout}], {self.nodes[0].getnewaddress(): 999.9999})
+        rawtx = self.nodes[0].signrawtransactionwithwallet(rawtx)
+        self.nodes[0].sendrawtransaction(rawtx["hex"])
+        self.generate(self.nodes[0], 1)
+        self.mninfo.remove(mn)
+
+        self.log.info("Removed masternode %d", idx)
 
     def run_test(self):
+        # No IS or Chainlocks in this test
+        self.bump_mocktime(1)
+        self.nodes[0].sporkupdate("SPORK_2_INSTANTSEND_ENABLED", 4070908800)
+        self.nodes[0].sporkupdate("SPORK_19_CHAINLOCKS_ENABLED", 4070908800)
+        self.wait_for_sporks_same()
+
         self.test_node = self.nodes[0].add_p2p_connection(TestP2PConn())
 
         self.confirm_mns()
@@ -59,7 +86,7 @@ class LLMQCoinbaseCommitmentsTest(DashTestFramework):
         # Register one more MN, but don't start it (that would fail as DashTestFramework doesn't support this atm)
         baseBlockHash = self.nodes[0].getbestblockhash()
         self.prepare_masternode(self.mn_count)
-        new_mn = self.mninfo[self.mn_count]
+        new_mn: MasternodeInfo = self.mninfo[self.mn_count]
 
         # Now test if that MN appears in a diff when the base block is the one just before MN registration
         expectedDeleted = []
@@ -84,22 +111,15 @@ class LLMQCoinbaseCommitmentsTest(DashTestFramework):
         #############################
         # Now start testing quorum commitment merkle roots
 
-        self.nodes[0].generate(1)
+        self.generate(self.nodes[0], 1, sync_fun=self.no_op)
         oldhash = self.nodes[0].getbestblockhash()
-        # Have to disable ChainLocks here because they won't let you to invalidate already locked blocks
-        self.nodes[0].sporkupdate("SPORK_19_CHAINLOCKS_ENABLED", 4070908800)
-        self.wait_for_sporks_same()
+
         # Test DIP8 activation once with a pre-existing quorum and once without (we don't know in which order it will activate on mainnet)
         self.test_dip8_quorum_merkle_root_activation(True)
         for n in self.nodes:
             n.invalidateblock(oldhash)
         self.sync_all()
         first_quorum = self.test_dip8_quorum_merkle_root_activation(False, True)
-
-        # Re-enable ChainLocks again
-        self.nodes[0].sporkupdate("SPORK_19_CHAINLOCKS_ENABLED", 0)
-        self.nodes[0].sporkupdate("SPORK_17_QUORUM_DKG_ENABLED", 0)
-        self.wait_for_sporks_same()
 
         # Verify that the first quorum appears in MNLISTDIFF
         expectedDeleted = []
@@ -181,7 +201,7 @@ class LLMQCoinbaseCommitmentsTest(DashTestFramework):
         # Verify that the merkle root matches what we locally calculate
         hashes = []
         for mn in sorted(newMNList.values(), key=lambda mn: ser_uint256(mn.proRegTxHash)):
-            hashes.append(hash256(mn.serialize()))
+            hashes.append(hash256(mn.serialize(with_version = False)))
         merkleRoot = CBlock.get_merkle_root(hashes)
         assert_equal(merkleRoot, cbtx.merkleRootMNList)
 
@@ -204,7 +224,7 @@ class LLMQCoinbaseCommitmentsTest(DashTestFramework):
         cbtx = CCbTx()
         cbtx.deserialize(BytesIO(d.cbTx.vExtraPayload))
 
-        if cbtx.version >= 2:
+        if cbtx.nVersion >= 2:
             hashes = []
             for qc in newQuorumList.values():
                 hashes.append(hash256(qc.serialize()))
@@ -217,7 +237,7 @@ class LLMQCoinbaseCommitmentsTest(DashTestFramework):
 
     def test_getmnlistdiff_base(self, baseBlockHash, blockHash):
         hexstr = self.nodes[0].getblockheader(blockHash, False)
-        header = FromHex(CBlockHeader(), hexstr)
+        header = from_hex(CBlockHeader(), hexstr)
 
         d = self.test_node.getmnlistdiff(int(baseBlockHash, 16), int(blockHash, 16))
         assert_equal(d.baseBlockHash, int(baseBlockHash, 16))
@@ -241,6 +261,7 @@ class LLMQCoinbaseCommitmentsTest(DashTestFramework):
 
         return d
 
+
     def test_dip8_quorum_merkle_root_activation(self, with_initial_quorum, slow_mode=False):
         if with_initial_quorum:
             self.nodes[0].sporkupdate("SPORK_17_QUORUM_DKG_ENABLED", 0)
@@ -255,7 +276,9 @@ class LLMQCoinbaseCommitmentsTest(DashTestFramework):
         cbtx = self.nodes[0].getblock(self.nodes[0].getbestblockhash(), 2)["tx"][0]
         assert cbtx["cbTx"]["version"] == 1
 
-        self.activate_dip8(slow_mode)
+        self.activate_by_name('dip0008', expected_activation_height=DIP0008_HEIGHT)
+        self.log.info("Mine one more block with new rules of dip0008")
+        self.generate(self.nodes[0], 1)
 
         # Assert that merkleRootQuorums is present and 0 (we have no quorums yet)
         cbtx = self.nodes[0].getblock(self.nodes[0].getbestblockhash(), 2)["tx"][0]
@@ -289,7 +312,7 @@ class LLMQCoinbaseCommitmentsTest(DashTestFramework):
                     break
             if not found_unconfirmed:
                 break
-            self.nodes[0].generate(1)
+            self.generate(self.nodes[0], 1, sync_fun=self.no_op)
         self.sync_blocks()
 
 if __name__ == '__main__':

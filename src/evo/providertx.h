@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2022 The Dash Core developers
+// Copyright (c) 2018-2025 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -6,47 +6,72 @@
 #define BITCOIN_EVO_PROVIDERTX_H
 
 #include <bls/bls.h>
+#include <evo/dmn_types.h>
+#include <evo/netinfo.h>
 #include <evo/specialtx.h>
 #include <primitives/transaction.h>
+#include <util/std23.h>
 
 #include <consensus/validation.h>
 #include <key_io.h>
 #include <netaddress.h>
 #include <pubkey.h>
+
 #include <univalue.h>
+#include <gsl/pointers.h>
 
 class CBlockIndex;
-class CCoinsViewCache;
-class CValidationState;
+class ChainstateManager;
+class TxValidationState;
+struct RPCResult;
 
-struct maybe_error{
-    bool did_err{false};
-    ValidationInvalidReason reason{ValidationInvalidReason::CONSENSUS};
-    std::string_view error_str;
-
-    constexpr maybe_error() = default;
-    constexpr maybe_error(ValidationInvalidReason reasonIn, std::string_view err): did_err(true), reason(reasonIn), error_str(err) {};
+namespace ProTxVersion {
+enum : uint16_t {
+    LegacyBLS = 1,
+    BasicBLS  = 2,
+    ExtAddr   = 3,
 };
+
+/** Get highest permissible ProTx version based on flags set. */
+[[nodiscard]] constexpr uint16_t GetMax(const bool is_basic_scheme_active, const bool is_extended_addr)
+{
+    if (is_basic_scheme_active) {
+        if (is_extended_addr) {
+            // Requires *both* forks to be active to use extended addresses. is_basic_scheme_active could
+            // be set to false due to RPC specialization, so we must evaluate is_extended_addr *last* to
+            // avoid accidentally upgrading a legacy BLS node to basic BLS due to v24 activation.
+            return ProTxVersion::ExtAddr;
+        }
+        return ProTxVersion::BasicBLS;
+    }
+    return ProTxVersion::LegacyBLS;
+}
+
+/** Get highest permissible ProTx version based on deployment status
+ *  Note: The override is needed because some RPCs need to use deployment status information for everything *except*
+ *        the BLS version upgrade since they are specializations for a specific BLS version. This is a one-off.
+ *  TODO: Resolve this oddity. Consider deprecating legacy BLS-only RPCs so we can remove them eventually.
+ */
+template <typename T>
+[[nodiscard]] uint16_t GetMaxFromDeployment(gsl::not_null<const CBlockIndex*> pindexPrev, const ChainstateManager& chainman,
+                                            std::optional<bool> is_basic_override = std::nullopt);
+} // namespace ProTxVersion
 
 class CProRegTx
 {
 public:
     static constexpr auto SPECIALTX_TYPE = TRANSACTION_PROVIDER_REGISTER;
-    static constexpr uint16_t LEGACY_BLS_VERSION = 1;
-    static constexpr uint16_t BASIC_BLS_VERSION = 2;
 
-    [[nodiscard]] static constexpr auto GetVersion(const bool is_basic_scheme_active) -> uint16_t
-    {
-        return is_basic_scheme_active ? BASIC_BLS_VERSION : LEGACY_BLS_VERSION;
-    }
-
-    uint16_t nVersion{LEGACY_BLS_VERSION};                 // message version
-    uint16_t nType{0};                                     // only 0 supported for now
+    uint16_t nVersion{ProTxVersion::LegacyBLS}; // message version
+    MnType nType{MnType::Regular};
     uint16_t nMode{0};                                     // only 0 supported for now
     COutPoint collateralOutpoint{uint256(), (uint32_t)-1}; // if hash is null, we refer to a ProRegTx output
-    CService addr;
+    std::shared_ptr<NetInfoInterface> netInfo{nullptr};
+    uint160 platformNodeID{};
+    uint16_t platformP2PPort{0};
+    uint16_t platformHTTPPort{0};
     CKeyID keyIDOwner;
-    CBLSPublicKey pubKeyOperator;
+    CBLSLazyPublicKey pubKeyOperator;
     CKeyID keyIDVoting;
     uint16_t nOperatorReward{0};
     CScript scriptPayout;
@@ -58,22 +83,34 @@ public:
         READWRITE(
                 obj.nVersion
         );
-        if (obj.nVersion == 0 || obj.nVersion > BASIC_BLS_VERSION) {
+        if (obj.nVersion == 0 ||
+            obj.nVersion > ProTxVersion::GetMax(/*is_basic_scheme_active=*/true, /*is_extended_addr=*/true)) {
             // unknown version, bail out early
             return;
         }
+
         READWRITE(
                 obj.nType,
                 obj.nMode,
                 obj.collateralOutpoint,
-                obj.addr,
+                NetInfoSerWrapper(const_cast<std::shared_ptr<NetInfoInterface>&>(obj.netInfo),
+                                  obj.nVersion >= ProTxVersion::ExtAddr),
                 obj.keyIDOwner,
-                CBLSPublicKeyVersionWrapper(const_cast<CBLSPublicKey&>(obj.pubKeyOperator), (obj.nVersion == LEGACY_BLS_VERSION)),
+                CBLSLazyPublicKeyVersionWrapper(const_cast<CBLSLazyPublicKey&>(obj.pubKeyOperator), (obj.nVersion == ProTxVersion::LegacyBLS)),
                 obj.keyIDVoting,
                 obj.nOperatorReward,
                 obj.scriptPayout,
                 obj.inputsHash
         );
+        if (obj.nType == MnType::Evo) {
+            READWRITE(
+                obj.platformNodeID);
+            if (obj.nVersion < ProTxVersion::ExtAddr) {
+                READWRITE(
+                obj.platformP2PPort,
+                obj.platformHTTPPort);
+            }
+        }
         if (!(s.GetType() & SER_GETHASH)) {
             READWRITE(obj.vchSig);
         }
@@ -85,45 +122,25 @@ public:
 
     std::string ToString() const;
 
-    void ToJson(UniValue& obj) const
-    {
-        obj.clear();
-        obj.setObject();
-        obj.pushKV("version", nVersion);
-        obj.pushKV("collateralHash", collateralOutpoint.hash.ToString());
-        obj.pushKV("collateralIndex", (int)collateralOutpoint.n);
-        obj.pushKV("service", addr.ToString(false));
-        obj.pushKV("ownerAddress", EncodeDestination(keyIDOwner));
-        obj.pushKV("votingAddress", EncodeDestination(keyIDVoting));
+    [[nodiscard]] static RPCResult GetJsonHelp(const std::string& key, bool optional);
+    [[nodiscard]] UniValue ToJson() const;
 
-        CTxDestination dest;
-        if (ExtractDestination(scriptPayout, dest)) {
-            obj.pushKV("payoutAddress", EncodeDestination(dest));
-        }
-        obj.pushKV("pubKeyOperator", pubKeyOperator.ToString(nVersion == LEGACY_BLS_VERSION));
-        obj.pushKV("operatorReward", (double)nOperatorReward / 100);
-
-        obj.pushKV("inputsHash", inputsHash.ToString());
-    }
-
-    maybe_error IsTriviallyValid(bool is_bls_legacy_scheme) const;
+    bool IsTriviallyValid(gsl::not_null<const CBlockIndex*> pindexPrev, const ChainstateManager& chainman,
+                          TxValidationState& state) const;
 };
 
 class CProUpServTx
 {
 public:
     static constexpr auto SPECIALTX_TYPE = TRANSACTION_PROVIDER_UPDATE_SERVICE;
-    static constexpr uint16_t LEGACY_BLS_VERSION = 1;
-    static constexpr uint16_t BASIC_BLS_VERSION = 2;
 
-    [[nodiscard]] static constexpr auto GetVersion(const bool is_basic_scheme_active) -> uint16_t
-    {
-        return is_basic_scheme_active ? BASIC_BLS_VERSION : LEGACY_BLS_VERSION;
-    }
-
-    uint16_t nVersion{LEGACY_BLS_VERSION}; // message version
+    uint16_t nVersion{ProTxVersion::LegacyBLS}; // message version
+    MnType nType{MnType::Regular};
     uint256 proTxHash;
-    CService addr;
+    std::shared_ptr<NetInfoInterface> netInfo{nullptr};
+    uint160 platformNodeID{};
+    uint16_t platformP2PPort{0};
+    uint16_t platformHTTPPort{0};
     CScript scriptOperatorPayout;
     uint256 inputsHash; // replay protection
     CBLSSignature sig;
@@ -133,58 +150,56 @@ public:
         READWRITE(
                 obj.nVersion
         );
-        if (obj.nVersion == 0 || obj.nVersion > BASIC_BLS_VERSION) {
+        if (obj.nVersion == 0 ||
+            obj.nVersion > ProTxVersion::GetMax(/*is_basic_scheme_active=*/true, /*is_extended_addr=*/true)) {
             // unknown version, bail out early
             return;
         }
+        if (obj.nVersion >= ProTxVersion::BasicBLS) {
+            READWRITE(
+                obj.nType);
+        }
         READWRITE(
                 obj.proTxHash,
-                obj.addr,
+                NetInfoSerWrapper(const_cast<std::shared_ptr<NetInfoInterface>&>(obj.netInfo),
+                                  obj.nVersion >= ProTxVersion::ExtAddr),
                 obj.scriptOperatorPayout,
                 obj.inputsHash
         );
+        if (obj.nType == MnType::Evo) {
+            READWRITE(
+                obj.platformNodeID);
+            if (obj.nVersion < ProTxVersion::ExtAddr) {
+                READWRITE(
+                obj.platformP2PPort,
+                obj.platformHTTPPort);
+            }
+        }
         if (!(s.GetType() & SER_GETHASH)) {
             READWRITE(
-                    CBLSSignatureVersionWrapper(const_cast<CBLSSignature&>(obj.sig), (obj.nVersion == LEGACY_BLS_VERSION), true)
+                    CBLSSignatureVersionWrapper(const_cast<CBLSSignature&>(obj.sig), (obj.nVersion == ProTxVersion::LegacyBLS))
             );
         }
     }
 
     std::string ToString() const;
 
-    void ToJson(UniValue& obj) const
-    {
-        obj.clear();
-        obj.setObject();
-        obj.pushKV("version", nVersion);
-        obj.pushKV("proTxHash", proTxHash.ToString());
-        obj.pushKV("service", addr.ToString(false));
-        CTxDestination dest;
-        if (ExtractDestination(scriptOperatorPayout, dest)) {
-            obj.pushKV("operatorPayoutAddress", EncodeDestination(dest));
-        }
-        obj.pushKV("inputsHash", inputsHash.ToString());
-    }
+    [[nodiscard]] static RPCResult GetJsonHelp(const std::string& key, bool optional);
+    [[nodiscard]] UniValue ToJson() const;
 
-    maybe_error IsTriviallyValid(bool is_bls_legacy_scheme) const;
+    bool IsTriviallyValid(gsl::not_null<const CBlockIndex*> pindexPrev, const ChainstateManager& chainman,
+                          TxValidationState& state) const;
 };
 
 class CProUpRegTx
 {
 public:
     static constexpr auto SPECIALTX_TYPE = TRANSACTION_PROVIDER_UPDATE_REGISTRAR;
-    static constexpr uint16_t LEGACY_BLS_VERSION = 1;
-    static constexpr uint16_t BASIC_BLS_VERSION = 2;
 
-    [[nodiscard]] static constexpr auto GetVersion(const bool is_basic_scheme_active) -> uint16_t
-    {
-        return is_basic_scheme_active ? BASIC_BLS_VERSION : LEGACY_BLS_VERSION;
-    }
-
-    uint16_t nVersion{LEGACY_BLS_VERSION}; // message version
+    uint16_t nVersion{ProTxVersion::LegacyBLS}; // message version
     uint256 proTxHash;
     uint16_t nMode{0}; // only 0 supported for now
-    CBLSPublicKey pubKeyOperator;
+    CBLSLazyPublicKey pubKeyOperator;
     CKeyID keyIDVoting;
     CScript scriptPayout;
     uint256 inputsHash; // replay protection
@@ -195,14 +210,15 @@ public:
         READWRITE(
                 obj.nVersion
         );
-        if (obj.nVersion == 0 || obj.nVersion > BASIC_BLS_VERSION) {
+        if (obj.nVersion == 0 ||
+            obj.nVersion > ProTxVersion::GetMax(/*is_basic_scheme_active=*/true, /*is_extended_addr=*/true)) {
             // unknown version, bail out early
             return;
         }
         READWRITE(
                 obj.proTxHash,
                 obj.nMode,
-                CBLSPublicKeyVersionWrapper(const_cast<CBLSPublicKey&>(obj.pubKeyOperator), (obj.nVersion == LEGACY_BLS_VERSION)),
+                CBLSLazyPublicKeyVersionWrapper(const_cast<CBLSLazyPublicKey&>(obj.pubKeyOperator), (obj.nVersion == ProTxVersion::LegacyBLS)),
                 obj.keyIDVoting,
                 obj.scriptPayout,
                 obj.inputsHash
@@ -216,35 +232,17 @@ public:
 
     std::string ToString() const;
 
-    void ToJson(UniValue& obj) const
-    {
-        obj.clear();
-        obj.setObject();
-        obj.pushKV("version", nVersion);
-        obj.pushKV("proTxHash", proTxHash.ToString());
-        obj.pushKV("votingAddress", EncodeDestination(keyIDVoting));
-        CTxDestination dest;
-        if (ExtractDestination(scriptPayout, dest)) {
-            obj.pushKV("payoutAddress", EncodeDestination(dest));
-        }
-        obj.pushKV("pubKeyOperator", pubKeyOperator.ToString(nVersion == LEGACY_BLS_VERSION));
-        obj.pushKV("inputsHash", inputsHash.ToString());
-    }
+    [[nodiscard]] static RPCResult GetJsonHelp(const std::string& key, bool optional);
+    [[nodiscard]] UniValue ToJson() const;
 
-    maybe_error IsTriviallyValid(bool is_bls_legacy_scheme) const;
+    bool IsTriviallyValid(gsl::not_null<const CBlockIndex*> pindexPrev, const ChainstateManager& chainman,
+                          TxValidationState& state) const;
 };
 
 class CProUpRevTx
 {
 public:
     static constexpr auto SPECIALTX_TYPE = TRANSACTION_PROVIDER_UPDATE_REVOKE;
-    static constexpr uint16_t LEGACY_BLS_VERSION = 1;
-    static constexpr uint16_t BASIC_BLS_VERSION = 2;
-
-    [[nodiscard]] static constexpr auto GetVersion(const bool is_basic_scheme_active) -> uint16_t
-    {
-        return is_basic_scheme_active ? BASIC_BLS_VERSION : LEGACY_BLS_VERSION;
-    }
 
     // these are just informational and do not have any effect on the revocation
     enum {
@@ -255,7 +253,7 @@ public:
         REASON_LAST = REASON_CHANGE_OF_KEYS
     };
 
-    uint16_t nVersion{LEGACY_BLS_VERSION}; // message version
+    uint16_t nVersion{ProTxVersion::LegacyBLS}; // message version
     uint256 proTxHash;
     uint16_t nReason{REASON_NOT_SPECIFIED};
     uint256 inputsHash; // replay protection
@@ -266,7 +264,8 @@ public:
         READWRITE(
                 obj.nVersion
         );
-        if (obj.nVersion == 0 || obj.nVersion > BASIC_BLS_VERSION) {
+        if (obj.nVersion == 0 ||
+            obj.nVersion > ProTxVersion::GetMax(/*is_basic_scheme_active=*/true, /*is_extended_addr=*/true)) {
             // unknown version, bail out early
             return;
         }
@@ -277,35 +276,27 @@ public:
         );
         if (!(s.GetType() & SER_GETHASH)) {
             READWRITE(
-                    CBLSSignatureVersionWrapper(const_cast<CBLSSignature&>(obj.sig), (obj.nVersion == LEGACY_BLS_VERSION), true)
+                    CBLSSignatureVersionWrapper(const_cast<CBLSSignature&>(obj.sig), (obj.nVersion == ProTxVersion::LegacyBLS))
             );
         }
     }
 
     std::string ToString() const;
 
-    void ToJson(UniValue& obj) const
-    {
-        obj.clear();
-        obj.setObject();
-        obj.pushKV("version", nVersion);
-        obj.pushKV("proTxHash", proTxHash.ToString());
-        obj.pushKV("reason", (int)nReason);
-        obj.pushKV("inputsHash", inputsHash.ToString());
-    }
+    [[nodiscard]] static RPCResult GetJsonHelp(const std::string& key, bool optional);
+    [[nodiscard]] UniValue ToJson() const;
 
-    maybe_error IsTriviallyValid(bool is_bls_legacy_scheme) const;
+    bool IsTriviallyValid(gsl::not_null<const CBlockIndex*> pindexPrev, const ChainstateManager& chainman,
+                          TxValidationState& state) const;
 };
 
 template <typename ProTx>
-static maybe_error CheckInputsHash(const CTransaction& tx, const ProTx& proTx)
+static bool CheckInputsHash(const CTransaction& tx, const ProTx& proTx, TxValidationState& state)
 {
     if (uint256 inputsHash = CalcTxInputsHash(tx); inputsHash != proTx.inputsHash) {
-        return {ValidationInvalidReason::CONSENSUS, "bad-protx-inputs-hash"};
+        return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-protx-inputs-hash");
     }
-
-    return {};
+    return true;
 }
-
 
 #endif // BITCOIN_EVO_PROVIDERTX_H

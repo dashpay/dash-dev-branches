@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2015 The Bitcoin Core developers
+// Copyright (c) 2011-2020 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -36,12 +36,16 @@
 #include <config/bitcoin-config.h>
 #endif
 
-#include <qt/walletmodel.h>
+#include <qt/sendcoinsrecipient.h>
 
 #include <QObject>
 #include <QString>
 
 class OptionsModel;
+
+namespace interfaces {
+class Node;
+} // namespace interfaces
 
 QT_BEGIN_NAMESPACE
 class QApplication;
@@ -50,6 +54,8 @@ class QLocalServer;
 class QUrl;
 QT_END_NAMESPACE
 
+extern const QString BITCOIN_IPC_PREFIX;
+
 class PaymentServer : public QObject
 {
     Q_OBJECT
@@ -57,7 +63,7 @@ class PaymentServer : public QObject
 public:
     // Parse URIs on command line
     // Returns false on error
-    static void ipcParseCommandLine(interfaces::Node& node, int argc, char *argv[]);
+    static void ipcParseCommandLine(int argc, char *argv[]);
 
     // Returns true if there were URIs on the command line
     // which were successfully sent to an already-running
@@ -97,9 +103,9 @@ protected:
     bool eventFilter(QObject *object, QEvent *event) override;
 
 private:
-    bool saveURIs;                      // true during startup
-    QLocalServer* uriServer;
-    OptionsModel *optionsModel;
+    bool saveURIs{true}; // true during startup
+    QLocalServer* uriServer{nullptr};
+    OptionsModel* optionsModel{nullptr};
 };
 
 #endif // BITCOIN_QT_PAYMENTSERVER_H

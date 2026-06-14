@@ -1,18 +1,25 @@
-// Copyright (c) 2014-2022 The Dash Core developers
+// Copyright (c) 2014-2025 The Dash Core developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <coinjoin/util.h>
-#include <net.h>
 #include <policy/fees.h>
 #include <policy/policy.h>
-#include <script/sign.h>
-#include <validation.h>
-#include <wallet/fees.h>
-#include <wallet/wallet.h>
 #include <util/translation.h>
+#include <wallet/fees.h>
+#include <wallet/spend.h>
+#include <wallet/wallet.h>
+#include <wallet/walletutil.h>
 
 #include <numeric>
+
+using wallet::CompactTallyItem;
+using wallet::CRecipient;
+using wallet::CWallet;
+using wallet::FEATURE_COMPRPUBKEY;
+using wallet::GetDiscardRate;
+using wallet::RANDOM_CHANGE_POSITION;
+using wallet::WalletBatch;
 
 inline unsigned int GetSizeOfCompactSizeDiff(uint64_t nSizePrev, uint64_t nSizeNew)
 {
@@ -23,7 +30,9 @@ inline unsigned int GetSizeOfCompactSizeDiff(uint64_t nSizePrev, uint64_t nSizeN
 CKeyHolder::CKeyHolder(CWallet* pwallet) :
     reserveDestination(pwallet)
 {
-    reserveDestination.GetReservedDestination(dest, false);
+    auto dest_opt = reserveDestination.GetReservedDestination(false);
+    assert(dest_opt);
+    dest = *dest_opt;
 }
 
 void CKeyHolder::KeepKey()
@@ -87,15 +96,16 @@ void CKeyHolderStorage::ReturnAll()
     }
 }
 
-CTransactionBuilderOutput::CTransactionBuilderOutput(CTransactionBuilder* pTxBuilderIn, std::shared_ptr<CWallet> pwalletIn, CAmount nAmountIn) :
+CTransactionBuilderOutput::CTransactionBuilderOutput(CTransactionBuilder* pTxBuilderIn, CWallet& wallet, CAmount nAmountIn) :
     pTxBuilder(pTxBuilderIn),
-    dest(pwalletIn.get()),
+    dest(&wallet),
     nAmount(nAmountIn)
 {
     assert(pTxBuilder);
-    CTxDestination txdest;
-    dest.GetReservedDestination(txdest, false);
-    script = ::GetScriptForDestination(txdest);
+    LOCK(wallet.cs_wallet);
+    auto dest_opt = dest.GetReservedDestination(false);
+    assert(dest_opt);
+    script = ::GetScriptForDestination(*dest_opt);
 }
 
 bool CTransactionBuilderOutput::UpdateAmount(const CAmount nNewAmount)
@@ -107,39 +117,44 @@ bool CTransactionBuilderOutput::UpdateAmount(const CAmount nNewAmount)
     return true;
 }
 
-CTransactionBuilder::CTransactionBuilder(std::shared_ptr<CWallet> pwalletIn, const CompactTallyItem& tallyItemIn) :
-    pwallet(pwalletIn),
-    dummyReserveDestination(pwalletIn.get()),
+CTransactionBuilder::CTransactionBuilder(CWallet& wallet, const CompactTallyItem& tallyItemIn) :
+    m_wallet(wallet),
+    dummyReserveDestination(&wallet),
     tallyItem(tallyItemIn)
 {
     // Generate a feerate which will be used to consider if the remainder is dust and will go into fees or not
-    coinControl.m_discard_feerate = ::GetDiscardRate(*pwallet);
+    coinControl.m_discard_feerate = ::GetDiscardRate(m_wallet);
     // Generate a feerate which will be used by calculations of this class and also by CWallet::CreateTransaction
-    coinControl.m_feerate = std::max(::feeEstimator.estimateSmartFee(int(pwallet->m_confirm_target), nullptr, true), pwallet->m_pay_tx_fee);
-    // Change always goes back to origin
-    coinControl.destChange = tallyItemIn.txdest;
+    coinControl.m_feerate = std::max(GetRequiredFeeRate(m_wallet), m_wallet.m_pay_tx_fee);
+    // If wallet does not have the avoid-reuse feature enabled, keep legacy
+    // behavior: force change to go back to the origin address. When
+    // WALLET_FLAG_AVOID_REUSE is enabled, let the wallet select a fresh
+    // change destination to avoid address reuse.
+    if (!m_wallet.IsWalletFlagSet(wallet::WALLET_FLAG_AVOID_REUSE)) {
+        coinControl.destChange = tallyItemIn.txdest;
+    }
     // Only allow tallyItems inputs for tx creation
-    coinControl.fAllowOtherInputs = false;
+    coinControl.m_allow_other_inputs = false;
     // Create dummy tx to calculate the exact required fees upfront for accurate amount and fee calculations
     CMutableTransaction dummyTx;
     // Select all tallyItem outputs in the coinControl so that CreateTransaction knows what to use
-    for (const auto& coin : tallyItem.vecInputCoins) {
-        coinControl.Select(coin.outpoint);
-        dummyTx.vin.emplace_back(coin.outpoint, CScript());
+    for (const auto& outpoint : tallyItem.outpoints) {
+        coinControl.Select(outpoint);
+        dummyTx.vin.emplace_back(outpoint, CScript());
     }
     // Get a comparable dummy scriptPubKey, avoid writing/flushing to the actual wallet db
     CScript dummyScript;
     {
-        LOCK(pwallet->cs_wallet);
-        WalletBatch dummyBatch(pwallet->GetDBHandle(), "r+", false);
+        LOCK(m_wallet.cs_wallet);
+        WalletBatch dummyBatch(m_wallet.GetDatabase(), false);
         dummyBatch.TxnBegin();
         CKey secret;
-        secret.MakeNewKey(pwallet->CanSupportFeature(FEATURE_COMPRPUBKEY));
+        secret.MakeNewKey(m_wallet.CanSupportFeature(FEATURE_COMPRPUBKEY));
         CPubKey dummyPubkey = secret.GetPubKey();
         dummyBatch.TxnAbort();
-        dummyScript = ::GetScriptForDestination(dummyPubkey.GetID());
+        dummyScript = ::GetScriptForDestination(PKHash(dummyPubkey));
         // Calculate required bytes for the dummy signed tx with tallyItem's inputs only
-        nBytesBase = CalculateMaximumSignedTxSize(CTransaction(dummyTx), pwallet.get(), false);
+        nBytesBase = CalculateMaximumSignedTxSize(CTransaction(dummyTx), &m_wallet, /*coin_control=*/nullptr);
     }
     // Calculate the output size
     nBytesOutput = ::GetSerializeSize(CTxOut(0, dummyScript), PROTOCOL_VERSION);
@@ -203,7 +218,7 @@ CTransactionBuilderOutput* CTransactionBuilder::AddOutput(CAmount nAmountOutput)
 {
     if (CouldAddOutput(nAmountOutput)) {
         LOCK(cs_outputs);
-        vecOutputs.push_back(std::make_unique<CTransactionBuilderOutput>(this, pwallet, nAmountOutput));
+        vecOutputs.push_back(std::make_unique<CTransactionBuilderOutput>(this, m_wallet, nAmountOutput));
         return vecOutputs.back().get();
     }
     return nullptr;
@@ -232,12 +247,12 @@ CAmount CTransactionBuilder::GetAmountUsed() const
 CAmount CTransactionBuilder::GetFee(unsigned int nBytes) const
 {
     CAmount nFeeCalc = coinControl.m_feerate->GetFee(nBytes);
-    CAmount nRequiredFee = GetRequiredFee(*pwallet, nBytes);
+    CAmount nRequiredFee = GetRequiredFee(m_wallet, nBytes);
     if (nRequiredFee > nFeeCalc) {
         nFeeCalc = nRequiredFee;
     }
-    if (nFeeCalc > pwallet->m_default_max_tx_fee) {
-        nFeeCalc = pwallet->m_default_max_tx_fee;
+    if (nFeeCalc > m_wallet.m_default_max_tx_fee) {
+        nFeeCalc = m_wallet.m_default_max_tx_fee;
     }
     return nFeeCalc;
 }
@@ -258,7 +273,7 @@ bool CTransactionBuilder::IsDust(CAmount nAmount) const
 bool CTransactionBuilder::Commit(bilingual_str& strResult)
 {
     CAmount nFeeRet = 0;
-    int nChangePosRet = -1;
+    int nChangePosRet{RANDOM_CHANGE_POSITION};
 
     // Transform the outputs to the format CWallet::CreateTransaction requires
     std::vector<CRecipient> vecSend;
@@ -272,8 +287,14 @@ bool CTransactionBuilder::Commit(bilingual_str& strResult)
 
     CTransactionRef tx;
     {
-        LOCK2(pwallet->cs_wallet, cs_main);
-        if (!pwallet->CreateTransaction(vecSend, tx, nFeeRet, nChangePosRet, strResult, coinControl)) {
+        LOCK2(m_wallet.cs_wallet, ::cs_main);
+        auto ret = wallet::CreateTransaction(m_wallet, vecSend, nChangePosRet, coinControl);
+        if (ret) {
+            tx = ret->tx;
+            nFeeRet = ret->fee;
+            nChangePosRet = ret->change_pos;
+        } else {
+            strResult = util::ErrorString(ret);
             return false;
         }
     }
@@ -281,13 +302,13 @@ bool CTransactionBuilder::Commit(bilingual_str& strResult)
     CAmount nAmountLeft = GetAmountLeft();
     bool fDust = IsDust(nAmountLeft);
     // If there is a either remainder which is considered to be dust (will be added to fee in this case) or no amount left there should be no change output, return if there is a change output.
-    if (nChangePosRet != -1 && fDust) {
+    if (nChangePosRet != RANDOM_CHANGE_POSITION && fDust) {
         strResult = Untranslated(strprintf("Unexpected change output %s at position %d", tx->vout[nChangePosRet].ToString(), nChangePosRet));
         return false;
     }
 
     // If there is a remainder which is not considered to be dust it should end up in a change output, return if not.
-    if (nChangePosRet == -1 && !fDust) {
+    if (nChangePosRet == RANDOM_CHANGE_POSITION && !fDust) {
         strResult = Untranslated(strprintf("Change output missing: %d", nAmountLeft));
         return false;
     }
@@ -310,8 +331,8 @@ bool CTransactionBuilder::Commit(bilingual_str& strResult)
     }
 
     {
-        LOCK2(pwallet->cs_wallet, cs_main);
-        pwallet->CommitTransaction(tx, {}, {});
+        LOCK2(m_wallet.cs_wallet, ::cs_main);
+        m_wallet.CommitTransaction(tx, {}, {});
     }
 
     fKeepKeys = true;

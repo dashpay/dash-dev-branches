@@ -1,5 +1,5 @@
-// Copyright (c) 2011-2015 The Bitcoin Core developers
-// Copyright (c) 2014-2022 The Dash Core developers
+// Copyright (c) 2011-2021 The Bitcoin Core developers
+// Copyright (c) 2014-2025 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -15,54 +15,80 @@
 #include <qt/transactionrecord.h>
 
 #include <consensus/consensus.h>
-#include <key_io.h>
 #include <interfaces/node.h>
-#include <validation.h>
+#include <interfaces/wallet.h>
+#include <key_io.h>
 #include <script/script.h>
+#include <util/strencodings.h>
 #include <util/system.h>
+#include <validation.h>
 #include <wallet/ismine.h>
 
 #include <stdint.h>
 #include <string>
 
-QString TransactionDesc::FormatTxStatus(const interfaces::WalletTx& wtx, const interfaces::WalletTxStatus& status, bool inMempool, int numBlocks)
+#include <QLatin1String>
+
+using wallet::ISMINE_ALL;
+using wallet::ISMINE_SPENDABLE;
+using wallet::ISMINE_WATCH_ONLY;
+using wallet::isminetype;
+
+QString TransactionDesc::FormatTxStatus(const interfaces::WalletTxStatus& status, bool inMempool)
 {
-    if (!status.is_final)
-    {
-        if (wtx.tx->nLockTime < LOCKTIME_THRESHOLD)
-            return tr("Open for %n more block(s)", "", wtx.tx->nLockTime - numBlocks);
-        else
-            return tr("Open until %1").arg(GUIUtil::dateTimeStr(wtx.tx->nLockTime));
+    int depth = status.depth_in_main_chain;
+    if (depth < 0) {
+        /*: Text explaining the current status of a transaction, shown in the
+            status field of the details window for this transaction. This status
+            represents an unconfirmed transaction that conflicts with a confirmed
+            transaction. */
+        return tr("conflicted with a transaction with %1 confirmations").arg(-depth);
     }
-    else
-    {
-        int nDepth = status.depth_in_main_chain;
-        if (nDepth < 0) return tr("conflicted");
 
-        QString strTxStatus;
-        bool fChainLocked = status.is_chainlocked;
+    QString strTxStatus;
+    bool fChainLocked = status.is_chainlocked;
 
-        if (nDepth == 0) {
-            strTxStatus = tr("0/unconfirmed, %1").arg((inMempool ? tr("in memory pool") : tr("not in memory pool"))) + (status.is_abandoned ? ", "+tr("abandoned") : "");
-        } else if (!fChainLocked && nDepth < 6) {
-            strTxStatus = tr("%1/unconfirmed").arg(nDepth);
-        } else {
-            strTxStatus = tr("%1 confirmations").arg(nDepth);
-            if (fChainLocked) {
-                strTxStatus += ", " + tr("locked via ChainLocks");
-                return strTxStatus;
-            }
+    if (depth == 0) {
+        /*: Text explaining the current status of a transaction, shown in the
+            status field of the details window for this transaction. This
+            status represents an abandoned transaction. */
+        const QString abandoned{status.is_abandoned ? QLatin1String(", ") + tr("abandoned") : QString()};
+        /*: Text explaining the current status of a transaction, shown in the
+            status field of the details window for this transaction. This status
+            represents an unconfirmed transaction that is in the memory pool. */
+        strTxStatus = tr("0/unconfirmed, %1").arg((inMempool ? tr("in memory pool") : tr("not in memory pool"))) + abandoned;
+    } else if (!fChainLocked && depth < 6) {
+        /*: Text explaining the current status of a transaction, shown in the
+            status field of the details window for this transaction. This status
+            represents a transaction confirmed in at least one block,
+            but less than 6 blocks, and still not locked via ChainLocks. */
+        strTxStatus = tr("%1/unconfirmed").arg(depth);
+    } else {
+        /*: Text explaining the current status of a transaction, shown in the
+            status field of the details window for this transaction. This
+            status represents a transaction confirmed in 6 or more blocks
+            or locked via ChainLocks. */
+        strTxStatus = tr("%1 confirmations").arg(depth);
+        if (fChainLocked) {
+            /*: Text explaining the current status of a transaction, shown in the
+                status field of the details window for this transaction. This status
+                represents a transaction confirmed in at least one block and has been locked by ChainLocks. */
+            strTxStatus += QLatin1String(", ") + tr("locked via ChainLocks");
+            return strTxStatus;
         }
-
-        if (status.is_islocked) {
-            strTxStatus += ", " + tr("verified via InstantSend");
-        }
-
-        return strTxStatus;
     }
+
+    if (status.is_islocked) {
+        /*: Text explaining the current status of a transaction, shown in the
+            status field of the details window for this transaction. This status
+            represents an unconfirmed transaction that has been locked by InstantSend. */
+        strTxStatus += QLatin1String(", ") + tr("verified via InstantSend");
+    }
+
+    return strTxStatus;
 }
 
-QString TransactionDesc::toHTML(interfaces::Node& node, interfaces::Wallet& wallet, TransactionRecord *rec, int unit)
+QString TransactionDesc::toHTML(interfaces::Node& node, interfaces::Wallet& wallet, TransactionRecord* rec, BitcoinUnit unit)
 {
     int numBlocks;
     interfaces::WalletTxStatus status;
@@ -80,7 +106,7 @@ QString TransactionDesc::toHTML(interfaces::Node& node, interfaces::Wallet& wall
     CAmount nDebit = wtx.debit;
     CAmount nNet = nCredit - nDebit;
 
-    strHTML += "<b>" + tr("Status") + ":</b> " + FormatTxStatus(wtx, status, inMempool, numBlocks);
+    strHTML += "<b>" + tr("Status") + ":</b> " + FormatTxStatus(status, inMempool);
     strHTML += "<br>";
 
     strHTML += "<b>" + tr("Date") + ":</b> " + (nTime ? GUIUtil::dateTimeStr(nTime) : "") + "<br>";
@@ -91,6 +117,10 @@ QString TransactionDesc::toHTML(interfaces::Node& node, interfaces::Wallet& wall
     if (wtx.is_coinbase)
     {
         strHTML += "<b>" + tr("Source") + ":</b> " + tr("Generated") + "<br>";
+    }
+    else if (wtx.is_platform_transfer)
+    {
+        strHTML += "<b>" + tr("Source") + ":</b> " + tr("Platform Transfer") + "<br>";
     }
     else if (wtx.value_map.count("from") && !wtx.value_map["from"].empty())
     {
@@ -266,6 +296,26 @@ QString TransactionDesc::toHTML(interfaces::Node& node, interfaces::Wallet& wall
     strHTML += "<b>" + tr("Output index") + ":</b> " + QString::number(rec->getOutputIndex()) + "<br>";
     strHTML += "<b>" + tr("Transaction total size") + ":</b> " + QString::number(wtx.tx->GetTotalSize()) + " bytes<br>";
 
+    // Show OP_RETURN payload for this specific output
+    if (rec->type == TransactionRecord::DataTransaction &&
+        rec->idx >= 0 && static_cast<size_t>(rec->idx) < wtx.tx->vout.size() &&
+        TransactionRecord::IsDataScript(wtx.tx->vout[rec->idx].scriptPubKey)) {
+        const auto& script{wtx.tx->vout[rec->idx].scriptPubKey};
+        // Extract all data pushes after OP_RETURN
+        const auto payload = [&script]() {
+            auto pc = script.begin() + 1; // Skip opcode
+            opcodetype opcode;
+            std::vector<uint8_t> ret{}, vch{};
+            while (pc < script.end() && script.GetOp(pc, opcode, vch)) {
+                ret.insert(ret.end(), vch.begin(), vch.end());
+            }
+            return ret;
+        }();
+        if (!payload.empty()) {
+            strHTML += "<b>" + tr("Payload") + ":</b> " + QString::fromStdString(HexStr(payload)) + "<br>";
+        }
+    }
+
     // Message from normal dash:URI (dash:XyZ...?message=example)
     for (const std::pair<std::string, std::string>& r : orderForm) {
         if (r.first == "Message")
@@ -325,6 +375,6 @@ QString TransactionDesc::toHTML(interfaces::Node& node, interfaces::Wallet& wall
         strHTML += "</ul>";
     }
 
-    strHTML += "</font></html>";
+    strHTML += "</html>";
     return strHTML;
 }

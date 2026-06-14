@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2022 The Dash Core developers
+// Copyright (c) 2018-2025 The Dash Core developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -6,27 +6,45 @@
 #define BITCOIN_LLMQ_COMMITMENT_H
 
 #include <bls/bls.h>
-#include <consensus/params.h>
+#include <llmq/params.h>
+#include <llmq/types.h>
+#include <util/helpers.h>
+#include <util/std23.h>
+
 #include <primitives/transaction.h>
-#include <util/irange.h>
 #include <util/strencodings.h>
 
+#include <gsl/pointers.h>
 #include <univalue.h>
 
+#include <algorithm>
+#include <limits>
+#include <memory>
+#include <string>
+#include <vector>
+
 class CBlockIndex;
-class CValidationState;
+class CDeterministicMNManager;
+class ChainstateManager;
+class TxValidationState;
+template <typename T>
+class CCheckQueueControl;
+struct RPCResult;
+namespace llmq {
+class CQuorumSnapshotManager;
+struct UtilParameters;
+namespace utils {
+struct BlsCheck;
+} // namespace utils
+} // namespace llmq
 
-namespace llmq
-{
-
+namespace llmq {
 // This message is an aggregation of all received premature commitments and only valid if
 // enough (>=threshold) premature commitments were aggregated
 // This is mined on-chain as part of TRANSACTION_QUORUM_COMMITMENT
 class CFinalCommitment
 {
 public:
-    static constexpr auto SPECIALTX_TYPE = TRANSACTION_PROVIDER_REGISTER;
-
     static constexpr uint16_t LEGACY_BLS_NON_INDEXED_QUORUM_VERSION = 1;
     static constexpr uint16_t LEGACY_BLS_INDEXED_QUORUM_VERSION = 2;
     static constexpr uint16_t BASIC_BLS_NON_INDEXED_QUORUM_VERSION = 3;
@@ -58,7 +76,9 @@ public:
         return int(std::count(validMembers.begin(), validMembers.end(), true));
     }
 
-    bool Verify(const CBlockIndex* pQuorumBaseBlockIndex, bool checkSigs) const;
+    bool VerifySignatureAsync(const llmq::UtilParameters& util_params,
+                              CCheckQueueControl<utils::BlsCheck>* queue_control) const;
+    bool Verify(const llmq::UtilParameters& util_params, bool checkSigs) const;
     bool VerifyNull() const;
     bool VerifySizes(const Consensus::LLMQParams& params) const;
 
@@ -110,34 +130,19 @@ public:
         return true;
     }
 
-    void ToJson(UniValue& obj) const
-    {
-        obj.setObject();
-        obj.pushKV("version", int{nVersion});
-        obj.pushKV("llmqType", int(llmqType));
-        obj.pushKV("quorumHash", quorumHash.ToString());
-        obj.pushKV("quorumIndex", quorumIndex);
-        obj.pushKV("signersCount", CountSigners());
-        obj.pushKV("signers", BitsVectorToHexStr(signers));
-        obj.pushKV("validMembersCount", CountValidMembers());
-        obj.pushKV("validMembers", BitsVectorToHexStr(validMembers));
-        obj.pushKV("quorumPublicKey", quorumPublicKey.ToString(nVersion == LEGACY_BLS_NON_INDEXED_QUORUM_VERSION || nVersion == LEGACY_BLS_INDEXED_QUORUM_VERSION));
-        obj.pushKV("quorumVvecHash", quorumVvecHash.ToString());
-        obj.pushKV("quorumSig", quorumSig.ToString(nVersion == LEGACY_BLS_NON_INDEXED_QUORUM_VERSION || nVersion == LEGACY_BLS_INDEXED_QUORUM_VERSION));
-        obj.pushKV("membersSig", membersSig.ToString(nVersion == LEGACY_BLS_NON_INDEXED_QUORUM_VERSION || nVersion == LEGACY_BLS_INDEXED_QUORUM_VERSION));
-    }
+    [[nodiscard]] static RPCResult GetJsonHelp(const std::string& key, bool optional);
+    [[nodiscard]] UniValue ToJson() const;
 
 private:
     static std::string BitsVectorToHexStr(const std::vector<bool>& vBits)
     {
         std::vector<uint8_t> vBytes((vBits.size() + 7) / 8);
-        for (const auto i : irange::range(vBits.size())) {
+        for (const auto i : util::irange(vBits.size())) {
             vBytes[i / 8] |= vBits[i] << (i % 8);
         }
         return HexStr(vBytes);
     }
 };
-using CFinalCommitmentPtr = std::unique_ptr<CFinalCommitment>;
 
 class CFinalCommitmentTxPayload
 {
@@ -155,19 +160,13 @@ public:
         READWRITE(obj.nVersion, obj.nHeight, obj.commitment);
     }
 
-    void ToJson(UniValue& obj) const
-    {
-        obj.setObject();
-        obj.pushKV("version", int{nVersion});
-        obj.pushKV("height", int(nHeight));
-
-        UniValue qcObj;
-        commitment.ToJson(qcObj);
-        obj.pushKV("commitment", qcObj);
-    }
+    [[nodiscard]] static RPCResult GetJsonHelp(const std::string& key, bool optional);
+    [[nodiscard]] UniValue ToJson() const;
 };
 
-bool CheckLLMQCommitment(const CTransaction& tx, const CBlockIndex* pindexPrev, CValidationState& state);
+bool CheckLLMQCommitment(const llmq::UtilParameters& util_params, const CTransaction& tx, TxValidationState& state);
+
+uint256 BuildCommitmentHash(Consensus::LLMQType llmqType, const uint256& blockHash, const std::vector<bool>& validMembers, const CBLSPublicKey& pubKey, const uint256& vvecHash);
 
 } // namespace llmq
 

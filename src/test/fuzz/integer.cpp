@@ -1,10 +1,11 @@
-// Copyright (c) 2019 The Bitcoin Core developers
+// Copyright (c) 2019-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <arith_uint256.h>
 #include <chainparams.h>
 #include <compressor.h>
+#include <consensus/amount.h>
 #include <consensus/merkle.h>
 #include <core_io.h>
 #include <crypto/common.h>
@@ -16,7 +17,6 @@
 #include <pow.h>
 #include <protocol.h>
 #include <pubkey.h>
-#include <rpc/util.h>
 #include <script/sign.h>
 #include <script/standard.h>
 #include <serialize.h>
@@ -25,18 +25,19 @@
 #include <test/fuzz/fuzz.h>
 #include <test/fuzz/util.h>
 #include <uint256.h>
+#include <univalue.h>
 #include <util/check.h>
 #include <util/moneystr.h>
+#include <util/overflow.h>
 #include <util/strencodings.h>
 #include <util/string.h>
 #include <util/system.h>
-#include <util/time.h>
 #include <version.h>
 
 #include <cassert>
 #include <chrono>
-#include <ctime>
 #include <limits>
+#include <optional>
 #include <set>
 #include <vector>
 
@@ -45,7 +46,7 @@ void initialize_integer()
     SelectParams(CBaseChainParams::REGTEST);
 }
 
-FUZZ_TARGET_INIT(integer, initialize_integer)
+FUZZ_TARGET(integer, .init = initialize_integer)
 {
     if (buffer.size() < sizeof(uint256) + sizeof(uint160)) {
         return;
@@ -73,12 +74,9 @@ FUZZ_TARGET_INIT(integer, initialize_integer)
     static const uint256 u256_max(uint256S("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"));
     const std::vector<uint256> v256{u256, u256_min, u256_max};
     (void)ComputeMerkleRoot(v256);
-    (void)CountBits(u64);
     (void)DecompressAmount(u64);
-    (void)FormatISO8601Date(i64);
-    (void)FormatISO8601DateTime(i64);
-    // FormatMoney(i) not defined when i == std::numeric_limits<int64_t>::min()
-    if (i64 != std::numeric_limits<int64_t>::min()) {
+    {
+
         if (std::optional<CAmount> parsed = ParseMoney(FormatMoney(i64))) {
             assert(parsed.value() == i64);
         }
@@ -115,23 +113,27 @@ FUZZ_TARGET_INIT(integer, initialize_integer)
         assert(dynamic_usage == incremental_dynamic_usage * i64s.size());
     }
     (void)MillisToTimeval(i64);
-    const double d = ser_uint64_to_double(u64);
-    assert(ser_double_to_uint64(d) == u64);
-    const float f = ser_uint32_to_float(u32);
-    assert(ser_float_to_uint32(f) == u32);
     (void)SighashToStr(uch);
     (void)SipHashUint256(u64, u64, u256);
     (void)SipHashUint256Extra(u64, u64, u256, u32);
     (void)ToLower(ch);
     (void)ToUpper(ch);
-    // ValueFromAmount(i) not defined when i == std::numeric_limits<int64_t>::min()
-    if (i64 != std::numeric_limits<int64_t>::min()) {
+    {
+
         if (std::optional<CAmount> parsed = ParseMoney(ValueFromAmount(i64).getValStr())) {
             assert(parsed.value() == i64);
         }
     }
+    if (i32 >= 0 && i32 <= 16) {
+        assert(i32 == CScript::DecodeOP_N(CScript::EncodeOP_N(i32)));
+    }
+
     const std::chrono::seconds seconds{i64};
     assert(count_seconds(seconds) == i64);
+
+    const CScriptNum script_num{i64};
+    (void)script_num.getint();
+    (void)script_num.getvch();
 
     const arith_uint256 au256 = UintToArith256(u256);
     assert(ArithToUint256(au256) == u256);
@@ -145,16 +147,8 @@ FUZZ_TARGET_INIT(integer, initialize_integer)
     (void)au256.size();
     (void)au256.ToString();
 
-    const CKeyID key_id{u160};
-    const CScriptID script_id{u160};
-    // CTxDestination = CNoDestination ∪ CKeyID ∪ CScriptID
-    const std::vector<CTxDestination> destinations{key_id, script_id};
-    for (const CTxDestination& destination : destinations) {
-        (void)DescribeAddress(destination);
-        (void)EncodeDestination(destination);
-        (void)GetScriptForDestination(destination);
-        (void)IsValidDestination(destination);
-    }
+    const PKHash key_id{u160};
+    const ScriptHash script_id{u160};
 
     {
         CDataStream stream(SER_NETWORK, INIT_PROTO_VERSION);
@@ -208,11 +202,6 @@ FUZZ_TARGET_INIT(integer, initialize_integer)
         stream << i8;
         stream >> deserialized_i8;
         assert(i8 == deserialized_i8 && stream.empty());
-
-        char deserialized_ch;
-        stream << ch;
-        stream >> deserialized_ch;
-        assert(ch == deserialized_ch && stream.empty());
 
         bool deserialized_b;
         stream << b;

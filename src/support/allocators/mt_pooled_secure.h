@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2022 The Dash Core developers
+// Copyright (c) 2014-2023 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -38,7 +38,7 @@ struct mt_pooled_secure_allocator : public std::allocator<T> {
     }
     ~mt_pooled_secure_allocator() noexcept {}
 
-    T* allocate(std::size_t n, const void* hint = 0)
+    T* allocate(std::size_t n, const void* hint = nullptr)
     {
         size_t bucket = get_bucket();
         std::lock_guard<std::mutex> lock(pools[bucket]->mutex);

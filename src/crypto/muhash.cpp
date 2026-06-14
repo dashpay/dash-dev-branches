@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2020 The Bitcoin Core developers
+// Copyright (c) 2017-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -298,8 +298,9 @@ void Num3072::ToBytes(unsigned char (&out)[BYTE_SIZE]) {
 Num3072 MuHash3072::ToNum3072(Span<const unsigned char> in) {
     unsigned char tmp[Num3072::BYTE_SIZE];
 
-    uint256 hashed_in = (CHashWriter(SER_DISK, 0) << in).GetSHA256();
-    ChaCha20(hashed_in.data(), hashed_in.size()).Keystream(tmp, Num3072::BYTE_SIZE);
+    uint256 hashed_in{(HashWriter{} << in).GetSHA256()};
+    static_assert(sizeof(tmp) % ChaCha20Aligned::BLOCKLEN == 0);
+    ChaCha20Aligned{MakeByteSpan(hashed_in)}.Keystream(MakeWritableByteSpan(tmp));
     Num3072 out{tmp};
 
     return out;
@@ -318,7 +319,7 @@ void MuHash3072::Finalize(uint256& out) noexcept
     unsigned char data[Num3072::BYTE_SIZE];
     m_numerator.ToBytes(data);
 
-    out = (CHashWriter(SER_DISK, 0) << data).GetSHA256();
+    out = (HashWriter{} << data).GetSHA256();
 }
 
 MuHash3072& MuHash3072::operator*=(const MuHash3072& mul) noexcept
@@ -341,6 +342,6 @@ MuHash3072& MuHash3072::Insert(Span<const unsigned char> in) noexcept {
 }
 
 MuHash3072& MuHash3072::Remove(Span<const unsigned char> in) noexcept {
-    m_numerator.Divide(ToNum3072(in));
+    m_denominator.Multiply(ToNum3072(in));
     return *this;
 }

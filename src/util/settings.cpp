@@ -1,11 +1,17 @@
-// Copyright (c) 2019 The Bitcoin Core developers
+// Copyright (c) 2019-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
+#include <fs.h>
 #include <util/settings.h>
 
 #include <tinyformat.h>
 #include <univalue.h>
+
+#include <fstream>
+#include <map>
+#include <string>
+#include <vector>
 
 namespace util {
 namespace {
@@ -63,27 +69,39 @@ bool ReadSettings(const fs::path& path, std::map<std::string, SettingsValue>& va
     // Ok for file to not exist
     if (!fs::exists(path)) return true;
 
-    fsbridge::ifstream file;
+    std::ifstream file;
     file.open(path);
     if (!file.is_open()) {
-      errors.emplace_back(strprintf("%s. Please check permissions.", path.string()));
+      errors.emplace_back(strprintf("%s. Please check permissions.", fs::PathToString(path)));
       return false;
+    }
+
+    // Check if settings file is empty
+    if (file.peek() == std::ifstream::traits_type::eof()) {
+        // In that case delete it and return true: it will be created with default value later
+        file.close();
+        if (!fs::remove(path)) {
+            // Return false only if it failed to delete the empty settings file
+            errors.emplace_back(strprintf("Unable to delete empty settings file %s", fs::PathToString(path)));
+            return false;
+        }
+        return true;
     }
 
     SettingsValue in;
     if (!in.read(std::string{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()})) {
-        errors.emplace_back(strprintf("Unable to parse settings file %s", path.string()));
+        errors.emplace_back(strprintf("Unable to parse settings file %s", fs::PathToString(path)));
         return false;
     }
 
     if (file.fail()) {
-        errors.emplace_back(strprintf("Failed reading settings file %s", path.string()));
+        errors.emplace_back(strprintf("Failed reading settings file %s", fs::PathToString(path)));
         return false;
     }
     file.close(); // Done with file descriptor. Release while copying data.
 
     if (!in.isObject()) {
-        errors.emplace_back(strprintf("Found non-object value %s in settings file %s", in.write(), path.string()));
+        errors.emplace_back(strprintf("Found non-object value %s in settings file %s", in.write(), fs::PathToString(path)));
         return false;
     }
 
@@ -92,7 +110,9 @@ bool ReadSettings(const fs::path& path, std::map<std::string, SettingsValue>& va
     for (size_t i = 0; i < in_keys.size(); ++i) {
         auto inserted = values.emplace(in_keys[i], in_values[i]);
         if (!inserted.second) {
-            errors.emplace_back(strprintf("Found duplicate key %s in settings file %s", in_keys[i], path.string()));
+            errors.emplace_back(strprintf("Found duplicate key %s in settings file %s", in_keys[i], fs::PathToString(path)));
+            values.clear();
+            break;
         }
     }
     return errors.empty();
@@ -106,10 +126,10 @@ bool WriteSettings(const fs::path& path,
     for (const auto& value : values) {
         out.__pushKV(value.first, value.second);
     }
-    fsbridge::ofstream file;
+    std::ofstream file;
     file.open(path);
     if (file.fail()) {
-        errors.emplace_back(strprintf("Error: Unable to open settings file %s for writing", path.string()));
+        errors.emplace_back(strprintf("Error: Unable to open settings file %s for writing", fs::PathToString(path)));
         return false;
     }
     file << out.write(/* prettyIndent= */ 4, /* indentLevel= */ 1) << std::endl;
@@ -121,9 +141,11 @@ SettingsValue GetSetting(const Settings& settings,
     const std::string& section,
     const std::string& name,
     bool ignore_default_section_config,
+    bool ignore_nonpersistent,
     bool get_chain_name)
 {
     SettingsValue result;
+    bool done = false; // Done merging any more settings sources.
     MergeSettings(settings, section, name, [&](SettingsSpan span, Source source) {
         // Weird behavior preserved for backwards compatibility: Apply negated
         // setting even if non-negated setting would be ignored. A negated
@@ -136,7 +158,9 @@ SettingsValue GetSetting(const Settings& settings,
         // precedence over early settings, but for backwards compatibility in
         // the config file the precedence is reversed for all settings except
         // chain name settings.
-        const bool reverse_precedence = (source == Source::CONFIG_FILE_NETWORK_SECTION || source == Source::CONFIG_FILE_DEFAULT_SECTION) && !get_chain_name;
+        const bool reverse_precedence =
+            (source == Source::CONFIG_FILE_NETWORK_SECTION || source == Source::CONFIG_FILE_DEFAULT_SECTION) &&
+            !get_chain_name;
 
         // Weird behavior preserved for backwards compatibility: Negated
         // -regtest and -testnet arguments which you would expect to override
@@ -145,19 +169,26 @@ SettingsValue GetSetting(const Settings& settings,
         // negated values, or at least warn they are ignored.
         const bool skip_negated_command_line = get_chain_name;
 
+        if (done) return;
+
         // Ignore settings in default config section if requested.
-        if (ignore_default_section_config && source == Source::CONFIG_FILE_DEFAULT_SECTION && !never_ignore_negated_setting) return;
+        if (ignore_default_section_config && source == Source::CONFIG_FILE_DEFAULT_SECTION &&
+            !never_ignore_negated_setting) {
+            return;
+        }
+
+        // Ignore nonpersistent settings if requested.
+        if (ignore_nonpersistent && (source == Source::COMMAND_LINE || source == Source::FORCED)) return;
 
         // Skip negated command line settings.
         if (skip_negated_command_line && span.last_negated()) return;
 
-        // Stick with highest priority value, keeping result if already set.
-        if (!result.isNull()) return;
-
         if (!span.empty()) {
             result = reverse_precedence ? span.begin()[0] : span.end()[-1];
+            done = true;
         } else if (span.last_negated()) {
             result = false;
+            done = true;
         }
     });
     return result;
@@ -169,7 +200,7 @@ std::vector<SettingsValue> GetSettingsList(const Settings& settings,
     bool ignore_default_section_config)
 {
     std::vector<SettingsValue> result;
-    bool result_complete = false;
+    bool done = false; // Done merging any more settings sources.
     bool prev_negated_empty = false;
     MergeSettings(settings, section, name, [&](SettingsSpan span, Source source) {
         // Weird behavior preserved for backwards compatibility: Apply config
@@ -179,14 +210,16 @@ std::vector<SettingsValue> GetSettingsList(const Settings& settings,
         // value is followed by non-negated value, in which case config file
         // settings will be brought back from the dead (but earlier command
         // line settings will still be ignored).
-        const bool add_zombie_config_values = (source == Source::CONFIG_FILE_NETWORK_SECTION || source == Source::CONFIG_FILE_DEFAULT_SECTION) && !prev_negated_empty;
+        const bool add_zombie_config_values =
+            (source == Source::CONFIG_FILE_NETWORK_SECTION || source == Source::CONFIG_FILE_DEFAULT_SECTION) &&
+            !prev_negated_empty;
 
         // Ignore settings in default config section if requested.
         if (ignore_default_section_config && source == Source::CONFIG_FILE_DEFAULT_SECTION) return;
 
         // Add new settings to the result if isn't already complete, or if the
         // values are zombies.
-        if (!result_complete || add_zombie_config_values) {
+        if (!done || add_zombie_config_values) {
             for (const auto& value : span) {
                 if (value.isArray()) {
                     result.insert(result.end(), value.getValues().begin(), value.getValues().end());
@@ -197,8 +230,8 @@ std::vector<SettingsValue> GetSettingsList(const Settings& settings,
         }
 
         // If a setting was negated, or if a setting was forced, set
-        // result_complete to true to ignore any later lower priority settings.
-        result_complete |= span.negated() > 0 || source == Source::FORCED;
+        // done to true to ignore any later lower priority settings.
+        done |= span.negated() > 0 || source == Source::FORCED;
 
         // Update the negated and empty state used for the zombie values check.
         prev_negated_empty |= span.last_negated() && result.empty();

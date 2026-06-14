@@ -39,7 +39,7 @@ The following are developer notes on how to build Dash Core on your native platf
 - [Windows Build Notes](build-windows.md)
 - [OpenBSD Build Notes](build-openbsd.md)
 - [NetBSD Build Notes](build-netbsd.md)
-- [Gitian Building Guide](gitian-building.md)
+- [Android Build Notes](build-android.md)
 
 Development
 ---------------------
@@ -52,13 +52,13 @@ The Dash Core repo's [root README](/README.md) contains relevant information on 
 - Source Code Documentation ***TODO***
 - [Translation Process](translation_process.md)
 - [Translation Strings Policy](translation_strings_policy.md)
-- [Travis CI](travis-ci.md)
 - [JSON-RPC Interface](JSON-RPC-interface.md)
 - [Unauthenticated REST Interface](REST-interface.md)
 - [Shared Libraries](shared-libraries.md)
 - [BIPS](bips.md)
 - [Dnsseed Policy](dnsseed-policy.md)
 - [Benchmarking](benchmarking.md)
+- [Internal Design Docs](design/)
 
 ### Resources
 * See the [Dash Developer Documentation](https://dashcore.readme.io/)
@@ -70,14 +70,20 @@ The Dash Core repo's [root README](/README.md) contains relevant information on 
 ### Miscellaneous
 - [Assets Attribution](assets-attribution.md)
 - [dash.conf Configuration File](dash-conf.md)
+- [CJDNS Support](cjdns.md)
 - [Files](files.md)
 - [Fuzz-testing](fuzzing.md)
+- [I2P Support](i2p.md)
+- [Init Scripts (systemd/upstart/openrc)](init.md)
+- [Managing Wallets](managing-wallets.md)
+- [Multisig Tutorial](multisig-tutorial.md)
+- [P2P bad ports definition and list](p2p-bad-ports.md)
+- [PSBT support](psbt.md)
 - [Reduce Memory](reduce-memory.md)
 - [Reduce Traffic](reduce-traffic.md)
 - [Tor Support](tor.md)
-- [Init Scripts (systemd/upstart/openrc)](init.md)
+- [Transaction Relay Policy](policy/README.md)
 - [ZMQ](zmq.md)
-- [PSBT support](psbt.md)
 
 License
 ---------------------

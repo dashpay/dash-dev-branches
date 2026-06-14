@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2015 The Bitcoin Core developers
+// Copyright (c) 2009-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -16,9 +16,10 @@
 #include <optional>
 #include <string>
 
+class ArgsManager;
 struct bilingual_str;
 
-void SplitWalletPath(const fs::path& wallet_path, fs::path& env_directory, std::string& database_filename);
+namespace wallet {
 
 /** RAII class that provides access to a WalletDatabase */
 class DatabaseBatch
@@ -89,6 +90,7 @@ public:
 
         return HasKey(std::move(ssKey));
     }
+    virtual bool ErasePrefix(Span<const std::byte> prefix) = 0;
 
     virtual bool StartCursor() = 0;
     virtual bool ReadAtCursor(CDataStream& ssKey, CDataStream& ssValue, bool& complete) = 0;
@@ -104,11 +106,11 @@ class WalletDatabase
 {
 public:
     /** Create dummy DB handle */
-    WalletDatabase() : nUpdateCounter(0), nLastSeen(0), nLastFlushed(0), nLastWalletUpdate(0) {}
+    WalletDatabase() : nUpdateCounter(0) {}
     virtual ~WalletDatabase() {};
 
     /** Open the database if it is not already opened. */
-    virtual void Open(const char* mode) = 0;
+    virtual void Open() = 0;
 
     //! Counts the number of active database users to be sure that the database is not closed while someone is using it
     std::atomic<int> m_refcount{0};
@@ -143,13 +145,17 @@ public:
     /** Return path to main database file for logs and error messages. */
     virtual std::string Filename() = 0;
 
+    virtual std::string Format() = 0;
+
     std::atomic<unsigned int> nUpdateCounter;
-    unsigned int nLastSeen;
-    unsigned int nLastFlushed;
-    int64_t nLastWalletUpdate;
+    unsigned int nLastSeen{0};
+    unsigned int nLastFlushed{0};
+    int64_t nLastWalletUpdate{0};
 
     /** Make a DatabaseBatch connected to this database */
-    virtual std::unique_ptr<DatabaseBatch> MakeBatch(const char* mode = "r+", bool flush_on_close = true) = 0;
+    virtual std::unique_ptr<DatabaseBatch> MakeBatch(bool flush_on_close = true) = 0;
+
+    virtual bool SupportsAutoBackup() { return false; }
 };
 
 /** RAII class that provides access to a DummyDatabase. Never fails. */
@@ -160,6 +166,7 @@ private:
     bool WriteKey(CDataStream&& key, CDataStream&& value, bool overwrite=true) override { return true; }
     bool EraseKey(CDataStream&& key) override { return true; }
     bool HasKey(CDataStream&& key) override { return true; }
+    bool ErasePrefix(Span<const std::byte> prefix) override { return true; }
 
 public:
     void Flush() override {}
@@ -178,7 +185,7 @@ public:
 class DummyDatabase : public WalletDatabase
 {
 public:
-    void Open(const char* mode) override {};
+    void Open() override {};
     void AddRef() override {}
     void RemoveRef() override {}
     bool Rewrite(const char* pszSkip=nullptr) override { return true; }
@@ -189,19 +196,27 @@ public:
     void IncrementUpdateCounter() override { ++nUpdateCounter; }
     void ReloadDbEnv() override {}
     std::string Filename() override { return "dummy"; }
-    std::unique_ptr<DatabaseBatch> MakeBatch(const char* mode = "r+", bool flush_on_close = true) override { return std::make_unique<DummyBatch>(); }
+    std::string Format() override { return "dummy"; }
+    std::unique_ptr<DatabaseBatch> MakeBatch(bool flush_on_close = true) override { return std::make_unique<DummyBatch>(); }
 };
 
 enum class DatabaseFormat {
     BERKELEY,
+    SQLITE,
 };
 
 struct DatabaseOptions {
     bool require_existing = false;
     bool require_create = false;
+    std::optional<DatabaseFormat> require_format;
     uint64_t create_flags = 0;
     SecureString create_passphrase;
-    bool verify = true;
+
+    // Specialized options. Not every option is supported by every backend.
+    bool verify = true;             //!< Check data integrity on load.
+    bool use_unsafe_sync = false;   //!< Disable file sync for faster performance.
+    bool use_shared_memory = false; //!< Let other processes access the database.
+    int64_t max_log_mb = 100;       //!< Max log size to allow before consolidating.
 };
 
 enum class DatabaseStatus {
@@ -212,10 +227,22 @@ enum class DatabaseStatus {
     FAILED_ALREADY_EXISTS,
     FAILED_NOT_FOUND,
     FAILED_CREATE,
+    FAILED_LOAD,
     FAILED_VERIFY,
     FAILED_ENCRYPT,
+    FAILED_INVALID_BACKUP_FILE,
 };
 
+/** Recursively list database paths in directory. */
+std::vector<fs::path> ListDatabases(const fs::path& path);
+
+void ReadDatabaseArgs(const ArgsManager& args, DatabaseOptions& options);
 std::unique_ptr<WalletDatabase> MakeDatabase(const fs::path& path, const DatabaseOptions& options, DatabaseStatus& status, bilingual_str& error);
+
+fs::path BDBDataFile(const fs::path& path);
+fs::path SQLiteDataFile(const fs::path& path);
+bool IsBDBFile(const fs::path& path);
+bool IsSQLiteFile(const fs::path& path);
+} // namespace wallet
 
 #endif // BITCOIN_WALLET_DB_H

@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-# Copyright (c) 2017 The Bitcoin Core developers
+# Copyright (c) 2017-2020 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
-"""Test the listsincelast RPC."""
+"""Test the listsinceblock RPC."""
 
+from test_framework.address import key_to_p2pkh
+from test_framework.blocktools import COINBASE_MATURITY
+from test_framework.key import ECKey
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.messages import BIP125_SEQUENCE_NUMBER
 from test_framework.util import (
@@ -11,13 +14,19 @@ from test_framework.util import (
     assert_equal,
     assert_raises_rpc_error,
 )
+from test_framework.wallet_util import bytes_to_wif
 
 from decimal import Decimal
 
 class ListSinceBlockTest(BitcoinTestFramework):
+    def add_options(self, parser):
+        self.add_wallet_options(parser)
+
     def set_test_params(self):
         self.num_nodes = 4
         self.setup_clean_chain = True
+        # whitelist peers to speed up tx relay / mempool sync
+        self.extra_args = [["-whitelist=noban@127.0.0.1"]] * self.num_nodes
 
     def skip_test_if_missing_module(self):
         self.skip_if_no_wallet()
@@ -26,8 +35,7 @@ class ListSinceBlockTest(BitcoinTestFramework):
         # All nodes are in IBD from genesis, so they'll need the miner (node2) to be an outbound connection, or have
         # only one connection. (See fPreferredDownload in net_processing)
         self.connect_nodes(1, 2)
-        self.nodes[2].generate(101)
-        self.sync_all()
+        self.generate(self.nodes[2], COINBASE_MATURITY + 1)
 
         self.test_no_blockhash()
         self.test_invalid_blockhash()
@@ -35,19 +43,34 @@ class ListSinceBlockTest(BitcoinTestFramework):
         self.test_double_spend()
         self.test_double_send()
         self.double_spends_filtered()
+        self.test_targetconfirmations()
+        self.test_op_return()
 
     def test_no_blockhash(self):
+        self.log.info("Test no blockhash")
         txid = self.nodes[2].sendtoaddress(self.nodes[0].getnewaddress(), 1)
-        blockhash, = self.nodes[2].generate(1)
         self.sync_all()
+        assert_array_result(self.nodes[0].listtransactions(), {"txid": txid}, {
+            "category": "receive",
+            "amount": 1,
+            "confirmations": 0,
+            "trusted": False,
+        })
+
+        blockhash, = self.generate(self.nodes[2], 1)
+        blockheight = self.nodes[2].getblockheader(blockhash)['height']
 
         txs = self.nodes[0].listtransactions()
         assert_array_result(txs, {"txid": txid}, {
             "category": "receive",
             "amount": 1,
             "blockhash": blockhash,
+            "blockheight": blockheight,
             "confirmations": 1,
         })
+        assert_equal(len(txs), 1)
+        assert "trusted" not in txs[0]
+
         assert_equal(
             self.nodes[0].listsinceblock(),
             {"lastblock": blockhash,
@@ -60,12 +83,35 @@ class ListSinceBlockTest(BitcoinTestFramework):
              "transactions": txs})
 
     def test_invalid_blockhash(self):
+        self.log.info("Test invalid blockhash")
         assert_raises_rpc_error(-5, "Block not found", self.nodes[0].listsinceblock,
                                 "42759cde25462784395a337460bde75f58e73d3f08bd31fdc3507cbac856a2c4")
         assert_raises_rpc_error(-5, "Block not found", self.nodes[0].listsinceblock,
                                 "0000000000000000000000000000000000000000000000000000000000000000")
-        assert_raises_rpc_error(-5, "Block not found", self.nodes[0].listsinceblock,
+        assert_raises_rpc_error(-8, "blockhash must be of length 64 (not 11, for 'invalid-hex')", self.nodes[0].listsinceblock,
                                 "invalid-hex")
+        assert_raises_rpc_error(-8, "blockhash must be hexadecimal string (not 'Z000000000000000000000000000000000000000000000000000000000000000')", self.nodes[0].listsinceblock,
+                                "Z000000000000000000000000000000000000000000000000000000000000000")
+
+    def test_targetconfirmations(self):
+        '''
+        This tests when the value of target_confirmations exceeds the number of
+        blocks in the main chain. In this case, the genesis block hash should be
+        given for the `lastblock` property. If target_confirmations is < 1, then
+        a -8 invalid parameter error is thrown.
+        '''
+        self.log.info("Test target_confirmations")
+        blockhash, = self.generate(self.nodes[2], 1)
+        blockheight = self.nodes[2].getblockheader(blockhash)['height']
+
+        assert_equal(
+            self.nodes[0].getblockhash(0),
+            self.nodes[0].listsinceblock(blockhash, blockheight + 1)['lastblock'])
+        assert_equal(
+            self.nodes[0].getblockhash(0),
+            self.nodes[0].listsinceblock(blockhash, blockheight + 1000)['lastblock'])
+        assert_raises_rpc_error(-8, "Invalid parameter",
+            self.nodes[0].listsinceblock, blockhash, 0)
 
     def test_reorg(self):
         '''
@@ -95,6 +141,7 @@ class ListSinceBlockTest(BitcoinTestFramework):
 
         This test only checks that [tx0] is present.
         '''
+        self.log.info("Test reorg")
 
         # Split network into two
         self.split_network()
@@ -103,23 +150,18 @@ class ListSinceBlockTest(BitcoinTestFramework):
         senttx = self.nodes[2].sendtoaddress(self.nodes[0].getnewaddress(), 1)
 
         # generate on both sides
-        lastblockhash = self.nodes[1].generate(6)[5]
-        self.nodes[2].generate(7)
-        self.log.info('lastblockhash=%s' % (lastblockhash))
-
-        self.sync_all(self.nodes[:2])
-        self.sync_all(self.nodes[2:])
+        nodes1_last_blockhash = self.generate(self.nodes[1], 6, sync_fun=lambda: self.sync_all(self.nodes[:2]))[-1]
+        nodes2_first_blockhash = self.generate(self.nodes[2], 7, sync_fun=lambda: self.sync_all(self.nodes[2:]))[0]
+        self.log.debug("nodes[1] last blockhash = {}".format(nodes1_last_blockhash))
+        self.log.debug("nodes[2] first blockhash = {}".format(nodes2_first_blockhash))
 
         self.join_network()
 
-        # listsinceblock(lastblockhash) should now include tx, as seen from nodes[0]
-        lsbres = self.nodes[0].listsinceblock(lastblockhash)
-        found = False
-        for tx in lsbres['transactions']:
-            if tx['txid'] == senttx:
-                found = True
-                break
-        assert found
+        # listsinceblock(nodes1_last_blockhash) should now include tx as seen from nodes[0]
+        # and return the block height which listsinceblock now exposes since a5e7795.
+        transactions = self.nodes[0].listsinceblock(nodes1_last_blockhash)['transactions']
+        found = next(tx for tx in transactions if tx['txid'] == senttx)
+        assert_equal(found['blockheight'], self.nodes[0].getblockheader(nodes2_first_blockhash)['height'])
 
     def test_double_spend(self):
         '''
@@ -150,17 +192,24 @@ class ListSinceBlockTest(BitcoinTestFramework):
         until the fork point, and to include all transactions that relate to the
         node wallet.
         '''
+        self.log.info("Test double spend")
 
         self.sync_all()
 
+        # share utxo between nodes[1] and nodes[2]
+        eckey = ECKey()
+        eckey.generate()
+        privkey = bytes_to_wif(eckey.get_bytes())
+        address = key_to_p2pkh(eckey.get_pubkey().get_bytes())
+        self.nodes[2].sendtoaddress(address, 10)
+        self.generate(self.nodes[2], 6)
+        self.nodes[2].importprivkey(privkey)
+        utxos = self.nodes[2].listunspent()
+        utxo = [u for u in utxos if u["address"] == address][0]
+        self.nodes[1].importprivkey(privkey)
+
         # Split network into two
         self.split_network()
-
-        # share utxo between nodes[1] and nodes[2]
-        utxos = self.nodes[2].listunspent()
-        utxo = utxos[0]
-        privkey = self.nodes[2].dumpprivkey(utxo['address'])
-        self.nodes[1].importprivkey(privkey)
 
         # send from nodes[1] using utxo to nodes[0]
         change = '%.8f' % (float(utxo['amount']) - 1.0003)
@@ -186,8 +235,8 @@ class ListSinceBlockTest(BitcoinTestFramework):
                 self.nodes[2].createrawtransaction(utxo_dicts, recipient_dict2))['hex'])
 
         # generate on both sides
-        lastblockhash = self.nodes[1].generate(3)[2]
-        self.nodes[2].generate(4)
+        lastblockhash = self.generate(self.nodes[1], 3, sync_fun=self.no_op)[2]
+        self.generate(self.nodes[2], 4, sync_fun=self.no_op)
 
         self.join_network()
 
@@ -229,6 +278,7 @@ class ListSinceBlockTest(BitcoinTestFramework):
         3. It is listed with a confirmation count of 2 (bb3, bb4), not
            3 (aa1, aa2, aa3).
         '''
+        self.log.info("Test double send")
 
         self.sync_all()
 
@@ -257,7 +307,7 @@ class ListSinceBlockTest(BitcoinTestFramework):
         txid1 = self.nodes[1].sendrawtransaction(signedtx)
 
         # generate bb1-bb2 on right side
-        self.nodes[2].generate(2)
+        self.generate(self.nodes[2], 2, sync_fun=self.no_op)
 
         # send from nodes[2]; this will end up in bb3
         txid2 = self.nodes[2].sendrawtransaction(signedtx)
@@ -265,15 +315,16 @@ class ListSinceBlockTest(BitcoinTestFramework):
         assert_equal(txid1, txid2)
 
         # generate on both sides
-        lastblockhash = self.nodes[1].generate(3)[2]
-        self.nodes[2].generate(2)
+        lastblockhash = self.generate(self.nodes[1], 3, sync_fun=self.no_op)[2]
+        self.generate(self.nodes[2], 2, sync_fun=self.no_op)
 
         self.join_network()
 
         self.sync_all()
 
         # gettransaction should work for txid1
-        self.nodes[0].gettransaction(txid1)
+        tx1 = self.nodes[0].gettransaction(txid1)
+        assert_equal(tx1['blockheight'], self.nodes[0].getblockheader(tx1['blockhash'])['height'])
 
         # listsinceblock(lastblockhash) should now include txid1 in transactions
         # as well as in removed
@@ -296,6 +347,7 @@ class ListSinceBlockTest(BitcoinTestFramework):
         `listsinceblock` was returning conflicted transactions even if they
         occurred before the specified cutoff blockhash
         '''
+        self.log.info("Test spends filtered")
         spending_node = self.nodes[2]
         double_spending_node = self.nodes[3]
         dest_address = spending_node.getnewaddress()
@@ -318,7 +370,7 @@ class ListSinceBlockTest(BitcoinTestFramework):
         double_signedtx = spending_node.signrawtransactionwithwallet(double_rawtx)
         dbl_tx_id = double_spending_node.sendrawtransaction(double_signedtx["hex"])
         double_tx = double_spending_node.getrawtransaction(dbl_tx_id, 1)
-        lastblockhash = double_spending_node.generate(1)[0]
+        lastblockhash = self.generate(double_spending_node, 1, sync_fun=self.no_op)[0]
 
         self.reconnect_isolated_node(3, 2)
         self.sync_all()
@@ -337,7 +389,7 @@ class ListSinceBlockTest(BitcoinTestFramework):
         assert_equal(original_found, True)
         assert_equal(double_found, True)
 
-        lastblockhash = spending_node.generate(1)[0]
+        lastblockhash = self.generate(spending_node, 1, sync_fun=self.no_op)[0]
 
         # check that neither transaction exists
         block_hash = spending_node.listsinceblock(lastblockhash)
@@ -350,6 +402,21 @@ class ListSinceBlockTest(BitcoinTestFramework):
                 double_found = True
         assert_equal(original_found, False)
         assert_equal(double_found, False)
+
+
+    def test_op_return(self):
+        """Test if OP_RETURN outputs will be displayed correctly."""
+        block_hash = self.nodes[2].getbestblockhash()
+
+        raw_tx = self.nodes[2].createrawtransaction([], [{'data': 'aa'}])
+        funded_tx = self.nodes[2].fundrawtransaction(raw_tx)
+        signed_tx = self.nodes[2].signrawtransactionwithwallet(funded_tx['hex'])
+        tx_id = self.nodes[2].sendrawtransaction(signed_tx['hex'])
+
+        op_ret_tx = [tx for tx in self.nodes[2].listsinceblock(blockhash=block_hash)["transactions"] if tx['txid'] == tx_id][0]
+
+        assert 'address' not in op_ret_tx
+
 
 if __name__ == '__main__':
     ListSinceBlockTest().main()

@@ -11,8 +11,7 @@ add_library(dashbls
   ${CMAKE_CURRENT_SOURCE_DIR}/extendedpublickey.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/legacy.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/schemes.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/threshold.cpp
-)
+  ${CMAKE_CURRENT_SOURCE_DIR}/threshold.cpp)
 
 target_include_directories(dashbls
   PUBLIC
@@ -47,9 +46,23 @@ if(BUILD_BLS_TESTS)
   target_link_libraries(runtest
                         PRIVATE dashbls
                         PRIVATE catch2)
+
+  if(EMSCRIPTEN)
+    target_link_options(runtest PRIVATE "SHELL:-s MALLOC=emmalloc")
+    if(CMAKE_BUILD_TYPE MATCHES "Debug")
+      target_link_options(runtest PRIVATE "SHELL:-s ASSERTIONS=2")
+    endif()
+  endif()
 endif()
 
 if(BUILD_BLS_BENCHMARKS)
   add_executable(runbench test-bench.cpp)
   target_link_libraries(runbench PRIVATE dashbls)
+
+  if(EMSCRIPTEN)
+    target_link_options(runbench PRIVATE "SHELL:-s MALLOC=emmalloc")
+    if(CMAKE_BUILD_TYPE MATCHES "Debug")
+      target_link_options(runbench PRIVATE "SHELL:-s ASSERTIONS=2")
+    endif()
+  endif()
 endif()

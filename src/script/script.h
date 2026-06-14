@@ -1,11 +1,12 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2015 The Bitcoin Core developers
+// Copyright (c) 2009-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #ifndef BITCOIN_SCRIPT_SCRIPT_H
 #define BITCOIN_SCRIPT_SCRIPT_H
 
+#include <attributes.h>
 #include <crypto/common.h>
 #include <prevector.h>
 #include <serialize.h>
@@ -199,7 +200,7 @@ enum opcodetype
 // Maximum value that an opcode can be
 static const unsigned int MAX_OPCODE = OP_CHECKDATASIGVERIFY;
 
-const char* GetOpName(opcodetype opcode);
+std::string GetOpName(opcodetype opcode);
 
 class scriptnum_error : public std::runtime_error
 {
@@ -319,6 +320,8 @@ public:
         return m_value;
     }
 
+    int64_t GetInt64() const { return m_value; }
+
     std::vector<unsigned char> getvch() const
     {
         return serialize(m_value);
@@ -331,7 +334,7 @@ public:
 
         std::vector<unsigned char> result;
         const bool neg = value < 0;
-        uint64_t absvalue = neg ? -value : value;
+        uint64_t absvalue = neg ? ~static_cast<uint64_t>(value) + 1 : static_cast<uint64_t>(value);
 
         while(absvalue)
         {
@@ -426,9 +429,9 @@ public:
     /** Delete non-existent operator to defend against future introduction */
     CScript& operator<<(const CScript& b) = delete;
 
-    CScript& operator<<(int64_t b) { return push_int64(b); }
+    CScript& operator<<(int64_t b) LIFETIMEBOUND { return push_int64(b); }
 
-    CScript& operator<<(opcodetype opcode)
+    CScript& operator<<(opcodetype opcode) LIFETIMEBOUND
     {
         if (opcode < 0 || opcode > 0xff)
             throw std::runtime_error("CScript::operator<<(): invalid opcode");
@@ -436,13 +439,13 @@ public:
         return *this;
     }
 
-    CScript& operator<<(const CScriptNum& b)
+    CScript& operator<<(const CScriptNum& b) LIFETIMEBOUND
     {
         *this << b.getvch();
         return *this;
     }
 
-    CScript& operator<<(const std::vector<unsigned char>& b)
+    CScript& operator<<(const std::vector<unsigned char>& b) LIFETIMEBOUND
     {
         if (b.size() < OP_PUSHDATA1)
         {
@@ -541,13 +544,31 @@ public:
     }
 };
 
-class CReserveScript
+bool CheckMinimalPush(const std::vector<unsigned char>& data, opcodetype opcode);
+
+/** Build a script by concatenating other scripts, or any argument accepted by CScript::operator<<. */
+template<typename... Ts>
+CScript BuildScript(Ts&&... inputs)
 {
-public:
-    CScript reserveScript;
-    virtual void KeepScript() {}
-    CReserveScript() {}
-    virtual ~CReserveScript() {}
-};
+    CScript ret;
+    int cnt{0};
+
+    ([&ret, &cnt] (Ts&& input) {
+        if constexpr (std::is_same_v<std::remove_cv_t<std::remove_reference_t<Ts>>, CScript>) {
+            // If it is a CScript, extend ret with it. Move or copy the first element instead.
+            if (cnt == 0) {
+                ret = std::forward<Ts>(input);
+            } else {
+                ret.insert(ret.end(), input.begin(), input.end());
+            }
+        } else {
+            // Otherwise invoke CScript::operator<<.
+            ret << input;
+        }
+        cnt++;
+    } (std::forward<Ts>(inputs)), ...);
+
+    return ret;
+}
 
 #endif // BITCOIN_SCRIPT_SCRIPT_H

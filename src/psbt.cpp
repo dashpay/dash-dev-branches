@@ -1,4 +1,4 @@
-// Copyright (c) 2009-2018 The Bitcoin Core developers
+// Copyright (c) 2009-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -7,6 +7,7 @@
 #include <policy/policy.h>
 #include <policy/settings.h>
 #include <psbt.h>
+#include <tinyformat.h>
 #include <util/check.h>
 #include <util/strencodings.h>
 
@@ -36,16 +37,15 @@ bool PartiallySignedTransaction::Merge(const PartiallySignedTransaction& psbt)
     for (unsigned int i = 0; i < outputs.size(); ++i) {
         outputs[i].Merge(psbt.outputs[i]);
     }
+    for (auto& xpub_pair : psbt.m_xpubs) {
+        if (m_xpubs.count(xpub_pair.first) == 0) {
+            m_xpubs[xpub_pair.first] = xpub_pair.second;
+        } else {
+            m_xpubs[xpub_pair.first].insert(xpub_pair.second.begin(), xpub_pair.second.end());
+        }
+    }
     unknown.insert(psbt.unknown.begin(), psbt.unknown.end());
 
-    return true;
-}
-
-bool PartiallySignedTransaction::IsSane() const
-{
-    for (PSBTInput input : inputs) {
-        if (!input.IsSane()) return false;
-    }
     return true;
 }
 
@@ -70,9 +70,15 @@ bool PartiallySignedTransaction::AddOutput(const CTxOut& txout, const PSBTOutput
 
 bool PartiallySignedTransaction::GetInputUTXO(CTxOut& utxo, int input_index) const
 {
-    PSBTInput input = inputs[input_index];
-    int prevout_index = tx->vin[input_index].prevout.n;
+    const PSBTInput& input = inputs[input_index];
+    uint32_t prevout_index = tx->vin[input_index].prevout.n;
     if (input.non_witness_utxo) {
+        if (prevout_index >= input.non_witness_utxo->vout.size()) {
+            return false;
+        }
+        if (input.non_witness_utxo->GetHash() != tx->vin[input_index].prevout.hash) {
+            return false;
+        }
         utxo = input.non_witness_utxo->vout[prevout_index];
     } else {
         return false;
@@ -131,16 +137,15 @@ void PSBTInput::Merge(const PSBTInput& input)
     if (!non_witness_utxo && input.non_witness_utxo) non_witness_utxo = input.non_witness_utxo;
 
     partial_sigs.insert(input.partial_sigs.begin(), input.partial_sigs.end());
+    ripemd160_preimages.insert(input.ripemd160_preimages.begin(), input.ripemd160_preimages.end());
+    sha256_preimages.insert(input.sha256_preimages.begin(), input.sha256_preimages.end());
+    hash160_preimages.insert(input.hash160_preimages.begin(), input.hash160_preimages.end());
+    hash256_preimages.insert(input.hash256_preimages.begin(), input.hash256_preimages.end());
     hd_keypaths.insert(input.hd_keypaths.begin(), input.hd_keypaths.end());
     unknown.insert(input.unknown.begin(), input.unknown.end());
 
     if (redeem_script.empty() && !input.redeem_script.empty()) redeem_script = input.redeem_script;
     if (final_script_sig.empty() && !input.final_script_sig.empty()) final_script_sig = input.final_script_sig;
-}
-
-bool PSBTInput::IsSane() const
-{
-    return true;
 }
 
 void PSBTOutput::FillSignatureData(SignatureData& sigdata) const
@@ -176,6 +181,17 @@ void PSBTOutput::Merge(const PSBTOutput& output)
     if (redeem_script.empty() && !output.redeem_script.empty()) redeem_script = output.redeem_script;
 }
 
+size_t CountPSBTUnsignedInputs(const PartiallySignedTransaction& psbt) {
+    size_t count = 0;
+    for (const auto& input : psbt.inputs) {
+        if (!PSBTInputSigned(input)) {
+            count++;
+        }
+    }
+
+    return count;
+}
+
 void UpdatePSBTOutput(const SigningProvider& provider, PartiallySignedTransaction& psbt, int index)
 {
     CMutableTransaction& tx = *Assert(psbt.tx);
@@ -189,7 +205,7 @@ void UpdatePSBTOutput(const SigningProvider& provider, PartiallySignedTransactio
     // Construct a would-be spend of this output, to update sigdata with.
     // Note that ProduceSignature is used to fill in metadata (not actual signatures),
     // so provider does not need to provide any private keys (it can be a HidingSigningProvider).
-    MutableTransactionSignatureCreator creator(&tx, /* index */ 0, out.nValue, SIGHASH_ALL);
+    MutableTransactionSignatureCreator creator(tx, /*input_idx=*/0, out.nValue, SIGHASH_ALL);
     ProduceSignature(provider, creator, out.scriptPubKey, sigdata);
 
     // Put redeem_script, key paths, into PSBTOutput.
@@ -200,7 +216,24 @@ bool PSBTInputSigned(const PSBTInput& input)
     return !input.final_script_sig.empty();
 }
 
-bool SignPSBTInput(const SigningProvider& provider, PartiallySignedTransaction& psbt, int index, int sighash, SignatureData* out_sigdata, bool use_dummy)
+PrecomputedTransactionData PrecomputePSBTData(const PartiallySignedTransaction& psbt)
+{
+    const CMutableTransaction& tx = *psbt.tx;
+    bool have_all_spent_outputs = true;
+    std::vector<CTxOut> utxos(tx.vin.size());
+    for (size_t idx = 0; idx < tx.vin.size(); ++idx) {
+        if (!psbt.GetInputUTXO(utxos[idx], idx)) have_all_spent_outputs = false;
+    }
+    PrecomputedTransactionData txdata;
+    if (have_all_spent_outputs) {
+        txdata.Init(tx, std::move(utxos), true);
+    } else {
+        txdata.Init(tx, {}, true);
+    }
+    return txdata;
+}
+
+bool SignPSBTInput(const SigningProvider& provider, PartiallySignedTransaction& psbt, int index, const PrecomputedTransactionData* txdata, int sighash,  SignatureData* out_sigdata, bool finalize)
 {
     PSBTInput& input = psbt.inputs.at(index);
     const CMutableTransaction& tx = *psbt.tx;
@@ -216,14 +249,12 @@ bool SignPSBTInput(const SigningProvider& provider, PartiallySignedTransaction& 
     // Get UTXO
     CTxOut utxo;
 
-    // Verify input sanity, which checks that at most one of witness or non-witness utxos is provided.
-    if (!input.IsSane()) {
-        return false;
-    }
-
     if (input.non_witness_utxo) {
         // If we're taking our information from a non-witness UTXO, verify that it matches the prevout.
         COutPoint prevout = tx.vin[index].prevout;
+        if (prevout.n >= input.non_witness_utxo->vout.size()) {
+            return false;
+        }
         if (input.non_witness_utxo->GetHash() != prevout.hash) {
             return false;
         }
@@ -233,12 +264,16 @@ bool SignPSBTInput(const SigningProvider& provider, PartiallySignedTransaction& 
     }
 
     bool sig_complete;
-    if (use_dummy) {
+    if (txdata == nullptr) {
         sig_complete = ProduceSignature(provider, DUMMY_SIGNATURE_CREATOR, utxo.scriptPubKey, sigdata);
     } else {
-        MutableTransactionSignatureCreator creator(&tx, index, utxo.nValue, sighash);
+        MutableTransactionSignatureCreator creator(tx, index, utxo.nValue, txdata, sighash);
         sig_complete = ProduceSignature(provider, creator, utxo.scriptPubKey, sigdata);
     }
+
+    // If we are not finalizing, set sigdata.complete to false to not set the scriptSig
+    if (!finalize && sigdata.complete) sigdata.complete = false;
+
     input.FromSignatureData(sigdata);
 
     // Fill in the missing info
@@ -251,6 +286,13 @@ bool SignPSBTInput(const SigningProvider& provider, PartiallySignedTransaction& 
     return sig_complete;
 }
 
+void RemoveUnnecessaryTransactions(PartiallySignedTransaction& /* psbtx */, const int& /* sighash_type */)
+{
+    // Dash does not support segwit, so there are no witness_utxos to consider.
+    // In Bitcoin, this function drops non_witness_utxos when all inputs are
+    // segwit v1+, which cannot occur in Dash.
+}
+
 bool FinalizePSBT(PartiallySignedTransaction& psbtx)
 {
     // Finalize input signatures -- in case we have partial signatures that add up to a complete
@@ -258,8 +300,9 @@ bool FinalizePSBT(PartiallySignedTransaction& psbtx)
     //   PartiallySignedTransaction did not understand them), this will combine them into a final
     //   script.
     bool complete = true;
+    const PrecomputedTransactionData txdata = PrecomputePSBTData(psbtx);
     for (unsigned int i = 0; i < psbtx.tx->vin.size(); ++i) {
-        complete &= SignPSBTInput(DUMMY_SIGNING_PROVIDER, psbtx, i, SIGHASH_ALL);
+        complete &= SignPSBTInput(DUMMY_SIGNING_PROVIDER, psbtx, i, &txdata, SIGHASH_ALL, nullptr, true);
     }
 
     return complete;
@@ -290,15 +333,12 @@ TransactionError CombinePSBTs(PartiallySignedTransaction& out, const std::vector
             return TransactionError::PSBT_MISMATCH;
         }
     }
-    if (!out.IsSane()) {
-        return TransactionError::INVALID_PSBT;
-    }
-
     return TransactionError::OK;
 }
 
 std::string PSBTRoleName(PSBTRole role) {
     switch (role) {
+    case PSBTRole::CREATOR: return "creator";
     case PSBTRole::UPDATER: return "updater";
     case PSBTRole::SIGNER: return "signer";
     case PSBTRole::FINALIZER: return "finalizer";
@@ -308,141 +348,19 @@ std::string PSBTRoleName(PSBTRole role) {
     assert(false);
 }
 
-PSBTAnalysis AnalyzePSBT(PartiallySignedTransaction psbtx)
-{
-    // Go through each input and build status
-    PSBTAnalysis result;
-
-    bool calc_fee = true;
-    bool all_final = true;
-    bool only_missing_sigs = true;
-    bool only_missing_final = false;
-    CAmount in_amt = 0;
-
-    result.inputs.resize(psbtx.tx->vin.size());
-
-    for (unsigned int i = 0; i < psbtx.tx->vin.size(); ++i) {
-        PSBTInput& input = psbtx.inputs[i];
-        PSBTInputAnalysis& input_analysis = result.inputs[i];
-
-        // Check for a UTXO
-        CTxOut utxo;
-        if (psbtx.GetInputUTXO(utxo, i)) {
-            in_amt += utxo.nValue;
-            input_analysis.has_utxo = true;
-        } else {
-            input_analysis.has_utxo = false;
-            input_analysis.is_final = false;
-            input_analysis.next = PSBTRole::UPDATER;
-            calc_fee = false;
-        }
-
-        // Check if it is final
-        if (!utxo.IsNull() && !PSBTInputSigned(input)) {
-            input_analysis.is_final = false;
-            all_final = false;
-
-            // Figure out what is missing
-            SignatureData outdata;
-            bool complete = SignPSBTInput(DUMMY_SIGNING_PROVIDER, psbtx, i, 1, &outdata);
-
-            // Things are missing
-            if (!complete) {
-                input_analysis.missing_pubkeys = outdata.missing_pubkeys;
-                input_analysis.missing_redeem_script = outdata.missing_redeem_script;
-                input_analysis.missing_sigs = outdata.missing_sigs;
-
-                // If we are only missing signatures and nothing else, then next is signer
-                if (outdata.missing_pubkeys.empty() && outdata.missing_redeem_script.IsNull() && !outdata.missing_sigs.empty()) {
-                    input_analysis.next = PSBTRole::SIGNER;
-                } else {
-                    only_missing_sigs = false;
-                    input_analysis.next = PSBTRole::UPDATER;
-                }
-            } else {
-                only_missing_final = true;
-                input_analysis.next = PSBTRole::FINALIZER;
-            }
-        } else if (!utxo.IsNull()){
-            input_analysis.is_final = true;
-        }
-    }
-
-    if (all_final) {
-        only_missing_sigs = false;
-        result.next = PSBTRole::EXTRACTOR;
-    }
-    if (calc_fee) {
-        // Get the output amount
-        CAmount out_amt = std::accumulate(psbtx.tx->vout.begin(), psbtx.tx->vout.end(), CAmount(0),
-            [](CAmount a, const CTxOut& b) {
-                return a += b.nValue;
-            }
-        );
-
-        // Get the fee
-        CAmount fee = in_amt - out_amt;
-        result.fee = fee;
-
-        // Estimate the size
-        CMutableTransaction mtx(*psbtx.tx);
-        CCoinsView view_dummy;
-        CCoinsViewCache view(&view_dummy);
-        bool success = true;
-
-        for (unsigned int i = 0; i < psbtx.tx->vin.size(); ++i) {
-            PSBTInput& input = psbtx.inputs[i];
-            Coin newcoin;
-
-            if (!SignPSBTInput(DUMMY_SIGNING_PROVIDER, psbtx, i, 1, nullptr, true) || !psbtx.GetInputUTXO(newcoin.out, i)) {
-                success = false;
-                break;
-            } else {
-                mtx.vin[i].scriptSig = input.final_script_sig;
-                newcoin.nHeight = 1;
-                view.AddCoin(psbtx.tx->vin[i].prevout, std::move(newcoin), true);
-            }
-        }
-
-        if (success) {
-            CTransaction ctx = CTransaction(mtx);
-            size_t size = GetVirtualTransactionSize(ctx, GetTransactionSigOpCount(ctx, view, STANDARD_SCRIPT_VERIFY_FLAGS));
-            result.estimated_vsize = size;
-            // Estimate fee rate
-            CFeeRate feerate(fee, size);
-            result.estimated_feerate = feerate;
-        }
-
-        if (only_missing_sigs) {
-            result.next = PSBTRole::SIGNER;
-        } else if (only_missing_final) {
-            result.next = PSBTRole::FINALIZER;
-        } else if (all_final) {
-            result.next = PSBTRole::EXTRACTOR;
-        } else {
-            result.next = PSBTRole::UPDATER;
-        }
-    } else {
-        result.next = PSBTRole::UPDATER;
-    }
-
-    return result;
-}
-
 bool DecodeBase64PSBT(PartiallySignedTransaction& psbt, const std::string& base64_tx, std::string& error)
 {
-    bool invalid;
-    std::string tx_data = DecodeBase64(base64_tx, &invalid);
-    if (invalid) {
+    auto tx_data = DecodeBase64(base64_tx);
+    if (!tx_data) {
         error = "invalid base64";
         return false;
     }
-    return DecodeRawPSBT(psbt, tx_data, error);
+    return DecodeRawPSBT(psbt, MakeByteSpan(*tx_data), error);
 }
 
-bool DecodeRawPSBT(PartiallySignedTransaction& psbt, const std::string& tx_data, std::string& error)
+bool DecodeRawPSBT(PartiallySignedTransaction& psbt, Span<const std::byte> tx_data, std::string& error)
 {
-    CDataStream ss_data(tx_data.data(), tx_data.data() + tx_data.size(), SER_NETWORK, PROTOCOL_VERSION);
+    CDataStream ss_data(tx_data, SER_NETWORK, PROTOCOL_VERSION);
     try {
         ss_data >> psbt;
         if (!ss_data.empty()) {
@@ -454,4 +372,12 @@ bool DecodeRawPSBT(PartiallySignedTransaction& psbt, const std::string& tx_data,
         return false;
     }
     return true;
+}
+
+uint32_t PartiallySignedTransaction::GetVersion() const
+{
+    if (m_version != std::nullopt) {
+        return *m_version;
+    }
+    return 0;
 }

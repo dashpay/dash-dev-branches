@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-# Copyright (c) 2018-2022 The Dash Core developers
+# Copyright (c) 2018-2023 The Dash Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 import time
 
 from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import wait_until
 
 '''
 feature_multikeysporks.py
@@ -101,7 +100,7 @@ class MultiKeySporkTest(BitcoinTestFramework):
         self.nodes[2].sporkupdate(spork_name, 1)
         # now spork state is changed
         for node in self.nodes:
-            wait_until(lambda: self.get_test_spork_value(node, spork_name) == 1, sleep=0.1, timeout=10)
+            self.wait_until(lambda: self.get_test_spork_value(node, spork_name) == 1, timeout=10)
 
         # restart with no extra args to trigger CheckAndRemove, should reset the spork back to its default
         self.restart_node(0)
@@ -112,7 +111,7 @@ class MultiKeySporkTest(BitcoinTestFramework):
         for i in range(1, 5):
             self.connect_nodes(0, i)
 
-        wait_until(lambda: self.get_test_spork_value(self.nodes[0], spork_name) == 1, sleep=0.1, timeout=10)
+        self.wait_until(lambda: self.get_test_spork_value(self.nodes[0], spork_name) == 1, timeout=10)
 
         self.bump_mocktime(1)
         # now set the spork again with other signers to test
@@ -121,14 +120,14 @@ class MultiKeySporkTest(BitcoinTestFramework):
         self.nodes[3].sporkupdate(spork_name, final_value)
         self.nodes[4].sporkupdate(spork_name, final_value)
         for node in self.nodes:
-            wait_until(lambda: self.get_test_spork_value(node, spork_name) == final_value, sleep=0.1, timeout=10)
+            self.wait_until(lambda: self.get_test_spork_value(node, spork_name) == final_value, timeout=10)
 
     def run_test(self):
         self.test_spork('SPORK_2_INSTANTSEND_ENABLED', 2)
-        self.test_spork('SPORK_3_INSTANTSEND_BLOCK_FILTERING', 3)
+        self.test_spork('SPORK_19_CHAINLOCKS_ENABLED', 3)
         for node in self.nodes:
             assert self.get_test_spork_value(node, 'SPORK_2_INSTANTSEND_ENABLED') == 2
-            assert self.get_test_spork_value(node, 'SPORK_3_INSTANTSEND_BLOCK_FILTERING') == 3
+            assert self.get_test_spork_value(node, 'SPORK_19_CHAINLOCKS_ENABLED') == 3
 
 
 if __name__ == '__main__':

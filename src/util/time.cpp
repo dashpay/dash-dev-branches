@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2019 The Bitcoin Core developers
+// Copyright (c) 2009-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -7,122 +7,92 @@
 #include <config/bitcoin-config.h>
 #endif
 
-#include <compat.h>
+#include <compat/compat.h>
+#include <tinyformat.h>
 #include <util/time.h>
+#include <util/check.h>
 
 #include <atomic>
-#include <boost/date_time/posix_time/posix_time.hpp>
+#include <chrono>
 #include <ctime>
+#include <locale>
 #include <thread>
-
-#include <tinyformat.h>
+#include <sstream>
+#include <string>
 
 void UninterruptibleSleep(const std::chrono::microseconds& n) { std::this_thread::sleep_for(n); }
 
-static std::atomic<int64_t> nMockTime(0); //!< For unit testing
+static std::atomic<std::chrono::seconds> g_mock_time{}; //!< For testing
 
-int64_t GetTime()
+NodeClock::time_point NodeClock::now() noexcept
 {
-    int64_t mocktime = nMockTime.load(std::memory_order_relaxed);
-    if (mocktime) return mocktime;
-
-    time_t now = time(nullptr);
-    assert(now > 0);
-    return now;
-}
-
-template <typename T>
-T GetTime()
-{
-    const std::chrono::seconds mocktime{nMockTime.load(std::memory_order_relaxed)};
-
-    return std::chrono::duration_cast<T>(
+    const auto mocktime{g_mock_time.load(std::memory_order_relaxed)};
+    const auto ret{
         mocktime.count() ?
             mocktime :
-            std::chrono::microseconds{GetTimeMicros()});
-}
-template std::chrono::seconds GetTime();
-template std::chrono::milliseconds GetTime();
-template std::chrono::microseconds GetTime();
+            std::chrono::system_clock::now().time_since_epoch()};
+    assert(ret > 0s);
+    return time_point{ret};
+};
 
-void SetMockTime(int64_t nMockTimeIn)
+template <typename T>
+static T GetSystemTime()
 {
-    nMockTime.store(nMockTimeIn, std::memory_order_relaxed);
-}
-
-int64_t GetMockTime()
-{
-    return nMockTime.load(std::memory_order_relaxed);
-}
-
-int64_t GetTimeMillis()
-{
-    int64_t now = std::chrono::time_point_cast<std::chrono::milliseconds>(std::chrono::system_clock::now()).time_since_epoch().count();
-    assert(now > 0);
+    const auto now = std::chrono::duration_cast<T>(std::chrono::system_clock::now().time_since_epoch());
+    assert(now.count() > 0);
     return now;
+}
+
+void SetMockTime(int64_t nMockTimeIn) { SetMockTime(std::chrono::seconds{nMockTimeIn}); }
+void SetMockTime(std::chrono::seconds mock_time_in)
+{
+    Assert(mock_time_in >= 0s);
+    g_mock_time.store(mock_time_in, std::memory_order_relaxed);
+}
+
+std::chrono::seconds GetMockTime()
+{
+    return g_mock_time.load(std::memory_order_relaxed);
 }
 
 int64_t GetTimeMicros()
 {
-    int64_t now = std::chrono::time_point_cast<std::chrono::microseconds>(std::chrono::system_clock::now()).time_since_epoch().count();
-    assert(now > 0);
-    return now;
+    return int64_t{GetSystemTime<std::chrono::microseconds>().count()};
 }
 
-int64_t GetSystemTimeInSeconds()
+int64_t GetTime() { return GetTime<std::chrono::seconds>().count(); }
+
+std::string FormatISO8601DateTime(int64_t nTime)
 {
-    return GetTimeMicros()/1000000;
+    const std::chrono::sys_seconds secs{std::chrono::seconds{nTime}};
+    const auto days{std::chrono::floor<std::chrono::days>(secs)};
+    const std::chrono::year_month_day ymd{days};
+    const std::chrono::hh_mm_ss hms{secs - days};
+    return strprintf("%04i-%02u-%02uT%02i:%02i:%02iZ", signed{ymd.year()}, unsigned{ymd.month()}, unsigned{ymd.day()}, hms.hours().count(), hms.minutes().count(), hms.seconds().count());
 }
 
-std::string FormatISO8601DateTime(int64_t nTime) {
-    struct tm ts;
-    time_t time_val = nTime;
-#ifdef HAVE_GMTIME_R
-    if (gmtime_r(&time_val, &ts) == nullptr) {
-#else
-    if (gmtime_s(&ts, &time_val) != 0) {
-#endif
-        return {};
-    }
-    return strprintf("%04i-%02i-%02iT%02i:%02i:%02iZ", ts.tm_year + 1900, ts.tm_mon + 1, ts.tm_mday, ts.tm_hour, ts.tm_min, ts.tm_sec);
-}
-
-std::string FormatISO8601Date(int64_t nTime) {
-    struct tm ts;
-    time_t time_val = nTime;
-#ifdef HAVE_GMTIME_R
-    if (gmtime_r(&time_val, &ts) == nullptr) {
-#else
-    if (gmtime_s(&ts, &time_val) != 0) {
-#endif
-        return {};
-    }
-    return strprintf("%04i-%02i-%02i", ts.tm_year + 1900, ts.tm_mon + 1, ts.tm_mday);
-}
-
-std::string FormatISO8601Time(int64_t nTime) {
-    struct tm ts;
-    time_t time_val = nTime;
-#ifdef HAVE_GMTIME_R
-    gmtime_r(&time_val, &ts);
-#else
-    gmtime_s(&ts, &time_val);
-#endif
-    return strprintf("%02i:%02i:%02iZ", ts.tm_hour, ts.tm_min, ts.tm_sec);
-}
-
-int64_t ParseISO8601DateTime(const std::string& str)
+std::string FormatISO8601Date(int64_t nTime)
 {
-    static const boost::posix_time::ptime epoch = boost::posix_time::from_time_t(0);
-    static const std::locale loc(std::locale::classic(),
-        new boost::posix_time::time_input_facet("%Y-%m-%dT%H:%M:%SZ"));
-    std::istringstream iss(str);
-    iss.imbue(loc);
-    boost::posix_time::ptime ptime(boost::date_time::not_a_date_time);
-    iss >> ptime;
-    if (ptime.is_not_a_date_time() || epoch > ptime)
-        return 0;
-    return (ptime - epoch).total_seconds();
+    const std::chrono::sys_seconds secs{std::chrono::seconds{nTime}};
+    const auto days{std::chrono::floor<std::chrono::days>(secs)};
+    const std::chrono::year_month_day ymd{days};
+    return strprintf("%04i-%02u-%02u", signed{ymd.year()}, unsigned{ymd.month()}, unsigned{ymd.day()});
+}
+
+std::string FormatISO8601Time(int64_t nTime)
+{
+    const std::chrono::sys_seconds secs{std::chrono::seconds{nTime}};
+    const auto days{std::chrono::floor<std::chrono::days>(secs)};
+    const std::chrono::hh_mm_ss hms{secs - days};
+    return strprintf("%02i:%02i:%02iZ", hms.hours().count(), hms.minutes().count(), hms.seconds().count());
+}
+
+struct timespec MillisToTimespec(int64_t nTimeout)
+{
+    struct timespec timeout;
+    timeout.tv_sec = nTimeout / 1000;
+    timeout.tv_nsec = (nTimeout % 1000) * 1000 * 1000;
+    return timeout;
 }
 
 struct timeval MillisToTimeval(int64_t nTimeout)
@@ -131,6 +101,11 @@ struct timeval MillisToTimeval(int64_t nTimeout)
     timeout.tv_sec  = nTimeout / 1000;
     timeout.tv_usec = (nTimeout % 1000) * 1000;
     return timeout;
+}
+
+struct timespec MillisToTimespec(std::chrono::milliseconds ms)
+{
+    return MillisToTimespec(count_milliseconds(ms));
 }
 
 struct timeval MillisToTimeval(std::chrono::milliseconds ms)

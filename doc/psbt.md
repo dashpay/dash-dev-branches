@@ -82,10 +82,18 @@ hardware implementations will typically implement multiple roles simultaneously.
   transactions.
 - **`decodepsbt`** is a diagnostic utility RPC which will show all information in
   a PSBT in human-readable form, as well as compute its eventual fee if known.
+- **`analyzepsbt`** is a utility RPC that examines a PSBT and reports the
+  current status of its inputs, the next step in the workflow if known, and if
+  possible, computes the fee of the resulting transaction and estimates the
+  final feerate.
+
 
 ### Workflows
 
 #### Multisig with multiple Bitcoin Core instances
+
+For a quick start see [Basic M-of-N multisig example using descriptor wallets and PSBTs](./descriptors.md#basic-multisig-example).
+If you are using legacy wallets feel free to continue with the example provided here.
 
 Alice, Bob, and Carol want to create a 2-of-3 multisig address. They're all using
 Bitcoin Core. We assume their wallets only contain the multisig funds. In case

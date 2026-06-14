@@ -1,4 +1,4 @@
-// Copyright (c) 2017 The Bitcoin Core developers
+// Copyright (c) 2017-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -6,9 +6,12 @@
 #define BITCOIN_WALLET_WALLETUTIL_H
 
 #include <fs.h>
+#include <script/descriptor.h>
+#include <support/allocators/secure.h>
 
 #include <vector>
 
+namespace wallet {
 /** (client) version numbers for particular wallet features */
 enum WalletFeature
 {
@@ -22,6 +25,8 @@ enum WalletFeature
     FEATURE_LATEST = FEATURE_HD
 };
 
+bool IsFeatureSupported(int wallet_version, int feature_version);
+WalletFeature GetClosestWalletFeature(int version);
 
 enum WalletFlags : uint64_t {
     // wallet flags in the upper section (> 1 << 31) will lead to not opening the wallet if flag is unknown
@@ -33,6 +38,9 @@ enum WalletFlags : uint64_t {
 
     // Indicates that the metadata has already been upgraded to contain key origins
     WALLET_FLAG_KEY_ORIGIN_METADATA = (1ULL << 1),
+
+    // Indicates that the descriptor cache has been upgraded to cache last hardened xpubs
+    WALLET_FLAG_LAST_HARDENED_XPUB_CACHED = (1ULL << 2),
 
     // will enforce the rule that the wallet can't contain any private keys (only watch-only/pubkeys)
     WALLET_FLAG_DISABLE_PRIVATE_KEYS = (1ULL << 32),
@@ -48,12 +56,76 @@ enum WalletFlags : uint64_t {
     //! bitcoin from opening the wallet, thinking it was newly created, and
     //! then improperly reinitializing it.
     WALLET_FLAG_BLANK_WALLET = (1ULL << 33),
+
+    //! Indicate that this wallet supports DescriptorScriptPubKeyMan
+    WALLET_FLAG_DESCRIPTORS = (1ULL << 34),
+
+    //! Indicates that the wallet needs an external signer
+    WALLET_FLAG_EXTERNAL_SIGNER = (1ULL << 35),
 };
 
 //! Get the path of the wallet directory.
 fs::path GetWalletDir();
 
-//! Get wallets in wallet directory.
-std::vector<fs::path> ListWalletDir();
+/** Descriptor with some wallet metadata */
+class WalletDescriptor
+{
+public:
+    std::shared_ptr<Descriptor> descriptor;
+    uint256 id; // Descriptor ID (calculated once at descriptor initialization/deserialization)
+    uint64_t creation_time = 0;
+    int32_t range_start = 0; // First item in range; start of range, inclusive, i.e. [range_start, range_end). This never changes.
+    int32_t range_end = 0; // Item after the last; end of range, exclusive, i.e. [range_start, range_end). This will increment with each TopUp()
+    int32_t next_index = 0; // Position of the next item to generate
+    DescriptorCache cache;
+
+    void DeserializeDescriptor(const std::string& str)
+    {
+        std::string error;
+        FlatSigningProvider keys;
+        descriptor = Parse(str, keys, error, true);
+        if (!descriptor) {
+            throw std::ios_base::failure("Invalid descriptor: " + error);
+        }
+        id = DescriptorID(*descriptor);
+    }
+
+    SERIALIZE_METHODS(WalletDescriptor, obj)
+    {
+        std::string descriptor_str;
+        SER_WRITE(obj, descriptor_str = obj.descriptor->ToString());
+        READWRITE(descriptor_str, obj.creation_time, obj.next_index, obj.range_start, obj.range_end);
+        SER_READ(obj, obj.DeserializeDescriptor(descriptor_str));
+     }
+
+    WalletDescriptor() {}
+    WalletDescriptor(std::shared_ptr<Descriptor> descriptor, uint64_t creation_time, int32_t range_start, int32_t range_end, int32_t next_index) : descriptor(descriptor), id(DescriptorID(*descriptor)), creation_time(creation_time), range_start(range_start), range_end(range_end), next_index(next_index) { }
+};
+
+class CWallet;
+class DescriptorScriptPubKeyMan;
+
+/** struct containing information needed for migrating legacy wallets to descriptor wallets */
+struct MigrationData
+{
+    CExtKey master_key;
+    SecureString mnemonic;
+    SecureString mnemonic_passphrase;
+    // Highest BIP44 index the legacy wallet ever derived per chain (external/0,
+    // internal/1). The active pkh() descriptors created during migration must
+    // start handing out the next address from this index, otherwise post-
+    // migration getnewaddress would re-derive addresses the legacy wallet had
+    // already given out. Carried via MigrationData purely to advance the active
+    // descriptors' next_index — the inactive combo descriptors built in
+    // MigrateToDescriptor already cover the history themselves.
+    uint32_t external_chain_counter{0};
+    uint32_t internal_chain_counter{0};
+    std::vector<std::pair<std::string, int64_t>> watch_descs;
+    std::vector<std::pair<std::string, int64_t>> solvable_descs;
+    std::vector<std::unique_ptr<DescriptorScriptPubKeyMan>> desc_spkms;
+    std::shared_ptr<CWallet> watchonly_wallet{nullptr};
+    std::shared_ptr<CWallet> solvable_wallet{nullptr};
+};
+} // namespace wallet
 
 #endif // BITCOIN_WALLET_WALLETUTIL_H

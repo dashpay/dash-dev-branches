@@ -1,0 +1,145 @@
+name: Build depends
+
+on:
+  workflow_call:
+    inputs:
+      build-target:
+        description: "Target name as defined by matrix.sh"
+        required: true
+        type: string
+      container-path:
+        description: "Path to built container at registry"
+        required: true
+        type: string
+      base-image-digest:
+        description: "Short hash of the CI base image manifest for cache busting"
+        required: true
+        type: string
+      runs-on:
+        description: "Runner label to use (e.g., ubuntu-24.04 or ubuntu-24.04-arm)"
+        required: true
+        type: string
+    outputs:
+      key:
+        description: "Key needed for restoring depends cache"
+        value: ${{ jobs.check-cache.outputs.cache-key }}
+      host:
+        description: "Host triplet for this build target"
+        value: ${{ jobs.check-cache.outputs.host }}
+      dep-opts:
+        description: "DEP_OPTS used to build depends"
+        value: ${{ jobs.check-cache.outputs.dep-opts }}
+
+jobs:
+  check-cache:
+    name: Check cache
+    runs-on: ${{ inputs.runs-on }}
+    outputs:
+      cache-hit: ${{ steps.cache-check.outputs.cache-hit }}
+      cache-key: ${{ steps.setup.outputs.cache-key }}
+      cache-key-prefix: ${{ steps.setup.outputs.cache-key-prefix }}
+      host: ${{ steps.setup.outputs.HOST }}
+      dep-opts: ${{ steps.setup.outputs.DEP_OPTS }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          sparse-checkout: |
+            ci/dash
+            ci/test
+            depends/Makefile
+            depends/packages
+            depends/hosts
+            contrib/containers/ci/ci.Dockerfile
+            contrib/containers/ci/ci-slim.Dockerfile
+            contrib/containers/guix/scripts/setup-sdk
+
+      - name: Compute cache key
+        id: setup
+        run: |
+          BUILD_TARGET="${{ inputs.build-target }}"
+          source ./ci/dash/matrix.sh
+          echo "DEP_OPTS=${DEP_OPTS}" >> "${GITHUB_OUTPUT}"
+          echo "HOST=${HOST}" >> "${GITHUB_OUTPUT}"
+          echo "RUNNER_ARCH=$(uname -m)" >> "${GITHUB_OUTPUT}"
+          DEP_HASH="$(echo -n "${BUILD_TARGET}" "${DEP_OPTS}" "${HOST}" | sha256sum | head -c 64)"
+          echo "DEP_HASH=${DEP_HASH}" >> "${GITHUB_OUTPUT}"
+          DOCKERFILE_HASH="${{ hashFiles('contrib/containers/ci/ci.Dockerfile', 'contrib/containers/ci/ci-slim.Dockerfile') }}"
+          PACKAGES_HASH="${{ hashFiles('depends/packages/*', 'depends/Makefile') }}"
+          CACHE_KEY_PREFIX="depends-${DOCKERFILE_HASH}-${{ inputs.base-image-digest }}-${{ inputs.runs-on }}-${{ inputs.build-target }}"
+          CACHE_KEY="${CACHE_KEY_PREFIX}-${DEP_HASH}-${PACKAGES_HASH}"
+          echo "cache-key-prefix=${CACHE_KEY_PREFIX}" >> "${GITHUB_OUTPUT}"
+          echo "cache-key=${CACHE_KEY}" >> "${GITHUB_OUTPUT}"
+          echo "Cache key: ${CACHE_KEY}"
+        shell: bash
+
+      - name: Check for cached depends
+        id: cache-check
+        uses: actions/cache@v5
+        with:
+          path: depends/built/${{ steps.setup.outputs.HOST }}
+          key: ${{ steps.setup.outputs.cache-key }}
+          lookup-only: true
+
+      - name: Cache SDKs
+        id: cache-sdk-check
+        uses: actions/cache@v5
+        if: inputs.build-target == 'mac'
+        with:
+          path: depends/SDKs
+          key: depends-sdks-${{ hashFiles('depends/hosts/darwin.mk') }}
+          restore-keys: depends-sdks-
+
+      - name: Prepare SDKs
+        if: inputs.build-target == 'mac' && steps.cache-sdk-check.outputs.cache-hit != 'true'
+        run: ./contrib/containers/guix/scripts/setup-sdk
+
+  build:
+    name: Build depends
+    needs: [check-cache]
+    if: needs.check-cache.outputs.cache-hit != 'true'
+    runs-on: ${{ inputs.runs-on }}
+    container:
+      image: ${{ inputs.container-path }}
+      options: --user root
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Restore depends sources
+        uses: actions/cache/restore@v5
+        with:
+          path: depends/sources
+          key: depends-sources-${{ hashFiles('depends/packages/*') }}
+          restore-keys: depends-sources-
+
+      - name: Restore SDKs cache
+        uses: actions/cache/restore@v5
+        if: inputs.build-target == 'mac'
+        with:
+          path: depends/SDKs
+          key: depends-sdks-${{ hashFiles('depends/hosts/darwin.mk') }}
+          restore-keys: depends-sdks-
+          fail-on-cache-miss: true
+
+      - name: Restore cached depends
+        uses: actions/cache/restore@v5
+        with:
+          path: depends/built/${{ needs.check-cache.outputs.host }}
+          key: ${{ needs.check-cache.outputs.cache-key }}
+          restore-keys: |
+            ${{ needs.check-cache.outputs.cache-key-prefix }}-
+
+      - name: Build depends
+        run: |
+          export HOST="${{ needs.check-cache.outputs.host }}"
+          env ${{ needs.check-cache.outputs.dep-opts }} make -j$(nproc) -C depends
+
+      - name: Save depends cache
+        uses: actions/cache/save@v5
+        with:
+          path: depends/built/${{ needs.check-cache.outputs.host }}
+          key: ${{ needs.check-cache.outputs.cache-key }}

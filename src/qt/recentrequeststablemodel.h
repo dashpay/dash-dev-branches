@@ -1,32 +1,36 @@
-// Copyright (c) 2011-2015 The Bitcoin Core developers
+// Copyright (c) 2011-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #ifndef BITCOIN_QT_RECENTREQUESTSTABLEMODEL_H
 #define BITCOIN_QT_RECENTREQUESTSTABLEMODEL_H
 
-#include <qt/walletmodel.h>
+#include <qt/sendcoinsrecipient.h>
+
+#include <string>
 
 #include <QAbstractTableModel>
 #include <QStringList>
 #include <QDateTime>
 
+class WalletModel;
+
 class RecentRequestEntry
 {
 public:
-    RecentRequestEntry() : nVersion(RecentRequestEntry::CURRENT_VERSION), id(0) { }
+    RecentRequestEntry() : nVersion(RecentRequestEntry::CURRENT_VERSION) {}
 
     static const int CURRENT_VERSION = 1;
     int nVersion;
-    int64_t id;
+    int64_t id{0};
     QDateTime date;
     SendCoinsRecipient recipient;
 
     SERIALIZE_METHODS(RecentRequestEntry, obj) {
         unsigned int date_timet;
-        SER_WRITE(obj, date_timet = obj.date.toTime_t());
+        SER_WRITE(obj, date_timet = obj.date.toSecsSinceEpoch());
         READWRITE(obj.nVersion, obj.id, date_timet, obj.recipient);
-        SER_READ(obj, obj.date = QDateTime::fromTime_t(date_timet));
+        SER_READ(obj, obj.date = QDateTime::fromSecsSinceEpoch(date_timet));
     }
 };
 

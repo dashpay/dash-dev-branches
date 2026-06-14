@@ -6,7 +6,7 @@ The package "mylib" will be used here as an example
 General tips:
 - mylib_foo is written as $(package)_foo in order to make recipes more similar.
 - Secondary dependency packages relative to the bitcoin binaries/libraries (i.e.
-  those not in `ALLOWED_LIBRARIES` in `contrib/devtools/symbol-check.py`) don't
+  those not in `ALLOWED_LIBRARIES` in `contrib/guix/symbol-check.py`) don't
   need to be shared and should be built statically whenever possible. See
   [below](#secondary-dependencies) for more details.
 
@@ -74,7 +74,6 @@ These variables may be set to override or append their default values.
     $(package)_objcxx
     $(package)_ar
     $(package)_ranlib
-    $(package)_libtool
     $(package)_nm
     $(package)_cflags
     $(package)_cxxflags
@@ -163,10 +162,13 @@ From the [Gentoo Wiki entry](https://wiki.gentoo.org/wiki/Project:Quality_Assura
 >  creates. This leads to massive overlinking, which is toxic to the Gentoo
 >  ecosystem, as it leads to a massive number of unnecessary rebuilds.
 
+Where possible, packages are built with Position Independant Code. Either using
+the Autotools `--with-pic` flag, or `CMAKE_POSITION_INDEPENDENT_CODE` with CMake.
+
 ## Secondary dependencies:
 
 Secondary dependency packages relative to the bitcoin binaries/libraries (i.e.
-those not in `ALLOWED_LIBRARIES` in `contrib/devtools/symbol-check.py`) don't
+those not in `ALLOWED_LIBRARIES` in `contrib/guix/symbol-check.py`) don't
 need to be shared and should be built statically whenever possible. This
 improves general build reliability as illustrated by the following example:
 
@@ -181,3 +183,18 @@ For us, it's much easier to just link a static `libsecondary` into a shared
 static or dynamic `libsecondary`, that's not our concern. With a static
 `libsecondary`, when we need to link `libprimary` into our executable, there's no
 dependency chain to worry about as `libprimary` has all the symbols.
+
+## Build targets:
+
+To build an individual package (useful for debugging), following build targets are available.
+
+    make ${package}
+    make ${package}_fetched
+    make ${package}_extracted
+    make ${package}_preprocessed
+    make ${package}_configured
+    make ${package}_built
+    make ${package}_staged
+    make ${package}_postprocessed
+    make ${package}_cached
+    make ${package}_cached_checksum

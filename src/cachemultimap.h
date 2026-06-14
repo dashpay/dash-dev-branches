@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2022 The Dash Core developers
+// Copyright (c) 2014-2025 The Dash Core developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -150,10 +150,10 @@ public:
         if(mit == mapIndex.end()) {
             return;
         }
-        it_map_t& mapIt = mit->second;
+        const it_map_t& mapIt = mit->second;
 
-        for(it_map_it it = mapIt.begin(); it != mapIt.end(); ++it) {
-            listItems.erase(it->second);
+        for (const auto& it : mapIt) {
+            listItems.erase(it.second);
         }
 
         mapIndex.erase(mit);

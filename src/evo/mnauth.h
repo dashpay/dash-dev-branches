@@ -1,4 +1,4 @@
-// Copyright (c) 2019-2022 The Dash Core developers
+// Copyright (c) 2019-2025 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -6,16 +6,25 @@
 #define BITCOIN_EVO_MNAUTH_H
 
 #include <bls/bls.h>
-#include <serialize.h>
+#include <msg_result.h>
 
+#include <protocol.h>
+#include <serialize.h>
+#include <uint256.h>
+
+#include <string_view>
+
+class CActiveMasternodeManager;
+class CBlockIndex;
 class CConnman;
 class CDataStream;
-class CDeterministicMN;
 class CDeterministicMNList;
 class CDeterministicMNListDiff;
+class CMasternodeMetaMan;
+class CMasternodeSync;
 class CNode;
-class UniValue;
-class CBlockIndex;
+
+enum ServiceFlags : uint64_t;
 
 /**
  * This class handles the p2p message MNAUTH. MNAUTH is sent directly after VERACK and authenticates the sender as a
@@ -45,8 +54,15 @@ public:
         READWRITE(obj.proRegTxHash, obj.sig);
     }
 
-    static void PushMNAUTH(CNode& peer, CConnman& connman, const CBlockIndex* tip);
-    static void ProcessMessage(CNode& peer, std::string_view msg_type, CDataStream& vRecv, CConnman& connman);
+    static void PushMNAUTH(CNode& peer, CConnman& connman, const CActiveMasternodeManager& mn_activeman);
+
+    /**
+     * @pre CMasternodeMetaMan's database must be successfully loaded before
+     *      attempting to call this function regardless of sync state
+     */
+    [[nodiscard]] static MessageProcessingResult ProcessMessage(CNode& peer, ServiceFlags node_services, CConnman& connman, CMasternodeMetaMan& mn_metaman,
+                                                                const CActiveMasternodeManager* const mn_activeman, const CMasternodeSync& mn_sync,
+                                                                const CDeterministicMNList& tip_mn_list, std::string_view msg_type, CDataStream& vRecv);
     static void NotifyMasternodeListChanged(bool undo, const CDeterministicMNList& oldMNList, const CDeterministicMNListDiff& diff, CConnman& connman);
 };
 

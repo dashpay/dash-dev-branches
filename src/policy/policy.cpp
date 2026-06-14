@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2016 The Bitcoin Core developers
+// Copyright (c) 2009-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -8,20 +8,32 @@
 #include <policy/policy.h>
 
 #include <coins.h>
-#include <policy/settings.h>
+#include <consensus/amount.h>
+#include <consensus/consensus.h>
+#include <consensus/validation.h>
+#include <policy/feerate.h>
+#include <primitives/transaction.h>
+#include <script/interpreter.h>
+#include <script/script.h>
+#include <script/standard.h>
+#include <serialize.h>
+#include <span.h>
 
+#include <algorithm>
+#include <cstddef>
+#include <vector>
 
 CAmount GetDustThreshold(const CTxOut& txout, const CFeeRate& dustRelayFeeIn)
 {
     // "Dust" is defined in terms of dustRelayFee,
-    // which has units duffs-per-kilobyte.
+    // which has units satoshis-per-kilobyte.
     // If you'd pay more in fees than the value of the output
     // to spend something, then we consider it dust.
     // A typical spendable txout is 34 bytes big, and will
     // need a CTxIn of at least 148 bytes to spend:
     // so dust is a spendable txout less than
-    // 182*dustRelayFee/1000 (in duffs).
-    // 546 duffs at the default rate of 3000 duff/kB.
+    // 182*dustRelayFee/1000 (in satoshis).
+    // 546 satoshis at the default rate of 3000 sat/kB.
     if (txout.scriptPubKey.IsUnspendable())
         return 0;
 
@@ -34,14 +46,14 @@ bool IsDust(const CTxOut& txout, const CFeeRate& dustRelayFeeIn)
     return (txout.nValue < GetDustThreshold(txout, dustRelayFeeIn));
 }
 
-bool IsStandard(const CScript& scriptPubKey, txnouttype& whichType)
+bool IsStandard(const CScript& scriptPubKey, TxoutType& whichType)
 {
     std::vector<std::vector<unsigned char> > vSolutions;
     whichType = Solver(scriptPubKey, vSolutions);
 
-    if (whichType == TX_NONSTANDARD) {
+    if (whichType == TxoutType::NONSTANDARD) {
         return false;
-    } else if (whichType == TX_MULTISIG) {
+    } else if (whichType == TxoutType::MULTISIG) {
         unsigned char m = vSolutions.front()[0];
         unsigned char n = vSolutions.back()[0];
         // Support up to x-of-3 multisig txns as standard
@@ -49,7 +61,7 @@ bool IsStandard(const CScript& scriptPubKey, txnouttype& whichType)
             return false;
         if (m < 1 || m > n)
             return false;
-    } else if (whichType == TX_NULL_DATA &&
+    } else if (whichType == TxoutType::NULL_DATA &&
                (!fAcceptDatacarrier || scriptPubKey.size() > nMaxDatacarrierBytes)) {
           return false;
     }
@@ -59,7 +71,7 @@ bool IsStandard(const CScript& scriptPubKey, txnouttype& whichType)
 
 bool IsStandardTx(const CTransaction& tx, bool permit_bare_multisig, const CFeeRate& dust_relay_fee, std::string& reason)
 {
-    if (tx.nVersion > CTransaction::MAX_STANDARD_VERSION || tx.nVersion < 1) {
+    if (tx.nVersion > TX_MAX_STANDARD_VERSION || tx.nVersion < 1) {
         reason = "version";
         return false;
     }
@@ -76,14 +88,15 @@ bool IsStandardTx(const CTransaction& tx, bool permit_bare_multisig, const CFeeR
 
     for (const CTxIn& txin : tx.vin)
     {
-        // Biggest 'standard' txin is a 15-of-15 P2SH multisig with compressed
-        // keys (remember the 520 byte limit on redeemScript size). That works
-        // out to a (15*(33+1))+3=513 byte redeemScript, 513+1+15*(73+1)+3=1627
-        // bytes of scriptSig, which we round off to 1650 bytes for some minor
-        // future-proofing. That's also enough to spend a 20-of-20
-        // CHECKMULTISIG scriptPubKey, though such a scriptPubKey is not
-        // considered standard.
-        if (txin.scriptSig.size() > 1650) {
+        // Biggest 'standard' txin involving only keys is a 15-of-15 P2SH
+        // multisig with compressed keys (remember the 520 byte limit on
+        // redeemScript size). That works out to a (15*(33+1))+3=513 byte
+        // redeemScript, 513+1+15*(73+1)+3=1627 bytes of scriptSig, which
+        // we round off to 1650(MAX_STANDARD_SCRIPTSIG_SIZE) bytes for
+        // some minor future-proofing. That's also enough to spend a
+        // 20-of-20 CHECKMULTISIG scriptPubKey, though such a scriptPubKey
+        // is not considered standard.
+        if (txin.scriptSig.size() > MAX_STANDARD_SCRIPTSIG_SIZE) {
             reason = "scriptsig-size";
             return false;
         }
@@ -94,16 +107,16 @@ bool IsStandardTx(const CTransaction& tx, bool permit_bare_multisig, const CFeeR
     }
 
     unsigned int nDataOut = 0;
-    txnouttype whichType;
+    TxoutType whichType;
     for (const CTxOut& txout : tx.vout) {
         if (!::IsStandard(txout.scriptPubKey, whichType)) {
             reason = "scriptpubkey";
             return false;
         }
 
-        if (whichType == TX_NULL_DATA)
+        if (whichType == TxoutType::NULL_DATA)
             nDataOut++;
-        else if ((whichType == TX_MULTISIG) && (!permit_bare_multisig)) {
+        else if ((whichType == TxoutType::MULTISIG) && (!permit_bare_multisig)) {
             reason = "bare-multisig";
             return false;
         } else if (IsDust(txout, dust_relay_fee)) {
@@ -147,10 +160,10 @@ bool AreInputsStandard(const CTransaction& tx, const CCoinsViewCache& mapInputs)
         const CTxOut& prev = mapInputs.AccessCoin(tx.vin[i].prevout).out;
 
         std::vector<std::vector<unsigned char> > vSolutions;
-        txnouttype whichType = Solver(prev.scriptPubKey, vSolutions);
-        if (whichType == TX_NONSTANDARD) {
+        TxoutType whichType = Solver(prev.scriptPubKey, vSolutions);
+        if (whichType == TxoutType::NONSTANDARD) {
             return false;
-        } else if (whichType == TX_SCRIPTHASH) {
+        } else if (whichType == TxoutType::SCRIPTHASH) {
             std::vector<std::vector<unsigned char> > stack;
             // convert the scriptSig into a stack, so we can inspect the redeemScript
             if (!EvalScript(stack, tx.vin[i].scriptSig, SCRIPT_VERIFY_NONE, BaseSignatureChecker(), SigVersion::BASE))

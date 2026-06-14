@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2022 The Dash Core developers
+// Copyright (c) 2014-2025 The Dash Core developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -7,42 +7,59 @@
 
 #include <cachemap.h>
 #include <cachemultimap.h>
-#include <governance/object.h>
+#include <primitives/transaction.h>
+#include <sync.h>
+
+#include <chrono>
+#include <limits>
+#include <map>
+#include <memory>
+#include <set>
+#include <string>
+#include <vector>
 
 class CBloomFilter;
 class CBlockIndex;
-class CInv;
-
-class CGovernanceManager;
-class CGovernanceTriggerManager;
+class CConnman;
+class CDataStream;
+class CDeterministicMNList;
+class CDeterministicMNManager;
+class ChainstateManager;
+template<typename T>
+class CFlatDB;
+class CGovernanceException;
 class CGovernanceObject;
 class CGovernanceVote;
-class CSporkManager;
+class CInv;
+class CMasternodeMetaMan;
+class CMasternodeSync;
+class CService;
+struct RPCResult;
+class UniValue;
 
-extern std::unique_ptr<CGovernanceManager> governance;
+namespace governance {
+class SuperblockManager;
+} // namespace governance
+
+using vote_time_pair_t = std::pair<CGovernanceVote, int64_t>;
 
 static constexpr int RATE_BUFFER_SIZE = 5;
+static constexpr bool DEFAULT_GOVERNANCE_ENABLE{true};
 
-class CDeterministicMNList;
-using CDeterministicMNListPtr = std::shared_ptr<CDeterministicMNList>;
+extern RecursiveMutex cs_main; // NOLINT(readability-redundant-declaration)
 
 class CRateCheckBuffer
 {
 private:
     std::vector<int64_t> vecTimestamps;
 
-    int nDataStart;
-
-    int nDataEnd;
-
-    bool fBufferEmpty;
+    int nDataStart{0};
+    int nDataEnd{0};
+    bool fBufferEmpty{true};
 
 public:
     CRateCheckBuffer() :
-        vecTimestamps(RATE_BUFFER_SIZE),
-        nDataStart(0),
-        nDataEnd(0),
-        fBufferEmpty(true)
+        vecTimestamps(RATE_BUFFER_SIZE)
     {
     }
 
@@ -57,7 +74,7 @@ public:
         fBufferEmpty = false;
     }
 
-    int64_t GetMinTimestamp()
+    int64_t GetMinTimestamp() const
     {
         int nIndex = nDataStart;
         int64_t nMin = std::numeric_limits<int64_t>::max();
@@ -73,7 +90,7 @@ public:
         return nMin;
     }
 
-    int64_t GetMaxTimestamp()
+    int64_t GetMaxTimestamp() const
     {
         int nIndex = nDataStart;
         int64_t nMax = 0;
@@ -100,7 +117,7 @@ public:
         return RATE_BUFFER_SIZE - nDataStart + nDataEnd;
     }
 
-    double GetRate()
+    double GetRate() const
     {
         int nCount = GetCount();
         if (nCount < RATE_BUFFER_SIZE) {
@@ -121,14 +138,9 @@ public:
     }
 };
 
-//
-// Governance Manager : Contains all proposals for the budget
-//
-class CGovernanceManager
+class GovernanceStore
 {
-    friend class CGovernanceObject;
-
-public: // Types
+protected:
     struct last_object_rec {
         explicit last_object_rec(bool fStatusOKIn = true) :
             triggerBuffer(),
@@ -145,130 +157,37 @@ public: // Types
         bool fStatusOK;
     };
 
-
-    using object_ref_cm_t = CacheMap<uint256, CGovernanceObject*>;
-
+    using txout_m_t = std::map<COutPoint, last_object_rec>;
     using vote_cmm_t = CacheMultiMap<uint256, vote_time_pair_t>;
 
-    using txout_m_t = std::map<COutPoint, last_object_rec>;
-
-    using hash_s_t = std::set<uint256>;
-
-private:
+protected:
     static constexpr int MAX_CACHE_SIZE = 1000000;
-
     static const std::string SERIALIZATION_VERSION_STRING;
 
-    static const int MAX_TIME_FUTURE_DEVIATION;
-    static const int RELIABLE_PROPAGATION_TIME;
-
-    int64_t nTimeLastDiff;
-
-    // keep track of current block height
-    int nCachedBlockHeight;
+protected:
+    // critical section to protect the inner data structures
+    mutable Mutex cs_store;
 
     // keep track of the scanning errors
-    std::map<uint256, CGovernanceObject> mapObjects;
-
+    std::map<uint256, std::shared_ptr<CGovernanceObject>> mapObjects GUARDED_BY(cs_store);
     // mapErasedGovernanceObjects contains key-value pairs, where
     //   key   - governance object's hash
     //   value - expiration time for deleted objects
-    std::map<uint256, int64_t> mapErasedGovernanceObjects;
-
-    std::map<uint256, CGovernanceObject> mapPostponedObjects;
-    hash_s_t setAdditionalRelayObjects;
-
-    object_ref_cm_t cmapVoteToObject;
-
-    CacheMap<uint256, CGovernanceVote> cmapInvalidVotes;
-
-    vote_cmm_t cmmapOrphanVotes;
-
-    txout_m_t mapLastMasternodeObject;
-
-    hash_s_t setRequestedObjects;
-
-    hash_s_t setRequestedVotes;
-
-    bool fRateChecksEnabled;
-
+    std::map<uint256, int64_t> mapErasedGovernanceObjects GUARDED_BY(cs_store);
+    CacheMap<uint256, CGovernanceVote> cmapInvalidVotes GUARDED_BY(cs_store);
+    vote_cmm_t cmmapOrphanVotes GUARDED_BY(cs_store);
+    txout_m_t mapLastMasternodeObject GUARDED_BY(cs_store);
     // used to check for changed voting keys
-    CDeterministicMNListPtr lastMNListForVotingKeys;
-
-    class ScopedLockBool
-    {
-        bool& ref;
-        bool fPrevValue;
-
-    public:
-        ScopedLockBool(CCriticalSection& _cs, bool& _ref, bool _value) :
-            ref(_ref)
-        {
-            AssertLockHeld(_cs);
-            fPrevValue = ref;
-            ref = _value;
-        }
-
-        ~ScopedLockBool()
-        {
-            ref = fPrevValue;
-        }
-    };
+    std::shared_ptr<CDeterministicMNList> lastMNListForVotingKeys GUARDED_BY(cs_store);
 
 public:
-    // critical section to protect the inner data structures
-    mutable CCriticalSection cs;
-
-    CGovernanceManager();
-
-    virtual ~CGovernanceManager() = default;
-
-    /**
-     * This is called by AlreadyHave in net_processing.cpp as part of the inventory
-     * retrieval process.  Returns true if we want to retrieve the object, otherwise
-     * false. (Note logic is inverted in AlreadyHave).
-     */
-    bool ConfirmInventoryRequest(const CInv& inv);
-
-    void SyncSingleObjVotes(CNode& peer, const uint256& nProp, const CBloomFilter& filter, CConnman& connman);
-    void SyncObjects(CNode& peer, CConnman& connman) const;
-
-    void ProcessMessage(CNode& peer, std::string_view msg_type, CDataStream& vRecv, CConnman& connman);
-
-    void DoMaintenance(CConnman& connman);
-
-    CGovernanceObject* FindGovernanceObject(const uint256& nHash);
-
-    // These commands are only used in RPC
-    std::vector<CGovernanceVote> GetCurrentVotes(const uint256& nParentHash, const COutPoint& mnCollateralOutpointFilter) const;
-    void GetAllNewerThan(std::vector<CGovernanceObject>& objs, int64_t nMoreThanTime) const;
-
-    void AddGovernanceObject(CGovernanceObject& govobj, CConnman& connman, const CNode* pfrom = nullptr);
-
-    void UpdateCachesAndClean();
-
-    void CheckAndRemove() { UpdateCachesAndClean(); }
-
-    void Clear()
-    {
-        LOCK(cs);
-
-        LogPrint(BCLog::GOBJECT, "Governance object manager was cleared\n");
-        mapObjects.clear();
-        mapErasedGovernanceObjects.clear();
-        cmapVoteToObject.Clear();
-        cmapInvalidVotes.Clear();
-        cmmapOrphanVotes.Clear();
-        mapLastMasternodeObject.clear();
-    }
-
-    std::string ToString() const;
-    UniValue ToJson() const;
+    GovernanceStore();
+    ~GovernanceStore() = default;
 
     template<typename Stream>
-    void Serialize(Stream &s) const
+    void Serialize(Stream &s) const EXCLUSIVE_LOCKS_REQUIRED(!cs_store)
     {
-        LOCK(cs);
+        LOCK(cs_store);
         s   << SERIALIZATION_VERSION_STRING
             << mapErasedGovernanceObjects
             << cmapInvalidVotes
@@ -279,11 +198,11 @@ public:
     }
 
     template<typename Stream>
-    void Unserialize(Stream &s)
+    void Unserialize(Stream &s) EXCLUSIVE_LOCKS_REQUIRED(!cs_store)
     {
-        LOCK(cs);
         Clear();
 
+        LOCK(cs_store);
         std::string strVersion;
         s >> strVersion;
         if (strVersion != SERIALIZATION_VERSION_STRING) {
@@ -298,89 +217,187 @@ public:
             >> *lastMNListForVotingKeys;
     }
 
-    void UpdatedBlockTip(const CBlockIndex* pindex, CConnman& connman);
-    int64_t GetLastDiffTime() const { return nTimeLastDiff; }
-    void UpdateLastDiffTime(int64_t nTimeIn) { nTimeLastDiff = nTimeIn; }
+    void Clear()
+        EXCLUSIVE_LOCKS_REQUIRED(!cs_store);
 
-    int GetCachedBlockHeight() const { return nCachedBlockHeight; }
-
-    // Accessors for thread-safe access to maps
-    bool HaveObjectForHash(const uint256& nHash) const;
-
-    bool HaveVoteForHash(const uint256& nHash) const;
-
-    int GetVoteCount() const;
-
-    bool SerializeObjectForHash(const uint256& nHash, CDataStream& ss) const;
-
-    bool SerializeVoteForHash(const uint256& nHash, CDataStream& ss) const;
-
-    void AddPostponedObject(const CGovernanceObject& govobj)
-    {
-        LOCK(cs);
-        mapPostponedObjects.insert(std::make_pair(govobj.GetHash(), govobj));
-    }
-
-    void MasternodeRateUpdate(const CGovernanceObject& govobj);
-
-    bool MasternodeRateCheck(const CGovernanceObject& govobj, bool fUpdateFailStatus = false);
-
-    bool MasternodeRateCheck(const CGovernanceObject& govobj, bool fUpdateFailStatus, bool fForce, bool& fRateCheckBypassed);
-
-    bool ProcessVoteAndRelay(const CGovernanceVote& vote, CGovernanceException& exception, CConnman& connman)
-    {
-        bool fOK = ProcessVote(nullptr, vote, exception, connman);
-        if (fOK) {
-            vote.Relay(connman);
-        }
-        return fOK;
-    }
-
-    void CheckPostponedObjects(CConnman& connman);
-
-    bool AreRateChecksEnabled() const
-    {
-        LOCK(cs);
-        return fRateChecksEnabled;
-    }
-
-    void InitOnLoad();
-
-    int RequestGovernanceObjectVotes(CNode& peer, CConnman& connman);
-    int RequestGovernanceObjectVotes(const std::vector<CNode*>& vNodesCopy, CConnman& connman);
-
-private:
-    void RequestGovernanceObject(CNode* pfrom, const uint256& nHash, CConnman& connman, bool fUseFilter = false);
-
-    void AddInvalidVote(const CGovernanceVote& vote)
-    {
-        cmapInvalidVotes.Insert(vote.GetHash(), vote);
-    }
-
-    bool ProcessVote(CNode* pfrom, const CGovernanceVote& vote, CGovernanceException& exception, CConnman& connman);
-
-    /// Called to indicate a requested object has been received
-    bool AcceptObjectMessage(const uint256& nHash);
-
-    /// Called to indicate a requested vote has been received
-    bool AcceptVoteMessage(const uint256& nHash);
-
-    static bool AcceptMessage(const uint256& nHash, hash_s_t& setHash);
-
-    void CheckOrphanVotes(CGovernanceObject& govobj, CConnman& connman);
-
-    void RebuildIndexes();
-
-    void AddCachedTriggers();
-
-    void RequestOrphanObjects(CConnman& connman);
-
-    void CleanOrphanObjects();
-
-    void RemoveInvalidVotes();
-
+    std::string ToString() const
+        EXCLUSIVE_LOCKS_REQUIRED(!cs_store);
 };
 
-bool AreSuperblocksEnabled(const CSporkManager& sporkManager);
+//
+// Governance Manager : Contains all proposals for the budget
+//
+class CGovernanceManager : public GovernanceStore
+{
+private:
+    using db_type = CFlatDB<GovernanceStore>;
+    using object_ref_cm_t = CacheMap<uint256, std::shared_ptr<CGovernanceObject>>;
+
+private:
+    const std::unique_ptr<db_type> m_db;
+    bool is_loaded{false};
+
+    CMasternodeMetaMan& m_mn_metaman;
+    const ChainstateManager& m_chainman;
+    governance::SuperblockManager& m_superblocks;
+    CDeterministicMNManager& m_dmnman;
+    CMasternodeSync& m_mn_sync;
+
+    int64_t nTimeLastDiff{0};
+    // keep track of current block height
+    int nCachedBlockHeight{0};
+    object_ref_cm_t cmapVoteToObject;
+    std::map<uint256, std::shared_ptr<CGovernanceObject>> mapPostponedObjects;
+    std::set<uint256> setAdditionalRelayObjects;
+    std::map<uint256, std::chrono::seconds> m_requested_hash_time;
+    bool fRateChecksEnabled{true};
+
+    mutable Mutex cs_relay;
+    std::vector<CInv> m_relay_invs GUARDED_BY(cs_relay);
+
+public:
+    CGovernanceManager() = delete;
+    CGovernanceManager(const CGovernanceManager&) = delete;
+    CGovernanceManager& operator=(const CGovernanceManager&) = delete;
+    explicit CGovernanceManager(CMasternodeMetaMan& mn_metaman, const ChainstateManager& chainman,
+                                governance::SuperblockManager& superblocks, CDeterministicMNManager& dmnman,
+                                CMasternodeSync& mn_sync);
+    ~CGovernanceManager();
+
+    // Basic initialization and querying
+    bool IsValid() const { return is_loaded; }
+    bool LoadCache(bool load_cache)
+        EXCLUSIVE_LOCKS_REQUIRED(!cs_store);
+    [[nodiscard]] static RPCResult GetJsonHelp(const std::string& key, bool optional);
+    std::string ToString() const
+        EXCLUSIVE_LOCKS_REQUIRED(!cs_store);
+    [[nodiscard]] UniValue ToJson() const
+        EXCLUSIVE_LOCKS_REQUIRED(!cs_store);
+    void Clear()
+        EXCLUSIVE_LOCKS_REQUIRED(!cs_store);
+
+    // CGovernanceObject
+    bool AreRateChecksEnabled() const { return fRateChecksEnabled; }
+
+    // Getters/Setters
+    int GetCachedBlockHeight() const { return nCachedBlockHeight; }
+    int64_t GetLastDiffTime() const { return nTimeLastDiff; }
+    std::vector<CGovernanceVote> GetCurrentVotes(const uint256& nParentHash, const COutPoint& mnCollateralOutpointFilter) const
+        EXCLUSIVE_LOCKS_REQUIRED(!cs_store);
+    void GetAllNewerThan(std::vector<CGovernanceObject>& objs, int64_t nMoreThanTime,
+                         bool include_postponed = false) const
+        EXCLUSIVE_LOCKS_REQUIRED(!cs_store);
+    void UpdateLastDiffTime(int64_t nTimeIn) { nTimeLastDiff = nTimeIn; }
+
+    // Networking
+    /**
+     * This is called by AlreadyHave in net_processing.cpp as part of the inventory
+     * retrieval process.  Returns true if we want to retrieve the object, otherwise
+     * false. (Note logic is inverted in AlreadyHave).
+     */
+    bool ConfirmInventoryRequest(const CInv& inv)
+        EXCLUSIVE_LOCKS_REQUIRED(!cs_store);
+    bool ProcessVoteAndRelay(const CGovernanceVote& vote, CGovernanceException& exception, CConnman& connman)
+        EXCLUSIVE_LOCKS_REQUIRED(!cs_store, !cs_relay);
+    void RelayObject(const CGovernanceObject& obj)
+        EXCLUSIVE_LOCKS_REQUIRED(!cs_relay);
+    void RelayVote(const CGovernanceVote& vote)
+        EXCLUSIVE_LOCKS_REQUIRED(!cs_relay);
+
+    // Notification interface trigger
+    void UpdatedBlockTip(const CBlockIndex* pindex)
+        EXCLUSIVE_LOCKS_REQUIRED(!cs_store, !cs_relay);
+
+    // Signer interface
+    bool MasternodeRateCheck(const CGovernanceObject& govobj, bool fUpdateFailStatus = false)
+        EXCLUSIVE_LOCKS_REQUIRED(!cs_store);
+    std::shared_ptr<CGovernanceObject> FindGovernanceObjectByDataHash(const uint256& nDataHash)
+        EXCLUSIVE_LOCKS_REQUIRED(!cs_store);
+    std::vector<std::shared_ptr<const CGovernanceObject>> GetApprovedProposals(const CDeterministicMNList& tip_mn_list)
+        EXCLUSIVE_LOCKS_REQUIRED(!cs_store);
+    void AddGovernanceObject(CGovernanceObject& govobj, const std::string& peer_str)
+        EXCLUSIVE_LOCKS_REQUIRED(!cs_store, !cs_relay);
+
+    // Thread-safe accessors
+    bool HaveObjectForHash(const uint256& nHash) const
+        EXCLUSIVE_LOCKS_REQUIRED(!cs_store);
+    bool HaveVoteForHash(const uint256& nHash) const
+        EXCLUSIVE_LOCKS_REQUIRED(!cs_store);
+    bool SerializeObjectForHash(const uint256& nHash, CDataStream& ss) const
+        EXCLUSIVE_LOCKS_REQUIRED(!cs_store);
+    bool SerializeVoteForHash(const uint256& nHash, CDataStream& ss) const
+        EXCLUSIVE_LOCKS_REQUIRED(!cs_store);
+    std::shared_ptr<CGovernanceObject> FindGovernanceObject(const uint256& nHash) EXCLUSIVE_LOCKS_REQUIRED(!cs_store);
+    int GetVoteCount() const
+        EXCLUSIVE_LOCKS_REQUIRED(!cs_store);
+    void AddPostponedObject(const CGovernanceObject& govobj)
+        EXCLUSIVE_LOCKS_REQUIRED(!cs_store);
+
+    std::shared_ptr<const CGovernanceObject> FindConstGovernanceObject(const uint256& nHash) const
+        EXCLUSIVE_LOCKS_REQUIRED(!cs_store);
+
+    // Used by NetGovernance
+    std::vector<CInv> FetchRelayInventory() EXCLUSIVE_LOCKS_REQUIRED(!cs_relay);
+    void CheckAndRemove() EXCLUSIVE_LOCKS_REQUIRED(!cs_store);
+    /** Get hashes of governance objects for which we have orphan votes. Also cleans up expired orphans. */
+    [[nodiscard]] std::vector<uint256> GetOrphanVoteObjectHashes() EXCLUSIVE_LOCKS_REQUIRED(!cs_store);
+    std::pair<std::vector<uint256>, std::vector<uint256>> FetchGovernanceObjectVotes(
+        size_t peers_per_hash_max, int64_t now, std::map<uint256, std::map<CService, int64_t>>& map_asked_recently) const
+        EXCLUSIVE_LOCKS_REQUIRED(!cs_store);
+    /** Build bloom filter of existing votes for a governance object (for sync requests) */
+    [[nodiscard]] CBloomFilter GetVoteBloomFilter(const uint256& nHash) const EXCLUSIVE_LOCKS_REQUIRED(!cs_store);
+    /** Returns inventory items for all syncable (non-deleted, non-expired) governance objects */
+    [[nodiscard]] std::vector<CInv> GetSyncableObjectInvs() const EXCLUSIVE_LOCKS_REQUIRED(!cs_store);
+    /** Returns inventory items for syncable votes on a specific object, filtered by bloom filter */
+    [[nodiscard]] std::vector<CInv> GetSyncableVoteInvs(const uint256& nProp, const CBloomFilter& filter) const
+        EXCLUSIVE_LOCKS_REQUIRED(!cs_store);
+    /// Called to indicate a requested object or vote has been received
+    bool AcceptMessage(const uint256& nHash) EXCLUSIVE_LOCKS_REQUIRED(!cs_store);
+    bool ProcessObject(const std::string& peer_str, const uint256& hash, CGovernanceObject& govobj)
+        EXCLUSIVE_LOCKS_REQUIRED(::cs_main, !cs_store, !cs_relay);
+
+    CDeterministicMNManager& GetMNManager();
+    /** Process a governance vote. Returns true on success.
+     *  If the vote is for an unknown object (orphan), hashToRequest is set to the object hash. */
+    bool ProcessVote(const CGovernanceVote& vote, CGovernanceException& exception, uint256& hashToRequest)
+        EXCLUSIVE_LOCKS_REQUIRED(!cs_store);
+
+
+private:
+    // Internal counterparts to "Thread-safe accessors"
+    void AddPostponedObjectInternal(const CGovernanceObject& govobj)
+        EXCLUSIVE_LOCKS_REQUIRED(cs_store);
+    std::shared_ptr<CGovernanceObject> FindGovernanceObjectInternal(const uint256& nHash)
+        EXCLUSIVE_LOCKS_REQUIRED(cs_store);
+
+    std::shared_ptr<const CGovernanceObject> FindConstGovernanceObjectInternal(const uint256& nHash) const
+        EXCLUSIVE_LOCKS_REQUIRED(cs_store);
+
+    // Internal counterpart to "Signer interface"
+    void AddGovernanceObjectInternal(CGovernanceObject& govobj, const std::string& peer_str)
+        EXCLUSIVE_LOCKS_REQUIRED(::cs_main, cs_store, !cs_relay);
+
+    // ...
+    void MasternodeRateUpdate(const CGovernanceObject& govobj)
+        EXCLUSIVE_LOCKS_REQUIRED(cs_store);
+
+    bool MasternodeRateCheck(const CGovernanceObject& govobj, bool fUpdateFailStatus, bool fForce, bool& fRateCheckBypassed)
+        EXCLUSIVE_LOCKS_REQUIRED(cs_store);
+
+    void CheckPostponedObjects()
+        EXCLUSIVE_LOCKS_REQUIRED(::cs_main, cs_store, !cs_relay);
+
+    void InitOnLoad()
+        EXCLUSIVE_LOCKS_REQUIRED(!cs_store);
+
+    void CheckOrphanVotes(CGovernanceObject& govobj)
+        EXCLUSIVE_LOCKS_REQUIRED(cs_store, !cs_relay);
+
+    void RebuildIndexes()
+        EXCLUSIVE_LOCKS_REQUIRED(cs_store);
+
+    void RemoveInvalidVotes()
+        EXCLUSIVE_LOCKS_REQUIRED(cs_store);
+};
 
 #endif // BITCOIN_GOVERNANCE_GOVERNANCE_H

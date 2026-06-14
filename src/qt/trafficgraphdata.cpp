@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2020 The Dash Core developers
+// Copyright (c) 2017-2023 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -23,10 +23,7 @@ const int TrafficGraphData::SMALLEST_SAMPLE_PERIOD =
         TrafficGraphData::RangeMinutes[TrafficGraphData::Range_5m] * 60 * 1000 / TrafficGraphData::DESIRED_DATA_SAMPLES;
 
 TrafficGraphData::TrafficGraphData(GraphRange range)
-    :currentGraphRange(range),
-    currentSampleCounter(0),
-    nLastBytesIn(0),
-    nLastBytesOut(0)
+    :currentGraphRange(range)
 {
 }
 

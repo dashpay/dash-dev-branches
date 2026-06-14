@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The Bitcoin Core developers
+// Copyright (c) 2016-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -6,6 +6,9 @@
 #define BITCOIN_VERSIONBITS_H
 
 #include <chain.h>
+#include <gsl/pointers.h>
+#include <sync.h>
+
 #include <map>
 
 /** What block version to use for new blocks (pre versionbits) */
@@ -25,7 +28,7 @@ static const int32_t VERSIONBITS_NUM_BITS = 29;
 enum class ThresholdState {
     DEFINED,   // First state that each softfork starts out as. The genesis block is by definition in this state for each deployment.
     STARTED,   // For blocks past the starttime.
-    LOCKED_IN, // For one retarget period after the first retarget period with STARTED blocks of which at least threshold have the associated bit set in nVersion.
+    LOCKED_IN, // For at least one retarget period after the first retarget period with STARTED blocks of which at least threshold have the associated bit set in nVersion, until min_activation_height is reached.
     ACTIVE,    // For all blocks after the LOCKED_IN retarget period (final state)
     FAILED,    // For all blocks once the first retarget period after the timeout time is hit, if LOCKED_IN wasn't already reached (final state)
 };
@@ -56,7 +59,9 @@ class AbstractThresholdConditionChecker {
 protected:
     virtual bool Condition(const CBlockIndex* pindex, const Consensus::Params& params) const =0;
     virtual int64_t BeginTime(const Consensus::Params& params) const =0;
+    virtual int SignalHeight(const CBlockIndex* pindexPrev, const Consensus::Params& params) const = 0;
     virtual int64_t EndTime(const Consensus::Params& params) const =0;
+    virtual int MinActivationHeight(const Consensus::Params& params) const { return 0; }
     virtual int Period(const Consensus::Params& params) const =0;
     virtual int Threshold(const Consensus::Params& params, int nAttempt) const =0;
 
@@ -70,18 +75,63 @@ public:
     int GetStateSinceHeightFor(const CBlockIndex* pindexPrev, const Consensus::Params& params, ThresholdConditionCache& cache) const;
 };
 
-/** BIP 9 allows multiple softforks to be deployed in parallel. We cache per-period state for every one of them
- *  keyed by the bit position used to signal support. */
-struct VersionBitsCache
+/** BIP 9 allows multiple softforks to be deployed in parallel. We cache
+ *  per-period state for every one of them. */
+class VersionBitsCache
 {
-    ThresholdConditionCache caches[Consensus::MAX_VERSION_BITS_DEPLOYMENTS];
+private:
+    Mutex m_mutex;
+    ThresholdConditionCache m_caches[Consensus::MAX_VERSION_BITS_DEPLOYMENTS] GUARDED_BY(m_mutex);
 
-    void Clear();
+public:
+    /** Get the numerical statistics for a given deployment for the signalling period that includes the block after pindexPrev. */
+    BIP9Stats Statistics(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
+
+    static uint32_t Mask(const Consensus::Params& params, Consensus::DeploymentPos pos);
+
+    /** Get the BIP9 state for a given deployment for the block after pindexPrev. */
+    ThresholdState State(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
+
+    /** Get the block height at which the BIP9 deployment switched into the state for the block after pindexPrev. */
+    int StateSinceHeight(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
+
+    /** Determine what nVersion a new block should use
+     */
+    int32_t ComputeBlockVersion(const CBlockIndex* pindexPrev, const Consensus::Params& params) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
+
+    void Clear() EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
 };
 
-ThresholdState VersionBitsState(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos, VersionBitsCache& cache);
-BIP9Stats VersionBitsStatistics(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos, VersionBitsCache& cache);
-int VersionBitsStateSinceHeight(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos, VersionBitsCache& cache);
-uint32_t VersionBitsMask(const Consensus::Params& params, Consensus::DeploymentPos pos);
+class AbstractEHFManager
+{
+public:
+    using Signals = std::unordered_map<uint8_t, int>;
+
+public:
+    AbstractEHFManager() = default;
+    virtual ~AbstractEHFManager() = default;
+
+    /**
+     * getInstance() is used in versionbit because it is non-trivial
+     * to get access to NodeContext from all usages of VersionBits* methods
+     * For simplification of interface this methods static/global variable is used
+     * to get access to EHF data
+     */
+    [[nodiscard]] static gsl::not_null<AbstractEHFManager*> getInstance() {
+        return globalInstance;
+    };
+
+    /**
+     * `GetSignalsStage' prepares signals for new block.
+     * The results are diffent with GetFromCache results due to one more
+     * stage of processing: signals that would be expired in next block
+     * are excluded from results.
+     * This member function is not const because it calls non-const GetFromCache()
+     */
+    virtual Signals GetSignalsStage(const CBlockIndex* const pindexPrev) = 0;
+
+protected:
+    static AbstractEHFManager* globalInstance;
+};
 
 #endif // BITCOIN_VERSIONBITS_H

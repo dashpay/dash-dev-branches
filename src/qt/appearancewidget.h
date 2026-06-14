@@ -1,4 +1,4 @@
-// Copyright (c) 2020-2022 The Dash Core developers
+// Copyright (c) 2020-2026 The Dash Core developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -7,13 +7,11 @@
 
 #include <QWidget>
 
-#include <qt/guiutil.h>
+#include <qt/optionsmodel.h>
 
 namespace Ui {
 class AppearanceWidget;
 }
-
-class OptionsModel;
 
 class QDataWidgetMapper;
 class QSlider;
@@ -24,7 +22,7 @@ class AppearanceWidget : public QWidget
     Q_OBJECT
 
 public:
-    explicit AppearanceWidget(QWidget* parent = 0);
+    explicit AppearanceWidget(QWidget* parent = nullptr);
     ~AppearanceWidget();
 
     void setModel(OptionsModel* model);
@@ -41,19 +39,27 @@ private Q_SLOTS:
     void updateFontScale(int nScale);
     void updateFontWeightNormal(int nValue, bool fForce = false);
     void updateFontWeightBold(int nValue, bool fForce = false);
+    void updateMoneyFont(int index);
 
 private:
     Ui::AppearanceWidget* ui;
     QDataWidgetMapper* mapper;
     OptionsModel* model;
     bool fAcceptChanges{false};
-    QString prevTheme{GUIUtil::getActiveTheme()};
-    int prevScale{GUIUtil::getFontScale()};
-    GUIUtil::FontFamily prevFontFamily{GUIUtil::getFontFamily()};
-    QFont::Weight prevWeightNormal{GUIUtil::getFontWeightNormal()};
-    QFont::Weight prevWeightBold{GUIUtil::getFontWeightBold()};
+    QString prevTheme;
+    int prevScale;
+    QString prevFontFamily;
+    //! Snapshots stored as -font-weight-* arg ints (0..8), matching slider values.
+    int prevWeightNormalArg;
+    int prevWeightBoldArg;
+    OptionsModel::FontChoice prevMoneyFont{OptionsModel::FontChoiceAbstract::ApplicationFont};
 
     void updateWeightSlider(bool fForce = false);
+
+public:
+    // Setup appearance settings if not done yet
+    static void setupAppearance(QWidget* parent, OptionsModel* model);
+
 };
 
 #endif // BITCOIN_QT_APPEARANCEWIDGET_H

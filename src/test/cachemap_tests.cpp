@@ -1,12 +1,14 @@
-// Copyright (c) 2014-2022 The Dash Core developers
+// Copyright (c) 2014-2025 The Dash Core developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <cachemap.h>
-
-#include <test/util/setup_common.h>
+#include <streams.h>
+#include <version.h>
 
 #include <boost/test/unit_test.hpp>
 
-BOOST_FIXTURE_TEST_SUITE(cachemap_tests, BasicTestingSetup)
+BOOST_AUTO_TEST_SUITE(cachemap_tests)
 
 static bool Compare(const CacheMap<int,int>& cmap1, const CacheMap<int,int>& cmap2)
 {

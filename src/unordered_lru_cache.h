@@ -1,4 +1,4 @@
-// Copyright (c) 2019-2021 The Dash Core developers
+// Copyright (c) 2019-2023 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -36,7 +36,6 @@ public:
     template<typename Value2>
     void _emplace(const Key& key, Value2&& v)
     {
-        truncate_if_needed();
         auto it = cacheMap.find(key);
         if (it == cacheMap.end()) {
             cacheMap.emplace(key, std::make_pair(std::forward<Value2>(v), accessCounter++));
@@ -44,6 +43,7 @@ public:
             it->second.first = std::forward<Value2>(v);
             it->second.second = accessCounter++;
         }
+        truncate_if_needed();
     }
 
     void emplace(const Key& key, Value&& v)

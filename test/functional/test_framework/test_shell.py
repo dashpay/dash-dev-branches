@@ -16,6 +16,9 @@ class TestShell:
     start a single TestShell at a time."""
 
     class __TestShell(BitcoinTestFramework):
+        def add_options(self, parser):
+            self.add_wallet_options(parser)
+
         def set_test_params(self):
             pass
 
@@ -29,8 +32,7 @@ class TestShell:
 
             # Num_nodes parameter must be set
             # by BitcoinTestFramework child class.
-            self.num_nodes = kwargs.get('num_nodes', 1)
-            kwargs.pop('num_nodes', None)
+            self.num_nodes = 1
 
             # User parameters override default values.
             for key, value in kwargs.items():
@@ -43,6 +45,7 @@ class TestShell:
 
             super().setup()
             self.running = True
+            return self
 
         def shutdown(self):
             if not self.running:
@@ -53,7 +56,7 @@ class TestShell:
 
         def reset(self):
             if self.running:
-                print("Shutdown TestWrapper before resetting!")
+                print("Shutdown TestShell before resetting!")
             else:
                 self.num_nodes = None
                 super().__init__()

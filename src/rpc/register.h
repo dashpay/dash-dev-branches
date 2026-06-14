@@ -1,4 +1,4 @@
-// Copyright (c) 2009-2016 The Bitcoin Core developers
+// Copyright (c) 2009-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -7,36 +7,53 @@
 
 /** These are in one header file to avoid creating tons of single-function
  * headers for everything under src/rpc/ */
+class CRPCCommand;
 class CRPCTable;
 
-/** Register block chain RPC commands */
+template <typename T>
+class Span;
+
 void RegisterBlockchainRPCCommands(CRPCTable &tableRPC);
-/** Register P2P networking RPC commands */
-void RegisterNetRPCCommands(CRPCTable &tableRPC);
-/** Register miscellaneous RPC commands */
-void RegisterMiscRPCCommands(CRPCTable &tableRPC);
-/** Register mining RPC commands */
+void RegisterFeeRPCCommands(CRPCTable&);
+void RegisterMempoolRPCCommands(CRPCTable&);
 void RegisterMiningRPCCommands(CRPCTable &tableRPC);
-/** Register raw transaction RPC commands */
+void RegisterNodeRPCCommands(CRPCTable&);
+void RegisterNetRPCCommands(CRPCTable&);
+void RegisterOutputScriptRPCCommands(CRPCTable&);
 void RegisterRawTransactionRPCCommands(CRPCTable &tableRPC);
-/** Register masternode RPC commands */
+void RegisterSignMessageRPCCommands(CRPCTable&);
+/** Register raw transaction RPC commands */
+void RegisterSignerRPCCommands(CRPCTable &tableRPC);
+void RegisterTxoutProofRPCCommands(CRPCTable&);
 void RegisterMasternodeRPCCommands(CRPCTable &tableRPC);
-/** Register CoinJoin RPC commands */
 void RegisterCoinJoinRPCCommands(CRPCTable &tableRPC);
-/** Register governance RPC commands */
 void RegisterGovernanceRPCCommands(CRPCTable &tableRPC);
-/** Register Evo RPC commands */
 void RegisterEvoRPCCommands(CRPCTable &tableRPC);
-/** Register Quorums RPC commands */
 void RegisterQuorumsRPCCommands(CRPCTable &tableRPC);
+
+#ifdef ENABLE_WALLET
+// Dash-specific wallet-only RPC commands
+Span<const CRPCCommand> GetWalletCoinJoinRPCCommands();
+Span<const CRPCCommand> GetWalletEvoRPCCommands();
+Span<const CRPCCommand> GetWalletGovernanceRPCCommands();
+Span<const CRPCCommand> GetWalletMasternodeRPCCommands();
+#endif // ENABLE_WALLET
 
 static inline void RegisterAllCoreRPCCommands(CRPCTable &t)
 {
     RegisterBlockchainRPCCommands(t);
-    RegisterNetRPCCommands(t);
-    RegisterMiscRPCCommands(t);
+    RegisterFeeRPCCommands(t);
+    RegisterMempoolRPCCommands(t);
     RegisterMiningRPCCommands(t);
+    RegisterNodeRPCCommands(t);
+    RegisterNetRPCCommands(t);
+    RegisterOutputScriptRPCCommands(t);
     RegisterRawTransactionRPCCommands(t);
+    RegisterSignMessageRPCCommands(t);
+#ifdef ENABLE_EXTERNAL_SIGNER
+    RegisterSignerRPCCommands(t);
+#endif // ENABLE_EXTERNAL_SIGNER
+    RegisterTxoutProofRPCCommands(t);
     RegisterMasternodeRPCCommands(t);
     RegisterCoinJoinRPCCommands(t);
     RegisterGovernanceRPCCommands(t);

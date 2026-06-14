@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2022 The Dash Core developers
+// Copyright (c) 2018-2025 The Dash Core developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -10,23 +10,29 @@
 class CBatchedLogger
 {
 private:
-    bool accept;
-    std::string header;
-    std::string msg;
+    bool m_accept;
+    BCLog::LogFlags m_category;
+    BCLog::Level m_level;
+    std::string m_logging_function;
+    std::string m_source_file;
+    const int m_source_line;
+    std::string m_msg;
+
 public:
-    CBatchedLogger(BCLog::LogFlags _category, const std::string& _header);
+    CBatchedLogger(BCLog::LogFlags category, BCLog::Level level, const std::string& logging_function,
+                   const std::string& m_source_file, int m_source_line);
     virtual ~CBatchedLogger();
 
     template<typename... Args>
     void Batch(const std::string& fmt, const Args&... args)
     {
-        if (!accept) {
+        if (!m_accept) {
             return;
         }
-        msg += "    " + strprintf(fmt, args...) + "\n";
+        m_msg += "    " + strprintf(fmt, args...) + "\n";
     }
 
     void Flush();
 };
 
-#endif//BITCOIN_BATCHEDLOGGER_H
+#endif // BITCOIN_BATCHEDLOGGER_H

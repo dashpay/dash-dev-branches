@@ -1,18 +1,18 @@
-// Copyright (c) 2016-2018 The Bitcoin Core developers
+// Copyright (c) 2016-2020 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <crypto/siphash.h>
 
-#define ROTL(x, b) (uint64_t)(((x) << (b)) | ((x) >> (64 - (b))))
+#include <bit>
 
 #define SIPROUND do { \
-    v0 += v1; v1 = ROTL(v1, 13); v1 ^= v0; \
-    v0 = ROTL(v0, 32); \
-    v2 += v3; v3 = ROTL(v3, 16); v3 ^= v2; \
-    v0 += v3; v3 = ROTL(v3, 21); v3 ^= v0; \
-    v2 += v1; v1 = ROTL(v1, 17); v1 ^= v2; \
-    v2 = ROTL(v2, 32); \
+    v0 += v1; v1 = std::rotl(v1, 13); v1 ^= v0; \
+    v0 = std::rotl(v0, 32); \
+    v2 += v3; v3 = std::rotl(v3, 16); v3 ^= v2; \
+    v0 += v3; v3 = std::rotl(v3, 21); v3 ^= v0; \
+    v2 += v1; v1 = std::rotl(v1, 17); v1 ^= v2; \
+    v2 = std::rotl(v2, 32); \
 } while (0)
 
 CSipHasher::CSipHasher(uint64_t k0, uint64_t k1)
@@ -119,10 +119,10 @@ uint64_t SipHashUint256(uint64_t k0, uint64_t k1, const uint256& val)
     SIPROUND;
     SIPROUND;
     v0 ^= d;
-    v3 ^= ((uint64_t)4) << 59;
+    v3 ^= (uint64_t{4}) << 59;
     SIPROUND;
     SIPROUND;
-    v0 ^= ((uint64_t)4) << 59;
+    v0 ^= (uint64_t{4}) << 59;
     v2 ^= 0xFF;
     SIPROUND;
     SIPROUND;
@@ -159,7 +159,7 @@ uint64_t SipHashUint256Extra(uint64_t k0, uint64_t k1, const uint256& val, uint3
     SIPROUND;
     SIPROUND;
     v0 ^= d;
-    d = (((uint64_t)36) << 56) | extra;
+    d = ((uint64_t{36}) << 56) | extra;
     v3 ^= d;
     SIPROUND;
     SIPROUND;

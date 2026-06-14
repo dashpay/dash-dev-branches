@@ -1,52 +1,55 @@
-// Copyright (c) 2021-2022 The Dash Core developers
+// Copyright (c) 2021-2025 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #ifndef BITCOIN_LLMQ_SNAPSHOT_H
 #define BITCOIN_LLMQ_SNAPSHOT_H
 
-#include <evo/evodb.h>
-#include <evo/simplifiedmns.h>
+#include <evo/smldiff.h>
 #include <llmq/commitment.h>
 #include <llmq/params.h>
+#include <unordered_lru_cache.h>
+#include <util/helpers.h>
+
 #include <saltedhasher.h>
 #include <serialize.h>
-#include <univalue.h>
-#include <unordered_lru_cache.h>
-#include <util/irange.h>
+#include <sync.h>
+#include <threadsafety.h>
 
 #include <optional>
 
 class CBlockIndex;
-class CDeterministicMN;
-class CDeterministicMNList;
-
+class CEvoDB;
+struct RPCResult;
 namespace llmq {
 class CQuorumBlockProcessor;
 class CQuorumManager;
+} // namespace llmq
 
-//TODO use enum class (probably)
-enum SnapshotSkipMode : int {
+class UniValue;
+
+enum class SnapshotSkipMode : int {
     MODE_NO_SKIPPING = 0,
     MODE_SKIPPING_ENTRIES = 1,
     MODE_NO_SKIPPING_ENTRIES = 2,
     MODE_ALL_SKIPPED = 3
 };
+template<> struct is_serializable_enum<SnapshotSkipMode> : std::true_type {};
+
+namespace llmq {
+constexpr int WORK_DIFF_DEPTH{8};
 
 class CQuorumSnapshot
 {
 public:
     std::vector<bool> activeQuorumMembers;
-    int mnSkipListMode = 0;
+    SnapshotSkipMode mnSkipListMode{SnapshotSkipMode::MODE_NO_SKIPPING};
     std::vector<int> mnSkipList;
 
-    CQuorumSnapshot() = default;
-    CQuorumSnapshot(std::vector<bool> _activeQuorumMembers, int _mnSkipListMode, std::vector<int> _mnSkipList) :
-        activeQuorumMembers(std::move(_activeQuorumMembers)),
-        mnSkipListMode(_mnSkipListMode),
-        mnSkipList(std::move(_mnSkipList))
-    {
-    }
+public:
+    CQuorumSnapshot();
+    CQuorumSnapshot(std::vector<bool> active_quorum_members, SnapshotSkipMode skip_mode, std::vector<int> skip_list);
+    ~CQuorumSnapshot();
 
     template <typename Stream, typename Operation>
     inline void SerializationOpBase(Stream& s, Operation ser_action)
@@ -75,14 +78,15 @@ public:
         size_t cnt = ReadCompactSize(s);
         ReadFixedBitSet(s, activeQuorumMembers, cnt);
         cnt = ReadCompactSize(s);
-        for ([[maybe_unused]] const auto _ : irange::range(cnt)) {
+        for ([[maybe_unused]] const auto _ : util::irange(cnt)) {
             int obj;
             s >> obj;
             mnSkipList.push_back(obj);
         }
     }
 
-    void ToJson(UniValue& obj) const;
+    [[nodiscard]] static RPCResult GetJsonHelp(const std::string& key, bool optional);
+    [[nodiscard]] UniValue ToJson() const;
 };
 
 class CGetQuorumRotationInfo
@@ -98,42 +102,46 @@ public:
     }
 };
 
-//TODO Maybe we should split the following class:
-// CQuorumSnaphot should include {creationHeight, activeQuorumMembers H_C H_2C H_3C, and skipLists H_C H_2C H3_C}
-// Maybe we need to include also blockHash for heights H_C H_2C H_3C
-// CSnapshotInfo should include CQuorumSnaphot + mnListDiff Tip H H_C H_2C H3_C
+struct CycleBase {
+    CQuorumSnapshot m_snap;
+    const CBlockIndex* m_cycle_index{nullptr};
+};
+
+struct CycleData : public CycleBase {
+    CSimplifiedMNListDiff m_diff;
+    const CBlockIndex* m_work_index{nullptr};
+};
+
 class CQuorumRotationInfo
 {
 public:
-    CQuorumSnapshot quorumSnapshotAtHMinusC;
-    CQuorumSnapshot quorumSnapshotAtHMinus2C;
-    CQuorumSnapshot quorumSnapshotAtHMinus3C;
-
+    bool extraShare{false};
+    CycleData cycleHMinusC;
+    CycleData cycleHMinus2C;
+    CycleData cycleHMinus3C;
+    std::optional<CycleData> cycleHMinus4C;
     CSimplifiedMNListDiff mnListDiffTip;
     CSimplifiedMNListDiff mnListDiffH;
-    CSimplifiedMNListDiff mnListDiffAtHMinusC;
-    CSimplifiedMNListDiff mnListDiffAtHMinus2C;
-    CSimplifiedMNListDiff mnListDiffAtHMinus3C;
-
-    bool extraShare{false};
-    std::optional<CQuorumSnapshot> quorumSnapshotAtHMinus4C;
-    std::optional<CSimplifiedMNListDiff> mnListDiffAtHMinus4C;
-
     std::vector<llmq::CFinalCommitment> lastCommitmentPerIndex;
     std::vector<CQuorumSnapshot> quorumSnapshotList;
     std::vector<CSimplifiedMNListDiff> mnListDiffList;
 
+public:
+    CQuorumRotationInfo();
+    CQuorumRotationInfo(const CQuorumRotationInfo& dmn) = delete;
+    ~CQuorumRotationInfo();
+
     template <typename Stream, typename Operation>
     inline void SerializationOpBase(Stream& s, Operation ser_action)
     {
-        READWRITE(quorumSnapshotAtHMinusC,
-                  quorumSnapshotAtHMinus2C,
-                  quorumSnapshotAtHMinus3C,
+        READWRITE(cycleHMinusC.m_snap,
+                  cycleHMinus2C.m_snap,
+                  cycleHMinus3C.m_snap,
                   mnListDiffTip,
                   mnListDiffH,
-                  mnListDiffAtHMinusC,
-                  mnListDiffAtHMinus2C,
-                  mnListDiffAtHMinus3C,
+                  cycleHMinusC.m_diff,
+                  cycleHMinus2C.m_diff,
+                  cycleHMinus3C.m_diff,
                   extraShare);
     }
 
@@ -142,12 +150,10 @@ public:
     {
         const_cast<CQuorumRotationInfo*>(this)->SerializationOpBase(s, CSerActionSerialize());
 
-        if (extraShare && quorumSnapshotAtHMinus4C.has_value()) {
-            ::Serialize(s, quorumSnapshotAtHMinus4C.value());
-        }
-
-        if (extraShare && mnListDiffAtHMinus4C.has_value()) {
-            ::Serialize(s, mnListDiffAtHMinus4C.value());
+        if (extraShare) {
+            // Needed to maintain compatibility with existing on-disk format
+            ::Serialize(s, cycleHMinus4C.value_or(CycleData{}).m_snap);
+            ::Serialize(s, cycleHMinus4C.value_or(CycleData{}).m_diff);
         }
 
         WriteCompactSize(s, lastCommitmentPerIndex.size());
@@ -171,65 +177,67 @@ public:
     {
         SerializationOpBase(s, CSerActionUnserialize());
 
-        if (extraShare && quorumSnapshotAtHMinus4C.has_value()) {
-            ::Unserialize(s, quorumSnapshotAtHMinus4C.value());
-        }
-
-        if (extraShare && mnListDiffAtHMinus4C.has_value()) {
-            ::Unserialize(s, mnListDiffAtHMinus4C.value());
+        if (extraShare) {
+            CycleData val{};
+            ::Unserialize(s, val.m_snap);
+            ::Unserialize(s, val.m_diff);
+            cycleHMinus4C = val;
         }
 
         size_t cnt = ReadCompactSize(s);
-        for ([[maybe_unused]] const auto _ : irange::range(cnt)) {
+        for ([[maybe_unused]] const auto _ : util::irange(cnt)) {
             CFinalCommitment qc;
             ::Unserialize(s, qc);
             lastCommitmentPerIndex.push_back(std::move(qc));
         }
 
         cnt = ReadCompactSize(s);
-        for ([[maybe_unused]] const auto _ : irange::range(cnt)) {
+        for ([[maybe_unused]] const auto _ : util::irange(cnt)) {
             CQuorumSnapshot snap;
             ::Unserialize(s, snap);
             quorumSnapshotList.push_back(std::move(snap));
         }
 
         cnt = ReadCompactSize(s);
-        for ([[maybe_unused]] const auto _ : irange::range(cnt)) {
+        for ([[maybe_unused]] const auto _ : util::irange(cnt)) {
             CSimplifiedMNListDiff mnlist;
             ::Unserialize(s, mnlist);
             mnListDiffList.push_back(std::move(mnlist));
         }
     }
 
-    CQuorumRotationInfo() = default;
-    CQuorumRotationInfo(const CQuorumRotationInfo& dmn) {}
-
-    void ToJson(UniValue& obj) const;
+    std::vector<CycleData*> GetCycles();
+    [[nodiscard]] static RPCResult GetJsonHelp(const std::string& key, bool optional);
+    [[nodiscard]] UniValue ToJson() const;
 };
 
-bool BuildQuorumRotationInfo(const CGetQuorumRotationInfo& request, CQuorumRotationInfo& response,
-                             const CQuorumManager& qman, const CQuorumBlockProcessor& quorumBlockProcessor, std::string& errorRet);
-uint256 GetLastBaseBlockHash(const std::vector<const CBlockIndex*>& baseBlockIndexes, const CBlockIndex* blockIndex);
+bool BuildQuorumRotationInfo(CDeterministicMNManager& dmnman, CQuorumSnapshotManager& qsnapman,
+                             const ChainstateManager& chainman, const CQuorumManager& qman,
+                             const CQuorumBlockProcessor& qblockman, const CGetQuorumRotationInfo& request,
+                             bool use_legacy_construction, CQuorumRotationInfo& response, std::string& errorRet)
+    EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
+uint256 GetLastBaseBlockHash(Span<const CBlockIndex*> baseBlockIndexes, const CBlockIndex* blockIndex,
+                             bool use_legacy_construction);
 
 class CQuorumSnapshotManager
 {
 private:
-    mutable CCriticalSection snapshotCacheCs;
+    mutable RecursiveMutex snapshotCacheCs;
 
     CEvoDB& m_evoDb;
 
-    unordered_lru_cache<uint256, CQuorumSnapshot, StaticSaltedHasher> quorumSnapshotCache GUARDED_BY(snapshotCacheCs);
+    Uint256LruHashMap<CQuorumSnapshot> quorumSnapshotCache GUARDED_BY(snapshotCacheCs);
 
 public:
-    explicit CQuorumSnapshotManager(CEvoDB& evoDb) :
-        m_evoDb(evoDb), quorumSnapshotCache(32) {}
+    CQuorumSnapshotManager() = delete;
+    CQuorumSnapshotManager(const CQuorumSnapshotManager&) = delete;
+    CQuorumSnapshotManager& operator=(const CQuorumSnapshotManager&) = delete;
+    explicit CQuorumSnapshotManager(CEvoDB& evoDb);
+    ~CQuorumSnapshotManager();
 
     std::optional<CQuorumSnapshot> GetSnapshotForBlock(Consensus::LLMQType llmqType, const CBlockIndex* pindex);
     void StoreSnapshotForBlock(Consensus::LLMQType llmqType, const CBlockIndex* pindex, const CQuorumSnapshot& snapshot);
 };
-
-extern std::unique_ptr<CQuorumSnapshotManager> quorumSnapshotManager;
-
 } // namespace llmq
 
-#endif //BITCOIN_LLMQ_SNAPSHOT_H
+#endif // BITCOIN_LLMQ_SNAPSHOT_H

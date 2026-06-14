@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2022 The Dash Core developers
+// Copyright (c) 2014-2025 The Dash Core developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 #ifndef BITCOIN_MASTERNODE_SYNC_H
@@ -8,11 +8,10 @@
 #include <memory>
 #include <string>
 
-class CMasternodeSync;
 class CBlockIndex;
-class CConnman;
-class CNode;
-class CDataStream;
+
+/** Default for -syncmempool */
+static const bool DEFAULT_SYNC_MEMPOOL = true;
 
 static constexpr int MASTERNODE_SYNC_BLOCKCHAIN      = 1;
 static constexpr int MASTERNODE_SYNC_GOVERNANCE      = 4;
@@ -24,12 +23,32 @@ static constexpr int MASTERNODE_SYNC_TICK_SECONDS    = 6;
 static constexpr int MASTERNODE_SYNC_TIMEOUT_SECONDS = 30; // our blocks are 2.5 minutes so 30 seconds should be fine
 static constexpr int MASTERNODE_SYNC_RESET_SECONDS   = 900; // Reset fReachedBestHeader in CMasternodeSync::Reset if UpdateBlockTip hasn't been called for this seconds
 
-extern std::unique_ptr<CMasternodeSync> masternodeSync;
+class NodeSyncNotifier
+{
+public:
+    virtual void SyncReset() = 0;
+    virtual void SyncFinished() = 0;
+
+    virtual ~NodeSyncNotifier() = default;
+};
+
+/** Stub implementation for use in chainstate-only (non-network) contexts.
+ *  CMasternodeSync constructed with this notifier permanently returns
+ *  IsBlockchainSynced()=false and IsSynced()=false, which correctly disables
+ *  network-dependent validation paths.
+ *
+ *  Asserts on any call — if sync state is being advanced, a real notifier
+ *  (NodeSyncNotifierImpl) must be used instead. */
+class NullNodeSyncNotifier final : public NodeSyncNotifier
+{
+public:
+    void SyncReset() override;
+    void SyncFinished() override;
+};
 
 //
 // CMasternodeSync : Sync masternode assets in stages
 //
-
 class CMasternodeSync
 {
 private:
@@ -48,34 +67,34 @@ private:
     /// Last time UpdateBlockTip has been called
     std::atomic<int64_t> nTimeLastUpdateBlockTip{0};
 
-    CConnman& connman;
+    std::unique_ptr<NodeSyncNotifier> m_sync_notifier;
 
 public:
-    explicit CMasternodeSync(CConnman& _connman);
-
-    void SendGovernanceSyncRequest(CNode* pnode);
+    CMasternodeSync() = delete;
+    CMasternodeSync(const CMasternodeSync&) = delete;
+    CMasternodeSync& operator=(const CMasternodeSync&) = delete;
+    explicit CMasternodeSync(std::unique_ptr<NodeSyncNotifier>&& sync_notifier);
+    ~CMasternodeSync();
 
     bool IsBlockchainSynced() const { return nCurrentAsset > MASTERNODE_SYNC_BLOCKCHAIN; }
     bool IsSynced() const { return nCurrentAsset == MASTERNODE_SYNC_FINISHED; }
 
     int GetAssetID() const { return nCurrentAsset; }
     int GetAttempt() const { return nTriedPeerCount; }
+    void BumpAttempt() { ++nTriedPeerCount; }
     void BumpAssetLastTime(const std::string& strFuncName);
+    int64_t GetLastBump() const { return nTimeLastBumped; }
     int64_t GetAssetStartTime() const { return nTimeAssetSyncStarted; }
     std::string GetAssetName() const;
     std::string GetSyncStatus() const;
+    bool IsReachedBestHeader() const { return fReachedBestHeader; }
 
     void Reset(bool fForce = false, bool fNotifyReset = true);
     void SwitchToNextAsset();
 
-    void ProcessMessage(const CNode& peer, std::string_view msg_type, CDataStream& vRecv) const;
-    void ProcessTick();
-
     void AcceptedBlockHeader(const CBlockIndex *pindexNew);
     void NotifyHeaderTip(const CBlockIndex *pindexNew, bool fInitialDownload);
-    void UpdatedBlockTip(const CBlockIndex *pindexNew, bool fInitialDownload);
-
-    void DoMaintenance();
+    void UpdatedBlockTip(const CBlockIndex *pindexTip, const CBlockIndex *pindexNew, bool fInitialDownload);
 };
 
 #endif // BITCOIN_MASTERNODE_SYNC_H

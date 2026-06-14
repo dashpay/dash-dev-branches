@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copyright (c) 2021 The Dash Core developers
+# Copyright (c) 2021-2025 The Dash Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 #
@@ -14,23 +14,14 @@ source ./ci/dash/matrix.sh
 unset CC; unset CXX
 unset DISPLAY
 
-mkdir -p $CACHE_DIR/depends
-mkdir -p $CACHE_DIR/sdk-sources
+mkdir -p "$CACHE_DIR/depends"
+mkdir -p "$CACHE_DIR/sdk-sources"
 
-ln -s $CACHE_DIR/depends depends/built
-ln -s $CACHE_DIR/sdk-sources depends/sdk-sources
+ln -s "$CACHE_DIR/depends" "${DEPENDS_DIR}/built"
+ln -s "$CACHE_DIR/sdk-sources" "${DEPENDS_DIR}/sdk-sources"
 
-mkdir -p depends/SDKs
-
-if [ -n "$XCODE_VERSION" ]; then
-  OSX_SDK_BASENAME="Xcode-${XCODE_VERSION}-${XCODE_BUILD_ID}-extracted-SDK-with-libcxx-headers.tar.gz"
-  OSX_SDK_PATH="depends/sdk-sources/${OSX_SDK_BASENAME}"
-  if [ ! -f "$OSX_SDK_PATH" ]; then
-    curl --location --fail "${SDK_URL}/${OSX_SDK_BASENAME}" -o "$OSX_SDK_PATH"
-  fi
-  if [ -f "$OSX_SDK_PATH" ]; then
-    tar -C depends/SDKs -xf "$OSX_SDK_PATH"
-  fi
+if [[ "${HOST}" == "x86_64-apple-darwin" ]]; then
+    ./contrib/containers/guix/scripts/setup-sdk
 fi
 
-make $MAKEJOBS -C depends HOST=$HOST $DEP_OPTS
+make "$MAKEJOBS" -C depends HOST="$HOST" "$DEP_OPTS"

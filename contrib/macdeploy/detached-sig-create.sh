@@ -1,5 +1,5 @@
 #!/bin/sh
-# Copyright (c) 2014-2015 The Bitcoin Core developers
+# Copyright (c) 2014-2021 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -8,9 +8,11 @@ set -e
 
 ROOTDIR=dist
 BUNDLE="${ROOTDIR}/Dash-Qt.app"
+BINARY="${BUNDLE}/Contents/MacOS/Dash-Qt"
 SIGNAPPLE=signapple
 TEMPDIR=sign.temp
-OUT=signature-osx.tar.gz
+ARCH=$(${SIGNAPPLE} info ${BINARY} | head -n 1 | cut -d " " -f 1)
+OUT="signature-osx-${ARCH}.tar.gz"
 OUTROOT=osx/dist
 
 if [ -z "$1" ]; then
@@ -22,7 +24,7 @@ fi
 rm -rf ${TEMPDIR}
 mkdir -p ${TEMPDIR}
 
-${SIGNAPPLE} sign -f --detach "${TEMPDIR}/${OUTROOT}"  "$@" "${BUNDLE}"
+${SIGNAPPLE} sign --hardened-runtime -f --detach "${TEMPDIR}/${OUTROOT}"  "$@" "${BUNDLE}"
 
 tar -C "${TEMPDIR}" -czf "${OUT}" .
 rm -rf "${TEMPDIR}"

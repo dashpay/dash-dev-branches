@@ -1,49 +1,101 @@
-// Copyright (c) 2014-2021 The Dash Core developers
+// Copyright (c) 2014-2025 The Dash Core developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #ifndef BITCOIN_GOVERNANCE_OBJECT_H
 #define BITCOIN_GOVERNANCE_OBJECT_H
 
-#include <governance/exceptions.h>
+#include <governance/common.h>
 #include <governance/vote.h>
 #include <governance/votedb.h>
-#include <logging.h>
 #include <sync.h>
 
-#include <univalue.h>
+#include <span.h>
 
-class CBLSSecretKey;
+#include <exception>
+#include <iosfwd>
+#include <string>
+
 class CBLSPublicKey;
-class CNode;
+class CDeterministicMNList;
+class ChainstateManager;
+class CMasternodeMetaMan;
+struct RPCResult;
 
-class CGovernanceManager;
-class CGovernanceTriggerManager;
-class CGovernanceObject;
-class CGovernanceVote;
+extern RecursiveMutex cs_main; // NOLINT(readability-redundant-declaration)
 
-extern CCriticalSection cs_main;
+enum governance_exception_type_enum_t {
+    /// Default value, normally indicates no exception condition occurred
+    GOVERNANCE_EXCEPTION_NONE = 0,
+    /// Unusual condition requiring no caller action
+    GOVERNANCE_EXCEPTION_WARNING = 1,
+    /// Requested operation cannot be performed
+    GOVERNANCE_EXCEPTION_PERMANENT_ERROR = 2,
+    /// Requested operation not currently possible, may resubmit later
+    GOVERNANCE_EXCEPTION_TEMPORARY_ERROR = 3,
+    /// Unexpected error (ie. should not happen unless there is a bug in the code)
+    GOVERNANCE_EXCEPTION_INTERNAL_ERROR = 4
+};
+
+std::ostream& operator<<(std::ostream& os, governance_exception_type_enum_t eType);
+
+/**
+ * A class which encapsulates information about a governance exception condition
+ *
+ * Derives from std::exception so is suitable for throwing
+ * (ie. will be caught by a std::exception handler) but may also be used as a
+ * normal object.
+ */
+class CGovernanceException : public std::exception
+{
+private:
+    std::string strMessage;
+
+    governance_exception_type_enum_t eType;
+
+    int nNodePenalty;
+
+public:
+    explicit CGovernanceException(const std::string& strMessageIn = "",
+        governance_exception_type_enum_t eTypeIn = GOVERNANCE_EXCEPTION_NONE,
+        int nNodePenaltyIn = 0);
+
+    ~CGovernanceException() noexcept override = default;
+
+    const char* what() const noexcept override
+    {
+        return strMessage.c_str();
+    }
+
+    const std::string& GetMessage() const
+    {
+        return strMessage;
+    }
+
+    governance_exception_type_enum_t GetType() const
+    {
+        return eType;
+    }
+
+    int GetNodePenalty() const
+    {
+        return nNodePenalty;
+    }
+};
 
 static constexpr double GOVERNANCE_FILTER_FP_RATE = 0.001;
-
-static constexpr int GOVERNANCE_OBJECT_UNKNOWN = 0;
-static constexpr int GOVERNANCE_OBJECT_PROPOSAL = 1;
-static constexpr int GOVERNANCE_OBJECT_TRIGGER = 2;
-
 static constexpr CAmount GOVERNANCE_PROPOSAL_FEE_TX = (1 * COIN);
-static constexpr CAmount GOVERNANCE_PROPOSAL_FEE_TX_OLD = (5 * COIN);
-
 static constexpr int64_t GOVERNANCE_FEE_CONFIRMATIONS = 6;
 static constexpr int64_t GOVERNANCE_MIN_RELAY_FEE_CONFIRMATIONS = 1;
 static constexpr int64_t GOVERNANCE_UPDATE_MIN = 60 * 60;
-static constexpr int64_t GOVERNANCE_DELETION_DELAY = 10 * 60;
-static constexpr int64_t GOVERNANCE_ORPHAN_EXPIRATION_TIME = 10 * 60;
 
 // FOR SEEN MAP ARRAYS - GOVERNANCE OBJECTS AND VOTES
-static constexpr int SEEN_OBJECT_IS_VALID = 0;
-static constexpr int SEEN_OBJECT_ERROR_INVALID = 1;
-static constexpr int SEEN_OBJECT_EXECUTED = 3; //used for triggers
-static constexpr int SEEN_OBJECT_UNKNOWN = 4;  // the default
+enum class SeenObjectStatus {
+    Valid = 0,
+    ErrorInvalid,
+    Executed,
+    Unknown
+};
 
 using vote_time_pair_t = std::pair<CGovernanceVote, int64_t>;
 
@@ -94,190 +146,153 @@ class CGovernanceObject
 public: // Types
     using vote_m_t = std::map<COutPoint, vote_rec_t>;
 
-private:
+public:
     /// critical section to protect the inner data structures
-    mutable CCriticalSection cs;
+    mutable Mutex cs;
 
-    /// Object typecode
-    int nObjectType;
-
-    /// parent object, 0 is root
-    uint256 nHashParent;
-
-    /// object revision in the system
-    int nRevision;
-
-    /// time this object was created
-    int64_t nTime;
+private:
+    Governance::Object m_obj;
 
     /// time this object was marked for deletion
-    int64_t nDeletionTime;
-
-    /// fee-tx
-    uint256 nCollateralHash;
-
-    /// Data field - can be used for anything
-    std::vector<unsigned char> vchData;
-
-    /// Masternode info for signed objects
-    COutPoint masternodeOutpoint;
-    std::vector<unsigned char> vchSig;
+    int64_t nDeletionTime GUARDED_BY(cs){0};
 
     /// is valid by blockchain
-    bool fCachedLocalValidity;
+    bool fCachedLocalValidity{false};
     std::string strLocalValidityError;
 
     // VARIOUS FLAGS FOR OBJECT / SET VIA MASTERNODE VOTING
 
     /// true == minimum network support has been reached for this object to be funded (doesn't mean it will for sure though)
-    bool fCachedFunding;
+    bool fCachedFunding{false};
 
     /// true == minimum network has been reached flagging this object as a valid and understood governance object (e.g, the serialized data is correct format, etc)
-    bool fCachedValid;
+    bool fCachedValid{true};
 
     /// true == minimum network support has been reached saying this object should be deleted from the system entirely
-    bool fCachedDelete;
+    bool fCachedDelete{false};
 
     /** true == minimum network support has been reached flagging this object as endorsed by an elected representative body
      * (e.g. business review board / technical review board /etc)
      */
-    bool fCachedEndorsed;
+    bool fCachedEndorsed{false};
 
     /// object was updated and cached values should be updated soon
-    bool fDirtyCache;
+    bool fDirtyCache{true};
 
     /// Object is no longer of interest
-    bool fExpired;
+    bool fExpired GUARDED_BY(cs){false};
 
     /// Failed to parse object data
-    bool fUnparsable;
+    bool fUnparsable{false};
 
-    vote_m_t mapCurrentMNVotes;
+    vote_m_t mapCurrentMNVotes GUARDED_BY(cs);
 
-    CGovernanceObjectVoteFile fileVotes;
+    CGovernanceObjectVoteFile fileVotes GUARDED_BY(cs);
 
 public:
     CGovernanceObject();
-
     CGovernanceObject(const uint256& nHashParentIn, int nRevisionIn, int64_t nTime, const uint256& nCollateralHashIn, const std::string& strDataHexIn);
-
     CGovernanceObject(const CGovernanceObject& other);
+    template <typename Stream>
+    CGovernanceObject(deserialize_type, Stream& s) { s >> *this; }
 
-    // Public Getter methods
-
-    int64_t GetCreationTime() const
+    // Getters
+    bool IsSetCachedFunding() const { return fCachedFunding; }
+    bool IsSetCachedValid() const { return fCachedValid; }
+    bool IsSetCachedDelete() const { return fCachedDelete; }
+    bool IsSetCachedEndorsed() const { return fCachedEndorsed; }
+    bool IsSetDirtyCache() const { return fDirtyCache; }
+    bool IsSetExpired() const EXCLUSIVE_LOCKS_REQUIRED(!cs)
     {
-        return nTime;
+        return WITH_LOCK(cs, return fExpired);
+    }
+    GovernanceObject GetObjectType() const { return m_obj.type; }
+    int64_t GetCreationTime() const { return m_obj.time; }
+    int64_t GetDeletionTime() const EXCLUSIVE_LOCKS_REQUIRED(!cs)
+    {
+        return WITH_LOCK(cs, return nDeletionTime);
     }
 
-    int64_t GetDeletionTime() const
+    const CGovernanceObjectVoteFile& GetVoteFile() const EXCLUSIVE_LOCKS_REQUIRED(cs)
     {
-        return nDeletionTime;
-    }
-
-    int GetObjectType() const
-    {
-        return nObjectType;
-    }
-
-    const uint256& GetCollateralHash() const
-    {
-        return nCollateralHash;
-    }
-
-    const COutPoint& GetMasternodeOutpoint() const
-    {
-        return masternodeOutpoint;
-    }
-
-    bool IsSetCachedFunding() const
-    {
-        return fCachedFunding;
-    }
-
-    bool IsSetCachedValid() const
-    {
-        return fCachedValid;
-    }
-
-    bool IsSetCachedDelete() const
-    {
-        return fCachedDelete;
-    }
-
-    bool IsSetCachedEndorsed() const
-    {
-        return fCachedEndorsed;
-    }
-
-    bool IsSetDirtyCache() const
-    {
-        return fDirtyCache;
-    }
-
-    bool IsSetExpired() const
-    {
-        return fExpired;
-    }
-
-    void SetExpired()
-    {
-        fExpired = true;
-    }
-
-    const CGovernanceObjectVoteFile& GetVoteFile() const
-    {
+        AssertLockHeld(cs);
         return fileVotes;
     }
+    const COutPoint& GetMasternodeOutpoint() const { return m_obj.masternodeOutpoint; }
+    const Governance::Object& Object() const { return m_obj; }
+    const uint256& GetCollateralHash() const { return m_obj.collateralHash; }
+
+    // Setters
+    void SetExpired() EXCLUSIVE_LOCKS_REQUIRED(!cs)
+    {
+        WITH_LOCK(cs, fExpired = true);
+    }
+    void SetMasternodeOutpoint(const COutPoint& outpoint);
+    void SetSignature(Span<const uint8_t> sig);
 
     // Signature related functions
-
-    void SetMasternodeOutpoint(const COutPoint& outpoint);
-    bool Sign(const CBLSSecretKey& key);
     bool CheckSignature(const CBLSPublicKey& pubKey) const;
-
     uint256 GetSignatureHash() const;
 
     // CORE OBJECT FUNCTIONS
 
-    bool IsValidLocally(std::string& strError, bool fCheckCollateral) const EXCLUSIVE_LOCKS_REQUIRED(cs_main);
+    bool IsValidLocally(const CDeterministicMNList& tip_mn_list, const ChainstateManager& chainman, std::string& strError, bool fCheckCollateral) const
+        EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 
-    bool IsValidLocally(std::string& strError, bool& fMissingConfirmations, bool fCheckCollateral) const EXCLUSIVE_LOCKS_REQUIRED(cs_main);
+    bool IsValidLocally(const CDeterministicMNList& tip_mn_list, const ChainstateManager& chainman, std::string& strError, bool& fMissingConfirmations, bool fCheckCollateral) const
+        EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 
     /// Check the collateral transaction for the budget proposal/finalized budget
-    bool IsCollateralValid(std::string& strError, bool& fMissingConfirmations) const EXCLUSIVE_LOCKS_REQUIRED(cs_main);
+    bool IsCollateralValid(const ChainstateManager& chainman, std::string& strError, bool& fMissingConfirmations) const
+        EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 
-    void UpdateLocalValidity();
+    void UpdateLocalValidity(const CDeterministicMNList& tip_mn_list, const ChainstateManager& chainman)
+        EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 
-    void UpdateSentinelVariables();
+    void UpdateSentinelVariables(const CDeterministicMNList& tip_mn_list)
+        EXCLUSIVE_LOCKS_REQUIRED(!cs);
 
-    void PrepareDeletion(int64_t nDeletionTime_)
+    void PrepareDeletion(int64_t nDeletionTime_) EXCLUSIVE_LOCKS_REQUIRED(!cs)
     {
         fCachedDelete = true;
+        LOCK(cs);
         if (nDeletionTime == 0) {
             nDeletionTime = nDeletionTime_;
         }
     }
 
-    CAmount GetMinCollateralFee(bool fork_active) const;
+    CAmount GetMinCollateralFee() const;
 
     UniValue GetJSONObject() const;
 
-    void Relay(CConnman& connman) const;
-
     uint256 GetHash() const;
+    uint256 GetDataHash() const;
 
     // GET VOTE COUNT FOR SIGNAL
 
-    int CountMatchingVotes(vote_signal_enum_t eVoteSignalIn, vote_outcome_enum_t eVoteOutcomeIn) const;
+    int CountMatchingVotes(const CDeterministicMNList& tip_mn_list, vote_signal_enum_t eVoteSignalIn, vote_outcome_enum_t eVoteOutcomeIn) const
+        EXCLUSIVE_LOCKS_REQUIRED(!cs);
 
-    int GetAbsoluteYesCount(vote_signal_enum_t eVoteSignalIn) const;
-    int GetAbsoluteNoCount(vote_signal_enum_t eVoteSignalIn) const;
-    int GetYesCount(vote_signal_enum_t eVoteSignalIn) const;
-    int GetNoCount(vote_signal_enum_t eVoteSignalIn) const;
-    int GetAbstainCount(vote_signal_enum_t eVoteSignalIn) const;
+    int GetAbsoluteYesCount(const CDeterministicMNList& tip_mn_list, vote_signal_enum_t eVoteSignalIn) const
+        EXCLUSIVE_LOCKS_REQUIRED(!cs);
+    int GetAbsoluteNoCount(const CDeterministicMNList& tip_mn_list, vote_signal_enum_t eVoteSignalIn) const
+        EXCLUSIVE_LOCKS_REQUIRED(!cs);
+    int GetYesCount(const CDeterministicMNList& tip_mn_list, vote_signal_enum_t eVoteSignalIn) const
+        EXCLUSIVE_LOCKS_REQUIRED(!cs);
+    int GetNoCount(const CDeterministicMNList& tip_mn_list, vote_signal_enum_t eVoteSignalIn) const
+        EXCLUSIVE_LOCKS_REQUIRED(!cs);
+    int GetAbstainCount(const CDeterministicMNList& tip_mn_list, vote_signal_enum_t eVoteSignalIn) const
+        EXCLUSIVE_LOCKS_REQUIRED(!cs);
 
-    bool GetCurrentMNVotes(const COutPoint& mnCollateralOutpoint, vote_rec_t& voteRecord) const;
+    struct UniqueVoterCount {
+        uint16_t m_regular{0};
+        uint16_t m_evo{0};
+    };
+    UniqueVoterCount GetUniqueVoterCount(const CDeterministicMNList& tip_mn_list, vote_signal_enum_t eVoteSignalIn) const
+        EXCLUSIVE_LOCKS_REQUIRED(!cs);
+
+    bool GetCurrentMNVotes(const COutPoint& mnCollateralOutpoint, vote_rec_t& voteRecord) const
+        EXCLUSIVE_LOCKS_REQUIRED(!cs);
 
     // FUNCTIONS FOR DEALING WITH DATA STRING
 
@@ -286,48 +301,69 @@ public:
 
     // SERIALIZER
 
-    SERIALIZE_METHODS(CGovernanceObject, obj)
+    template<typename Stream>
+    void Serialize(Stream& s) const EXCLUSIVE_LOCKS_REQUIRED(!cs)
     {
         // SERIALIZE DATA FOR SAVING/LOADING OR NETWORK FUNCTIONS
-        READWRITE(
-                obj.nHashParent,
-                obj.nRevision,
-                obj.nTime,
-                obj.nCollateralHash,
-                obj.vchData,
-                obj.nObjectType,
-                obj.masternodeOutpoint
-                );
-        if (!(s.GetType() & SER_GETHASH)) {
-            READWRITE(obj.vchSig);
-        }
+        s << m_obj;
         if (s.GetType() & SER_DISK) {
             // Only include these for the disk file format
-            LogPrint(BCLog::GOBJECT, "CGovernanceObject::SerializationOp Reading/writing votes from/to disk\n");
-            READWRITE(obj.nDeletionTime, obj.fExpired, obj.mapCurrentMNVotes, obj.fileVotes);
-            LogPrint(BCLog::GOBJECT, "CGovernanceObject::SerializationOp hash = %s, vote count = %d\n", obj.GetHash().ToString(), obj.fileVotes.GetVoteCount());
+            LOCK(cs);
+            s << nDeletionTime << fExpired << mapCurrentMNVotes << fileVotes;
         }
+    }
 
+    template<typename Stream>
+    void Unserialize(Stream& s) EXCLUSIVE_LOCKS_REQUIRED(!cs)
+    {
+        s >> m_obj;
+        if (s.GetType() & SER_DISK) {
+            // Only include these for the disk file format
+            LOCK(cs);
+            s >> nDeletionTime >> fExpired >> mapCurrentMNVotes >> fileVotes;
+        }
         // AFTER DESERIALIZATION OCCURS, CACHED VARIABLES MUST BE CALCULATED MANUALLY
     }
 
-    UniValue ToJson() const;
+    // JSON emitters/help
+    [[nodiscard]] static RPCResult GetInnerJsonHelp(const std::string& key, bool optional);
+    [[nodiscard]] UniValue GetInnerJson() const;
+
+    [[nodiscard]] static RPCResult GetStateJsonHelp(const std::string& key, bool optional, const std::string& local_valid_key);
+    [[nodiscard]] UniValue GetStateJson(const ChainstateManager& chainman, const CDeterministicMNList& tip_mn_list, const std::string& local_valid_key) const
+        EXCLUSIVE_LOCKS_REQUIRED(!cs);
+
+    [[nodiscard]] static RPCResult GetVotesJsonHelp(const std::string& key, bool optional);
+    [[nodiscard]] UniValue GetVotesJson(const CDeterministicMNList& tip_mn_list, vote_signal_enum_t signal) const
+        EXCLUSIVE_LOCKS_REQUIRED(!cs);
 
     // FUNCTIONS FOR DEALING WITH DATA STRING
     void LoadData();
     void GetData(UniValue& objResult) const;
 
-    bool ProcessVote(const CGovernanceVote& vote, CGovernanceException& exception);
+    bool ProcessVote(CMasternodeMetaMan& mn_metaman, bool fRateChecksEnabled, const CDeterministicMNList& tip_mn_list,
+                     const CGovernanceVote& vote, CGovernanceException& exception) EXCLUSIVE_LOCKS_REQUIRED(!cs);
 
     /// Called when MN's which have voted on this object have been removed
-    void ClearMasternodeVotes();
+    void ClearMasternodeVotes(const CDeterministicMNList& tip_mn_list)
+        EXCLUSIVE_LOCKS_REQUIRED(!cs);
 
     // Revalidate all votes from this MN and delete them if validation fails.
     // This is the case for DIP3 MNs that changed voting or operator keys and
     // also for MNs that were removed from the list completely.
     // Returns deleted vote hashes.
-    std::set<uint256> RemoveInvalidVotes(const COutPoint& mnOutpoint);
+    std::set<uint256> RemoveInvalidVotes(const CDeterministicMNList& tip_mn_list, const COutPoint& mnOutpoint)
+        EXCLUSIVE_LOCKS_REQUIRED(!cs);
 };
 
+namespace governance {
+/**
+ * Validate the serialized proposal data (hex-encoded JSON).
+ * Returns true on success. On failure, returns false and fills strErrorOut
+ * with a semicolon-delimited list of detected issues.
+ */
+bool ValidateProposal(const std::string& strDataHex, std::string& strErrorOut,
+                      bool fCheckExpiration = true, bool fAllowScript = true);
+} // namespace governance
 
 #endif // BITCOIN_GOVERNANCE_OBJECT_H

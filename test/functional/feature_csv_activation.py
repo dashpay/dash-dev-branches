@@ -1,24 +1,18 @@
 #!/usr/bin/env python3
-# Copyright (c) 2015 The Bitcoin Core developers
+# Copyright (c) 2015-2020 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
-"""Test activation of the first version bits soft fork.
+"""Test CSV soft fork activation.
 
 This soft fork will activate the following BIPS:
 BIP 68  - nSequence relative lock times
 BIP 112 - CHECKSEQUENCEVERIFY
 BIP 113 - MedianTimePast semantics for nLockTime
 
-regtest lock-in with 108/144 block signalling
-activation after a further 144 blocks
-
-mine 82 blocks whose coinbases will be used to generate inputs for our tests
-mine 61 blocks to transition from DEFINED to STARTED
-mine 144 blocks only 100 of which are signaling readiness in order to fail to change state this period
-mine 144 blocks with 108 signaling and verify STARTED->LOCKED_IN
-mine 140 blocks and seed block chain with the 82 inputs will use for our tests at height 572
-mine 3 blocks and verify still at LOCKED_IN and test that enforcement has not triggered
-mine 1 block and test that enforcement has triggered (which triggers ACTIVE)
+mine 83 blocks whose coinbases will be used to generate inputs for our tests
+mine 344 blocks and seed block chain with the 83 inputs used for our tests at height 427
+mine 2 blocks and verify soft fork not yet activated
+mine 1 block and test that soft fork is activated (rules enforced for next block)
 Test BIP 113 is enforced
 Mine 4 blocks so next height is 580 and test BIP 68 is enforced for time and height
 Mine 1 block so next height is 581 and test BIP 68 now passes time but not height
@@ -43,13 +37,14 @@ bip112txs_vary_OP_CSV_9 - 16 txs with nSequence = 9 evaluated against varying {r
 bip112tx_special - test negative argument to OP_CSV
 bip112tx_emptystack - test empty stack (= no argument) OP_CSV
 """
-from decimal import Decimal
 from itertools import product
-from io import BytesIO
 
-from test_framework.blocktools import create_coinbase, create_block, create_transaction, TIME_GENESIS_BLOCK
-from test_framework.messages import ToHex, CTransaction
-from test_framework.mininode import P2PDataStore
+from test_framework.blocktools import (
+    create_block,
+    create_coinbase,
+    TIME_GENESIS_BLOCK,
+)
+from test_framework.p2p import P2PDataStore
 from test_framework.script import (
     CScript,
     OP_CHECKSEQUENCEVERIFY,
@@ -58,8 +53,11 @@ from test_framework.script import (
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import (
     assert_equal,
-    get_bip9_status,
-    hex_str_to_bytes,
+    softfork_active,
+)
+from test_framework.wallet import (
+    MiniWallet,
+    MiniWalletMode,
 )
 
 TESTING_TX_COUNT = 83  # Number of testing transactions: 1 BIP113 tx, 16 BIP68 txs, 66 BIP112 txs (see comments above)
@@ -69,6 +67,7 @@ SEQ_DISABLE_FLAG = 1 << 31
 SEQ_RANDOM_HIGH_BIT = 1 << 25
 SEQ_TYPE_FLAG = 1 << 22
 SEQ_RANDOM_LOW_BIT = 1 << 18
+
 
 def relative_locktime(sdf, srhb, stf, srlb):
     """Returns a locktime with certain bits set."""
@@ -84,107 +83,106 @@ def relative_locktime(sdf, srhb, stf, srlb):
         locktime |= SEQ_RANDOM_LOW_BIT
     return locktime
 
+
 def all_rlt_txs(txs):
     return [tx['tx'] for tx in txs]
 
-def sign_transaction(node, unsignedtx):
-    rawtx = ToHex(unsignedtx)
-    signresult = node.signrawtransactionwithwallet(rawtx)
-    tx = CTransaction()
-    f = BytesIO(hex_str_to_bytes(signresult['hex']))
-    tx.deserialize(f)
-    return tx
 
-def create_bip112special(node, input, txversion, address):
-    tx = create_transaction(node, input, address, amount=Decimal("499.98"))
-    tx.nVersion = txversion
-    signtx = sign_transaction(node, tx)
-    signtx.vin[0].scriptSig = CScript([-1, OP_CHECKSEQUENCEVERIFY, OP_DROP] + list(CScript(signtx.vin[0].scriptSig)))
-    return signtx
+CSV_ACTIVATION_HEIGHT = 432
 
-def create_bip112emptystack(node, input, txversion, address):
-    tx = create_transaction(node, input, address, amount=Decimal("499.98"))
-    tx.nVersion = txversion
-    signtx = sign_transaction(node, tx)
-    signtx.vin[0].scriptSig = CScript([OP_CHECKSEQUENCEVERIFY] + list(CScript(signtx.vin[0].scriptSig)))
-    return signtx
-
-def send_generic_input_tx(node, coinbases, address):
-    return node.sendrawtransaction(ToHex(sign_transaction(node, create_transaction(node, node.getblock(coinbases.pop())['tx'][0], address, amount=Decimal("499.99")))))
-
-def create_bip68txs(node, bip68inputs, txversion, address, locktime_delta=0):
-    """Returns a list of bip68 transactions with different bits set."""
-    txs = []
-    assert len(bip68inputs) >= 16
-    for i, (sdf, srhb, stf, srlb) in enumerate(product(*[[True, False]] * 4)):
-        locktime = relative_locktime(sdf, srhb, stf, srlb)
-        tx = create_transaction(node, bip68inputs[i], address, amount=Decimal("499.98"))
-        tx.nVersion = txversion
-        tx.vin[0].nSequence = locktime + locktime_delta
-        tx = sign_transaction(node, tx)
-        tx.rehash()
-        txs.append({'tx': tx, 'sdf': sdf, 'stf': stf})
-
-    return txs
-
-def create_bip112txs(node, bip112inputs, varyOP_CSV, txversion, address, locktime_delta=0):
-    """Returns a list of bip68 transactions with different bits set."""
-    txs = []
-    assert len(bip112inputs) >= 16
-    for i, (sdf, srhb, stf, srlb) in enumerate(product(*[[True, False]] * 4)):
-        locktime = relative_locktime(sdf, srhb, stf, srlb)
-        tx = create_transaction(node, bip112inputs[i], address, amount=Decimal("499.98"))
-        if (varyOP_CSV):  # if varying OP_CSV, nSequence is fixed
-            tx.vin[0].nSequence = BASE_RELATIVE_LOCKTIME + locktime_delta
-        else:  # vary nSequence instead, OP_CSV is fixed
-            tx.vin[0].nSequence = locktime + locktime_delta
-        tx.nVersion = txversion
-        signtx = sign_transaction(node, tx)
-        if (varyOP_CSV):
-            signtx.vin[0].scriptSig = CScript([locktime, OP_CHECKSEQUENCEVERIFY, OP_DROP] + list(CScript(signtx.vin[0].scriptSig)))
-        else:
-            signtx.vin[0].scriptSig = CScript([BASE_RELATIVE_LOCKTIME, OP_CHECKSEQUENCEVERIFY, OP_DROP] + list(CScript(signtx.vin[0].scriptSig)))
-        tx.rehash()
-        txs.append({'tx': signtx, 'sdf': sdf, 'stf': stf})
-    return txs
 
 class BIP68_112_113Test(BitcoinTestFramework):
     def set_test_params(self):
         self.num_nodes = 1
         self.setup_clean_chain = True
-        # Must also set '-maxtipage=600100' to allow syncing from very old blocks
-        # and '-dip3params=2000:2000' to create pre-dip3 blocks only
+        # Must set '-dip3params=2000:2000' to create pre-dip3 blocks only
         self.extra_args = [[
+            '-peertimeout=999999',  # bump because mocktime might cause a disconnect otherwise
             '-whitelist=noban@127.0.0.1',
-            '-blockversion=4',
-            '-maxtipage=600100', '-dip3params=2000:2000',
+            f'-testactivationheight=csv@{CSV_ACTIVATION_HEIGHT}',
             '-par=1',  # Use only one script thread to get the exact reject reason for testing
+            '-dip3params=2000:2000',
+            '-testactivationheight=v20@2000',
+            '-testactivationheight=mn_rr@2000',
         ]]
         self.supports_cli = False
 
     def setup_network(self):
         self.setup_nodes()
 
-    def skip_test_if_missing_module(self):
-        self.skip_if_no_wallet()
+    def create_self_transfer_from_utxo(self, input_tx):
+        utxo = self.miniwallet.get_utxo(txid=input_tx.rehash(), mark_as_spent=False)
+        tx = self.miniwallet.create_self_transfer(utxo_to_spend=utxo)['tx']
+        return tx
 
-    def generate_blocks(self, number, version, test_blocks=None):
-        if test_blocks is None:
-            test_blocks = []
-        for i in range(number):
-            block = self.create_test_block([], version)
+    def create_bip112special(self, input, txversion):
+        tx = self.create_self_transfer_from_utxo(input)
+        tx.nVersion = txversion
+        self.miniwallet.sign_tx(tx)
+        tx.vin[0].scriptSig = CScript([-1, OP_CHECKSEQUENCEVERIFY, OP_DROP] + list(CScript(tx.vin[0].scriptSig)))
+        tx.rehash()
+        return tx
+
+    def create_bip112emptystack(self, input, txversion):
+        tx = self.create_self_transfer_from_utxo(input)
+        tx.nVersion = txversion
+        self.miniwallet.sign_tx(tx)
+        tx.vin[0].scriptSig = CScript([OP_CHECKSEQUENCEVERIFY] + list(CScript(tx.vin[0].scriptSig)))
+        tx.rehash()
+        return tx
+
+    def send_generic_input_tx(self, coinbases):
+        input_txid = self.nodes[0].getblock(coinbases.pop(), 2)['tx'][0]['txid']
+        utxo_to_spend = self.miniwallet.get_utxo(txid=input_txid)
+        return self.miniwallet.send_self_transfer(from_node=self.nodes[0], utxo_to_spend=utxo_to_spend)['tx']
+
+    def create_bip68txs(self, bip68inputs, txversion, locktime_delta=0):
+        """Returns a list of bip68 transactions with different bits set."""
+        txs = []
+        assert len(bip68inputs) >= 16
+        for i, (sdf, srhb, stf, srlb) in enumerate(product(*[[True, False]] * 4)):
+            locktime = relative_locktime(sdf, srhb, stf, srlb)
+            tx = self.create_self_transfer_from_utxo(bip68inputs[i])
+            tx.nVersion = txversion
+            tx.vin[0].nSequence = locktime + locktime_delta
+            self.miniwallet.sign_tx(tx)
+            txs.append({'tx': tx, 'sdf': sdf, 'stf': stf})
+
+        return txs
+
+    def create_bip112txs(self, bip112inputs, varyOP_CSV, txversion, locktime_delta=0):
+        """Returns a list of bip68 transactions with different bits set."""
+        txs = []
+        assert len(bip112inputs) >= 16
+        for i, (sdf, srhb, stf, srlb) in enumerate(product(*[[True, False]] * 4)):
+            locktime = relative_locktime(sdf, srhb, stf, srlb)
+            tx = self.create_self_transfer_from_utxo(bip112inputs[i])
+            if varyOP_CSV:  # if varying OP_CSV, nSequence is fixed
+                tx.vin[0].nSequence = BASE_RELATIVE_LOCKTIME + locktime_delta
+            else:  # vary nSequence instead, OP_CSV is fixed
+                tx.vin[0].nSequence = locktime + locktime_delta
+            tx.nVersion = txversion
+            self.miniwallet.sign_tx(tx)
+            if varyOP_CSV:
+                tx.vin[0].scriptSig = CScript([locktime, OP_CHECKSEQUENCEVERIFY, OP_DROP] + list(CScript(tx.vin[0].scriptSig)))
+            else:
+                tx.vin[0].scriptSig = CScript([BASE_RELATIVE_LOCKTIME, OP_CHECKSEQUENCEVERIFY, OP_DROP] + list(CScript(tx.vin[0].scriptSig)))
+            tx.rehash()
+            txs.append({'tx': tx, 'sdf': sdf, 'stf': stf})
+        return txs
+
+    def generate_blocks(self, number):
+        test_blocks = []
+        for _ in range(number):
+            block = self.create_test_block([])
             test_blocks.append(block)
             self.last_block_time += 600
             self.tip = block.sha256
             self.tipheight += 1
         return test_blocks
 
-    def create_test_block(self, txs, version=536870912):
-        block = create_block(self.tip, create_coinbase(self.tipheight + 1), self.last_block_time + 600)
-        block.nVersion = version
-        block.vtx.extend(txs)
-        block.hashMerkleRoot = block.calc_merkle_root()
-        block.rehash()
+    def create_test_block(self, txs):
+        block = create_block(self.tip, create_coinbase(self.tipheight + 1), self.last_block_time + 600, txlist=txs)
         block.solve()
         return block
 
@@ -192,97 +190,62 @@ class BIP68_112_113Test(BitcoinTestFramework):
         """Sends blocks to test node. Syncs and verifies that tip has advanced to most recent block.
 
         Call with success = False if the tip shouldn't advance to the most recent block."""
-        self.nodes[0].p2p.send_blocks_and_test(blocks, self.nodes[0], success=success, reject_reason=reject_reason)
+        self.helper_peer.send_blocks_and_test(blocks, self.nodes[0], success=success, reject_reason=reject_reason)
 
     def run_test(self):
-        self.nodes[0].add_p2p_connection(P2PDataStore())
+        self.helper_peer = self.nodes[0].add_p2p_connection(P2PDataStore())
+        self.miniwallet = MiniWallet(self.nodes[0], mode=MiniWalletMode.RAW_P2PK)
 
         self.log.info("Generate blocks in the past for coinbase outputs.")
-        self.coinbase_blocks = self.nodes[0].generate(COINBASE_BLOCK_COUNT)  # blocks generated for inputs
+        self.coinbase_blocks = self.generate(self.miniwallet, COINBASE_BLOCK_COUNT)  # blocks generated for inputs
         # set time so that there was enough time to build up to 1000 blocks 10 minutes apart on top of the last one
         # without worrying about getting into the future
         self.nodes[0].setmocktime(TIME_GENESIS_BLOCK + 600 * 1000 + 100)
         self.tipheight = COINBASE_BLOCK_COUNT  # height of the next block to build
         self.last_block_time = TIME_GENESIS_BLOCK
         self.tip = int(self.nodes[0].getbestblockhash(), 16)
-        self.nodeaddress = self.nodes[0].getnewaddress()
 
-        # TODO: uncomment the code below when bitcoin#16060 is backported,
-        #       should go right below `# Activation height is hardcoded` line
-        # # We advance to block height five below BIP112 activation for the following tests
-        # test_blocks = self.generate_blocks(CSV_ACTIVATION_HEIGHT-5 - COINBASE_BLOCK_COUNT)
-
-        self.log.info("Test that the csv softfork is DEFINED")
-        assert_equal(get_bip9_status(self.nodes[0], 'csv')['status'], 'defined')
-        test_blocks = self.generate_blocks(60, 4)
+        # Activation height is hardcoded
+        test_blocks = self.generate_blocks(CSV_ACTIVATION_HEIGHT - 5 - COINBASE_BLOCK_COUNT)
+        #test_blocks = self.generate_blocks(345)
         self.send_blocks(test_blocks)
+        assert not softfork_active(self.nodes[0], 'csv')
 
-        self.log.info("Advance from DEFINED to STARTED, height = 143")
-        assert_equal(get_bip9_status(self.nodes[0], 'csv')['status'], 'started')
-
-        self.log.info("Fail to achieve LOCKED_IN")
-        # 100 out of 144 signal bit 0. Use a variety of bits to simulate multiple parallel softforks
-
-        test_blocks = self.generate_blocks(50, 536870913)  # 0x20000001 (signalling ready)
-        test_blocks = self.generate_blocks(20, 4, test_blocks)  # 0x00000004 (signalling not)
-        test_blocks = self.generate_blocks(50, 536871169, test_blocks)  # 0x20000101 (signalling ready)
-        test_blocks = self.generate_blocks(24, 536936448, test_blocks)  # 0x20010000 (signalling not)
-        self.send_blocks(test_blocks)
-
-        self.log.info("Failed to advance past STARTED, height = 287")
-        assert_equal(get_bip9_status(self.nodes[0], 'csv')['status'], 'started')
-
-        self.log.info("Generate blocks to achieve LOCK-IN")
-        # 108 out of 144 signal bit 0 to achieve lock-in
-        # using a variety of bits to simulate multiple parallel softforks
-        test_blocks = self.generate_blocks(58, 536870913)  # 0x20000001 (signalling ready)
-        test_blocks = self.generate_blocks(26, 4, test_blocks)  # 0x00000004 (signalling not)
-        test_blocks = self.generate_blocks(50, 536871169, test_blocks)  # 0x20000101 (signalling ready)
-        test_blocks = self.generate_blocks(10, 536936448, test_blocks)  # 0x20010000 (signalling not)
-        self.send_blocks(test_blocks)
-
-        self.log.info("Advanced from STARTED to LOCKED_IN, height = 431")
-        assert_equal(get_bip9_status(self.nodes[0], 'csv')['status'], 'locked_in')
-
-        # Generate 140 more version 4 blocks
-        test_blocks = self.generate_blocks(140, 4)
-        self.send_blocks(test_blocks)
-
-        # Inputs at height = 572
+        # Inputs at height = 431
         #
-        # Put inputs for all tests in the chain at height 572 (tip now = 571) (time increases by 600s per block)
+        # Put inputs for all tests in the chain at height 431 (tip now = 430) (time increases by 600s per block)
         # Note we reuse inputs for v1 and v2 txs so must test these separately
         # 16 normal inputs
         bip68inputs = []
-        for i in range(16):
-            bip68inputs.append(send_generic_input_tx(self.nodes[0], self.coinbase_blocks, self.nodeaddress))
+        for _ in range(16):
+            bip68inputs.append(self.send_generic_input_tx(self.coinbase_blocks))
 
         # 2 sets of 16 inputs with 10 OP_CSV OP_DROP (actually will be prepended to spending scriptSig)
         bip112basicinputs = []
-        for j in range(2):
+        for _ in range(2):
             inputs = []
-            for i in range(16):
-                inputs.append(send_generic_input_tx(self.nodes[0], self.coinbase_blocks, self.nodeaddress))
+            for _ in range(16):
+                inputs.append(self.send_generic_input_tx(self.coinbase_blocks))
             bip112basicinputs.append(inputs)
 
         # 2 sets of 16 varied inputs with (relative_lock_time) OP_CSV OP_DROP (actually will be prepended to spending scriptSig)
         bip112diverseinputs = []
-        for j in range(2):
+        for _ in range(2):
             inputs = []
-            for i in range(16):
-                inputs.append(send_generic_input_tx(self.nodes[0], self.coinbase_blocks, self.nodeaddress))
+            for _ in range(16):
+                inputs.append(self.send_generic_input_tx(self.coinbase_blocks))
             bip112diverseinputs.append(inputs)
 
         # 1 special input with -1 OP_CSV OP_DROP (actually will be prepended to spending scriptSig)
-        bip112specialinput = send_generic_input_tx(self.nodes[0], self.coinbase_blocks, self.nodeaddress)
+        bip112specialinput = self.send_generic_input_tx(self.coinbase_blocks)
         # 1 special input with (empty stack) OP_CSV (actually will be prepended to spending scriptSig)
-        bip112emptystackinput = send_generic_input_tx(self.nodes[0],self.coinbase_blocks, self.nodeaddress)
+        bip112emptystackinput = self.send_generic_input_tx(self.coinbase_blocks)
 
         # 1 normal input
-        bip113input = send_generic_input_tx(self.nodes[0], self.coinbase_blocks, self.nodeaddress)
+        bip113input = self.send_generic_input_tx(self.coinbase_blocks)
 
         self.nodes[0].setmocktime(self.last_block_time + 600)
-        inputblockhash = self.nodes[0].generate(1)[0]  # 1 block generated for inputs to be in chain at height 572
+        inputblockhash = self.generate(self.nodes[0], 1)[0]  # 1 block generated for inputs to be in chain at height 431
         self.nodes[0].setmocktime(TIME_GENESIS_BLOCK + 600 * 1000 + 100)
         self.tip = int(inputblockhash, 16)
         self.tipheight += 1
@@ -290,44 +253,45 @@ class BIP68_112_113Test(BitcoinTestFramework):
         assert_equal(len(self.nodes[0].getblock(inputblockhash, True)["tx"]), TESTING_TX_COUNT + 1)
 
         # 2 more version 4 blocks
-        test_blocks = self.generate_blocks(2, 4)
+        test_blocks = self.generate_blocks(2)
         self.send_blocks(test_blocks)
 
-        self.log.info("Not yet advanced to ACTIVE, height = 574 (will activate for block 576, not 575)")
-        assert_equal(get_bip9_status(self.nodes[0], 'csv')['status'], 'locked_in')
+        assert_equal(self.tipheight, CSV_ACTIVATION_HEIGHT - 2)
+        self.log.info(f"Height = {self.tipheight}, CSV not yet active (will activate for block {CSV_ACTIVATION_HEIGHT}, not {CSV_ACTIVATION_HEIGHT - 1})")
+        assert not softfork_active(self.nodes[0], 'csv')
 
         # Test both version 1 and version 2 transactions for all tests
         # BIP113 test transaction will be modified before each use to put in appropriate block time
-        bip113tx_v1 = create_transaction(self.nodes[0], bip113input, self.nodeaddress, amount=Decimal("499.98"))
+        bip113tx_v1 = self.create_self_transfer_from_utxo(bip113input)
         bip113tx_v1.vin[0].nSequence = 0xFFFFFFFE
         bip113tx_v1.nVersion = 1
-        bip113tx_v2 = create_transaction(self.nodes[0], bip113input, self.nodeaddress, amount=Decimal("499.98"))
+        bip113tx_v2 = self.create_self_transfer_from_utxo(bip113input)
         bip113tx_v2.vin[0].nSequence = 0xFFFFFFFE
         bip113tx_v2.nVersion = 2
 
         # For BIP68 test all 16 relative sequence locktimes
-        bip68txs_v1 = create_bip68txs(self.nodes[0], bip68inputs, 1, self.nodeaddress)
-        bip68txs_v2 = create_bip68txs(self.nodes[0], bip68inputs, 2, self.nodeaddress)
+        bip68txs_v1 = self.create_bip68txs(bip68inputs, 1)
+        bip68txs_v2 = self.create_bip68txs(bip68inputs, 2)
 
         # For BIP112 test:
         # 16 relative sequence locktimes of 10 against 10 OP_CSV OP_DROP inputs
-        bip112txs_vary_nSequence_v1 = create_bip112txs(self.nodes[0], bip112basicinputs[0], False, 1, self.nodeaddress)
-        bip112txs_vary_nSequence_v2 = create_bip112txs(self.nodes[0], bip112basicinputs[0], False, 2, self.nodeaddress)
+        bip112txs_vary_nSequence_v1 = self.create_bip112txs(bip112basicinputs[0], False, 1)
+        bip112txs_vary_nSequence_v2 = self.create_bip112txs(bip112basicinputs[0], False, 2)
         # 16 relative sequence locktimes of 9 against 10 OP_CSV OP_DROP inputs
-        bip112txs_vary_nSequence_9_v1 = create_bip112txs(self.nodes[0], bip112basicinputs[1], False, 1, self.nodeaddress, -1)
-        bip112txs_vary_nSequence_9_v2 = create_bip112txs(self.nodes[0], bip112basicinputs[1], False, 2, self.nodeaddress, -1)
+        bip112txs_vary_nSequence_9_v1 = self.create_bip112txs(bip112basicinputs[1], False, 1, -1)
+        bip112txs_vary_nSequence_9_v2 = self.create_bip112txs(bip112basicinputs[1], False, 2, -1)
         # sequence lock time of 10 against 16 (relative_lock_time) OP_CSV OP_DROP inputs
-        bip112txs_vary_OP_CSV_v1 = create_bip112txs(self.nodes[0], bip112diverseinputs[0], True, 1, self.nodeaddress)
-        bip112txs_vary_OP_CSV_v2 = create_bip112txs(self.nodes[0], bip112diverseinputs[0], True, 2, self.nodeaddress)
+        bip112txs_vary_OP_CSV_v1 = self.create_bip112txs(bip112diverseinputs[0], True, 1)
+        bip112txs_vary_OP_CSV_v2 = self.create_bip112txs(bip112diverseinputs[0], True, 2)
         # sequence lock time of 9 against 16 (relative_lock_time) OP_CSV OP_DROP inputs
-        bip112txs_vary_OP_CSV_9_v1 = create_bip112txs(self.nodes[0], bip112diverseinputs[1], True, 1, self.nodeaddress, -1)
-        bip112txs_vary_OP_CSV_9_v2 = create_bip112txs(self.nodes[0], bip112diverseinputs[1], True, 2, self.nodeaddress, -1)
+        bip112txs_vary_OP_CSV_9_v1 = self.create_bip112txs(bip112diverseinputs[1], True, 1, -1)
+        bip112txs_vary_OP_CSV_9_v2 = self.create_bip112txs(bip112diverseinputs[1], True, 2, -1)
         # -1 OP_CSV OP_DROP input
-        bip112tx_special_v1 = create_bip112special(self.nodes[0], bip112specialinput, 1, self.nodeaddress)
-        bip112tx_special_v2 = create_bip112special(self.nodes[0], bip112specialinput, 2, self.nodeaddress)
+        bip112tx_special_v1 = self.create_bip112special(bip112specialinput, 1)
+        bip112tx_special_v2 = self.create_bip112special(bip112specialinput, 2)
         # (empty stack) OP_CSV input
-        bip112tx_emptystack_v1 = create_bip112emptystack(self.nodes[0], bip112emptystackinput, 1, self.nodeaddress)
-        bip112tx_emptystack_v2 = create_bip112emptystack(self.nodes[0], bip112emptystackinput, 2, self.nodeaddress)
+        bip112tx_emptystack_v1 = self.create_bip112emptystack(bip112emptystackinput, 1)
+        bip112tx_emptystack_v2 = self.create_bip112emptystack(bip112emptystackinput, 2)
 
         self.log.info("TESTING")
 
@@ -337,8 +301,8 @@ class BIP68_112_113Test(BitcoinTestFramework):
         success_txs = []
         # BIP113 tx, -1 CSV tx and empty stack CSV tx should succeed
         bip113tx_v1.nLockTime = self.last_block_time - 600 * 5  # = MTP of prior block (not <) but < time put on current block
-        bip113signed1 = sign_transaction(self.nodes[0], bip113tx_v1)
-        success_txs.append(bip113signed1)
+        self.miniwallet.sign_tx(bip113tx_v1)
+        success_txs.append(bip113tx_v1)
         success_txs.append(bip112tx_special_v1)
         success_txs.append(bip112tx_emptystack_v1)
         # add BIP 68 txs
@@ -357,8 +321,8 @@ class BIP68_112_113Test(BitcoinTestFramework):
         success_txs = []
         # BIP113 tx, -1 CSV tx and empty stack CSV tx should succeed
         bip113tx_v2.nLockTime = self.last_block_time - 600 * 5  # = MTP of prior block (not <) but < time put on current block
-        bip113signed2 = sign_transaction(self.nodes[0], bip113tx_v2)
-        success_txs.append(bip113signed2)
+        self.miniwallet.sign_tx(bip113tx_v2)
+        success_txs.append(bip113tx_v2)
         success_txs.append(bip112tx_special_v2)
         success_txs.append(bip112tx_emptystack_v2)
         # add BIP 68 txs
@@ -372,32 +336,34 @@ class BIP68_112_113Test(BitcoinTestFramework):
         self.send_blocks([self.create_test_block(success_txs)])
         self.nodes[0].invalidateblock(self.nodes[0].getbestblockhash())
 
-        # 1 more version 4 block to get us to height 575 so the fork should now be active for the next block
-        test_blocks = self.generate_blocks(1, 4)
+        # 1 more version 4 block to get us to height 432 so the fork should now be active for the next block
+        assert not softfork_active(self.nodes[0], 'csv')
+        test_blocks = self.generate_blocks(1)
         self.send_blocks(test_blocks)
-        assert_equal(get_bip9_status(self.nodes[0], 'csv')['status'], 'active')
+        assert softfork_active(self.nodes[0], 'csv')
 
         self.log.info("Post-Soft Fork Tests.")
 
         self.log.info("BIP 113 tests")
         # BIP 113 tests should now fail regardless of version number if nLockTime isn't satisfied by new rules
         bip113tx_v1.nLockTime = self.last_block_time - 600 * 5  # = MTP of prior block (not <) but < time put on current block
-        bip113signed1 = sign_transaction(self.nodes[0], bip113tx_v1)
+        self.miniwallet.sign_tx(bip113tx_v1)
         bip113tx_v2.nLockTime = self.last_block_time - 600 * 5  # = MTP of prior block (not <) but < time put on current block
-        bip113signed2 = sign_transaction(self.nodes[0], bip113tx_v2)
-        for bip113tx in [bip113signed1, bip113signed2]:
-            self.send_blocks([self.create_test_block([bip113tx])], success=False)
+        self.miniwallet.sign_tx(bip113tx_v2)
+        for bip113tx in [bip113tx_v1, bip113tx_v2]:
+            self.send_blocks([self.create_test_block([bip113tx])], success=False, reject_reason='bad-txns-nonfinal')
+
         # BIP 113 tests should now pass if the locktime is < MTP
         bip113tx_v1.nLockTime = self.last_block_time - 600 * 5 - 1  # < MTP of prior block
-        bip113signed1 = sign_transaction(self.nodes[0], bip113tx_v1)
+        self.miniwallet.sign_tx(bip113tx_v1)
         bip113tx_v2.nLockTime = self.last_block_time - 600 * 5 - 1  # < MTP of prior block
-        bip113signed2 = sign_transaction(self.nodes[0], bip113tx_v2)
-        for bip113tx in [bip113signed1, bip113signed2]:
+        self.miniwallet.sign_tx(bip113tx_v2)
+        for bip113tx in [bip113tx_v1, bip113tx_v2]:
             self.send_blocks([self.create_test_block([bip113tx])])
             self.nodes[0].invalidateblock(self.nodes[0].getbestblockhash())
 
-        # Next block height = 580 after 4 blocks of random version
-        test_blocks = self.generate_blocks(4, 1234)
+        # Next block height = 437 after 4 blocks of random version
+        test_blocks = self.generate_blocks(4)
         self.send_blocks(test_blocks)
 
         self.log.info("BIP 68 tests")
@@ -418,14 +384,14 @@ class BIP68_112_113Test(BitcoinTestFramework):
         # All txs without flag fail as we are at delta height = 8 < 10 and delta time = 8 * 600 < 10 * 512
         bip68timetxs = [tx['tx'] for tx in bip68txs_v2 if not tx['sdf'] and tx['stf']]
         for tx in bip68timetxs:
-            self.send_blocks([self.create_test_block([tx])], success=False)
+            self.send_blocks([self.create_test_block([tx])], success=False, reject_reason='bad-txns-nonfinal')
 
         bip68heighttxs = [tx['tx'] for tx in bip68txs_v2 if not tx['sdf'] and not tx['stf']]
         for tx in bip68heighttxs:
-            self.send_blocks([self.create_test_block([tx])], success=False)
+            self.send_blocks([self.create_test_block([tx])], success=False, reject_reason='bad-txns-nonfinal')
 
-        # Advance one block to 581
-        test_blocks = self.generate_blocks(1, 1234)
+        # Advance one block to 438
+        test_blocks = self.generate_blocks(1)
         self.send_blocks(test_blocks)
 
         # Height txs should fail and time txs should now pass 9 * 600 > 10 * 512
@@ -433,10 +399,10 @@ class BIP68_112_113Test(BitcoinTestFramework):
         self.send_blocks([self.create_test_block(bip68success_txs)])
         self.nodes[0].invalidateblock(self.nodes[0].getbestblockhash())
         for tx in bip68heighttxs:
-            self.send_blocks([self.create_test_block([tx])], success=False)
+            self.send_blocks([self.create_test_block([tx])], success=False, reject_reason='bad-txns-nonfinal')
 
-        # Advance one block to 582
-        test_blocks = self.generate_blocks(1, 1234)
+        # Advance one block to 439
+        test_blocks = self.generate_blocks(1)
         self.send_blocks(test_blocks)
 
         # All BIP 68 txs should pass
@@ -448,7 +414,8 @@ class BIP68_112_113Test(BitcoinTestFramework):
         self.log.info("Test version 1 txs")
 
         # -1 OP_CSV tx and (empty stack) OP_CSV tx should fail
-        self.send_blocks([self.create_test_block([bip112tx_special_v1])], success=False)
+        self.send_blocks([self.create_test_block([bip112tx_special_v1])], success=False,
+                         reject_reason='non-mandatory-script-verify-flag (Negative locktime)')
         self.send_blocks([self.create_test_block([bip112tx_emptystack_v1])], success=False,
                          reject_reason='non-mandatory-script-verify-flag (Operation not valid with the current stack size)')
         # If SEQUENCE_LOCKTIME_DISABLE_FLAG is set in argument to OP_CSV, version 1 txs should still pass
@@ -461,15 +428,17 @@ class BIP68_112_113Test(BitcoinTestFramework):
         # If SEQUENCE_LOCKTIME_DISABLE_FLAG is unset in argument to OP_CSV, version 1 txs should now fail
         fail_txs = all_rlt_txs(bip112txs_vary_nSequence_v1)
         fail_txs += all_rlt_txs(bip112txs_vary_nSequence_9_v1)
-        fail_txs += [tx['tx'] for tx in bip112txs_vary_OP_CSV_9_v1 if not tx['sdf']]
+        fail_txs += [tx['tx'] for tx in bip112txs_vary_OP_CSV_v1 if not tx['sdf']]
         fail_txs += [tx['tx'] for tx in bip112txs_vary_OP_CSV_9_v1 if not tx['sdf']]
         for tx in fail_txs:
-            self.send_blocks([self.create_test_block([tx])], success=False)
+            self.send_blocks([self.create_test_block([tx])], success=False,
+                             reject_reason='non-mandatory-script-verify-flag (Locktime requirement not satisfied)')
 
         self.log.info("Test version 2 txs")
 
         # -1 OP_CSV tx and (empty stack) OP_CSV tx should fail
-        self.send_blocks([self.create_test_block([bip112tx_special_v2])], success=False)
+        self.send_blocks([self.create_test_block([bip112tx_special_v2])], success=False,
+                         reject_reason='non-mandatory-script-verify-flag (Negative locktime)')
         self.send_blocks([self.create_test_block([bip112tx_emptystack_v2])], success=False,
                          reject_reason='non-mandatory-script-verify-flag (Operation not valid with the current stack size)')
 
@@ -486,18 +455,21 @@ class BIP68_112_113Test(BitcoinTestFramework):
         fail_txs = all_rlt_txs(bip112txs_vary_nSequence_9_v2)
         fail_txs += [tx['tx'] for tx in bip112txs_vary_OP_CSV_9_v2 if not tx['sdf']]
         for tx in fail_txs:
-            self.send_blocks([self.create_test_block([tx])], success=False)
+            self.send_blocks([self.create_test_block([tx])], success=False,
+                             reject_reason='non-mandatory-script-verify-flag (Locktime requirement not satisfied)')
 
         # If SEQUENCE_LOCKTIME_DISABLE_FLAG is set in nSequence, tx should fail
         fail_txs = [tx['tx'] for tx in bip112txs_vary_nSequence_v2 if tx['sdf']]
         for tx in fail_txs:
-            self.send_blocks([self.create_test_block([tx])], success=False)
+            self.send_blocks([self.create_test_block([tx])], success=False,
+                             reject_reason='non-mandatory-script-verify-flag (Locktime requirement not satisfied)')
 
         # If sequencelock types mismatch, tx should fail
         fail_txs = [tx['tx'] for tx in bip112txs_vary_nSequence_v2 if not tx['sdf'] and tx['stf']]
         fail_txs += [tx['tx'] for tx in bip112txs_vary_OP_CSV_v2 if not tx['sdf'] and tx['stf']]
         for tx in fail_txs:
-            self.send_blocks([self.create_test_block([tx])], success=False)
+            self.send_blocks([self.create_test_block([tx])], success=False,
+                             reject_reason='non-mandatory-script-verify-flag (Locktime requirement not satisfied)')
 
         # Remaining txs should pass, just test masking works properly
         success_txs = [tx['tx'] for tx in bip112txs_vary_nSequence_v2 if not tx['sdf'] and not tx['stf']]
@@ -509,11 +481,12 @@ class BIP68_112_113Test(BitcoinTestFramework):
         time_txs = []
         for tx in [tx['tx'] for tx in bip112txs_vary_OP_CSV_v2 if not tx['sdf'] and tx['stf']]:
             tx.vin[0].nSequence = BASE_RELATIVE_LOCKTIME | SEQ_TYPE_FLAG
-            signtx = sign_transaction(self.nodes[0], tx)
-            time_txs.append(signtx)
+            self.miniwallet.sign_tx(tx)
+            time_txs.append(tx)
 
         self.send_blocks([self.create_test_block(time_txs)])
         self.nodes[0].invalidateblock(self.nodes[0].getbestblockhash())
+
 
 if __name__ == '__main__':
     BIP68_112_113Test().main()

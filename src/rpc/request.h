@@ -1,5 +1,5 @@
 // Copyright (c) 2010 Satoshi Nakamoto
-// Copyright (c) 2009-2019 The Bitcoin Core developers
+// Copyright (c) 2009-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -24,7 +24,7 @@ bool GetAuthCookie(std::string *cookie_out);
 /** Delete RPC authentication cookie from disk */
 void DeleteAuthCookie();
 /** Parse JSON-RPC batch reply into a vector */
-std::vector<UniValue> JSONRPCProcessBatchReply(const UniValue &in, size_t num);
+std::vector<UniValue> JSONRPCProcessBatchReply(const UniValue& in);
 
 class JSONRPCRequest
 {
@@ -32,26 +32,15 @@ public:
     UniValue id;
     std::string strMethod;
     UniValue params;
-    bool fHelp;
+    enum Mode { EXECUTE, GET_HELP, GET_ARGS } mode = EXECUTE;
     std::string URI;
     std::string authUser;
     std::string peerAddr;
-    const CoreContext& context;
-
-    JSONRPCRequest(const CoreContext& context) : id(NullUniValue), params(NullUniValue), fHelp(false), context(context) {}
-
-    //! Initializes request information from another request object and the
-    //! given context. The implementation should be updated if any members are
-    //! added or removed above.
-    JSONRPCRequest(const JSONRPCRequest& other, const CoreContext& context)
-        : id(other.id), strMethod(other.strMethod), params(other.params), fHelp(other.fHelp), URI(other.URI),
-          authUser(other.authUser), peerAddr(other.peerAddr), context(context)
-    {
-    }
+    CoreContext context;
 
     void parse(const UniValue& valRequest);
     // Returns new JSONRPCRequest with the first param "squashed' into strMethod
-    const JSONRPCRequest squashed() const;
+    JSONRPCRequest squashed() const;
 };
 
 #endif // BITCOIN_RPC_REQUEST_H

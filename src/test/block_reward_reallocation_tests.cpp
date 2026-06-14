@@ -1,66 +1,59 @@
-// Copyright (c) 2021-2022 The Dash Core developers
+// Copyright (c) 2021-2025 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <test/util/setup_common.h>
 
-#include <chainparams.h>
 #include <bls/bls.h>
-#include <consensus/validation.h>
-#include <messagesigner.h>
-#include <miner.h>
-#include <netbase.h>
+#include <evo/deterministicmns.h>
+#include <evo/providertx.h>
+#include <evo/specialtx.h>
+#include <masternode/payments.h>
+#include <util/helpers.h>
+#include <util/std23.h>
+
+#include <chainparams.h>
+#include <deploymentstatus.h>
+#include <node/miner.h>
+#include <node/transaction.h>
 #include <script/interpreter.h>
 #include <script/sign.h>
 #include <script/signingprovider.h>
 #include <script/standard.h>
-#include <spork.h>
 #include <validation.h>
-
-#include <evo/specialtx.h>
-#include <evo/providertx.h>
-#include <evo/deterministicmns.h>
-#include <governance/governance.h>
-#include <llmq/blockprocessor.h>
-#include <llmq/chainlocks.h>
-#include <llmq/context.h>
-#include <llmq/instantsend.h>
-#include <util/enumerate.h>
-#include <util/irange.h>
 
 #include <boost/test/unit_test.hpp>
 
 #include <map>
 #include <vector>
 
-using SimpleUTXOMap = std::map<COutPoint, std::pair<int, CAmount>>;
+using node::BlockAssembler;
+using node::GetTransaction;
 
-const auto deployment_id = Consensus::DEPLOYMENT_REALLOC;
-const int window{500}, th_start{400}, th_end{300};
+using SimpleUTXOMap = std::map<COutPoint, std::pair<int, CAmount>>;
 
 struct TestChainBRRBeforeActivationSetup : public TestChainSetup
 {
-    TestChainBRRBeforeActivationSetup() : TestChainSetup(497)
+    // Force fast DIP3 activation
+    TestChainBRRBeforeActivationSetup() :
+        TestChainSetup(497, CBaseChainParams::REGTEST,
+                       {"-dip3params=30:50", "-testactivationheight=brr@1000", "-testactivationheight=v20@1200", "-testactivationheight=mn_rr@2200"})
     {
-        // Force fast DIP3 activation
-        gArgs.ForceSetArg("-dip3params", "30:50");
-        SelectParams(CBaseChainParams::REGTEST);
-        gArgs.ForceRemoveArg("dip3params");
     }
 };
 
 static SimpleUTXOMap BuildSimpleUtxoMap(const std::vector<CTransactionRef>& txs)
 {
     SimpleUTXOMap utxos;
-    for (auto [i, tx] : enumerate(txs)) {
-        for (auto [j, output] : enumerate(tx->vout)) {
+    for (auto [i, tx] : std23::views::enumerate(txs)) {
+        for (auto [j, output] : std23::views::enumerate(tx->vout)) {
             utxos.try_emplace(COutPoint(tx->GetHash(), j), std::make_pair((int)i + 1, output.nValue));
         }
     }
     return utxos;
 }
 
-static std::vector<COutPoint> SelectUTXOs(SimpleUTXOMap& utoxs, CAmount amount, CAmount& changeRet)
+static std::vector<COutPoint> SelectUTXOs(const CChain& active_chain, SimpleUTXOMap& utoxs, CAmount amount, CAmount& changeRet)
 {
     changeRet = 0;
 
@@ -69,7 +62,7 @@ static std::vector<COutPoint> SelectUTXOs(SimpleUTXOMap& utoxs, CAmount amount, 
     while (!utoxs.empty()) {
         bool found = false;
         for (auto it = utoxs.begin(); it != utoxs.end(); ++it) {
-            if (::ChainActive().Height() - it->second.first < 101) {
+            if (active_chain.Height() - it->second.first < 101) {
                 continue;
             }
 
@@ -79,7 +72,7 @@ static std::vector<COutPoint> SelectUTXOs(SimpleUTXOMap& utoxs, CAmount amount, 
             utoxs.erase(it);
             break;
         }
-        BOOST_ASSERT(found);
+        BOOST_REQUIRE(found);
         if (selectedAmount >= amount) {
             changeRet = selectedAmount - amount;
             break;
@@ -89,10 +82,10 @@ static std::vector<COutPoint> SelectUTXOs(SimpleUTXOMap& utoxs, CAmount amount, 
     return selectedUtxos;
 }
 
-static void FundTransaction(CMutableTransaction& tx, SimpleUTXOMap& utoxs, const CScript& scriptPayout, CAmount amount)
+static void FundTransaction(const CChain& active_chain, CMutableTransaction& tx, SimpleUTXOMap& utoxs, const CScript& scriptPayout, CAmount amount)
 {
     CAmount change;
-    auto inputs = SelectUTXOs(utoxs, amount, change);
+    auto inputs = SelectUTXOs(active_chain, utoxs, amount, change);
     for (const auto& input : inputs) {
         tx.vin.emplace_back(input);
     }
@@ -107,32 +100,35 @@ static void SignTransaction(const CTxMemPool& mempool, CMutableTransaction& tx, 
     FillableSigningProvider tempKeystore;
     tempKeystore.AddKeyPubKey(coinbaseKey, coinbaseKey.GetPubKey());
 
-    for (auto [i, input] : enumerate(tx.vin)) {
+    for (auto [i, input] : std23::views::enumerate(tx.vin)) {
         uint256 hashBlock;
-        CTransactionRef txFrom = GetTransaction(/* block_index */ nullptr, &mempool, input.prevout.hash, Params().GetConsensus(), hashBlock);
-        BOOST_ASSERT(txFrom);
-        BOOST_ASSERT(SignSignature(tempKeystore, *txFrom, tx, i, SIGHASH_ALL));
+        CTransactionRef txFrom = GetTransaction(/*block_index=*/nullptr, &mempool, input.prevout.hash,
+                                                Params().GetConsensus(), hashBlock);
+        BOOST_REQUIRE(txFrom);
+        BOOST_REQUIRE(SignSignature(tempKeystore, *txFrom, tx, i, SIGHASH_ALL));
     }
 }
 
-static CMutableTransaction CreateProRegTx(const CTxMemPool& mempool, SimpleUTXOMap& utxos, int port, const CScript& scriptPayout, const CKey& coinbaseKey, CKey& ownerKeyRet, CBLSSecretKey& operatorKeyRet)
+static CMutableTransaction CreateProRegTx(const CChain& active_chain, const CTxMemPool& mempool, SimpleUTXOMap& utxos, int port, const CScript& scriptPayout, const CKey& coinbaseKey, CKey& ownerKeyRet, CBLSSecretKey& operatorKeyRet)
 {
     ownerKeyRet.MakeNewKey(true);
     operatorKeyRet.MakeNewKey();
 
     CProRegTx proTx;
-    proTx.nVersion = CProRegTx::GetVersion(!bls::bls_legacy_scheme);
+    proTx.nVersion = ProTxVersion::GetMax(!bls::bls_legacy_scheme, /*is_extended_addr=*/false);
+    proTx.netInfo = NetInfoInterface::MakeNetInfo(proTx.nVersion);
     proTx.collateralOutpoint.n = 0;
-    proTx.addr = LookupNumeric("1.1.1.1", port);
+    BOOST_CHECK_EQUAL(proTx.netInfo->AddEntry(NetInfoPurpose::CORE_P2P, strprintf("1.1.1.1:%d", port)),
+                      NetInfoStatus::Success);
     proTx.keyIDOwner = ownerKeyRet.GetPubKey().GetID();
-    proTx.pubKeyOperator = operatorKeyRet.GetPublicKey();
+    proTx.pubKeyOperator.Set(operatorKeyRet.GetPublicKey(), bls::bls_legacy_scheme.load());
     proTx.keyIDVoting = ownerKeyRet.GetPubKey().GetID();
     proTx.scriptPayout = scriptPayout;
 
     CMutableTransaction tx;
     tx.nVersion = 3;
     tx.nType = TRANSACTION_PROVIDER_REGISTER;
-    FundTransaction(tx, utxos, scriptPayout, 1000 * COIN);
+    FundTransaction(active_chain, tx, utxos, scriptPayout, dmn_types::Regular.collat_amount);
     proTx.inputsHash = CalcTxInputsHash(CTransaction(tx));
     SetTxPayload(tx, proTx);
     SignTransaction(mempool, tx, coinbaseKey);
@@ -144,138 +140,67 @@ static CScript GenerateRandomAddress()
 {
     CKey key;
     key.MakeNewKey(false);
-    return GetScriptForDestination(key.GetPubKey().GetID());
-}
-
-static constexpr int threshold(int attempt)
-{
-    // An implementation of VersionBitsConditionChecker::Threshold()
-    int threshold_calc = th_start - attempt * attempt * window / 100 / 5;
-    if (threshold_calc < th_end) {
-        return th_end;
-    }
-    return threshold_calc;
+    return GetScriptForDestination(PKHash(key.GetPubKey()));
 }
 
 BOOST_AUTO_TEST_SUITE(block_reward_reallocation_tests)
 
 BOOST_FIXTURE_TEST_CASE(block_reward_reallocation, TestChainBRRBeforeActivationSetup)
 {
+    auto& dmnman = *Assert(m_node.dmnman);
     const auto& consensus_params = Params().GetConsensus();
-    CScript coinbasePubKey = CScript() <<  ToByteVector(coinbaseKey.GetPubKey()) << OP_CHECKSIG;
 
-    auto signal = [&](int num_blocks, bool expected_lockin)
-    {
-        // Mine non-signalling blocks
-        gArgs.ForceSetArg("-blockversion", "536870912");
-        for ([[maybe_unused]] auto _ : irange::range(window - num_blocks)) {
-            CreateAndProcessBlock({}, coinbaseKey);
-            LOCK(cs_main);
-            deterministicMNManager->UpdatedBlockTip(::ChainActive().Tip());
-        }
-        gArgs.ForceRemoveArg("blockversion");
-        // Mine signalling blocks
-        for ([[maybe_unused]] auto _ : irange::range(num_blocks)) {
-            CreateAndProcessBlock({}, coinbaseKey);
-            LOCK(cs_main);
-            deterministicMNManager->UpdatedBlockTip(::ChainActive().Tip());
-        }
-        LOCK(cs_main);
-        if (expected_lockin) {
-            BOOST_CHECK_EQUAL(VersionBitsTipState(consensus_params, deployment_id), ThresholdState::LOCKED_IN);
-        } else {
-            BOOST_CHECK_EQUAL(VersionBitsTipState(consensus_params, deployment_id), ThresholdState::STARTED);
-        }
-    };
+    CScript coinbasePubKey = GetScriptForRawPubKey(coinbaseKey.GetPubKey());
 
-    BOOST_ASSERT(deterministicMNManager->IsDIP3Enforced(WITH_LOCK(cs_main, return ::ChainActive().Height())));
+    BOOST_REQUIRE(DeploymentDIP0003Enforced(WITH_LOCK(cs_main, return m_node.chainman->ActiveChain().Height()),
+                                            consensus_params));
 
     // Register one MN
     CKey ownerKey;
     CBLSSecretKey operatorKey;
     auto utxos = BuildSimpleUtxoMap(m_coinbase_txns);
-    auto tx = CreateProRegTx(*m_node.mempool, utxos, 1, GenerateRandomAddress(), coinbaseKey, ownerKey, operatorKey);
+    auto tx = CreateProRegTx(m_node.chainman->ActiveChain(), *m_node.mempool, utxos, 1, GenerateRandomAddress(), coinbaseKey, ownerKey, operatorKey);
 
-    CreateAndProcessBlock({tx}, coinbaseKey);
-
-    {
-        LOCK(cs_main);
-        deterministicMNManager->UpdatedBlockTip(::ChainActive().Tip());
-
-        BOOST_ASSERT(deterministicMNManager->GetListAtChainTip().HasMN(tx.GetHash()));
-
-        BOOST_CHECK_EQUAL(::ChainActive().Height(), 498);
-        BOOST_CHECK_EQUAL(VersionBitsTipState(consensus_params, deployment_id), ThresholdState::DEFINED);
-    }
-
-    CreateAndProcessBlock({}, coinbaseKey);
+    CreateAndProcessBlock({tx}, coinbasePubKey);
 
     {
         LOCK(cs_main);
-        // Advance from DEFINED to STARTED at height = 499
-        BOOST_CHECK_EQUAL(::ChainActive().Height(), 499);
-        deterministicMNManager->UpdatedBlockTip(::ChainActive().Tip());
-        BOOST_ASSERT(deterministicMNManager->GetListAtChainTip().HasMN(tx.GetHash()));
-        BOOST_CHECK_EQUAL(VersionBitsTipState(consensus_params, deployment_id), ThresholdState::STARTED);
-        BOOST_CHECK_EQUAL(VersionBitsTipStatistics(consensus_params, deployment_id).threshold, threshold(0));
-        // Next block should be signaling by default
-        const auto pblocktemplate = BlockAssembler(*sporkManager, *governance, *m_node.llmq_ctx->quorum_block_processor, *m_node.llmq_ctx->clhandler,  *m_node.llmq_ctx->isman, *m_node.evodb, *m_node.mempool, Params()).CreateNewBlock(coinbasePubKey);
-        const uint32_t bitmask = ((uint32_t)1) << consensus_params.vDeployments[deployment_id].bit;
-        BOOST_CHECK_EQUAL(::ChainActive().Tip()->nVersion & bitmask, 0);
-        BOOST_CHECK_EQUAL(pblocktemplate->block.nVersion & bitmask, bitmask);
+        const CBlockIndex* const tip{m_node.chainman->ActiveChain().Tip()};
+        dmnman.UpdatedBlockTip(tip);
+
+        BOOST_REQUIRE(dmnman.GetListAtChainTip().HasMN(tx.GetHash()));
+
+        BOOST_CHECK_EQUAL(tip->nHeight, 498);
+        BOOST_CHECK(tip->nHeight < Params().GetConsensus().BRRHeight);
     }
 
-    signal(threshold(0) - 1, false); // 1 block short
+    CreateAndProcessBlock({}, coinbasePubKey);
 
     {
-        // Still STARTED but new threshold should be lower at height = 999
         LOCK(cs_main);
-        BOOST_CHECK_EQUAL(::ChainActive().Height(), 999);
-        deterministicMNManager->UpdatedBlockTip(::ChainActive().Tip());
-        BOOST_ASSERT(deterministicMNManager->GetListAtChainTip().HasMN(tx.GetHash()));
-        BOOST_CHECK_EQUAL(VersionBitsTipState(consensus_params, deployment_id), ThresholdState::STARTED);
-        BOOST_CHECK_EQUAL(VersionBitsTipStatistics(consensus_params, deployment_id).threshold, threshold(1));
+        const CBlockIndex* const tip{m_node.chainman->ActiveChain().Tip()};
+        BOOST_CHECK_EQUAL(tip->nHeight, 499);
+        dmnman.UpdatedBlockTip(tip);
+        BOOST_REQUIRE(dmnman.GetListAtChainTip().HasMN(tx.GetHash()));
+        BOOST_CHECK(tip->nHeight < Params().GetConsensus().BRRHeight);
+        // Creating blocks by different ways
+        const auto pblocktemplate = BlockAssembler(m_node.chainman->ActiveChainstate(), m_node, m_node.mempool.get(), Params()).CreateNewBlock(coinbasePubKey);
     }
-
-    signal(threshold(1) - 1, false); // 1 block short again
+    for ([[maybe_unused]] auto _ : util::irange(499)) {
+        CreateAndProcessBlock({}, coinbasePubKey);
+        LOCK(cs_main);
+        dmnman.UpdatedBlockTip(m_node.chainman->ActiveChain().Tip());
+    }
+    BOOST_CHECK(m_node.chainman->ActiveChain().Height() < Params().GetConsensus().BRRHeight);
+    CreateAndProcessBlock({}, coinbasePubKey);
 
     {
-        // Still STARTED but new threshold should be even lower at height = 1499
+        // Advance to ACTIVE at height = (BRRHeight - 1)
         LOCK(cs_main);
-        BOOST_CHECK_EQUAL(::ChainActive().Height(), 1499);
-        deterministicMNManager->UpdatedBlockTip(::ChainActive().Tip());
-        BOOST_ASSERT(deterministicMNManager->GetListAtChainTip().HasMN(tx.GetHash()));
-        BOOST_CHECK_EQUAL(VersionBitsTipState(consensus_params, deployment_id), ThresholdState::STARTED);
-        BOOST_CHECK_EQUAL(VersionBitsTipStatistics(consensus_params, deployment_id).threshold, threshold(2));
-    }
-
-    signal(threshold(2), true); // just enough to lock in
-
-    {
-        // Advanced to LOCKED_IN at height = 1999
-        LOCK(cs_main);
-        BOOST_CHECK_EQUAL(::ChainActive().Height(), 1999);
-        deterministicMNManager->UpdatedBlockTip(::ChainActive().Tip());
-        BOOST_ASSERT(deterministicMNManager->GetListAtChainTip().HasMN(tx.GetHash()));
-        BOOST_CHECK_EQUAL(VersionBitsTipState(consensus_params, deployment_id), ThresholdState::LOCKED_IN);
-    }
-
-    for ([[maybe_unused]] auto _ : irange::range(499)) {
-        // Still LOCKED_IN at height = 2498
-        CreateAndProcessBlock({}, coinbaseKey);
-        LOCK(cs_main);
-        BOOST_CHECK_EQUAL(VersionBitsTipState(consensus_params, deployment_id), ThresholdState::LOCKED_IN);
-    }
-    CreateAndProcessBlock({}, coinbaseKey);
-
-    {
-        // Advance from LOCKED_IN to ACTIVE at height = 2499
-        LOCK(cs_main);
-        BOOST_CHECK_EQUAL(::ChainActive().Height(), 2499);
-        deterministicMNManager->UpdatedBlockTip(::ChainActive().Tip());
-        BOOST_ASSERT(deterministicMNManager->GetListAtChainTip().HasMN(tx.GetHash()));
-        BOOST_CHECK_EQUAL(VersionBitsTipState(consensus_params, deployment_id), ThresholdState::ACTIVE);
-        BOOST_CHECK_EQUAL(VersionBitsTipStateSinceHeight(consensus_params, deployment_id), 2500);
+        const CBlockIndex* const tip{m_node.chainman->ActiveChain().Tip()};
+        BOOST_CHECK_EQUAL(tip->nHeight, Params().GetConsensus().BRRHeight - 1);
+        dmnman.UpdatedBlockTip(tip);
+        BOOST_REQUIRE(dmnman.GetListAtChainTip().HasMN(tx.GetHash()));
     }
 
     {
@@ -283,70 +208,118 @@ BOOST_FIXTURE_TEST_CASE(block_reward_reallocation, TestChainBRRBeforeActivationS
         // This applies even if reallocation was activated right at superblock height like it does here.
         // next block should be signaling by default
         LOCK(cs_main);
-        deterministicMNManager->UpdatedBlockTip(::ChainActive().Tip());
-        BOOST_ASSERT(deterministicMNManager->GetListAtChainTip().HasMN(tx.GetHash()));
-        auto masternode_payment = GetMasternodePayment(::ChainActive().Height(), GetBlockSubsidy(::ChainActive().Tip()->nBits, ::ChainActive().Height(), consensus_params), 2500);
-        const auto pblocktemplate = BlockAssembler(*sporkManager, *governance, *m_node.llmq_ctx->quorum_block_processor, *m_node.llmq_ctx->clhandler,  *m_node.llmq_ctx->isman, *m_node.evodb, *m_node.mempool, Params()).CreateNewBlock(coinbasePubKey);
+        const CBlockIndex* const tip{m_node.chainman->ActiveChain().Tip()};
+        const bool isV20Active{DeploymentActiveAfter(tip, consensus_params, Consensus::DEPLOYMENT_V20)};
+        dmnman.UpdatedBlockTip(tip);
+        BOOST_REQUIRE(dmnman.GetListAtChainTip().HasMN(tx.GetHash()));
+        const CAmount block_subsidy = GetBlockSubsidyInner(tip->nBits, tip->nHeight, consensus_params, isV20Active);
+        const CAmount masternode_payment = GetMasternodePayment(tip->nHeight, block_subsidy, isV20Active);
+        const auto pblocktemplate = BlockAssembler(m_node.chainman->ActiveChainstate(), m_node, m_node.mempool.get(), Params()).CreateNewBlock(coinbasePubKey);
         BOOST_CHECK_EQUAL(pblocktemplate->voutMasternodePayments[0].nValue, masternode_payment);
     }
 
-    for ([[maybe_unused]] auto _ : irange::range(9)) {
-        CreateAndProcessBlock({}, coinbaseKey);
+    for ([[maybe_unused]] auto _ : util::irange(consensus_params.nSuperblockCycle - 1)) {
+        CreateAndProcessBlock({}, coinbasePubKey);
     }
 
     {
         LOCK(cs_main);
-        auto masternode_payment = GetMasternodePayment(::ChainActive().Height(), GetBlockSubsidy(::ChainActive().Tip()->nBits, ::ChainActive().Height(), consensus_params), 2500);
-        const auto pblocktemplate = BlockAssembler(*sporkManager, *governance, *m_node.llmq_ctx->quorum_block_processor, *m_node.llmq_ctx->clhandler,  *m_node.llmq_ctx->isman, *m_node.evodb, *m_node.mempool, Params()).CreateNewBlock(coinbasePubKey);
-        BOOST_CHECK_EQUAL(pblocktemplate->block.vtx[0]->GetValueOut(), 13748571607);
+        const CBlockIndex* const tip{m_node.chainman->ActiveChain().Tip()};
+        const bool isV20Active{DeploymentActiveAfter(tip, consensus_params, Consensus::DEPLOYMENT_V20)};
+        const CAmount block_subsidy = GetBlockSubsidyInner(tip->nBits, tip->nHeight, consensus_params, isV20Active);
+        const CAmount masternode_payment = GetMasternodePayment(tip->nHeight, block_subsidy, isV20Active);
+        const auto pblocktemplate = BlockAssembler(m_node.chainman->ActiveChainstate(), m_node, m_node.mempool.get(), Params()).CreateNewBlock(coinbasePubKey);
+        BOOST_CHECK_EQUAL(pblocktemplate->block.vtx[0]->GetValueOut(), 28847249686);
         BOOST_CHECK_EQUAL(pblocktemplate->voutMasternodePayments[0].nValue, masternode_payment);
-        BOOST_CHECK_EQUAL(pblocktemplate->voutMasternodePayments[0].nValue, 6874285801); // 0.4999999998
+        BOOST_CHECK_EQUAL(pblocktemplate->voutMasternodePayments[0].nValue, 14423624841); // 0.4999999999
     }
 
-    // Reallocation should kick-in with the superblock mined at height = 2010,
-    // there will be 19 adjustments, 3 superblocks long each
-    for ([[maybe_unused]] auto i : irange::range(19)) {
-        for ([[maybe_unused]] auto j : irange::range(3)) {
-            for ([[maybe_unused]] auto k : irange::range(10)) {
-                CreateAndProcessBlock({}, coinbaseKey);
+    // Reallocation should kick-in with the superblock after 19 adjustments, 3 superblocks long each
+    for ([[maybe_unused]] auto i : util::irange(19)) {
+        for ([[maybe_unused]] auto j : util::irange(3)) {
+            for ([[maybe_unused]] auto k : util::irange(consensus_params.nSuperblockCycle)) {
+                CreateAndProcessBlock({}, coinbasePubKey);
             }
             LOCK(cs_main);
-            auto masternode_payment = GetMasternodePayment(::ChainActive().Height(), GetBlockSubsidy(::ChainActive().Tip()->nBits, ::ChainActive().Height(), consensus_params), 2500);
-            const auto pblocktemplate = BlockAssembler(*sporkManager, *governance, *m_node.llmq_ctx->quorum_block_processor, *m_node.llmq_ctx->clhandler,  *m_node.llmq_ctx->isman, *m_node.evodb, *m_node.mempool, Params()).CreateNewBlock(coinbasePubKey);
+            const CBlockIndex* const tip{m_node.chainman->ActiveChain().Tip()};
+            const bool isV20Active{DeploymentActiveAfter(tip, consensus_params, Consensus::DEPLOYMENT_V20)};
+            const CAmount block_subsidy = GetBlockSubsidyInner(tip->nBits, tip->nHeight, consensus_params, isV20Active);
+            const CAmount masternode_payment = GetMasternodePayment(tip->nHeight, block_subsidy, isV20Active);
+            const auto pblocktemplate = BlockAssembler(m_node.chainman->ActiveChainstate(), m_node, m_node.mempool.get(), Params()).CreateNewBlock(coinbasePubKey);
             BOOST_CHECK_EQUAL(pblocktemplate->voutMasternodePayments[0].nValue, masternode_payment);
         }
     }
-
+    BOOST_CHECK(DeploymentActiveAfter(m_node.chainman->ActiveChain().Tip(), consensus_params, Consensus::DEPLOYMENT_V20));
+    // Allocation of block subsidy is 60% MN, 20% miners and 20% treasury
     {
-        // Reward split should reach ~60/40 after reallocation is done
+        // Reward split should reach ~75/25 after reallocation is done
         LOCK(cs_main);
-        auto masternode_payment = GetMasternodePayment(::ChainActive().Height(), GetBlockSubsidy(::ChainActive().Tip()->nBits, ::ChainActive().Height(), consensus_params), 2500);
-        const auto pblocktemplate = BlockAssembler(*sporkManager, *governance, *m_node.llmq_ctx->quorum_block_processor, *m_node.llmq_ctx->clhandler,  *m_node.llmq_ctx->isman, *m_node.evodb, *m_node.mempool, Params()).CreateNewBlock(coinbasePubKey);
-        BOOST_CHECK_EQUAL(pblocktemplate->block.vtx[0]->GetValueOut(), 10221599170);
-        BOOST_CHECK_EQUAL(pblocktemplate->voutMasternodePayments[0].nValue, masternode_payment);
-        BOOST_CHECK_EQUAL(pblocktemplate->voutMasternodePayments[0].nValue, 6132959502); // 0.6
-    }
+        const CBlockIndex* const tip{m_node.chainman->ActiveChain().Tip()};
+        const bool isV20Active{DeploymentActiveAfter(tip, consensus_params, Consensus::DEPLOYMENT_V20)};
+        const CAmount block_subsidy = GetBlockSubsidyInner(tip->nBits, tip->nHeight, consensus_params, isV20Active);
+        const CAmount block_subsidy_sb = GetSuperblockSubsidyInner(tip->nBits, tip->nHeight, consensus_params, isV20Active);
+        CAmount block_subsidy_potential = block_subsidy + block_subsidy_sb;
+        BOOST_CHECK_EQUAL(block_subsidy_potential, 177167660);
+        CAmount expected_block_reward = block_subsidy_potential - block_subsidy_potential / 5;
 
-    // Reward split should stay ~60/40 after reallocation is done,
+        const CAmount masternode_payment = GetMasternodePayment(tip->nHeight, block_subsidy, isV20Active);
+        const auto pblocktemplate = BlockAssembler(m_node.chainman->ActiveChainstate(), m_node, m_node.mempool.get(), Params()).CreateNewBlock(coinbasePubKey);
+        BOOST_CHECK_EQUAL(pblocktemplate->block.vtx[0]->GetValueOut(), expected_block_reward);
+        BOOST_CHECK_EQUAL(pblocktemplate->block.vtx[0]->GetValueOut(), 141734128);
+        BOOST_CHECK_EQUAL(pblocktemplate->voutMasternodePayments[0].nValue, masternode_payment);
+        BOOST_CHECK_EQUAL(pblocktemplate->voutMasternodePayments[0].nValue, 106300596); // 0.75
+    }
+    BOOST_CHECK(!DeploymentActiveAfter(m_node.chainman->ActiveChain().Tip(), consensus_params, Consensus::DEPLOYMENT_MN_RR));
+
+    // Reward split should stay ~75/25 after reallocation is done,
     // check 10 next superblocks
-    for ([[maybe_unused]] auto i : irange::range(10)) {
-        for ([[maybe_unused]] auto k : irange::range(10)) {
-            CreateAndProcessBlock({}, coinbaseKey);
+    for ([[maybe_unused]] auto i : util::irange(10)) {
+        for ([[maybe_unused]] auto k : util::irange(consensus_params.nSuperblockCycle)) {
+            CreateAndProcessBlock({}, coinbasePubKey);
         }
         LOCK(cs_main);
-        auto masternode_payment = GetMasternodePayment(::ChainActive().Height(), GetBlockSubsidy(::ChainActive().Tip()->nBits, ::ChainActive().Height(), consensus_params), 2500);
-        const auto pblocktemplate = BlockAssembler(*sporkManager, *governance, *m_node.llmq_ctx->quorum_block_processor, *m_node.llmq_ctx->clhandler,  *m_node.llmq_ctx->isman, *m_node.evodb, *m_node.mempool, Params()).CreateNewBlock(coinbasePubKey);
-        BOOST_CHECK_EQUAL(pblocktemplate->voutMasternodePayments[0].nValue, masternode_payment);
+        const CBlockIndex* const tip{m_node.chainman->ActiveChain().Tip()};
+        const bool isV20Active{DeploymentActiveAfter(tip, consensus_params, Consensus::DEPLOYMENT_V20)};
+        const bool isMNRewardReallocated{DeploymentActiveAfter(tip, consensus_params, Consensus::DEPLOYMENT_MN_RR)};
+        const CAmount block_subsidy = GetBlockSubsidyInner(tip->nBits, tip->nHeight, consensus_params, isV20Active);
+        CAmount masternode_payment = GetMasternodePayment(tip->nHeight, block_subsidy, isV20Active);
+        const auto pblocktemplate = BlockAssembler(m_node.chainman->ActiveChainstate(), m_node, m_node.mempool.get(), Params()).CreateNewBlock(coinbasePubKey);
+
+        if (isMNRewardReallocated) {
+            const CAmount platform_payment = PlatformShare(masternode_payment);
+            masternode_payment -= platform_payment;
+        }
+        size_t payment_index = isMNRewardReallocated ? 1 : 0;
+
+        BOOST_CHECK_EQUAL(pblocktemplate->voutMasternodePayments[payment_index].nValue, masternode_payment);
     }
 
-    {
-        // Reward split should reach ~60/40 after reallocation is done
+    BOOST_CHECK(DeploymentActiveAfter(m_node.chainman->ActiveChain().Tip(), consensus_params, Consensus::DEPLOYMENT_MN_RR));
+    { // At this moment Masternode reward should be reallocated to platform
+        // Allocation of block subsidy is 60% MN, 20% miners and 20% treasury
         LOCK(cs_main);
-        auto masternode_payment = GetMasternodePayment(::ChainActive().Height(), GetBlockSubsidy(::ChainActive().Tip()->nBits, ::ChainActive().Height(), consensus_params), 2500);
-        const auto pblocktemplate = BlockAssembler(*sporkManager, *governance, *m_node.llmq_ctx->quorum_block_processor, *m_node.llmq_ctx->clhandler,  *m_node.llmq_ctx->isman, *m_node.evodb, *m_node.mempool, Params()).CreateNewBlock(coinbasePubKey);
-        BOOST_CHECK_EQUAL(pblocktemplate->block.vtx[0]->GetValueOut(), 9491484944);
-        BOOST_CHECK_EQUAL(pblocktemplate->voutMasternodePayments[0].nValue, masternode_payment);
-        BOOST_CHECK_EQUAL(pblocktemplate->voutMasternodePayments[0].nValue, 5694890966); // 0.6
+        const CBlockIndex* const tip{m_node.chainman->ActiveChain().Tip()};
+        const bool isV20Active{DeploymentActiveAfter(tip, consensus_params, Consensus::DEPLOYMENT_V20)};
+        const CAmount block_subsidy = GetBlockSubsidyInner(tip->nBits, tip->nHeight, consensus_params, isV20Active);
+        const CAmount block_subsidy_sb = GetSuperblockSubsidyInner(tip->nBits, tip->nHeight, consensus_params, isV20Active);
+        CAmount masternode_payment = GetMasternodePayment(tip->nHeight, block_subsidy, isV20Active);
+        const CAmount platform_payment = PlatformShare(masternode_payment);
+        masternode_payment -= platform_payment;
+        const auto pblocktemplate = BlockAssembler(m_node.chainman->ActiveChainstate(), m_node, m_node.mempool.get(), Params()).CreateNewBlock(coinbasePubKey);
+
+        CAmount block_subsidy_potential = block_subsidy + block_subsidy_sb;
+        BOOST_CHECK_EQUAL(tip->nHeight, 2358);
+        BOOST_CHECK_EQUAL(block_subsidy_potential, 164512828);
+        // Treasury is 20% since MNRewardReallocation
+        CAmount expected_block_reward = block_subsidy_potential - block_subsidy_potential / 5;
+        // Since MNRewardReallocation, MN reward share is 75% of the block reward
+        CAmount expected_masternode_reward = expected_block_reward * 3 / 4;
+        CAmount expected_mn_platform_payment = PlatformShare(expected_masternode_reward);
+        CAmount expected_mn_core_payment = expected_masternode_reward - expected_mn_platform_payment;
+
+        BOOST_CHECK_EQUAL(pblocktemplate->block.vtx[0]->GetValueOut(), expected_block_reward);
+        BOOST_CHECK_EQUAL(pblocktemplate->voutMasternodePayments[1].nValue, masternode_payment);
+        BOOST_CHECK_EQUAL(pblocktemplate->voutMasternodePayments[1].nValue, expected_mn_core_payment);
     }
 }
 

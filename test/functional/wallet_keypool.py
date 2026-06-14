@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2014-2016 The Bitcoin Core developers
+# Copyright (c) 2014-2020 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Test the wallet keypool and interaction with wallet encryption/locking."""
@@ -10,6 +10,9 @@ from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import assert_equal, assert_raises_rpc_error
 
 class KeyPoolTest(BitcoinTestFramework):
+    def add_options(self, parser):
+        self.add_wallet_options(parser)
+
     def set_test_params(self):
         self.num_nodes = 1
         self.extra_args = [['-usehd=0']]
@@ -28,7 +31,7 @@ class KeyPoolTest(BitcoinTestFramework):
         assert_raises_rpc_error(-12, "Error: Keypool ran out, please call keypoolrefill first", nodes[0].getnewaddress)
 
         # put three new keys in the keypool
-        nodes[0].walletpassphrase('test', 12000)
+        nodes[0].walletpassphrase('test', 999000)
         nodes[0].keypoolrefill(3)
         nodes[0].walletlock()
 

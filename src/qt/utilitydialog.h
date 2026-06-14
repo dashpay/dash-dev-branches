@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2015 The Bitcoin Core developers
+// Copyright (c) 2011-2020 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -11,10 +11,6 @@
 QT_BEGIN_NAMESPACE
 class QMainWindow;
 QT_END_NAMESPACE
-
-namespace interfaces {
-    class Node;
-}
 
 namespace Ui {
     class HelpMessageDialog;
@@ -32,7 +28,7 @@ public:
         pshelp
     };
 
-    explicit HelpMessageDialog(interfaces::Node& node, QWidget *parent, HelpMode helpMode);
+    explicit HelpMessageDialog(QWidget *parent, HelpMode helpMode);
     ~HelpMessageDialog();
 
     void printToConsole();
@@ -53,8 +49,8 @@ class ShutdownWindow : public QWidget
     Q_OBJECT
 
 public:
-    explicit ShutdownWindow(interfaces::Node& node, QWidget *parent=nullptr, Qt::WindowFlags f=Qt::Widget);
-    static QWidget* showShutdownWindow(interfaces::Node& node, QMainWindow* window);
+    explicit ShutdownWindow(QWidget *parent=nullptr, Qt::WindowFlags f=Qt::Widget);
+    static QWidget* showShutdownWindow(QMainWindow* window);
 
 protected:
     void closeEvent(QCloseEvent *event) override;

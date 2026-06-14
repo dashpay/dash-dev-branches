@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2015 The Bitcoin Core developers
+// Copyright (c) 2009-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -22,20 +22,23 @@ public:
     m_remaining(txToLen)
     {}
 
-    void read(char* pch, size_t nSize)
+    void read(Span<std::byte> dst)
     {
-        if (nSize > m_remaining)
+        if (dst.size() > m_remaining) {
             throw std::ios_base::failure(std::string(__func__) + ": end of data");
+        }
 
-        if (pch == nullptr)
+        if (dst.data() == nullptr) {
             throw std::ios_base::failure(std::string(__func__) + ": bad destination buffer");
+        }
 
-        if (m_data == nullptr)
+        if (m_data == nullptr) {
             throw std::ios_base::failure(std::string(__func__) + ": bad source buffer");
+        }
 
-        memcpy(pch, m_data, nSize);
-        m_remaining -= nSize;
-        m_data += nSize;
+        memcpy(dst.data(), m_data, dst.size());
+        m_remaining -= dst.size();
+        m_data += dst.size();
     }
 
     template<typename T>
@@ -45,7 +48,7 @@ public:
         return *this;
     }
 
-    int GetVersion() const { return m_version; }
+    [[maybe_unused]] int GetVersion() const { return m_version; }
 private:
     const int m_version;
     const unsigned char* m_data;
@@ -59,12 +62,6 @@ inline int set_error(dashconsensus_error* ret, dashconsensus_error serror)
     return 0;
 }
 
-struct ECCryptoClosure
-{
-    ECCVerifyHandle handle;
-};
-
-ECCryptoClosure instance_of_eccryptoclosure;
 } // namespace
 
 /** Check that all specified flags are part of the libconsensus interface. */
@@ -93,7 +90,7 @@ int dashconsensus_verify_script(const unsigned char *scriptPubKey, unsigned int 
 
         PrecomputedTransactionData txdata(tx);
 		CAmount am(0);
-        return VerifyScript(tx.vin[nIn].scriptSig, CScript(scriptPubKey, scriptPubKey + scriptPubKeyLen), flags, TransactionSignatureChecker(&tx, nIn, am, txdata), nullptr);
+        return VerifyScript(tx.vin[nIn].scriptSig, CScript(scriptPubKey, scriptPubKey + scriptPubKeyLen), flags, TransactionSignatureChecker(&tx, nIn, am, txdata, MissingDataBehavior::FAIL), nullptr);
     } catch (const std::exception&) {
         return set_error(err, dashconsensus_ERR_TX_DESERIALIZE); // Error deserializing
     }

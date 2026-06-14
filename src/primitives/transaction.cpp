@@ -1,15 +1,21 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2015 The Bitcoin Core developers
+// Copyright (c) 2009-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <primitives/transaction.h>
 
+#include <consensus/amount.h>
 #include <hash.h>
+#include <script/script.h>
+#include <serialize.h>
 #include <tinyformat.h>
+#include <uint256.h>
 #include <util/strencodings.h>
+#include <version.h>
 
-#include <assert.h>
+#include <cassert>
+#include <stdexcept>
 
 std::string COutPoint::ToString() const
 {
@@ -92,8 +98,6 @@ uint256 CTransaction::ComputeHash() const
     return SerializeHash(*this);
 }
 
-/* For backward compatibility, the hash is initialized to 0. TODO: remove the need for this default constructor entirely. */
-CTransaction::CTransaction() : vin(), vout(), nVersion(CTransaction::CURRENT_VERSION), nType(TRANSACTION_NORMAL), nLockTime(0), hash{} {}
 CTransaction::CTransaction(const CMutableTransaction& tx) : vin(tx.vin), vout(tx.vout), nVersion(tx.nVersion), nType(tx.nType), nLockTime(tx.nLockTime), vExtraPayload(tx.vExtraPayload), hash{ComputeHash()} {}
 CTransaction::CTransaction(CMutableTransaction&& tx) : vin(std::move(tx.vin)), vout(std::move(tx.vout)), nVersion(tx.nVersion), nType(tx.nType), nLockTime(tx.nLockTime), vExtraPayload(tx.vExtraPayload), hash{ComputeHash()} {}
 

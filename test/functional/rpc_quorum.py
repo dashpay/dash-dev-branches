@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-# Copyright (c) 2022 The Dash Core developers
+# Copyright (c) 2022-2025 The Dash Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
-from test_framework.test_framework import DashTestFramework
-from test_framework.util import assert_equal, p2p_port
+from test_framework.test_framework import (
+    DashTestFramework,
+    MasternodeInfo,
+)
+from test_framework.util import assert_equal
 
 '''
 rpc_quorum.py
@@ -12,8 +15,11 @@ Test "quorum" rpc subcommands
 '''
 
 class RPCMasternodeTest(DashTestFramework):
+    def add_options(self, parser):
+        self.add_wallet_options(parser)
+
     def set_test_params(self):
-        self.set_dash_test_params(4, 3, fast_dip3_enforcement=True)
+        self.set_dash_test_params(4, 3)
 
     def run_test(self):
         self.nodes[0].sporkupdate("SPORK_17_QUORUM_DKG_ENABLED", 0)
@@ -22,10 +28,10 @@ class RPCMasternodeTest(DashTestFramework):
 
         quorum_info = self.nodes[0].quorum("info", 100, quorum_hash)
         for idx in range(0, self.mn_count):
-            mn = self.mninfo[idx]
+            mn: MasternodeInfo = self.mninfo[idx]
             for member in quorum_info["members"]:
                 if member["proTxHash"] == mn.proTxHash:
-                    assert_equal(member["service"], '127.0.0.1:%d' % p2p_port(mn.node.index))
+                    assert_equal(member['addresses']['core_p2p'][0], f'127.0.0.1:{mn.nodePort}')
 
 if __name__ == '__main__':
     RPCMasternodeTest().main()

@@ -1,10 +1,13 @@
-// Copyright (c) 2012-2016 The Bitcoin Core developers
+// Copyright (c) 2012-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
-#include <cuckoocache.h>
-#include <script/sigcache.h>
+
 #include <test/util/setup_common.h>
+
+#include <cuckoocache.h>
 #include <random.h>
+#include <script/sigcache.h>
+#include <test/util/random.h>
 
 #include <boost/test/unit_test.hpp>
 
@@ -217,6 +220,7 @@ static void test_cache_erase_parallel(size_t megabytes)
     /** Spin up 3 threads to run contains with erase.
      */
     std::vector<std::thread> threads;
+    threads.reserve(3);
     /** Erase the first quarter */
     for (uint32_t x = 0; x < 3; ++x)
         /** Each thread is emplaced with x copy-by-value

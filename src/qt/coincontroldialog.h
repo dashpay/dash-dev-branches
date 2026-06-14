@@ -1,11 +1,11 @@
-// Copyright (c) 2011-2015 The Bitcoin Core developers
+// Copyright (c) 2011-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #ifndef BITCOIN_QT_COINCONTROLDIALOG_H
 #define BITCOIN_QT_COINCONTROLDIALOG_H
 
-#include <amount.h>
+#include <consensus/amount.h>
 
 #include <QAbstractButton>
 #include <QAction>
@@ -13,12 +13,13 @@
 #include <QList>
 #include <QMenu>
 #include <QPoint>
-#include <QString>
 #include <QTreeWidgetItem>
 
 class WalletModel;
 
+namespace wallet {
 class CCoinControl;
+} // namespace wallet
 
 namespace Ui {
     class CoinControlDialog;
@@ -41,25 +42,25 @@ class CoinControlDialog : public QDialog
     Q_OBJECT
 
 public:
-    explicit CoinControlDialog(CCoinControl& coin_control, WalletModel* model, QWidget *parent = nullptr);
+    explicit CoinControlDialog(wallet::CCoinControl& coin_control, WalletModel* model, QWidget *parent = nullptr);
     ~CoinControlDialog();
 
     // static because also called from sendcoinsdialog
-    static void updateLabels(CCoinControl& m_coin_control, WalletModel*, QDialog*);
+    static void updateLabels(wallet::CCoinControl& m_coin_control, WalletModel*, QDialog*);
 
     static QList<CAmount> payAmounts;
     static bool fSubtractFeeFromAmount;
 
 private:
     Ui::CoinControlDialog *ui;
-    CCoinControl& m_coin_control;
+    wallet::CCoinControl& m_coin_control;
     WalletModel *model;
     int sortColumn;
     Qt::SortOrder sortOrder;
 
     QMenu *contextMenu;
     QTreeWidgetItem *contextMenuItem;
-    QAction *copyTransactionHashAction;
+    QAction* m_copy_transaction_outpoint_action;
     QAction *lockAction;
     QAction *unlockAction;
 
@@ -92,7 +93,7 @@ private Q_SLOTS:
     void copyAmount();
     void copyLabel();
     void copyAddress();
-    void copyTransactionHash();
+    void copyTransactionOutpoint();
     void lockCoin();
     void unlockCoin();
     void clipboardQuantity();
@@ -100,7 +101,6 @@ private Q_SLOTS:
     void clipboardFee();
     void clipboardAfterFee();
     void clipboardBytes();
-    void clipboardLowOutput();
     void clipboardChange();
     void radioTreeMode(bool);
     void radioListMode(bool);
@@ -108,7 +108,7 @@ private Q_SLOTS:
     void headerSectionClicked(int);
     void buttonBoxClicked(QAbstractButton*);
     void buttonSelectAllClicked();
-    void buttonToggleLockClicked();
+    void buttonLockAllClicked();
     void updateLabelLocked();
     void on_hideButton_clicked();
 };

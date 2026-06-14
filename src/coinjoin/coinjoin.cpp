@@ -1,26 +1,24 @@
-// Copyright (c) 2014-2023 The Dash Core developers
+// Copyright (c) 2014-2025 The Dash Core developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <coinjoin/coinjoin.h>
 
 #include <bls/bls.h>
+#include <chainlock/chainlock.h>
+#include <instantsend/instantsend.h>
+#include <util/helpers.h>
+
 #include <chain.h>
 #include <chainparams.h>
-#include <consensus/validation.h>
-#include <llmq/chainlocks.h>
-#include <llmq/instantsend.h>
-#include <llmq/utils.h>
-#include <masternode/node.h>
-#include <masternode/sync.h>
-#include <messagesigner.h>
-#include <netmessagemaker.h>
 #include <txmempool.h>
 #include <util/moneystr.h>
 #include <util/system.h>
 #include <util/translation.h>
 #include <validation.h>
+#include <tinyformat.h>
 
+#include <ranges>
 #include <string>
 
 constexpr static CAmount DEFAULT_MAX_RAW_TX_FEE{COIN / 10};
@@ -43,28 +41,13 @@ bool CCoinJoinEntry::AddScriptSig(const CTxIn& txin)
 
 uint256 CCoinJoinQueue::GetSignatureHash() const
 {
-    return SerializeHash(*this);
+    return SerializeHash(*this, SER_GETHASH, PROTOCOL_VERSION);
 }
-
-bool CCoinJoinQueue::Sign()
-{
-    if (!fMasternodeMode) return false;
-
-
-    uint256 hash = GetSignatureHash();
-    CBLSSignature sig = WITH_LOCK(activeMasternodeInfoCs, return activeMasternodeInfo.blsKeyOperator->Sign(hash));
-    if (!sig.IsValid()) {
-        return false;
-    }
-    bool legacy_bls_scheme = !llmq::utils::IsV19Active(::ChainActive().Tip());
-    vchSig = sig.ToByteVector(legacy_bls_scheme);
-
-    return true;
-}
+uint256 CCoinJoinQueue::GetHash() const { return SerializeHash(*this, SER_NETWORK, PROTOCOL_VERSION); }
 
 bool CCoinJoinQueue::CheckSignature(const CBLSPublicKey& blsPubKey) const
 {
-    if (!CBLSSignature(vchSig).VerifyInsecure(blsPubKey, GetSignatureHash())) {
+    if (!CBLSSignature(Span{vchSig}, false).VerifyInsecure(blsPubKey, GetSignatureHash(), false)) {
         LogPrint(BCLog::COINJOIN, "CCoinJoinQueue::CheckSignature -- VerifyInsecure() failed\n");
         return false;
     }
@@ -72,59 +55,32 @@ bool CCoinJoinQueue::CheckSignature(const CBLSPublicKey& blsPubKey) const
     return true;
 }
 
-bool CCoinJoinQueue::Relay(CConnman& connman)
-{
-    connman.ForEachNode([&connman, this](CNode* pnode) {
-        CNetMsgMaker msgMaker(pnode->GetSendVersion());
-        if (pnode->fSendDSQueue) {
-            connman.PushMessage(pnode, msgMaker.Make(NetMsgType::DSQUEUE, (*this)));
-        }
-    });
-    return true;
-}
-
 bool CCoinJoinQueue::IsTimeOutOfBounds(int64_t current_time) const
 {
+    if (current_time < 0 || nTime < 0) return true;
     return current_time - nTime > COINJOIN_QUEUE_TIMEOUT ||
            nTime - current_time > COINJOIN_QUEUE_TIMEOUT;
 }
 
-uint256 CCoinJoinBroadcastTx::GetSignatureHash() const
+[[nodiscard]] std::string CCoinJoinQueue::ToString() const
 {
-    return SerializeHash(*this);
+    return strprintf("nDenom=%d, nTime=%lld, fReady=%s, fTried=%s, masternode=%s",
+        nDenom, nTime, util::to_string(fReady), util::to_string(fTried), masternodeOutpoint.ToStringShort());
 }
 
-bool CCoinJoinBroadcastTx::Sign()
+uint256 CCoinJoinBroadcastTx::GetSignatureHash() const
 {
-    if (!fMasternodeMode) return false;
-
-    uint256 hash = GetSignatureHash();
-    CBLSSignature sig = WITH_LOCK(activeMasternodeInfoCs, return activeMasternodeInfo.blsKeyOperator->Sign(hash));
-    if (!sig.IsValid()) {
-        return false;
-    }
-    bool legacy_bls_scheme = !llmq::utils::IsV19Active(::ChainActive().Tip());
-    vchSig = sig.ToByteVector(legacy_bls_scheme);
-
-    return true;
+    return SerializeHash(*this, SER_GETHASH, PROTOCOL_VERSION);
 }
 
 bool CCoinJoinBroadcastTx::CheckSignature(const CBLSPublicKey& blsPubKey) const
 {
-    if (!CBLSSignature(vchSig).VerifyInsecure(blsPubKey, GetSignatureHash())) {
+    if (!CBLSSignature(Span{vchSig}, false).VerifyInsecure(blsPubKey, GetSignatureHash(), false)) {
         LogPrint(BCLog::COINJOIN, "CCoinJoinBroadcastTx::CheckSignature -- VerifyInsecure() failed\n");
         return false;
     }
 
     return true;
-}
-
-bool CCoinJoinBroadcastTx::IsExpired(const CBlockIndex* pindex, const llmq::CChainLocksHandler& clhandler) const
-{
-    // expire confirmed DSTXes after ~1h since confirmation or chainlocked confirmation
-    if (nConfirmedHeight == -1 || pindex->nHeight < nConfirmedHeight) return false; // not mined yet
-    if (pindex->nHeight - nConfirmedHeight > 24) return true; // mined more than an hour ago
-    return clhandler.HasChainLock(pindex->nHeight, *pindex->phashBlock);
 }
 
 bool CCoinJoinBroadcastTx::IsValidStructure() const
@@ -136,14 +92,14 @@ bool CCoinJoinBroadcastTx::IsValidStructure() const
     if (tx->vin.size() != tx->vout.size()) {
         return false;
     }
-    if (tx->vin.size() < size_t(CCoinJoin::GetMinPoolParticipants())) {
+    if (tx->vin.size() < size_t(CoinJoin::GetMinPoolParticipants())) {
         return false;
     }
-    if (tx->vin.size() > CCoinJoin::GetMaxPoolParticipants() * COINJOIN_ENTRY_MAX_SIZE) {
+    if (tx->vin.size() > CoinJoin::GetMaxPoolParticipants() * COINJOIN_ENTRY_MAX_SIZE) {
         return false;
     }
-    return ranges::all_of(tx->vout, [] (const auto& txOut){
-        return CCoinJoin::IsDenominatedAmount(txOut.nValue) && txOut.scriptPubKey.IsPayToPublicKeyHash();
+    return std::ranges::all_of(tx->vout, [](const auto& txOut) {
+        return CoinJoin::IsDenominatedAmount(txOut.nValue) && txOut.scriptPubKey.IsPayToPublicKeyHash();
     });
 }
 
@@ -160,13 +116,13 @@ void CCoinJoinBaseSession::SetNull()
     nTimeLastSuccessfulStep = GetTime();
 }
 
-void CCoinJoinBaseManager::SetNull()
+void CoinJoinQueueManager::SetNull()
 {
     LOCK(cs_vecqueue);
     vecCoinJoinQueue.clear();
 }
 
-void CCoinJoinBaseManager::CheckQueue()
+void CoinJoinQueueManager::CheckQueue()
 {
     TRY_LOCK(cs_vecqueue, lockDS);
     if (!lockDS) return; // it's ok to fail here, we run this quite frequently
@@ -175,7 +131,7 @@ void CCoinJoinBaseManager::CheckQueue()
     auto it = vecCoinJoinQueue.begin();
     while (it != vecCoinJoinQueue.end()) {
         if (it->IsTimeOutOfBounds()) {
-            LogPrint(BCLog::COINJOIN, "CCoinJoinBaseManager::%s -- Removing a queue (%s)\n", __func__, it->ToString());
+            LogPrint(BCLog::COINJOIN, "CoinJoinQueueManager::%s -- Removing a queue (%s)\n", __func__, it->ToString());
             it = vecCoinJoinQueue.erase(it);
         } else {
             ++it;
@@ -183,7 +139,33 @@ void CCoinJoinBaseManager::CheckQueue()
     }
 }
 
-bool CCoinJoinBaseManager::GetQueueItemAndTry(CCoinJoinQueue& dsqRet)
+std::optional<bool> CoinJoinQueueManager::TryHasQueueFromMasternode(const COutPoint& outpoint) const
+{
+    TRY_LOCK(cs_vecqueue, lockDS);
+    if (!lockDS) return std::nullopt;
+    return std::ranges::any_of(vecCoinJoinQueue, [&outpoint](const auto& q) { return q.masternodeOutpoint == outpoint; });
+}
+
+std::optional<bool> CoinJoinQueueManager::TryCheckDuplicate(const CCoinJoinQueue& dsq) const
+{
+    TRY_LOCK(cs_vecqueue, lockDS);
+    if (!lockDS) return std::nullopt;
+    for (const auto& q : vecCoinJoinQueue) {
+        if (q == dsq) return true;
+        if (q.fReady == dsq.fReady && q.masternodeOutpoint == dsq.masternodeOutpoint) return true;
+    }
+    return false;
+}
+
+bool CoinJoinQueueManager::TryAddQueue(CCoinJoinQueue dsq)
+{
+    TRY_LOCK(cs_vecqueue, lockDS);
+    if (!lockDS) return false;
+    vecCoinJoinQueue.push_back(std::move(dsq));
+    return true;
+}
+
+bool CoinJoinQueueManager::GetQueueItemAndTry(CCoinJoinQueue& dsqRet)
 {
     TRY_LOCK(cs_vecqueue, lockDS);
     if (!lockDS) return false; // it's ok to fail here, we run this quite frequently
@@ -217,7 +199,10 @@ std::string CCoinJoinBaseSession::GetStateString() const
     }
 }
 
-bool CCoinJoinBaseSession::IsValidInOuts(const std::vector<CTxIn>& vin, const std::vector<CTxOut>& vout, PoolMessage& nMessageIDRet, bool* fConsumeCollateralRet) const
+bool CCoinJoinBaseSession::IsValidInOuts(CChainState& active_chainstate, const llmq::CInstantSendManager& isman,
+                                         const CTxMemPool& mempool, const std::vector<CTxIn>& vin,
+                                         const std::vector<CTxOut>& vout, PoolMessage& nMessageIDRet,
+                                         bool* fConsumeCollateralRet) const
 {
     std::set<CScript> setScripPubKeys;
     nMessageIDRet = MSG_NOERR;
@@ -231,10 +216,9 @@ bool CCoinJoinBaseSession::IsValidInOuts(const std::vector<CTxIn>& vin, const st
     }
 
     auto checkTxOut = [&](const CTxOut& txout) {
-        int nDenom = CCoinJoin::AmountToDenomination(txout.nValue);
-        if (nDenom != nSessionDenom) {
+        if (int nDenom = CoinJoin::AmountToDenomination(txout.nValue); nDenom != nSessionDenom) {
             LogPrint(BCLog::COINJOIN, "CCoinJoinBaseSession::IsValidInOuts -- ERROR: incompatible denom %d (%s) != nSessionDenom %d (%s)\n",
-                    nDenom, CCoinJoin::DenominationToString(nDenom), nSessionDenom, CCoinJoin::DenominationToString(nSessionDenom));
+                    nDenom, CoinJoin::DenominationToString(nDenom), nSessionDenom, CoinJoin::DenominationToString(nSessionDenom));
             nMessageIDRet = ERR_DENOM;
             if (fConsumeCollateralRet) *fConsumeCollateralRet = true;
             return false;
@@ -265,7 +249,7 @@ bool CCoinJoinBaseSession::IsValidInOuts(const std::vector<CTxIn>& vin, const st
         nFees -= txout.nValue;
     }
 
-    CCoinsViewMemPool viewMemPool(WITH_LOCK(cs_main, return &::ChainstateActive().CoinsTip()), mempool);
+    CCoinsViewMemPool viewMemPool(WITH_LOCK(::cs_main, return &active_chainstate.CoinsTip()), mempool);
 
     for (const auto& txin : vin) {
         LogPrint(BCLog::COINJOIN, "CCoinJoinBaseSession::%s -- txin=%s\n", __func__, txin.ToString());
@@ -279,7 +263,7 @@ bool CCoinJoinBaseSession::IsValidInOuts(const std::vector<CTxIn>& vin, const st
 
         Coin coin;
         if (!viewMemPool.GetCoin(txin.prevout, coin) || coin.IsSpent() ||
-            (coin.nHeight == MEMPOOL_HEIGHT && !llmq::quorumInstantSendManager->IsLocked(txin.prevout.hash))) {
+            (coin.nHeight == MEMPOOL_HEIGHT && !isman.IsLocked(txin.prevout.hash))) {
             LogPrint(BCLog::COINJOIN, "CCoinJoinBaseSession::%s -- ERROR: missing, spent or non-locked mempool input! txin=%s\n", __func__, txin.ToString());
             nMessageIDRet = ERR_MISSING_TX;
             return false;
@@ -303,12 +287,29 @@ bool CCoinJoinBaseSession::IsValidInOuts(const std::vector<CTxIn>& vin, const st
     return true;
 }
 
-// Definitions for static data members
-Mutex CCoinJoin::cs_mapdstx;
-std::map<uint256, CCoinJoinBroadcastTx> CCoinJoin::mapDSTX GUARDED_BY(CCoinJoin::cs_mapdstx);
+// Responsibility for checking fee sanity is moved from the mempool to the client (BroadcastTransaction)
+// but CoinJoin still requires ATMP with fee sanity checks so we need to implement them separately
+bool ATMPIfSaneFee(ChainstateManager& chainman, const CTransactionRef& tx, bool test_accept)
+{
+    AssertLockHeld(::cs_main);
+
+    const MempoolAcceptResult result = chainman.ProcessTransaction(tx, /*test_accept=*/true);
+    if (result.m_result_type != MempoolAcceptResult::ResultType::VALID) {
+        /* Fetch fee and fast-fail if ATMP fails regardless */
+        return false;
+    } else if (result.m_base_fees.value() > DEFAULT_MAX_RAW_TX_FEE) {
+        /* Check fee against fixed upper limit */
+        return false;
+    } else if (test_accept) {
+        /* Don't re-run ATMP if only doing test run */
+        return true;
+    }
+    return chainman.ProcessTransaction(tx, test_accept).m_result_type == MempoolAcceptResult::ResultType::VALID;
+}
 
 // check to make sure the collateral provided by the client is valid
-bool CCoinJoin::IsCollateralValid(const CTransaction& txCollateral)
+bool CoinJoin::IsCollateralValid(ChainstateManager& chainman, const llmq::CInstantSendManager& isman,
+                                 const CTxMemPool& mempool, const CTransaction& txCollateral)
 {
     if (txCollateral.vout.empty()) return false;
     if (txCollateral.nLockTime != 0) return false;
@@ -320,65 +321,41 @@ bool CCoinJoin::IsCollateralValid(const CTransaction& txCollateral)
         nValueOut += txout.nValue;
 
         if (!txout.scriptPubKey.IsPayToPublicKeyHash() && !txout.scriptPubKey.IsUnspendable()) {
-            LogPrint(BCLog::COINJOIN, "CCoinJoin::IsCollateralValid -- Invalid Script, txCollateral=%s", txCollateral.ToString()); /* Continued */
+            LogPrint(BCLog::COINJOIN, "CoinJoin::IsCollateralValid -- Invalid Script, txCollateral=%s", txCollateral.ToString()); /* Continued */
             return false;
         }
     }
 
+    LOCK(::cs_main);
+    CCoinsViewMemPool viewMemPool(&chainman.ActiveChainstate().CoinsTip(), mempool);
+
     for (const auto& txin : txCollateral.vin) {
         Coin coin;
-        auto mempoolTx = mempool.get(txin.prevout.hash);
-        if (mempoolTx != nullptr) {
-            if (mempool.isSpent(txin.prevout) || !llmq::quorumInstantSendManager->IsLocked(txin.prevout.hash)) {
-                LogPrint(BCLog::COINJOIN, "CCoinJoin::IsCollateralValid -- spent or non-locked mempool input! txin=%s\n", txin.ToString());
-                return false;
-            }
-            nValueIn += mempoolTx->vout[txin.prevout.n].nValue;
-        } else if (GetUTXOCoin(txin.prevout, coin)) {
-            nValueIn += coin.out.nValue;
-        } else {
-            LogPrint(BCLog::COINJOIN, "CCoinJoin::IsCollateralValid -- Unknown inputs in collateral transaction, txCollateral=%s", txCollateral.ToString()); /* Continued */
+        if (!viewMemPool.GetCoin(txin.prevout, coin) || coin.IsSpent() ||
+            (coin.nHeight == MEMPOOL_HEIGHT && !isman.IsLocked(txin.prevout.hash))) {
+            LogPrint(BCLog::COINJOIN, "CoinJoin::IsCollateralValid -- missing, spent or non-locked mempool input! txin=%s\n", txin.ToString());
             return false;
         }
+        nValueIn += coin.out.nValue;
     }
 
     //collateral transactions are required to pay out a small fee to the miners
     if (nValueIn - nValueOut < GetCollateralAmount()) {
-        LogPrint(BCLog::COINJOIN, "CCoinJoin::IsCollateralValid -- did not include enough fees in transaction: fees: %d, txCollateral=%s", nValueOut - nValueIn, txCollateral.ToString()); /* Continued */
+        LogPrint(BCLog::COINJOIN, "CoinJoin::IsCollateralValid -- did not include enough fees in transaction: fees: %d, txCollateral=%s", nValueOut - nValueIn, txCollateral.ToString()); /* Continued */
         return false;
     }
 
-    LogPrint(BCLog::COINJOIN, "CCoinJoin::IsCollateralValid -- %s", txCollateral.ToString()); /* Continued */
+    LogPrint(BCLog::COINJOIN, "CoinJoin::IsCollateralValid -- %s", txCollateral.ToString()); /* Continued */
 
-    {
-        LOCK(cs_main);
-        CValidationState validationState;
-        if (!AcceptToMemoryPool(mempool, validationState, MakeTransactionRef(txCollateral), /*pfMissingInputs=*/nullptr, /*bypass_limits=*/false, /*nAbsurdFee=*/DEFAULT_MAX_RAW_TX_FEE, /*test_accept=*/true)) {
-            LogPrint(BCLog::COINJOIN, "CCoinJoin::IsCollateralValid -- didn't pass AcceptToMemoryPool()\n");
-            return false;
-        }
+    if (!ATMPIfSaneFee(chainman, MakeTransactionRef(txCollateral), /*test_accept=*/true)) {
+        LogPrint(BCLog::COINJOIN, "CoinJoin::IsCollateralValid -- didn't pass ATMPIfSaneFee()\n");
+        return false;
     }
 
     return true;
 }
 
-std::string CCoinJoin::DenominationToString(int nDenom)
-{
-    CAmount nDenomAmount = DenominationToAmount(nDenom);
-
-    switch (nDenomAmount) {
-        case  0: return "N/A";
-        case -1: return "out-of-bounds";
-        case -2: return "non-denom";
-        case -3: return "to-amount-error";
-        default: return ValueFromAmount(nDenomAmount).getValStr();
-    }
-
-    // shouldn't happen
-    return "to-string-error";
-}
-
-bilingual_str CCoinJoin::GetMessageByID(PoolMessage nMessageID)
+bilingual_str CoinJoin::GetMessageByID(PoolMessage nMessageID)
 {
     switch (nMessageID) {
     case ERR_ALREADY_HAVE:
@@ -430,14 +407,20 @@ bilingual_str CCoinJoin::GetMessageByID(PoolMessage nMessageID)
     }
 }
 
-void CCoinJoin::AddDSTX(const CCoinJoinBroadcastTx& dstx)
+CDSTXManager::CDSTXManager(const chainlock::Chainlocks& chainlocks) :
+    m_chainlocks{chainlocks}
+{
+}
+CDSTXManager::~CDSTXManager() = default;
+
+void CDSTXManager::AddDSTX(const CCoinJoinBroadcastTx& dstx)
 {
     AssertLockNotHeld(cs_mapdstx);
     LOCK(cs_mapdstx);
     mapDSTX.insert(std::make_pair(dstx.tx->GetHash(), dstx));
 }
 
-CCoinJoinBroadcastTx CCoinJoin::GetDSTX(const uint256& hash)
+CCoinJoinBroadcastTx CDSTXManager::GetDSTX(const uint256& hash)
 {
     AssertLockNotHeld(cs_mapdstx);
     LOCK(cs_mapdstx);
@@ -445,36 +428,45 @@ CCoinJoinBroadcastTx CCoinJoin::GetDSTX(const uint256& hash)
     return (it == mapDSTX.end()) ? CCoinJoinBroadcastTx() : it->second;
 }
 
-void CCoinJoin::CheckDSTXes(const CBlockIndex* pindex, const llmq::CChainLocksHandler& clhandler)
+bool CDSTXManager::IsTxExpired(const CCoinJoinBroadcastTx& tx, const CBlockIndex* pindex) const
+{
+    // expire confirmed DSTXes after ~1h since confirmation or chainlocked
+    const auto& opt_confirmed_height = tx.GetConfirmedHeight();
+    if (!opt_confirmed_height.has_value() || pindex->nHeight < *opt_confirmed_height) return false; // not mined yet
+    return (pindex->nHeight - *opt_confirmed_height > 24) ||
+           m_chainlocks.HasChainLock(pindex->nHeight, *pindex->phashBlock); // mined more than an hour ago or chainlocked
+}
+
+void CDSTXManager::CheckDSTXes(const CBlockIndex* pindex)
 {
     AssertLockNotHeld(cs_mapdstx);
     LOCK(cs_mapdstx);
     auto it = mapDSTX.begin();
     while (it != mapDSTX.end()) {
-        if (it->second.IsExpired(pindex, clhandler)) {
+        if (IsTxExpired(it->second, pindex)) {
             mapDSTX.erase(it++);
         } else {
             ++it;
         }
     }
-    LogPrint(BCLog::COINJOIN, "CCoinJoin::CheckDSTXes -- mapDSTX.size()=%llu\n", mapDSTX.size());
+    LogPrint(BCLog::COINJOIN, "CoinJoin::CheckDSTXes -- mapDSTX.size()=%llu\n", mapDSTX.size());
 }
 
-void CCoinJoin::UpdatedBlockTip(const CBlockIndex* pindex, const llmq::CChainLocksHandler& clhandler, const std::unique_ptr<CMasternodeSync>& mn_sync)
+void CDSTXManager::UpdatedBlockTip(const CBlockIndex* pindex)
 {
-    if (pindex && mn_sync->IsBlockchainSynced()) {
-        CheckDSTXes(pindex, clhandler);
+    if (pindex) {
+        CheckDSTXes(pindex);
     }
 }
 
-void CCoinJoin::NotifyChainLock(const CBlockIndex* pindex, const llmq::CChainLocksHandler& clhandler, const std::unique_ptr<CMasternodeSync>& mn_sync)
+void CDSTXManager::NotifyChainLock(const CBlockIndex* pindex)
 {
-    if (pindex && mn_sync->IsBlockchainSynced()) {
-        CheckDSTXes(pindex, clhandler);
+    if (pindex) {
+        CheckDSTXes(pindex);
     }
 }
 
-void CCoinJoin::UpdateDSTXConfirmedHeight(const CTransactionRef& tx, int nHeight)
+void CDSTXManager::UpdateDSTXConfirmedHeight(const CTransactionRef& tx, std::optional<int> nHeight)
 {
     AssertLockHeld(cs_mapdstx);
 
@@ -484,37 +476,34 @@ void CCoinJoin::UpdateDSTXConfirmedHeight(const CTransactionRef& tx, int nHeight
     }
 
     it->second.SetConfirmedHeight(nHeight);
-    LogPrint(BCLog::COINJOIN, "CCoinJoin::%s -- txid=%s, nHeight=%d\n", __func__, tx->GetHash().ToString(), nHeight);
+    LogPrint(BCLog::COINJOIN, "CDSTXManager::%s -- txid=%s, nHeight=%d\n", __func__, tx->GetHash().ToString(), nHeight.value_or(-1));
 }
 
-void CCoinJoin::TransactionAddedToMempool(const CTransactionRef& tx)
+void CDSTXManager::TransactionAddedToMempool(const CTransactionRef& tx)
 {
     AssertLockNotHeld(cs_mapdstx);
     LOCK(cs_mapdstx);
-    UpdateDSTXConfirmedHeight(tx, -1);
+    UpdateDSTXConfirmedHeight(tx, std::nullopt);
 }
 
-void CCoinJoin::BlockConnected(const std::shared_ptr<const CBlock>& pblock, const CBlockIndex* pindex, const std::vector<CTransactionRef>& vtxConflicted)
+void CDSTXManager::BlockConnected(const std::shared_ptr<const CBlock>& pblock, const CBlockIndex* pindex)
 {
     AssertLockNotHeld(cs_mapdstx);
     LOCK(cs_mapdstx);
-    for (const auto& tx : vtxConflicted) {
-        UpdateDSTXConfirmedHeight(tx, -1);
-    }
 
     for (const auto& tx : pblock->vtx) {
         UpdateDSTXConfirmedHeight(tx, pindex->nHeight);
     }
 }
 
-void CCoinJoin::BlockDisconnected(const std::shared_ptr<const CBlock>& pblock, const CBlockIndex*)
+void CDSTXManager::BlockDisconnected(const std::shared_ptr<const CBlock>& pblock, const CBlockIndex*)
 {
     AssertLockNotHeld(cs_mapdstx);
     LOCK(cs_mapdstx);
     for (const auto& tx : pblock->vtx) {
-        UpdateDSTXConfirmedHeight(tx, -1);
+        UpdateDSTXConfirmedHeight(tx, std::nullopt);
     }
 }
 
-int CCoinJoin::GetMinPoolParticipants() { return Params().PoolMinParticipants(); }
-int CCoinJoin::GetMaxPoolParticipants() { return Params().PoolMaxParticipants(); }
+int CoinJoin::GetMinPoolParticipants() { return Params().PoolMinParticipants(); }
+int CoinJoin::GetMaxPoolParticipants() { return Params().PoolMaxParticipants(); }

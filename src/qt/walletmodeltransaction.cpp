@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2015 The Bitcoin Core developers
+// Copyright (c) 2011-2020 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -10,9 +10,8 @@
 
 #include <key_io.h>
 
-WalletModelTransaction::WalletModelTransaction(const QList<SendCoinsRecipient> &_recipients) :
-    recipients(_recipients),
-    fee(0)
+WalletModelTransaction::WalletModelTransaction(const QList<SendCoinsRecipient>& _recipients)
+    : recipients(_recipients)
 {
 }
 
@@ -24,6 +23,11 @@ QList<SendCoinsRecipient> WalletModelTransaction::getRecipients() const
 CTransactionRef& WalletModelTransaction::getWtx()
 {
     return wtx;
+}
+
+void WalletModelTransaction::setWtx(const CTransactionRef& newTx)
+{
+    wtx = newTx;
 }
 
 unsigned int WalletModelTransaction::getTransactionSize()
@@ -41,14 +45,16 @@ void WalletModelTransaction::setTransactionFee(const CAmount& newFee)
     fee = newFee;
 }
 
-void WalletModelTransaction::reassignAmounts()
+void WalletModelTransaction::reassignAmounts(const int nChangePos)
 {
     // For each recipient look for a matching CTxOut in walletTransaction and reassign amounts
     for (QList<SendCoinsRecipient>::iterator it = recipients.begin(); it != recipients.end(); ++it)
     {
         SendCoinsRecipient& rcp = (*it);
         {
+            int nPos = 0;
             for (const auto& txout : wtx.get()->vout) {
+                if (nPos++ == nChangePos) continue; // ignore change output
                 CScript scriptPubKey = GetScriptForDestination(DecodeDestination(rcp.address.toStdString()));
                 if (txout.scriptPubKey == scriptPubKey) {
                     rcp.amount = txout.nValue;

@@ -1,4 +1,4 @@
-// Copyright (c) 2019 The Bitcoin Core developers
+// Copyright (c) 2019-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -25,7 +25,7 @@ void initialize_transaction()
     SelectParams(CBaseChainParams::REGTEST);
 }
 
-FUZZ_TARGET_INIT(transaction, initialize_transaction)
+FUZZ_TARGET(transaction, .init = initialize_transaction)
 {
     CDataStream ds(buffer, SER_NETWORK, INIT_PROTO_VERSION);
     try {
@@ -41,7 +41,7 @@ FUZZ_TARGET_INIT(transaction, initialize_transaction)
             return CTransaction(deserialize, ds);
         } catch (const std::ios_base::failure&) {
             valid_tx = false;
-            return CTransaction();
+            return CTransaction{CMutableTransaction{}};
         }
     }();
     bool valid_mutable_tx = true;
@@ -60,8 +60,11 @@ FUZZ_TARGET_INIT(transaction, initialize_transaction)
         return;
     }
 
-    CValidationState state_with_dupe_check;
-    (void)CheckTransaction(tx, state_with_dupe_check);
+    {
+        TxValidationState state_with_dupe_check;
+        const bool res{CheckTransaction(tx, state_with_dupe_check)};
+        Assert(res == state_with_dupe_check.IsValid());
+    }
 
     std::string reason;
     const bool is_standard_with_permit_bare_multisig = IsStandardTx(tx, reason);
@@ -91,16 +94,9 @@ FUZZ_TARGET_INIT(transaction, initialize_transaction)
     (void)AreInputsStandard(tx, coins_view_cache);
 
     UniValue u(UniValue::VOBJ);
-    // ValueFromAmount(i) not defined when i == std::numeric_limits<int64_t>::min()
-    bool skip_tx_to_univ = false;
-    for (const CTxOut& txout : tx.vout) {
-        if (txout.nValue == std::numeric_limits<int64_t>::min()) {
-            skip_tx_to_univ = true;
-        }
-    }
-    if (!skip_tx_to_univ) {
-        TxToUniv(tx, /* hashBlock */ {}, u);
-        static const uint256 u256_max(uint256S("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"));
-        TxToUniv(tx, u256_max, u);
-    }
+    TxToUniv(tx, /*block_hash=*/uint256::ZERO, /*entry=*/u);
+    TxToUniv(tx, /*block_hash=*/uint256::ONE, /*entry=*/u);
+
+//    TxToUniv(tx, /*block_hash=*/uint256::ZERO, /*include_addresses=*/true, u);
+//    TxToUniv(tx, /*block_hash=*/uint256::ONE, /*include_addresses=*/false, u);
 }

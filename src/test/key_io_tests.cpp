@@ -1,22 +1,22 @@
-// Copyright (c) 2011-2016 The Bitcoin Core developers
+// Copyright (c) 2011-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <test/data/key_io_invalid.json.h>
 #include <test/data/key_io_valid.json.h>
 
+#include <bech32.h>
 #include <chainparams.h>
 #include <key.h>
 #include <key_io.h>
 #include <script/script.h>
-#include <util/strencodings.h>
+#include <test/util/json.h>
 #include <test/util/setup_common.h>
+#include <util/strencodings.h>
 
 #include <boost/test/unit_test.hpp>
 
 #include <univalue.h>
-
-extern UniValue read_json(const std::string& jsondata);
 
 BOOST_FIXTURE_TEST_SUITE(key_io_tests, BasicTestingSetup)
 
@@ -29,25 +29,25 @@ BOOST_AUTO_TEST_CASE(key_io_valid_parse)
     SelectParams(CBaseChainParams::MAIN);
 
     for (unsigned int idx = 0; idx < tests.size(); idx++) {
-        UniValue test = tests[idx];
+        const UniValue& test = tests[idx];
         std::string strTest = test.write();
         if (test.size() < 3) { // Allow for extra stuff (useful for comments)
             BOOST_ERROR("Bad test: " << strTest);
             continue;
         }
         std::string exp_base58string = test[0].get_str();
-        std::vector<unsigned char> exp_payload = ParseHex(test[1].get_str());
+        const std::vector<std::byte> exp_payload{ParseHex<std::byte>(test[1].get_str())};
         const UniValue &metadata = test[2].get_obj();
-        bool isPrivkey = find_value(metadata, "isPrivkey").get_bool();
-        SelectParams(find_value(metadata, "chain").get_str());
-        bool try_case_flip = find_value(metadata, "tryCaseFlip").isNull() ? false : find_value(metadata, "tryCaseFlip").get_bool();
+        bool isPrivkey = metadata.find_value("isPrivkey").get_bool();
+        SelectParams(metadata.find_value("chain").get_str());
+        bool try_case_flip = metadata.find_value("tryCaseFlip").isNull() ? false : metadata.find_value("tryCaseFlip").get_bool();
         if (isPrivkey) {
-            bool isCompressed = find_value(metadata, "isCompressed").get_bool();
+            bool isCompressed = metadata.find_value("isCompressed").get_bool();
             // Must be valid private key
             privkey = DecodeSecret(exp_base58string);
             BOOST_CHECK_MESSAGE(privkey.IsValid(), "!IsValid:" + strTest);
             BOOST_CHECK_MESSAGE(privkey.IsCompressed() == isCompressed, "compressed mismatch:" + strTest);
-            BOOST_CHECK_MESSAGE(privkey.size() == exp_payload.size() && std::equal(privkey.begin(), privkey.end(), exp_payload.begin()), "key mismatch:" + strTest);
+            BOOST_CHECK_MESSAGE(Span{privkey} == Span{exp_payload}, "key mismatch:" + strTest);
 
             // Private key must be invalid public key
             destination = DecodeDestination(exp_base58string);
@@ -87,7 +87,7 @@ BOOST_AUTO_TEST_CASE(key_io_valid_gen)
     UniValue tests = read_json(std::string(json_tests::key_io_valid, json_tests::key_io_valid + sizeof(json_tests::key_io_valid)));
 
     for (unsigned int idx = 0; idx < tests.size(); idx++) {
-        UniValue test = tests[idx];
+        const UniValue& test = tests[idx];
         std::string strTest = test.write();
         if (test.size() < 3) // Allow for extra stuff (useful for comments)
         {
@@ -97,10 +97,10 @@ BOOST_AUTO_TEST_CASE(key_io_valid_gen)
         std::string exp_base58string = test[0].get_str();
         std::vector<unsigned char> exp_payload = ParseHex(test[1].get_str());
         const UniValue &metadata = test[2].get_obj();
-        bool isPrivkey = find_value(metadata, "isPrivkey").get_bool();
-        SelectParams(find_value(metadata, "chain").get_str());
+        bool isPrivkey = metadata.find_value("isPrivkey").get_bool();
+        SelectParams(metadata.find_value("chain").get_str());
         if (isPrivkey) {
-            bool isCompressed = find_value(metadata, "isCompressed").get_bool();
+            bool isCompressed = metadata.find_value("isCompressed").get_bool();
             CKey key;
             key.Set(exp_payload.begin(), exp_payload.end(), isCompressed);
             assert(key.IsValid());
@@ -127,7 +127,7 @@ BOOST_AUTO_TEST_CASE(key_io_invalid)
     CTxDestination destination;
 
     for (unsigned int idx = 0; idx < tests.size(); idx++) {
-        UniValue test = tests[idx];
+        const UniValue& test = tests[idx];
         std::string strTest = test.write();
         if (test.size() < 1) // Allow for extra stuff (useful for comments)
         {
@@ -145,6 +145,104 @@ BOOST_AUTO_TEST_CASE(key_io_invalid)
             BOOST_CHECK_MESSAGE(!privkey.IsValid(), "IsValid privkey in mainnet:" + strTest);
         }
     }
+}
+
+// DIP-18: Dash Platform bech32m address encoding.
+BOOST_AUTO_TEST_CASE(dip18_platform_roundtrip)
+{
+    struct Sample {
+        std::string hash_hex;
+        std::string address;
+        std::string chain;
+        bool is_p2sh;
+    };
+    // Samples from DIP-0018 (Test Vectors section).
+    const Sample samples[] = {
+        {"f7da0a2b5cbd4ff6bb2c4d89b67d2f3ffeec0525", "dash1krma5z3ttj75la4m93xcndna9ullamq9y5e9n5rs",  CBaseChainParams::MAIN, false},
+        {"a5ff0046217fd1c7d238e3e146cc5bfd90832a7e", "dash1kzjl7qzxy9lar37j8r37z3kvt07epqe20ckxfezw",  CBaseChainParams::MAIN, false},
+        {"6d92674fd64472a3dfcfc3ebcfed7382bf699d7b", "dash1kpkeye606ez89g7lelp7hnldwwpt76va0v3j6x28",  CBaseChainParams::MAIN, false},
+        {"f7da0a2b5cbd4ff6bb2c4d89b67d2f3ffeec0525", "tdash1krma5z3ttj75la4m93xcndna9ullamq9y5fzq2j7", CBaseChainParams::TESTNET, false},
+        {"a5ff0046217fd1c7d238e3e146cc5bfd90832a7e", "tdash1kzjl7qzxy9lar37j8r37z3kvt07epqe20cxp68nq", CBaseChainParams::TESTNET, false},
+        {"6d92674fd64472a3dfcfc3ebcfed7382bf699d7b", "tdash1kpkeye606ez89g7lelp7hnldwwpt76va0vp4fcmf", CBaseChainParams::TESTNET, false},
+        {"43fa183cf3fb6e9e7dc62b692aeb4fc8d8045636", "dash1sppl5xpu70aka8nacc4kj2htflydspzkxch4cad6",  CBaseChainParams::MAIN, true},
+        {"43fa183cf3fb6e9e7dc62b692aeb4fc8d8045636", "tdash1sppl5xpu70aka8nacc4kj2htflydspzkxc8jtru5", CBaseChainParams::TESTNET, true},
+    };
+    for (const auto& s : samples) {
+        SelectParams(s.chain);
+        std::string err;
+        PlatformDestination dest = DecodePlatformDestination(s.address, err);
+        BOOST_REQUIRE_MESSAGE(IsValidPlatformDestination(dest),
+                              std::string{"decode failed: "} + s.address + " err=" + err);
+        std::vector<unsigned char> got_hash;
+        if (s.is_p2sh) {
+            BOOST_REQUIRE(std::holds_alternative<PlatformP2SHDestination>(dest));
+            const auto& h = std::get<PlatformP2SHDestination>(dest);
+            got_hash.assign(h.begin(), h.end());
+        } else {
+            BOOST_REQUIRE(std::holds_alternative<PlatformP2PKHDestination>(dest));
+            const auto& h = std::get<PlatformP2PKHDestination>(dest);
+            got_hash.assign(h.begin(), h.end());
+        }
+        BOOST_CHECK_EQUAL(HexStr(got_hash), std::string(s.hash_hex));
+        BOOST_CHECK_EQUAL(EncodePlatformDestination(dest), std::string(s.address));
+    }
+    SelectParams(CBaseChainParams::MAIN);
+}
+
+BOOST_AUTO_TEST_CASE(dip18_platform_invalid)
+{
+    SelectParams(CBaseChainParams::MAIN);
+    std::string err;
+
+    // Wrong HRP for the selected network (testnet string on mainnet).
+    BOOST_CHECK(!IsValidPlatformDestination(
+        DecodePlatformDestination("tdash1krma5z3ttj75la4m93xcndna9ullamq9y5fzq2j7", err)));
+
+    // Mixed case is forbidden by BIP-173.
+    BOOST_CHECK(!IsValidPlatformDestination(
+        DecodePlatformDestination("Dash1krma5z3ttj75la4m93xcndna9ullamq9y5e9n5rs", err)));
+
+    // Bech32 (BIP-173) checksum MUST be rejected; only bech32m is valid for DIP-18.
+    // Re-encode the same 21-byte payload with the BIP-173 generator and verify rejection.
+    {
+        std::vector<uint8_t> payload = ParseHex("b0f7da0a2b5cbd4ff6bb2c4d89b67d2f3ffeec0525");
+        std::vector<uint8_t> values;
+        ConvertBits<8, 5, true>([&](uint8_t b) { values.push_back(b); }, payload.begin(), payload.end());
+        const std::string bech32_str = bech32::Encode(bech32::Encoding::BECH32, "dash", values);
+        BOOST_REQUIRE(!bech32_str.empty());
+        BOOST_CHECK(!IsValidPlatformDestination(DecodePlatformDestination(bech32_str, err)));
+    }
+
+    // Unknown DIP-18 type byte (0x00) must be rejected.
+    {
+        std::vector<uint8_t> payload = ParseHex("00f7da0a2b5cbd4ff6bb2c4d89b67d2f3ffeec0525");
+        std::vector<uint8_t> values;
+        ConvertBits<8, 5, true>([&](uint8_t b) { values.push_back(b); }, payload.begin(), payload.end());
+        const std::string bad = bech32::Encode(bech32::Encoding::BECH32M, "dash", values);
+        BOOST_REQUIRE(!bad.empty());
+        BOOST_CHECK(!IsValidPlatformDestination(DecodePlatformDestination(bad, err)));
+    }
+
+    // Wrong payload length (19-byte hash) must be rejected.
+    {
+        std::vector<uint8_t> payload = ParseHex("b0f7da0a2b5cbd4ff6bb2c4d89b67d2f3ffeec05");
+        std::vector<uint8_t> values;
+        ConvertBits<8, 5, true>([&](uint8_t b) { values.push_back(b); }, payload.begin(), payload.end());
+        const std::string bad = bech32::Encode(bech32::Encoding::BECH32M, "dash", values);
+        BOOST_REQUIRE(!bad.empty());
+        BOOST_CHECK(!IsValidPlatformDestination(DecodePlatformDestination(bad, err)));
+    }
+
+    // Empty / garbage inputs.
+    BOOST_CHECK(!IsValidPlatformDestination(DecodePlatformDestination("", err)));
+    BOOST_CHECK(!IsValidPlatformDestination(DecodePlatformDestination("not-an-address", err)));
+
+    // Mainnet address on testnet must fail.
+    SelectParams(CBaseChainParams::TESTNET);
+    BOOST_CHECK(!IsValidPlatformDestination(
+        DecodePlatformDestination("dash1krma5z3ttj75la4m93xcndna9ullamq9y5e9n5rs", err)));
+
+    SelectParams(CBaseChainParams::MAIN);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

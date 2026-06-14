@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2020 The Dash Core developers
+// Copyright (c) 2017-2023 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -6,7 +6,7 @@
 #include <qt/trafficgraphdata.h>
 #include <algorithm>
 #include <sstream>
-#include <QTime>
+#include <QRandomGenerator>
 
 void TrafficGraphDataTests::simpleCurrentSampleQueueTests()
 {
@@ -137,13 +137,12 @@ void compareQueues(const TrafficGraphData::SampleQueue& expected, const TrafficG
 
 void testRangeSwitch(TrafficGraphData::GraphRange baseRange, TrafficGraphData::GraphRange toRange,int size)
 {
-    QTime time = QTime::currentTime();
-    qsrand((uint)time.msec());
     TrafficGraphData trafficGraphDataBase(baseRange);
     TrafficGraphData trafficGraphData(toRange);
+    auto* generator = QRandomGenerator::global();
     for (int i = 1; i <= size; i++){
-        int in = qrand() % 1000;
-        int out = qrand() % 1000;
+        int in = generator->generate() % 1000;
+        int out = generator->generate() % 1000;
         trafficGraphData.update(TrafficSample(in, out));
         trafficGraphDataBase.update(TrafficSample(in, out));
     }

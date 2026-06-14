@@ -1,8 +1,10 @@
-// Copyright (c) 2018-2022 The Dash Core developers
+// Copyright (c) 2018-2025 The Dash Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <evo/evodb.h>
+
+#include <uint256.h>
 
 CEvoDBScopedCommitter::CEvoDBScopedCommitter(CEvoDB &_evoDB) :
     evoDB(_evoDB)
@@ -29,13 +31,15 @@ void CEvoDBScopedCommitter::Rollback()
     evoDB.RollbackCurTransaction();
 }
 
-CEvoDB::CEvoDB(size_t nCacheSize, bool fMemory, bool fWipe) :
-    db(fMemory ? "" : (GetDataDir() / "evodb"), nCacheSize, fMemory, fWipe),
-    rootBatch(db),
-    rootDBTransaction(db, rootBatch),
-    curDBTransaction(rootDBTransaction, rootDBTransaction)
+CEvoDB::CEvoDB(const util::DbWrapperParams& db_params) :
+    db{util::MakeDbWrapper({db_params.path / "evodb", db_params.memory, db_params.wipe, /*cache_size=*/64 << 20})},
+    rootBatch{*db},
+    rootDBTransaction{*db, rootBatch},
+    curDBTransaction{rootDBTransaction, rootDBTransaction}
 {
 }
+
+CEvoDB::~CEvoDB() = default;
 
 void CEvoDB::CommitCurTransaction()
 {
@@ -54,7 +58,7 @@ bool CEvoDB::CommitRootTransaction()
     LOCK(cs);
     assert(curDBTransaction.IsClean());
     rootDBTransaction.Commit();
-    bool ret = db.WriteBatch(rootBatch);
+    bool ret = db->WriteBatch(rootBatch);
     rootBatch.Clear();
     return ret;
 }

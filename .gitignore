@@ -9,10 +9,13 @@ reset-files.bash
 src/dash
 src/dashd
 src/dash-cli
+src/dash-gui
+src/dash-node
 src/dash-tx
+src/dash-util
+src/dash-chainstate
 src/dash-wallet
-src/test/fuzz
-!src/test/fuzz/*.*
+src/test/fuzz/fuzz
 src/test/test_dash
 src/qt/test/test_dash-qt
 src/qt/res/css/colors/*
@@ -38,6 +41,7 @@ build-aux/test-driver
 config.cache
 config.log
 config.status
+config.status.old
 configure
 libtool
 src/config/bitcoin-config.h
@@ -46,8 +50,6 @@ src/config/stamp-h1
 src/obj
 share/setup.nsi
 share/qt/Info.plist
-
-src/univalue/gen
 
 src/qt/*.moc
 src/qt/moc_*.cpp
@@ -74,8 +76,7 @@ libconftest.dylib*
 
 *.log
 *.trs
-*.dmg
-*.iso
+*.zip
 
 *.json.h
 *.raw.h
@@ -95,8 +96,6 @@ Makefile
 !depends/Makefile
 dash-qt
 Dash-Qt.app
-background.tiff*
-!/depends/Makefile
 
 # Qt Creator
 Makefile.am.user
@@ -113,13 +112,19 @@ qrc_*.cpp
 build
 *.dSYM
 
+# Previous releases
+releases
+
 #lcov
 *.gcno
 *.gcda
 /*.info
 test_dash.coverage/
 total.coverage/
+fuzz.coverage/
 coverage_percent.txt
+/cov_tool_wrapper.sh
+qa-assets/
 
 #build tests
 linux-coverage-build
@@ -127,6 +132,7 @@ linux-build
 win32-build
 test/config.ini
 test/cache/*
+test/.mypy_cache/
 
 !src/leveldb*/Makefile
 
@@ -155,14 +161,23 @@ cmake-build-debug
 # clang-check
 *.plist
 
-osx_volname
 dist/
-*.background.tiff
 
 /guix-build-*
 
+/ci/scratch/
+
 # cppcheck cache-directory
-.cppcheck/*
+test/lint/.cppcheck/*
 
 # flake8 cache location
 .cache/*
+
+# Editor and tooling
+.clangd/
+.claude/
+.vscode/
+compile_commands.json
+# Linux perf profiling artifacts
+perf.data
+perf.data.old
