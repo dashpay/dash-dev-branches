@@ -356,6 +356,14 @@ bool CSpecialTxProcessor::RebuildListFromBlock(const CBlock& block, gsl::not_nul
                 if (opt_proTx->nVersion < ProTxVersion::ExtAddr) {
                     newState->platformP2PPort = opt_proTx->platformP2PPort;
                     newState->platformHTTPPort = opt_proTx->platformHTTPPort;
+                } else {
+                    // From ExtAddr onwards the Platform ports are stored in netInfo. Clear the
+                    // legacy scalar fields (which a legacy registration may have left set) so the
+                    // in-memory state matches its serialized form, which omits them for ExtAddr
+                    // (see CDeterministicMNState serialization). Otherwise a stale value would
+                    // survive in diff-reconstructed lists but vanish through a snapshot round-trip.
+                    newState->platformP2PPort = 0;
+                    newState->platformHTTPPort = 0;
                 }
             }
             if (newState->IsBanned()) {
@@ -1230,6 +1238,35 @@ bool CheckProUpRevTx(const CTransaction& tx, gsl::not_null<const CBlockIndex*> p
     }
     if (check_sigs && !CheckHashSig(*opt_ptx, dmn->pdmnState->pubKeyOperator.Get(), state)) {
         // pass the state returned by the function above
+        return false;
+    }
+
+    return true;
+}
+
+bool IsStandardSpecialTx(const CTransaction& tx, std::string& reason)
+{
+    if (!tx.IsSpecialTxVersion()) return true;
+
+    if (tx.nType != TRANSACTION_ASSET_LOCK) return true;
+
+    // Each input is referenced by Platform's funding state transition; beyond this
+    // many inputs that state transition exceeds Platform's ~20 kB size limit.
+    static constexpr size_t MAX_STANDARD_ASSET_LOCK_INPUTS{100};
+    if (tx.vin.size() > MAX_STANDARD_ASSET_LOCK_INPUTS) {
+        reason = "assetlocktx-too-many-inputs";
+        return false;
+    }
+
+    constexpr int max_tx_size_for_platform = 20480;
+    if (tx.GetTotalSize() > max_tx_size_for_platform) {
+        reason = "assetlocktx-too-big";
+        return false;
+    }
+
+    if (const auto opt_assetLockTx = GetTxPayload<CAssetLockPayload>(tx);
+        opt_assetLockTx.has_value() && opt_assetLockTx->getVersion() >= 2) {
+        reason = "assetlocktx-version-2";
         return false;
     }
 
