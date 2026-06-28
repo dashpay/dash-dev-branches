@@ -228,12 +228,18 @@ static std::string GetRequiredPaymentsString(governance::SuperblockManager& supe
 {
     std::string strPayments = "Unknown";
     if (payee) {
-        CTxDestination dest;
-        if (!ExtractDestination(payee->pdmnState->scriptPayout, dest)) {
-            NONFATAL_UNREACHABLE();
+        strPayments.clear();
+        for (const auto& payout : GetOwnerPayouts(payee->pdmnState->nVersion, payee->pdmnState->scriptPayout,
+                                                  payee->pdmnState->payouts)) {
+            CTxDestination dest;
+            if (!ExtractDestination(payout.scriptPayout, dest)) {
+                NONFATAL_UNREACHABLE();
+            }
+            if (!strPayments.empty()) strPayments += ", ";
+            strPayments += EncodeDestination(dest);
         }
-        strPayments = EncodeDestination(dest);
         if (payee->nOperatorReward != 0 && payee->pdmnState->scriptOperatorPayout != CScript()) {
+            CTxDestination dest;
             if (!ExtractDestination(payee->pdmnState->scriptOperatorPayout, dest)) {
                 NONFATAL_UNREACHABLE();
             }
@@ -258,6 +264,20 @@ static std::string GetRequiredPaymentsString(governance::SuperblockManager& supe
         strPayments += ", " + strSBPayees;
     }
     return strPayments;
+}
+
+static std::string GetOwnerPayoutsString(const CDeterministicMNState& state)
+{
+    std::string str_payees;
+    for (const auto& payout : GetOwnerPayouts(state.nVersion, state.scriptPayout, state.payouts)) {
+        CTxDestination dest;
+        if (!ExtractDestination(payout.scriptPayout, dest)) {
+            NONFATAL_UNREACHABLE();
+        }
+        if (!str_payees.empty()) str_payees += ", ";
+        str_payees += EncodeDestination(dest);
+    }
+    return str_payees.empty() ? "UNKNOWN" : str_payees;
 }
 
 static RPCHelpMan masternode_winners()
@@ -421,7 +441,8 @@ static RPCHelpMan masternode_payments()
         std::vector<CTxOut> voutMasternodePayments, voutDummy;
         CMutableTransaction dummyTx;
         CAmount blockSubsidy = GetBlockSubsidy(pindex, Params().GetConsensus());
-        node.chain_helper->mn_payments->FillBlockPayments(dummyTx, pindex->pprev, blockSubsidy, nBlockFees, voutMasternodePayments, voutDummy);
+        const MnRewardEra mn_reward_era{GetMnRewardEraAfter(pindex->pprev, chainman)};
+        node.chain_helper->mn_payments->FillBlockPayments(dummyTx, pindex->pprev, blockSubsidy, nBlockFees, mn_reward_era, voutMasternodePayments, voutDummy);
 
         UniValue blockObj(UniValue::VOBJ);
         CAmount payedPerBlock{0};
@@ -632,12 +653,7 @@ static RPCHelpMan masternodelist_helper(bool is_composite)
             }
         }
 
-        CScript payeeScript = dmn.pdmnState->scriptPayout;
-        CTxDestination payeeDest;
-        std::string payeeStr = "UNKNOWN";
-        if (ExtractDestination(payeeScript, payeeDest)) {
-            payeeStr = EncodeDestination(payeeDest);
-        }
+        const std::string payeeStr = GetOwnerPayoutsString(*dmn.pdmnState);
 
         std::string strAddress{};
         if (strMode == "addr" || strMode == "full" || strMode == "info" || strMode == "json" || strMode == "recent" ||
