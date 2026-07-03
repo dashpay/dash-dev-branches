@@ -202,6 +202,7 @@ jobs:
       depends-key: ${{ needs.depends-aarch64-linux.outputs.key }}
       depends-host: ${{ needs.depends-aarch64-linux.outputs.host }}
       depends-dep-opts: ${{ needs.depends-aarch64-linux.outputs.dep-opts }}
+      depends-artifact: ${{ needs.depends-aarch64-linux.outputs.built-artifact }}
       runs-on: ${{ needs.check-skip.outputs['runner-amd64'] }}
 
   src-linux64:
@@ -215,6 +216,7 @@ jobs:
       depends-key: ${{ needs.depends-linux64.outputs.key }}
       depends-host: ${{ needs.depends-linux64.outputs.host }}
       depends-dep-opts: ${{ needs.depends-linux64.outputs.dep-opts }}
+      depends-artifact: ${{ needs.depends-linux64.outputs.built-artifact }}
       runs-on: ${{ needs.check-skip.outputs['runner-amd64'] }}
 
   src-linux64_fuzz:
@@ -228,6 +230,7 @@ jobs:
       depends-key: ${{ needs.depends-linux64.outputs.key }}
       depends-host: ${{ needs.depends-linux64.outputs.host }}
       depends-dep-opts: ${{ needs.depends-linux64.outputs.dep-opts }}
+      depends-artifact: ${{ needs.depends-linux64.outputs.built-artifact }}
       runs-on: ${{ needs.check-skip.outputs['runner-amd64'] }}
 
   src-linux64_multiprocess:
@@ -241,6 +244,7 @@ jobs:
       depends-key: ${{ needs.depends-linux64_multiprocess.outputs.key }}
       depends-host: ${{ needs.depends-linux64_multiprocess.outputs.host }}
       depends-dep-opts: ${{ needs.depends-linux64_multiprocess.outputs.dep-opts }}
+      depends-artifact: ${{ needs.depends-linux64_multiprocess.outputs.built-artifact }}
       runs-on: ${{ needs.check-skip.outputs['runner-arm64'] }}
 
   src-linux64_nowallet:
@@ -253,6 +257,7 @@ jobs:
       depends-key: ${{ needs.depends-linux64_nowallet.outputs.key }}
       depends-host: ${{ needs.depends-linux64_nowallet.outputs.host }}
       depends-dep-opts: ${{ needs.depends-linux64_nowallet.outputs.dep-opts }}
+      depends-artifact: ${{ needs.depends-linux64_nowallet.outputs.built-artifact }}
       runs-on: ${{ needs.check-skip.outputs['runner-amd64'] }}
 
   src-linux64_sqlite:
@@ -266,6 +271,7 @@ jobs:
       depends-key: ${{ needs.depends-linux64.outputs.key }}
       depends-host: ${{ needs.depends-linux64.outputs.host }}
       depends-dep-opts: ${{ needs.depends-linux64.outputs.dep-opts }}
+      depends-artifact: ${{ needs.depends-linux64.outputs.built-artifact }}
       runs-on: ${{ needs.check-skip.outputs['runner-amd64'] }}
 
   src-linux64_tsan:
@@ -279,6 +285,7 @@ jobs:
       depends-key: ${{ needs.depends-linux64_multiprocess.outputs.key }}
       depends-host: ${{ needs.depends-linux64_multiprocess.outputs.host }}
       depends-dep-opts: ${{ needs.depends-linux64_multiprocess.outputs.dep-opts }}
+      depends-artifact: ${{ needs.depends-linux64_multiprocess.outputs.built-artifact }}
       runs-on: ${{ needs.check-skip.outputs['runner-arm64'] }}
 
   src-linux64_ubsan:
@@ -292,6 +299,7 @@ jobs:
       depends-key: ${{ needs.depends-linux64.outputs.key }}
       depends-host: ${{ needs.depends-linux64.outputs.host }}
       depends-dep-opts: ${{ needs.depends-linux64.outputs.dep-opts }}
+      depends-artifact: ${{ needs.depends-linux64.outputs.built-artifact }}
       runs-on: ${{ needs.check-skip.outputs['runner-amd64'] }}
 
   src-mac:
@@ -304,6 +312,7 @@ jobs:
       depends-key: ${{ needs.depends-mac.outputs.key }}
       depends-host: ${{ needs.depends-mac.outputs.host }}
       depends-dep-opts: ${{ needs.depends-mac.outputs.dep-opts }}
+      depends-artifact: ${{ needs.depends-mac.outputs.built-artifact }}
       runs-on: ${{ needs.check-skip.outputs['runner-amd64'] }}
 
   src-win64:
@@ -316,6 +325,7 @@ jobs:
       depends-key: ${{ needs.depends-win64.outputs.key }}
       depends-host: ${{ needs.depends-win64.outputs.host }}
       depends-dep-opts: ${{ needs.depends-win64.outputs.dep-opts }}
+      depends-artifact: ${{ needs.depends-win64.outputs.built-artifact }}
       runs-on: ${{ needs.check-skip.outputs['runner-amd64'] }}
 
   test-linux64:
