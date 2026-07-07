@@ -21,6 +21,7 @@
 #include <boost/test/unit_test.hpp>
 
 #include <algorithm>
+#include <optional>
 
 using namespace llmq;
 using namespace llmq::testutils;
@@ -124,7 +125,7 @@ BOOST_FIXTURE_TEST_CASE(commitment_check_undersized_bitset_debug_log_test, RegTe
     };
 
     std::vector<std::string> log_lines;
-    LogCaptureGuard guard{log_lines};
+    std::optional<LogCaptureGuard> guard{std::in_place, log_lines};
     BOOST_REQUIRE(LogAcceptDebug(BCLog::LLMQ));
 
     CFinalCommitmentTxPayload payload;
@@ -167,6 +168,12 @@ BOOST_FIXTURE_TEST_CASE(commitment_check_undersized_bitset_debug_log_test, RegTe
     BOOST_CHECK(!llmq::CheckLLMQCommitment(util_params, tx, state));
     BOOST_CHECK(state.IsInvalid());
     BOOST_CHECK_EQUAL(state.GetRejectReason(), "bad-qc-height");
+
+    // Remove the callback before reading log_lines: callbacks run under the
+    // logger mutex from whichever thread logs, and RegTestingSetup has
+    // background threads that log concurrently. DeleteCallback takes the same
+    // mutex, so after this reset no thread can still be mutating log_lines.
+    guard.reset();
 
     // Locate the validMembers debug line emitted by CheckLLMQCommitment and
     // assert the loop was clamped: with an empty bitset the rendered list must
