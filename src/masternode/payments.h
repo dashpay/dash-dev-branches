@@ -17,6 +17,25 @@ class CDeterministicMNManager;
 class CTransaction;
 class CTxOut;
 
+/**
+ * Match the list of expected masternode payment outputs against the coinbase
+ * outputs.
+ *
+ * When @p strict_multiplicity is true, every expected output must be matched
+ * by a distinct actual output (multiplicity-correct matching): two identical
+ * expected outputs require two identical actual outputs.
+ *
+ * When false, the legacy behaviour is used where each expected output only
+ * has to appear at least once in the actual outputs. This is preserved for
+ * pre-v24 historical validation.
+ *
+ * @return -1 if every expected output is matched, otherwise the index in
+ * @p expected of the first output that could not be matched.
+ */
+int FindUnmatchedMasternodePayment(const std::vector<CTxOut>& expected,
+                                   const std::vector<CTxOut>& actual,
+                                   bool strict_multiplicity);
+
 struct CMutableTransaction;
 
 namespace governance {
@@ -65,7 +84,7 @@ private:
     [[nodiscard]] bool GetMasternodeTxOuts(const CBlockIndex* pindexPrev, const CAmount blockSubsidy, const CAmount feeReward,
                                       MnRewardEra era, std::vector<CTxOut>& voutMasternodePaymentsRet);
     [[nodiscard]] bool IsTransactionValid(const CTransaction& txNew, const CBlockIndex* pindexPrev, const CAmount blockSubsidy,
-                                          const CAmount feeReward, MnRewardEra era);
+                                          const CAmount feeReward, MnRewardEra era, bool strict_multiplicity);
     [[nodiscard]] bool IsOldBudgetBlockValueValid(const CBlock& block, const int nBlockHeight, const CAmount blockReward, std::string& strErrorRet);
 
 public:
@@ -78,7 +97,7 @@ public:
     }
 
     bool IsBlockValueValid(const CChain& active_chain, const CBlock& block, const CBlockIndex* pindexPrev, const CAmount blockReward, std::string& strErrorRet, SuperBlockCheckType check_superblock);
-    bool IsBlockPayeeValid(const CChain& active_chain, const CTransaction& txNew, const CBlockIndex* pindexPrev, const CAmount blockSubsidy, const CAmount feeReward, MnRewardEra era, SuperBlockCheckType check_superblock);
+    bool IsBlockPayeeValid(const CChain& active_chain, const CTransaction& txNew, const CBlockIndex* pindexPrev, const CAmount blockSubsidy, const CAmount feeReward, MnRewardEra era, bool strict_multiplicity, SuperBlockCheckType check_superblock);
     void FillBlockPayments(CMutableTransaction& txNew, const CBlockIndex* pindexPrev, const CAmount blockSubsidy, const CAmount feeReward,
                            MnRewardEra era, std::vector<CTxOut>& voutMasternodePaymentsRet, std::vector<CTxOut>& voutSuperblockPaymentsRet);
 };

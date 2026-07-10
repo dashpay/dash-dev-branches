@@ -5,6 +5,8 @@
 #include <test/util/setup_common.h>
 
 #include <chainparams.h>
+#include <clientversion.h>
+#include <consensus/merkle.h>
 #include <consensus/validation.h>
 #include <deploymentstatus.h>
 #include <evo/deterministicmns.h>
@@ -14,18 +16,23 @@
 #include <evo/specialtxman.h>
 #include <llmq/context.h>
 #include <messagesigner.h>
+#include <mempool_args.h>
+#include <netbase.h>
 #include <node/transaction.h>
 #include <policy/policy.h>
+#include <pow.h>
 #include <script/interpreter.h>
 #include <script/sign.h>
 #include <script/signingprovider.h>
 #include <script/standard.h>
+#include <streams.h>
 #include <test/util/txmempool.h>
 #include <txmempool.h>
 #include <validation.h>
 
 #include <boost/test/unit_test.hpp>
 
+#include <optional>
 #include <vector>
 
 using node::GetTransaction;
@@ -665,6 +672,298 @@ void FuncProUpRegTxV2CannotBypassV4PayoutCollateralReuse(TestChainSetup& setup)
     BOOST_CHECK_EQUAL(val_state.GetRejectReason(), "bad-protx-payee-reuse");
 }
 
+// Coinbase validation matches each expected masternode payment against a DISTINCT coinbase output
+// only after v24. This exercises the exact activation boundary with a SINGLE masternode whose
+// owner payout and operator payout resolve to the same script AND amount (an even 50% operator
+// reward), so the coinbase carries two identical outputs. The "merge cheat" folds those two
+// identical outputs into one, redirecting the freed value to a miner output so the total coinbase
+// value is unchanged; this underpays the masternode.
+//
+//   Pre-v24:  existence-only matching ACCEPTS the merge cheat.
+//   Post-v24: strict multiplicity matching REJECTS it (and the faithful block connects).
+//
+// The duplicate is NOT a multi-payout (v4) phenomenon: multi-payout owner shares are forced to
+// distinct scripts (bad-protx-payee-dup) and can never collide. It is a plain owner-payout ==
+// operator-payout script collision, which every ProTx version supports -- here a v2 (BasicBLS)
+// MN, the max version eligible while v24 is still pending, kept across the boundary.
+void FuncMNPaymentMultiplicityV24Boundary(TestChainSetup& setup)
+{
+    auto& chainman = *Assert(setup.m_node.chainman.get());
+    auto& dmnman = *Assert(setup.m_node.dmnman);
+    const CScript coinbase_pk = GetScriptForRawPubKey(setup.coinbaseKey.GetPubKey());
+    const auto& consensus = chainman.GetConsensus();
+
+    // Start in the pre-v24 window: v19 active (basic BLS scheme) so we can register a v2 MN, but
+    // v24 -- and thus strict multiplicity matching -- not yet active.
+    BOOST_REQUIRE(DeploymentActiveAfter(chainman.ActiveChain().Tip(), consensus, Consensus::DEPLOYMENT_V19));
+    BOOST_REQUIRE(!DeploymentActiveAfter(chainman.ActiveChain().Tip(), chainman, Consensus::DEPLOYMENT_V24));
+    BOOST_REQUIRE(!bls::bls_legacy_scheme.load());
+
+    auto utxos = BuildSimpleUtxoMap(setup.m_coinbase_txns);
+
+    // A single script that BOTH an owner payout and the operator payout will point at.
+    CKey payout_key;
+    payout_key.MakeNewKey(true);
+    const CScript shared_script = GetScriptForDestination(PKHash(payout_key.GetPubKey()));
+
+    CKey owner_key;
+    CKey collateral_key;
+    CBLSSecretKey operator_key;
+    owner_key.MakeNewKey(true);
+    collateral_key.MakeNewKey(true);
+    operator_key.MakeNewKey();
+    const auto script_collateral = GetScriptForDestination(PKHash(collateral_key.GetPubKey()));
+
+    // Fund the collateral.
+    CMutableTransaction tx_collateral;
+    FundTransaction(chainman.ActiveChain(), tx_collateral, utxos, script_collateral, dmn_types::Regular.collat_amount,
+                    setup.coinbaseKey);
+    SignTransaction(*(setup.m_node.mempool), tx_collateral, setup.coinbaseKey);
+    setup.CreateAndProcessBlock({tx_collateral}, coinbase_pk);
+    dmnman.UpdatedBlockTip(chainman.ActiveChain().Tip());
+
+    // Register a plain v2 (BasicBLS) MN -- deliberately NOT multi-payout, and the max version
+    // eligible while v24 is pending -- with a single legacy owner payout -> shared_script and a
+    // 50% operator reward, so the owner share and the operator share are equal whenever the
+    // masternode reward is even.
+    CProRegTx pro_reg;
+    pro_reg.nVersion = ProTxVersion::BasicBLS;
+    pro_reg.netInfo = NetInfoInterface::MakeNetInfo(pro_reg.nVersion);
+    // Legacy MnNetInfo (v2) on regtest must not use the mainnet port; a small port works.
+    BOOST_CHECK_EQUAL(pro_reg.netInfo->AddEntry(NetInfoPurpose::CORE_P2P, "1.1.1.1:1"), NetInfoStatus::Success);
+    pro_reg.keyIDOwner = owner_key.GetPubKey().GetID();
+    pro_reg.pubKeyOperator.Set(operator_key.GetPublicKey(), bls::bls_legacy_scheme.load());
+    pro_reg.keyIDVoting = owner_key.GetPubKey().GetID();
+    pro_reg.nOperatorReward = 5000; // 50%
+    pro_reg.scriptPayout = shared_script;
+    for (size_t i = 0; i < tx_collateral.vout.size(); ++i) {
+        if (tx_collateral.vout[i].nValue == dmn_types::Regular.collat_amount) {
+            pro_reg.collateralOutpoint = COutPoint(tx_collateral.GetHash(), i);
+            break;
+        }
+    }
+
+    CMutableTransaction tx_reg;
+    tx_reg.nVersion = 3;
+    tx_reg.nType = TRANSACTION_PROVIDER_REGISTER;
+    FundTransaction(chainman.ActiveChain(), tx_reg, utxos, GetScriptForDestination(PKHash(setup.coinbaseKey.GetPubKey())),
+                    1 * COIN, setup.coinbaseKey);
+    pro_reg.inputsHash = CalcTxInputsHash(CTransaction(tx_reg));
+    CMessageSigner::SignMessage(pro_reg.MakeSignString(), pro_reg.vchSig, collateral_key);
+    SetTxPayload(tx_reg, pro_reg);
+    SignTransaction(*(setup.m_node.mempool), tx_reg, setup.coinbaseKey);
+    const auto proTxHash = tx_reg.GetHash();
+    setup.CreateAndProcessBlock({tx_reg}, coinbase_pk);
+    dmnman.UpdatedBlockTip(chainman.ActiveChain().Tip());
+
+    auto dmn = dmnman.GetListAtChainTip().GetMN(proTxHash);
+    BOOST_REQUIRE(dmn);
+    BOOST_CHECK_EQUAL(dmn->pdmnState->nVersion, ProTxVersion::BasicBLS);
+
+    // Point the operator payout at the same script as the owner payout. Nothing checks the
+    // operator payout script against the owner payout script, in any version, so this collision
+    // is accepted.
+    CProUpServTx pro_ups;
+    pro_ups.nVersion = ProTxVersion::BasicBLS;
+    pro_ups.proTxHash = proTxHash;
+    pro_ups.netInfo = NetInfoInterface::MakeNetInfo(pro_ups.nVersion);
+    BOOST_CHECK_EQUAL(pro_ups.netInfo->AddEntry(NetInfoPurpose::CORE_P2P, "1.1.1.1:1"), NetInfoStatus::Success);
+    pro_ups.scriptOperatorPayout = shared_script;
+
+    CMutableTransaction tx_ups;
+    tx_ups.nVersion = 3;
+    tx_ups.nType = TRANSACTION_PROVIDER_UPDATE_SERVICE;
+    FundTransaction(chainman.ActiveChain(), tx_ups, utxos, GetScriptForDestination(PKHash(setup.coinbaseKey.GetPubKey())),
+                    1 * COIN, setup.coinbaseKey);
+    pro_ups.inputsHash = CalcTxInputsHash(CTransaction(tx_ups));
+    pro_ups.sig = operator_key.Sign(::SerializeHash(pro_ups), bls::bls_legacy_scheme);
+    SetTxPayload(tx_ups, pro_ups);
+    SignTransaction(*(setup.m_node.mempool), tx_ups, setup.coinbaseKey);
+    setup.CreateAndProcessBlock({tx_ups}, coinbase_pk);
+    dmnman.UpdatedBlockTip(chainman.ActiveChain().Tip());
+    BOOST_REQUIRE(dmnman.GetListAtChainTip().GetMN(proTxHash)->pdmnState->scriptOperatorPayout == shared_script);
+
+    // Two identical coinbase outputs paying shared_script (the owner/operator collision).
+    auto find_duplicate = [&](const CBlock& b) -> std::optional<CTxOut> {
+        const auto& vout = b.vtx[0]->vout;
+        for (size_t i = 0; i < vout.size(); ++i) {
+            if (vout[i].scriptPubKey != shared_script) continue;
+            for (size_t j = i + 1; j < vout.size(); ++j) {
+                if (vout[j] == vout[i]) return vout[i];
+            }
+        }
+        return std::nullopt;
+    };
+
+    // Mine until a block's (pre-operator) masternode reward is even: only then does the 50%
+    // operator share equal the single owner share, so the owner and operator outputs -- both
+    // paying shared_script -- collide into two identical coinbase outputs. The reward is constant
+    // within a subsidy/reallocation epoch, so this can take up to a full epoch; intermediate
+    // blocks are processed to advance the chain.
+    auto mine_until_duplicate = [&]() -> std::pair<CBlock, CTxOut> {
+        for (int i = 0; i < 2000; ++i) {
+            CBlock good = setup.CreateBlock({}, coinbase_pk, chainman.ActiveChainstate());
+            if (auto dup = find_duplicate(good)) return {good, *dup};
+            BOOST_REQUIRE(chainman.ProcessNewBlock(std::make_shared<CBlock>(good), /*force_processing=*/true, nullptr));
+            dmnman.UpdatedBlockTip(chainman.ActiveChain().Tip());
+        }
+        BOOST_REQUIRE_MESSAGE(false, "expected owner/operator collision to yield a duplicate coinbase output");
+        return {}; // unreachable, BOOST_REQUIRE above aborts the test
+    };
+
+    // Build the "merge cheat" sibling of `good`: drop one of the two identical outputs and fold
+    // its value into a non-masternode (miner) output. Total coinbase value is unchanged (so
+    // IsBlockValueValid still passes), but only ONE distinct output now pays shared_script.
+    auto build_merge_cheat = [&](const CBlock& good, const CTxOut& dup) -> CBlock {
+        CBlock merged = good;
+        CMutableTransaction cb(*merged.vtx[0]);
+        bool kept_first = false;
+        for (auto it = cb.vout.begin(); it != cb.vout.end();) {
+            if (*it == dup && kept_first) {
+                it = cb.vout.erase(it);
+            } else {
+                if (*it == dup) kept_first = true;
+                ++it;
+            }
+        }
+        bool redirected = false;
+        for (auto& o : cb.vout) {
+            if (o.scriptPubKey != shared_script && !o.scriptPubKey.IsUnspendable()) {
+                o.nValue += dup.nValue;
+                redirected = true;
+                break;
+            }
+        }
+        BOOST_REQUIRE(redirected);
+        merged.vtx[0] = MakeTransactionRef(std::move(cb));
+        merged.hashMerkleRoot = BlockMerkleRoot(merged);
+        merged.nNonce = 0;
+        while (!CheckProofOfWork(merged.GetHash(), merged.nBits, consensus)) ++merged.nNonce;
+        return merged;
+    };
+
+    // ---- Pre-v24: legacy existence-only matching ACCEPTS the merge cheat (masternode underpaid).
+    {
+        const auto [good, dup] = mine_until_duplicate();
+        // The collision must be reached while v24 is still pending, otherwise this phase would be
+        // testing post-v24 behaviour by accident.
+        BOOST_REQUIRE(!DeploymentActiveAfter(chainman.ActiveChain().Tip(), chainman, Consensus::DEPLOYMENT_V24));
+        const CBlock merged = build_merge_cheat(good, dup);
+        BOOST_REQUIRE(chainman.ProcessNewBlock(std::make_shared<CBlock>(merged), /*force_processing=*/true, nullptr));
+        BOOST_CHECK_EQUAL(chainman.ActiveChain().Tip()->GetBlockHash(), merged.GetHash());
+        dmnman.UpdatedBlockTip(chainman.ActiveChain().Tip());
+    }
+
+    // ---- Mine across v24 activation (the same v2 MN is kept; its collision is version-independent).
+    for (int i = 0; i < 2000 && !DeploymentActiveAfter(chainman.ActiveChain().Tip(), chainman, Consensus::DEPLOYMENT_V24); ++i) {
+        setup.CreateAndProcessBlock({}, coinbase_pk);
+        dmnman.UpdatedBlockTip(chainman.ActiveChain().Tip());
+    }
+    BOOST_REQUIRE(DeploymentActiveAfter(chainman.ActiveChain().Tip(), chainman, Consensus::DEPLOYMENT_V24));
+
+    // ---- Post-v24: strict multiplicity matching REJECTS the same merge (two expected outputs, one
+    // distinct actual). Rejection is observed as the tip not advancing.
+    {
+        const auto [good, dup] = mine_until_duplicate();
+        const CBlock merged = build_merge_cheat(good, dup);
+        const uint256 tip_before = chainman.ActiveChain().Tip()->GetBlockHash();
+        chainman.ProcessNewBlock(std::make_shared<CBlock>(merged), /*force_processing=*/true, nullptr);
+        BOOST_CHECK(chainman.ActiveChain().Tip()->GetBlockHash() == tip_before);
+        BOOST_CHECK(chainman.ActiveChain().Tip()->GetBlockHash() != merged.GetHash());
+
+        // The faithful block (both identical outputs present) connects.
+        BOOST_REQUIRE(chainman.ProcessNewBlock(std::make_shared<CBlock>(good), /*force_processing=*/true, nullptr));
+        BOOST_CHECK_EQUAL(chainman.ActiveChain().Tip()->GetBlockHash(), good.GetHash());
+    }
+}
+
+static std::shared_ptr<NetInfoInterface> DeserializeCoreP2PExtNetInfo(const std::vector<NetInfoEntry>& entries)
+{
+    // Hand-roll ExtNetInfo's serialization (version byte followed by a map of purpose to entries)
+    // to construct states that AddEntry() would refuse to produce
+    CDataStream ds(SER_DISK, CLIENT_VERSION);
+    ds << uint8_t{1};                      // m_version (ExtNetInfo::CURRENT_VERSION)
+    WriteCompactSize(ds, 1);               // m_data map size (one purpose)
+    ds << NetInfoPurpose::CORE_P2P;        // map key (purpose)
+    WriteCompactSize(ds, entries.size());  // entry count for this purpose
+    for (const auto& entry : entries) {
+        ds << entry;
+    }
+
+    auto net_info{std::make_shared<ExtNetInfo>()};
+    ds >> *net_info;
+    return net_info;
+}
+
+static CTransaction BuildExtNetInfoProRegTx(std::shared_ptr<NetInfoInterface> net_info)
+{
+    CKey owner_key;
+    owner_key.MakeNewKey(true);
+    CBLSSecretKey operator_key;
+    operator_key.MakeNewKey();
+
+    CProRegTx pro_reg;
+    pro_reg.nVersion = ProTxVersion::ExtAddr;
+    pro_reg.netInfo = std::move(net_info);
+    pro_reg.keyIDOwner = owner_key.GetPubKey().GetID();
+    pro_reg.pubKeyOperator.Set(operator_key.GetPublicKey(), bls::bls_legacy_scheme.load());
+    pro_reg.keyIDVoting = owner_key.GetPubKey().GetID();
+    pro_reg.scriptPayout = GenerateRandomAddress();
+
+    CMutableTransaction tx;
+    tx.nVersion = 3;
+    tx.nType = TRANSACTION_PROVIDER_REGISTER;
+    pro_reg.inputsHash = CalcTxInputsHash(CTransaction(tx));
+    SetTxPayload(tx, pro_reg);
+    return CTransaction(tx);
+}
+
+void FuncProRegTxRejectsInvalidDeserializedExtNetInfo(TestChainSetup& setup)
+{
+    auto& chainman = *Assert(setup.m_node.chainman.get());
+    auto& dmnman = *Assert(setup.m_node.dmnman);
+    const CScript coinbase_pk = GetScriptForRawPubKey(setup.coinbaseKey.GetPubKey());
+
+    for (int i = 0; i < 2000 && !DeploymentActiveAfter(chainman.ActiveChain().Tip(), chainman, Consensus::DEPLOYMENT_V24); ++i) {
+        setup.CreateAndProcessBlock({}, coinbase_pk);
+        dmnman.UpdatedBlockTip(chainman.ActiveChain().Tip());
+    }
+    BOOST_REQUIRE(DeploymentActiveAfter(chainman.ActiveChain().Tip(), chainman.GetConsensus(), Consensus::DEPLOYMENT_V19));
+    BOOST_REQUIRE(DeploymentActiveAfter(chainman.ActiveChain().Tip(), chainman, Consensus::DEPLOYMENT_V24));
+    BOOST_REQUIRE(!bls::bls_legacy_scheme.load());
+
+    auto check_reject_reason = [&](std::shared_ptr<NetInfoInterface> net_info, const std::string& reject_reason) {
+        TxValidationState state;
+        {
+            LOCK(cs_main);
+            BOOST_CHECK(!CheckProRegTx(BuildExtNetInfoProRegTx(std::move(net_info)), chainman.ActiveChain().Tip(),
+                                       dmnman, chainman.ActiveChainstate().CoinsTip(), chainman, state,
+                                       /*check_sigs=*/false));
+        }
+        BOOST_CHECK_EQUAL(state.GetResult(), TxValidationResult::TX_BAD_SPECIAL);
+        BOOST_CHECK_EQUAL(state.GetRejectReason(), reject_reason);
+    };
+
+    const uint16_t port{9998};
+    const NetInfoEntry p2p_entry{LookupNumeric("1.1.1.1", port)};
+    BOOST_REQUIRE(p2p_entry.IsTriviallyValid());
+    check_reject_reason(DeserializeCoreP2PExtNetInfo({p2p_entry, p2p_entry}), "bad-protx-dup-netinfo-entry");
+
+    std::vector<NetInfoEntry> too_many_entries;
+    for (size_t i = 1; i <= MAX_ENTRIES_EXTNETINFO + 1; ++i) {
+        const NetInfoEntry entry{LookupNumeric(strprintf("1.1.1.%d", i), port)};
+        BOOST_REQUIRE(entry.IsTriviallyValid());
+        too_many_entries.emplace_back(entry);
+    }
+    check_reject_reason(DeserializeCoreP2PExtNetInfo(too_many_entries), "bad-protx-netinfo-maxlimit");
+
+    DomainPort domain;
+    BOOST_REQUIRE_EQUAL(domain.Set("example.com", 443), DomainPort::Status::Success);
+    const NetInfoEntry domain_entry{domain};
+    BOOST_REQUIRE(domain_entry.IsTriviallyValid());
+    check_reject_reason(DeserializeCoreP2PExtNetInfo({domain_entry}), "bad-protx-netinfo-entry");
+}
+
 void FuncDIP3Protx(TestChainSetup& setup)
 {
     auto& chainman = *Assert(setup.m_node.chainman.get());
@@ -911,7 +1210,7 @@ void FuncTestMempoolReorg(TestChainSetup& setup)
     SetTxPayload(tx_reg, payload);
     SignTransaction(*(setup.m_node.mempool), tx_reg, setup.coinbaseKey);
 
-    CTxMemPool testPool;
+    CTxMemPool testPool{MemPoolOptionsForTest(setup.m_node)};
     if (setup.m_node.dmnman) {
         testPool.ConnectManagers(setup.m_node.dmnman.get(), setup.m_node.llmq_ctx->isman.get());
     }
@@ -987,7 +1286,7 @@ void FuncTestMempoolDualProregtx(TestChainSetup& setup)
     SetTxPayload(tx_reg2, payload);
     SignTransaction(*(setup.m_node.mempool), tx_reg2, setup.coinbaseKey);
 
-    CTxMemPool testPool;
+    CTxMemPool testPool{MemPoolOptionsForTest(setup.m_node)};
     if (setup.m_node.dmnman) {
         testPool.ConnectManagers(setup.m_node.dmnman.get(), setup.m_node.llmq_ctx->isman.get());
     }
@@ -1236,6 +1535,31 @@ struct TestChainV24SignalBeforeV19Setup : public TestChainSetup {
     }
 };
 
+// v19/v20/mn_rr active at height 500, with v24 signalled but still PENDING (not yet locked in).
+// The 500-block window means v24 locks in well after v19, so this fixture stops in the window
+// where basic-BLS (v2) registrations are valid but strict multiplicity matching is off, letting
+// a single test cross the v24 activation boundary.
+struct TestChainV24PendingSetup : public TestChainSetup {
+    TestChainV24PendingSetup() :
+        TestChainSetup(494, CBaseChainParams::REGTEST,
+                       {"-testactivationheight=v19@500", "-testactivationheight=v20@500",
+                        "-testactivationheight=mn_rr@500",
+                        "-vbparams=v24:0:9999999999:0:500:400:300:5:0"})
+    {
+        const CScript coinbase_pk = GetScriptForRawPubKey(coinbaseKey.GetPubKey());
+        auto& chainman = *Assert(m_node.chainman);
+        auto& dmnman = *Assert(m_node.dmnman);
+        // Mine just enough to activate v19/v20/mn_rr (height 500) while keeping v24 pending.
+        for (int i = 0; i < 20 && !DeploymentActiveAfter(chainman.ActiveChain().Tip(), chainman.GetConsensus(), Consensus::DEPLOYMENT_V19); ++i) {
+            CreateAndProcessBlock({}, coinbase_pk);
+            dmnman.UpdatedBlockTip(chainman.ActiveChain().Tip());
+        }
+        assert(DeploymentActiveAfter(chainman.ActiveChain().Tip(), chainman.GetConsensus(), Consensus::DEPLOYMENT_V19));
+        assert(!DeploymentActiveAfter(chainman.ActiveChain().Tip(), chainman, Consensus::DEPLOYMENT_V24));
+        assert(!bls::bls_legacy_scheme.load());
+    }
+};
+
 // DIP3 can only be activated with legacy scheme (v19 is activated later)
 BOOST_AUTO_TEST_CASE(dip3_activation_legacy)
 {
@@ -1266,6 +1590,18 @@ BOOST_AUTO_TEST_CASE(proupreg_v2_cannot_bypass_v4_payout_collateral_reuse)
 {
     TestChainV24SignalBeforeV19Setup setup;
     FuncProUpRegTxV2CannotBypassV4PayoutCollateralReuse(setup);
+}
+
+BOOST_AUTO_TEST_CASE(proregtx_rejects_invalid_deserialized_extnetinfo)
+{
+    TestChainV24SignalBeforeV19Setup setup;
+    FuncProRegTxRejectsInvalidDeserializedExtNetInfo(setup);
+}
+
+BOOST_AUTO_TEST_CASE(mn_payment_multiplicity_v24_boundary)
+{
+    TestChainV24PendingSetup setup;
+    FuncMNPaymentMultiplicityV24Boundary(setup);
 }
 
 BOOST_AUTO_TEST_CASE(dip3_protx_legacy)

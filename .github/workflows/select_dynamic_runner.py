@@ -135,6 +135,7 @@ def select_runners(
     event_name: str,
     event: Dict,
     threshold: int,
+    arm64_threshold: int,
     runner_amd64_var: str,
     runner_arm64_var: str,
     fetch_json: Callable[[str], Tuple[Dict, Dict[str, str]]],
@@ -158,30 +159,46 @@ def select_runners(
     except Exception as exc:  # noqa: BLE001
         measurement_error = "{}: {}".format(type(exc).__name__, exc)
 
-    use_blacksmith = False
     decision_parts = []
 
     if label_override:
-        use_blacksmith = True
         decision_parts.append("label:blacksmith-ci")
     elif measurement_error is not None:
         decision_parts.append("metric-unavailable")
-    elif backlog_count_value > threshold:
-        use_blacksmith = True
-        decision_parts.append("backlog:{}>{}".format(backlog_count_value, threshold))
     else:
-        decision_parts.append("backlog:{}<={}".format(backlog_count_value, threshold))
+        decision_parts.append(
+            "amd64:backlog:{}{}".format(
+                backlog_count_value,
+                ">{}".format(threshold)
+                if backlog_count_value > threshold else "<={}".format(threshold),
+            )
+        )
+        decision_parts.append(
+            "arm64:backlog:{}{}".format(
+                backlog_count_value,
+                ">{}".format(arm64_threshold)
+                if backlog_count_value > arm64_threshold else "<={}".format(arm64_threshold),
+            )
+        )
+
+    use_blacksmith_amd64 = label_override or (
+        measurement_error is None and backlog_count_value > threshold
+    )
+    use_blacksmith_arm64 = label_override or (
+        measurement_error is None and backlog_count_value > arm64_threshold
+    )
 
     runner_amd64 = DEFAULT_RUNNER_AMD64
     runner_arm64 = DEFAULT_RUNNER_ARM64
     fallback_parts: List[str] = []
 
-    if use_blacksmith:
+    if use_blacksmith_amd64:
         if runner_amd64_var:
             runner_amd64 = runner_amd64_var
         else:
             fallback_parts.append("amd64-github-fallback")
 
+    if use_blacksmith_arm64:
         if runner_arm64_var:
             runner_arm64 = runner_arm64_var
         else:
@@ -194,7 +211,9 @@ def select_runners(
     return {
         "runner_amd64": runner_amd64,
         "runner_arm64": runner_arm64,
-        "use_blacksmith": "true" if use_blacksmith else "false",
+        "use_blacksmith": "true" if use_blacksmith_amd64 or use_blacksmith_arm64 else "false",
+        "use_blacksmith_amd64": "true" if use_blacksmith_amd64 else "false",
+        "use_blacksmith_arm64": "true" if use_blacksmith_arm64 else "false",
         "backlog_count": backlog_count,
         "decision_reason": ";".join(decision_parts),
         "label_override": "true" if label_override else "false",
@@ -225,8 +244,13 @@ def write_step_summary(path: Optional[str], outputs: Dict[str, str]) -> None:
         )
         fh.write("- Aggregated queued jobs: {}\n".format(outputs["backlog_count"]))
         fh.write(
-            "- Use Blacksmith: {}\n".format(
-                "yes" if outputs["use_blacksmith"] == "true" else "no"
+            "- Use Blacksmith amd64: {}\n".format(
+                "yes" if outputs["use_blacksmith_amd64"] == "true" else "no"
+            )
+        )
+        fh.write(
+            "- Use Blacksmith arm64: {}\n".format(
+                "yes" if outputs["use_blacksmith_arm64"] == "true" else "no"
             )
         )
         fh.write("- amd64 runner: `{}`\n".format(outputs["runner_amd64"]))
@@ -234,7 +258,15 @@ def write_step_summary(path: Optional[str], outputs: Dict[str, str]) -> None:
         fh.write("- Decision: `{}`\n".format(outputs["decision_reason"]))
 
 
+def env_int(name: str, default: int) -> int:
+    value = os.environ.get(name, "")
+    if value == "":
+        return default
+    return int(value)
+
+
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
+    default_backlog_threshold = env_int("BACKLOG_THRESHOLD", 10)
     parser = argparse.ArgumentParser(description="Select GitHub Actions runners dynamically.")
     parser.add_argument(
         "--event-name",
@@ -249,8 +281,14 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument(
         "--backlog-threshold",
         type=int,
-        default=int(os.environ.get("BACKLOG_THRESHOLD", "10")),
+        default=default_backlog_threshold,
         help="Queued job threshold for switching to Blacksmith",
+    )
+    parser.add_argument(
+        "--arm64-backlog-threshold",
+        type=int,
+        default=env_int("BACKLOG_THRESHOLD_ARM64", default_backlog_threshold * 3),
+        help="Queued job threshold for switching arm64 jobs to Blacksmith",
     )
     parser.add_argument(
         "--runner-amd64-var",
@@ -299,6 +337,7 @@ def main(argv: Sequence[str]) -> int:
         event_name=args.event_name,
         event=event,
         threshold=args.backlog_threshold,
+        arm64_threshold=args.arm64_backlog_threshold,
         runner_amd64_var=args.runner_amd64_var,
         runner_arm64_var=args.runner_arm64_var,
         fetch_json=fetch_json,

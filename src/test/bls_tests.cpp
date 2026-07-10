@@ -5,8 +5,6 @@
 #include <bls/bls.h>
 #include <bls/bls_batchverifier.h>
 #include <bls/bls_worker.h>
-#include <util/helpers.h>
-
 #include <chainparams.h>
 #include <clientversion.h>
 #include <consensus/validation.h>
@@ -15,6 +13,8 @@
 #include <script/standard.h>
 #include <streams.h>
 #include <test/util/setup_common.h>
+#include <timedata.h>
+#include <util/helpers.h>
 #include <util/strencodings.h>
 #include <validation.h>
 
@@ -680,7 +680,7 @@ BOOST_AUTO_TEST_CASE(v19_boundary_validation_failure_restores_bls_scheme)
         BlockValidationState state;
         BOOST_CHECK(!TestBlockValidity(state, *Assert(setup.m_node.chainlocks), *Assert(setup.m_node.evodb), Params(),
                                        chainman.ActiveChainstate(), proposal_block, chainman.ActiveChain().Tip(),
-                                       /*fCheckPOW=*/true, /*fCheckMerkleRoot=*/true));
+                                       GetAdjustedTime, /*fCheckPOW=*/true, /*fCheckMerkleRoot=*/true));
         BOOST_CHECK_EQUAL(state.GetRejectReason(), "bad-txns-inputs-missingorspent");
     }
     BOOST_CHECK(bls::bls_legacy_scheme.load());

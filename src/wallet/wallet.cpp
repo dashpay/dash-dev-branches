@@ -1682,13 +1682,19 @@ void CWallet::UnsetBlankWalletFlag(WalletBatch& batch)
     UnsetWalletFlagWithDB(batch, WALLET_FLAG_BLANK_WALLET);
 }
 
+bool CWallet::StartMixing()
+{
+    // Refuse to start mixing on a wallet that is locked for mixing
+    if (IsLocked(/*fForMixing=*/true)) {
+        return false;
+    }
+    bool expected{false};
+    return m_mixing.compare_exchange_strong(expected, true);
+}
+
 void CWallet::NewKeyPoolCallback()
 {
-    // Note: GetClient(*this) can return nullptr when this wallet is in the middle of its creation.
-    // Skipping stopMixing() is fine in this case.
-    if (std::unique_ptr<interfaces::CoinJoin::Client> coinjoin_client = coinjoin_available() ? coinjoin_loader().GetClient(GetName()) : nullptr) {
-        coinjoin_client->stopMixing();
-    }
+    StopMixing();
     nKeysLeftSinceAutoBackup = 0;
 }
 
@@ -1932,7 +1938,7 @@ CWallet::ScanResult CWallet::ScanForWalletTransactions(const uint256& start_bloc
     WalletLogPrintf("Rescan started from block %s... (%s)\n", start_block.ToString(),
                     fast_rescan_filter ? "fast variant using block filters" : "slow variant inspecting all blocks");
 
-    ShowProgress(strprintf("%s " + _("Rescanning…").translated, GetDisplayName()), 0); // show rescan progress in GUI as dialog or on splashscreen, if -rescan on startup
+    ShowProgress(strprintf("%s " + _("Rescanning…").translated, GetDisplayName()), 0); // show rescan progress in GUI as dialog or on splashscreen, if rescan required on startup (e.g. due to corruption)
     uint256 tip_hash = WITH_LOCK(cs_wallet, return GetLastBlockHash());
     uint256 end_hash = tip_hash;
     if (max_height) chain().findAncestorByHeight(tip_hash, *max_height, FoundBlock().hash(end_hash));
@@ -2439,15 +2445,12 @@ DBErrors CWallet::LoadWallet()
         }
     }
 
-    if (nLoadWalletRet != DBErrors::LOAD_OK)
-        return nLoadWalletRet;
-
     /* If the CoinJoin salt is not set, try to set a new random hash as the salt */
-    if (GetCoinJoinSalt().IsNull() && !SetCoinJoinSalt(GetRandHash())) {
+    if (nLoadWalletRet == DBErrors::LOAD_OK && GetCoinJoinSalt().IsNull() && !SetCoinJoinSalt(GetRandHash())) {
         return DBErrors::LOAD_FAIL;
     }
 
-    return DBErrors::LOAD_OK;
+    return nLoadWalletRet;
 }
 
 // Goes through all wallet transactions and checks if they are masternode collaterals, in which case these are locked
@@ -3102,6 +3105,7 @@ std::shared_ptr<CWallet> CWallet::Create(WalletContext& context, const std::stri
     if (!walletInstance->AutoBackupWallet(fs::PathFromString(walletFile), error, warnings) && !error.original.empty()) {
         return nullptr;
     }
+    bool rescan_required = false;
     DBErrors nLoadWalletRet = walletInstance->LoadWallet();
     if (nLoadWalletRet != DBErrors::LOAD_OK)
     {
@@ -3127,6 +3131,10 @@ std::shared_ptr<CWallet> CWallet::Create(WalletContext& context, const std::stri
         {
             error = strprintf(_("Wallet needed to be rewritten: restart %s to complete"), PACKAGE_NAME);
             return nullptr;
+        } else if (nLoadWalletRet == DBErrors::NEED_RESCAN) {
+            warnings.push_back(strprintf(_("Error reading %s! Transaction data may be missing or incorrect."
+                                           " Rescanning wallet."), walletFile));
+            rescan_required = true;
         }
         else {
             error = strprintf(_("Error loading %s"), walletFile);
@@ -3382,7 +3390,7 @@ std::shared_ptr<CWallet> CWallet::Create(WalletContext& context, const std::stri
 
     NotifyWalletLoading(context, walletInstance);
 
-    if (chain && !AttachChain(walletInstance, *chain, error, warnings)) {
+    if (chain && !AttachChain(walletInstance, *chain, rescan_required, error, warnings)) {
         walletInstance->m_chain_notifications_handler.reset(); // Reset this pointer so that the wallet will actually be unloaded
         return nullptr;
     }
@@ -3407,7 +3415,7 @@ std::shared_ptr<CWallet> CWallet::Create(WalletContext& context, const std::stri
     return walletInstance;
 }
 
-bool CWallet::AttachChain(const std::shared_ptr<CWallet>& walletInstance, interfaces::Chain& chain, bilingual_str& error, std::vector<bilingual_str>& warnings)
+bool CWallet::AttachChain(const std::shared_ptr<CWallet>& walletInstance, interfaces::Chain& chain, const bool rescan_required, bilingual_str& error, std::vector<bilingual_str>& warnings)
 {
     LOCK(walletInstance->cs_wallet);
     // allow setting the chain if it hasn't been set already but prevent changing it
@@ -3441,8 +3449,9 @@ bool CWallet::AttachChain(const std::shared_ptr<CWallet>& walletInstance, interf
     walletInstance->m_attaching_chain = true; //ignores chainStateFlushed notifications
     walletInstance->m_chain_notifications_handler = walletInstance->chain().handleNotifications(walletInstance);
 
+    // If rescan_required = true, rescan_height remains equal to 0
     int rescan_height = 0;
-    if (!gArgs.GetBoolArg("-rescan", false))
+    if (!rescan_required)
     {
         WalletBatch batch(walletInstance->GetDatabase());
         CBlockLocator locator;
@@ -3467,21 +3476,19 @@ bool CWallet::AttachChain(const std::shared_ptr<CWallet>& walletInstance, interf
         // No need to read and scan block if block was created before
         // our wallet birthday (as adjusted for block time variability)
         // unless a full rescan was requested
-        if (gArgs.GetIntArg("-rescan", 0) != 2) {
-            std::optional<int64_t> time_first_key;
-            for (auto spk_man : walletInstance->GetAllScriptPubKeyMans()) {
-                int64_t time = spk_man->GetTimeFirstKey();
-                if (!time_first_key || time < *time_first_key) time_first_key = time;
-            }
-            if (time_first_key) {
-                FoundBlock found = FoundBlock().height(rescan_height);
-                chain.findFirstBlockWithTimeAndHeight(*time_first_key - TIMESTAMP_WINDOW, rescan_height, found);
-                if (!found.found) {
-                    // We were unable to find a block that had a time more recent than our earliest timestamp
-                    // or a height higher than the wallet was synced to, indicating that the wallet is newer than the
-                    // current chain tip. Skip rescanning in this case.
-                    rescan_height = *tip_height;
-                }
+        std::optional<int64_t> time_first_key;
+        for (auto spk_man : walletInstance->GetAllScriptPubKeyMans()) {
+            int64_t time = spk_man->GetTimeFirstKey();
+            if (!time_first_key || time < *time_first_key) time_first_key = time;
+        }
+        if (time_first_key) {
+            FoundBlock found = FoundBlock().height(rescan_height);
+            chain.findFirstBlockWithTimeAndHeight(*time_first_key - TIMESTAMP_WINDOW, rescan_height, found);
+            if (!found.found) {
+                // We were unable to find a block that had a time more recent than our earliest timestamp
+                // or a height higher than the wallet was synced to, indicating that the wallet is newer than the
+                // current chain tip. Skip rescanning in this case.
+                rescan_height = *tip_height;
             }
         }
 

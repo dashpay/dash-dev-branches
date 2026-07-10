@@ -28,6 +28,8 @@ jobs:
       runner-amd64: ${{ steps.select-runner.outputs.runner_amd64 }}
       runner-arm64: ${{ steps.select-runner.outputs.runner_arm64 }}
       use-blacksmith: ${{ steps.select-runner.outputs.use_blacksmith }}
+      use-blacksmith-amd64: ${{ steps.select-runner.outputs.use_blacksmith_amd64 }}
+      use-blacksmith-arm64: ${{ steps.select-runner.outputs.use_blacksmith_arm64 }}
       backlog-count: ${{ steps.select-runner.outputs.backlog_count }}
       decision-reason: ${{ steps.select-runner.outputs.decision_reason }}
       base-image-digest: ${{ steps.base-image.outputs.digest }}
@@ -54,6 +56,7 @@ jobs:
         if: ${{ steps.skip-check.outputs.skip == 'false' }}
         env:
           BACKLOG_THRESHOLD: "10"
+          BACKLOG_THRESHOLD_ARM64: "30"
           GH_TOKEN: ${{ github.token }}
           RUNNER_AMD64_VAR: ${{ vars.RUNNER_AMD64 }}
           RUNNER_ARM64_VAR: ${{ vars.RUNNER_ARM64 }}

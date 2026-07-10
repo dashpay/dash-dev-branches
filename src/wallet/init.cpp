@@ -51,7 +51,7 @@ public:
 
     // Dash Specific Wallet Init
     void AutoLockMasternodeCollaterals(interfaces::WalletLoader& wallet_loader) const override;
-    void InitCoinJoinSettings(interfaces::CoinJoin::Loader& coinjoin_loader, interfaces::WalletLoader& wallet_loader) const override;
+    void InitCoinJoinSettings(CCoinJoinClientManager& mgr) const override;
     void InitAutoBackup() const override;
 };
 
@@ -65,8 +65,6 @@ void WalletInit::AddWalletOptions(ArgsManager& argsman) const
     argsman.AddArg("-instantsendnotify=<cmd>", "Execute command when a wallet InstantSend transaction is successfully locked. %s in cmd is replaced by TxID and %w is replaced by wallet name. %w is not currently implemented on Windows. On systems where %w is supported, it should NOT be quoted because this would break shell escaping used to invoke the command.", ArgsManager::ALLOW_ANY, OptionsCategory::WALLET);
 #endif
     argsman.AddArg("-keypool=<n>", strprintf("Set key pool size to <n> (default: %u). Warning: Smaller sizes may increase the risk of losing funds when restoring from an old backup, if none of the addresses in the original keypool have been used.", DEFAULT_KEYPOOL_SIZE), ArgsManager::ALLOW_ANY, OptionsCategory::WALLET);
-    argsman.AddArg("-rescan=<mode>", "Rescan the block chain for missing wallet transactions on startup"
-                                            " (1 = start from wallet creation time, 2 = start from genesis block)", ArgsManager::ALLOW_ANY, OptionsCategory::WALLET);
 #ifdef ENABLE_EXTERNAL_SIGNER
     argsman.AddArg("-signer=<cmd>", "External signing tool, see doc/external-signer.md", ArgsManager::ALLOW_ANY, OptionsCategory::WALLET);
 #endif
@@ -154,13 +152,6 @@ bool WalletInit::ParameterInteraction() const
         LogPrintf("%s: parameter interaction: -blocksonly=1 -> setting -walletbroadcast=0\n", __func__);
     }
 
-    int rescan_mode = gArgs.GetIntArg("-rescan", 0);
-    if (rescan_mode < 0 || rescan_mode > 2) {
-        LogPrintf("%s: Warning: incorrect -rescan mode, falling back to default value.\n", __func__);
-        InitWarning(_("Incorrect -rescan mode, falling back to default value"));
-        gArgs.ForceRemoveArg("rescan");
-    }
-
     if (gArgs.IsArgSet("-walletbackupsdir")) {
         if (!fs::is_directory(gArgs.GetArg("-walletbackupsdir", ""))) {
             InitWarning(strprintf(_("Warning: incorrect parameter %s, path must exist! Using default path."), "-walletbackupsdir"));
@@ -207,23 +198,11 @@ void WalletInit::AutoLockMasternodeCollaterals(interfaces::WalletLoader& wallet_
     }
 }
 
-void WalletInit::InitCoinJoinSettings(interfaces::CoinJoin::Loader& coinjoin_loader, interfaces::WalletLoader& wallet_loader) const
+void WalletInit::InitCoinJoinSettings(CCoinJoinClientManager& mgr) const
 {
-    const auto& wallets{wallet_loader.getWallets()};
-    CCoinJoinClientOptions::SetEnabled(!wallets.empty() ? gArgs.GetBoolArg("-enablecoinjoin", true) : false);
-    if (!CCoinJoinClientOptions::IsEnabled()) {
-        return;
-    }
     bool fAutoStart = gArgs.GetBoolArg("-coinjoinautostart", DEFAULT_COINJOIN_AUTOSTART);
-    for (auto& wallet : wallets) {
-        auto manager = Assert(coinjoin_loader.GetClient(wallet->getWalletName()));
-        if (wallet->isLocked(/*fForMixing=*/false)) {
-            manager->stopMixing();
-            LogPrintf("CoinJoin: Mixing stopped for locked wallet \"%s\"\n", wallet->getWalletName());
-        } else if (fAutoStart) {
-            manager->startMixing();
-            LogPrintf("CoinJoin: Automatic mixing started for wallet \"%s\"\n", wallet->getWalletName());
-        }
+    if (fAutoStart) {
+        mgr.startMixing();
     }
     LogPrintf("CoinJoin: autostart=%d, multisession=%d," /* Continued */
               "sessions=%d, rounds=%d, amount=%d, denoms_goal=%d, denoms_hardcap=%d\n",

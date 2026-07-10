@@ -142,6 +142,7 @@ static constexpr auto BLOCK_STALLING_TIMEOUT_MAX{64s};
 static const int MAX_CMPCTBLOCK_DEPTH = 5;
 /** Maximum depth of blocks we're willing to respond to GETBLOCKTXN requests for. */
 static const int MAX_BLOCKTXN_DEPTH = 10;
+static_assert(MAX_BLOCKTXN_DEPTH <= MIN_BLOCKS_TO_KEEP, "MAX_BLOCKTXN_DEPTH too high");
 /** Size of the "block download window": how far ahead of our current height do we fetch?
  *  Larger windows tolerate larger download speed differences between peer, but increase the potential
  *  degree of disordering of blocks on disk (which make reindexing and pruning harder). We'll probably
@@ -583,7 +584,7 @@ struct CNodeState {
 class PeerManagerImpl final : public PeerManager
 {
 public:
-    PeerManagerImpl(const CChainParams& chainparams, CConnman& connman, AddrMan& addrman, BanMan* banman,
+    PeerManagerImpl(CConnman& connman, AddrMan& addrman, BanMan* banman,
                     CDSTXManager& dstxman, ChainstateManager& chainman, CTxMemPool& pool,
                     CMasternodeMetaMan& mn_metaman, CMasternodeSync& mn_sync,
                     CSporkManager& sporkman, const chainlock::Chainlocks& chainlocks,
@@ -1538,8 +1539,6 @@ void PeerManagerImpl::FindNextBlocksToDownload(const Peer& peer, unsigned int co
 
 void PeerManagerImpl::PushNodeVersion(CNode& pnode, const Peer& peer)
 {
-    const auto& params = Params();
-
     uint64_t my_services{peer.m_our_services};
     const int64_t nTime{count_seconds(GetTime<std::chrono::seconds>())};
     uint64_t nonce = pnode.GetLocalNonce();
@@ -1555,7 +1554,7 @@ void PeerManagerImpl::PushNodeVersion(CNode& pnode, const Peer& peer)
     pnode.SetSentMNAuthChallenge(mnauthChallenge);
 
     int nProtocolVersion = PROTOCOL_VERSION;
-    if (params.NetworkIDString() != CBaseChainParams::MAIN && gArgs.IsArgSet("-pushversion")) {
+    if (m_chainparams.NetworkIDString() != CBaseChainParams::MAIN && gArgs.IsArgSet("-pushversion")) {
         nProtocolVersion = gArgs.GetIntArg("-pushversion", PROTOCOL_VERSION);
     }
 
@@ -2090,7 +2089,7 @@ std::optional<std::string> PeerManagerImpl::FetchBlock(NodeId peer_id, const CBl
     return std::nullopt;
 }
 
-std::unique_ptr<PeerManager> PeerManager::make(const CChainParams& chainparams, CConnman& connman, AddrMan& addrman,
+std::unique_ptr<PeerManager> PeerManager::make(CConnman& connman, AddrMan& addrman,
                                                BanMan* banman, CDSTXManager& dstxman, ChainstateManager& chainman,
                                                CTxMemPool& pool, CMasternodeMetaMan& mn_metaman,
                                                CMasternodeSync& mn_sync,
@@ -2101,10 +2100,10 @@ std::unique_ptr<PeerManager> PeerManager::make(const CChainParams& chainparams, 
                                                const std::unique_ptr<CJWalletManager>& cj_walletman,
                                                const std::unique_ptr<LLMQContext>& llmq_ctx, bool ignore_incoming_txs)
 {
-    return std::make_unique<PeerManagerImpl>(chainparams, connman, addrman, banman, dstxman, chainman, pool, mn_metaman, mn_sync, sporkman, chainlocks, clhandler, nodeman, dmnman, cj_walletman, llmq_ctx, ignore_incoming_txs);
+    return std::make_unique<PeerManagerImpl>(connman, addrman, banman, dstxman, chainman, pool, mn_metaman, mn_sync, sporkman, chainlocks, clhandler, nodeman, dmnman, cj_walletman, llmq_ctx, ignore_incoming_txs);
 }
 
-PeerManagerImpl::PeerManagerImpl(const CChainParams& chainparams, CConnman& connman, AddrMan& addrman, BanMan* banman,
+PeerManagerImpl::PeerManagerImpl(CConnman& connman, AddrMan& addrman, BanMan* banman,
                                  CDSTXManager& dstxman, ChainstateManager& chainman, CTxMemPool& pool,
                                  CMasternodeMetaMan& mn_metaman, CMasternodeSync& mn_sync,
                                  CSporkManager& sporkman,
@@ -2114,7 +2113,7 @@ PeerManagerImpl::PeerManagerImpl(const CChainParams& chainparams, CConnman& conn
                                  const std::unique_ptr<CDeterministicMNManager>& dmnman,
                                  const std::unique_ptr<CJWalletManager>& cj_walletman,
                                  const std::unique_ptr<LLMQContext>& llmq_ctx, bool ignore_incoming_txs)
-    : m_chainparams(chainparams),
+    : m_chainparams(chainman.GetParams()),
       m_connman(connman),
       m_addrman(addrman),
       m_banman(banman),
@@ -2724,47 +2723,66 @@ void PeerManagerImpl::ProcessGetBlockData(CNode& pfrom, Peer& peer, const CInv& 
         }
     }
 
-    LOCK(cs_main);
-    const CBlockIndex* pindex = m_chainman.m_blockman.LookupBlockIndex(inv.hash);
-    if (!pindex) {
-        return;
-    }
-    if (!BlockRequestAllowed(pindex)) {
-        LogPrint(BCLog::NET, "%s: ignoring request from peer=%i for old block that isn't in the main chain\n", __func__, pfrom.GetId());
-        return;
-    }
     const CNetMsgMaker msgMaker(pfrom.GetCommonVersion());
-    // disconnect node in case we have reached the outbound limit for serving historical blocks
-    if (m_connman.OutboundTargetReached(true) &&
-        (((m_chainman.m_best_header != nullptr) && (m_chainman.m_best_header->GetBlockTime() - pindex->GetBlockTime() > HISTORICAL_BLOCK_AGE)) || inv.IsMsgFilteredBlk()) &&
-        !pfrom.HasPermission(NetPermissionFlags::Download) // nodes with the download permission may exceed target
-    ) {
-        LogPrint(BCLog::NET, "historical block serving limit reached, disconnect peer=%d\n", pfrom.GetId());
-        pfrom.fDisconnect = true;
-        return;
+
+    const CBlockIndex* pindex{nullptr};
+    const CBlockIndex* tip{nullptr};
+    bool can_direct_fetch{false};
+    FlatFilePos block_pos{};
+    {
+        LOCK(cs_main);
+        pindex = m_chainman.m_blockman.LookupBlockIndex(inv.hash);
+        if (!pindex) {
+            return;
+        }
+        if (!BlockRequestAllowed(pindex)) {
+            LogPrint(BCLog::NET, "%s: ignoring request from peer=%i for old block that isn't in the main chain\n", __func__, pfrom.GetId());
+            return;
+        }
+        // disconnect node in case we have reached the outbound limit for serving historical blocks
+        if (m_connman.OutboundTargetReached(true) &&
+            (((m_chainman.m_best_header != nullptr) && (m_chainman.m_best_header->GetBlockTime() - pindex->GetBlockTime() > HISTORICAL_BLOCK_AGE)) || inv.IsMsgFilteredBlk()) &&
+            !pfrom.HasPermission(NetPermissionFlags::Download) // nodes with the download permission may exceed target
+        ) {
+            LogPrint(BCLog::NET, "historical block serving limit reached, disconnect peer=%d\n", pfrom.GetId());
+            pfrom.fDisconnect = true;
+            return;
+        }
+        tip = m_chainman.ActiveChain().Tip();
+        // Avoid leaking prune-height by never sending blocks below the NODE_NETWORK_LIMITED threshold
+        if (!pfrom.HasPermission(NetPermissionFlags::NoBan) && (
+                (((peer.m_our_services & NODE_NETWORK_LIMITED) == NODE_NETWORK_LIMITED) && ((peer.m_our_services & NODE_NETWORK) != NODE_NETWORK) && (tip->nHeight - pindex->nHeight > (int)NODE_NETWORK_LIMITED_MIN_BLOCKS + 2 /* add two blocks buffer extension for possible races */) )
+           )) {
+            LogPrint(BCLog::NET, "Ignore block request below NODE_NETWORK_LIMITED threshold, disconnect peer=%d\n", pfrom.GetId());
+            //disconnect node and prevent it from stalling (would otherwise wait for the missing block)
+            pfrom.fDisconnect = true;
+            return;
+        }
+        // Pruned nodes may have deleted the block, so check whether
+        // it's available before trying to send.
+        if (!(pindex->nStatus & BLOCK_HAVE_DATA)) {
+            return;
+        }
+        can_direct_fetch = CanDirectFetch();
+        block_pos = pindex->GetBlockPos();
     }
-    // Avoid leaking prune-height by never sending blocks below the NODE_NETWORK_LIMITED threshold
-    if (!pfrom.HasPermission(NetPermissionFlags::NoBan) && (
-            (((peer.m_our_services & NODE_NETWORK_LIMITED) == NODE_NETWORK_LIMITED) && ((peer.m_our_services & NODE_NETWORK) != NODE_NETWORK) && (m_chainman.ActiveChain().Tip()->nHeight - pindex->nHeight > (int)NODE_NETWORK_LIMITED_MIN_BLOCKS + 2 /* add two blocks buffer extension for possible races */) )
-       )) {
-        LogPrint(BCLog::NET, "Ignore block request below NODE_NETWORK_LIMITED threshold, disconnect peer=%d\n", pfrom.GetId());
-        //disconnect node and prevent it from stalling (would otherwise wait for the missing block)
-        pfrom.fDisconnect = true;
-        return;
-    }
-    // Pruned nodes may have deleted the block, so check whether
-    // it's available before trying to send.
-    if (!(pindex->nStatus & BLOCK_HAVE_DATA)) {
-        return;
-    }
+
     std::shared_ptr<const CBlock> pblock;
     if (a_recent_block && a_recent_block->GetHash() == pindex->GetBlockHash()) {
         pblock = a_recent_block;
     } else {
         // Send block from disk
         std::shared_ptr<CBlock> pblockRead = std::make_shared<CBlock>();
-        if (!ReadBlockFromDisk(*pblockRead, pindex, m_chainparams.GetConsensus()))
-            assert(!"cannot load block from disk");
+        const auto hash = ReadBlockFromDisk(*pblockRead, block_pos, m_chainparams.GetConsensus());
+        if (!hash || *hash != inv.hash) {
+            if (WITH_LOCK(cs_main, return m_chainman.m_blockman.IsBlockPruned(pindex))) {
+                LogPrint(BCLog::NET, "Block was pruned before it could be read, disconnect peer=%d\n", pfrom.GetId());
+            } else {
+                LogError("Cannot load block from disk, disconnect peer=%d\n", pfrom.GetId());
+            }
+            pfrom.fDisconnect = true;
+            return;
+        }
         pblock = pblockRead;
     }
     if (pblock) {
@@ -2806,8 +2824,8 @@ void PeerManagerImpl::ProcessGetBlockData(CNode& pfrom, Peer& peer, const CInv& 
             // they won't have a useful mempool to match against a compact block,
             // and we don't feel like constructing the object for them, so
             // instead we respond with the full, non-compact block.
-            if (CanDirectFetch() &&
-                pindex->nHeight >= m_chainman.ActiveChain().Height() - MAX_CMPCTBLOCK_DEPTH) {
+            if (can_direct_fetch &&
+                pindex->nHeight >= tip->nHeight - MAX_CMPCTBLOCK_DEPTH) {
                 if (a_recent_compact_block &&
                     a_recent_compact_block->header.GetHash() == pindex->GetBlockHash()) {
                     m_connman.PushMessage(&pfrom, msgMaker.Make(NetMsgType::CMPCTBLOCK, *a_recent_compact_block));
@@ -2829,7 +2847,7 @@ void PeerManagerImpl::ProcessGetBlockData(CNode& pfrom, Peer& peer, const CInv& 
             // and we want it right after the last block so they don't
             // wait for other stuff first.
             std::vector<CInv> vInv;
-            vInv.emplace_back(MSG_BLOCK, m_chainman.ActiveChain().Tip()->GetBlockHash());
+            vInv.emplace_back(MSG_BLOCK, tip->GetBlockHash());
             m_connman.PushMessage(&pfrom, msgMaker.Make(NetMsgType::INV, vInv));
             peer.m_continuation_block.SetNull();
         }
@@ -3775,7 +3793,7 @@ MessageProcessingResult PeerManagerImpl::ProcessPlatformBanMessage(NodeId node, 
         return ret;
     }
 
-    Consensus::LLMQType llmq_type = Params().GetConsensus().llmqTypePlatform;
+    Consensus::LLMQType llmq_type = m_chainparams.GetConsensus().llmqTypePlatform;
     auto quorum = m_llmq_ctx->qman->GetQuorum(llmq_type, ban_msg.m_quorum_hash);
     if (!quorum) {
         LogPrintf("PLATFORMBAN -- hash: %s protx_hash: %s missing quorum_hash: %s llmq_type: %d\n", hash.ToString(), ban_msg.m_protx_hash.ToString(), ban_msg.m_quorum_hash.ToString(), std23::to_underlying(llmq_type));
@@ -3919,7 +3937,7 @@ void PeerManagerImpl::ProcessMessage(
             PushNodeVersion(pfrom, *peer);
         }
 
-        if (Params().NetworkIDString() == CBaseChainParams::DEVNET) {
+        if (m_chainparams.NetworkIDString() == CBaseChainParams::DEVNET) {
             if (cleanSubVer.find(strprintf("devnet.%s", gArgs.GetDevNetName())) == std::string::npos) {
                 LogPrintf("connected to wrong devnet. Reported version is %s, expected devnet name is %s\n", cleanSubVer, gArgs.GetDevNetName());
                 if (!pfrom.IsInboundConn())
@@ -4591,6 +4609,7 @@ void PeerManagerImpl::ProcessMessage(
             return;
         }
 
+        FlatFilePos block_pos{};
         {
             LOCK(cs_main);
 
@@ -4601,13 +4620,19 @@ void PeerManagerImpl::ProcessMessage(
             }
 
             if (pindex->nHeight >= m_chainman.ActiveChain().Height() - MAX_BLOCKTXN_DEPTH) {
-                CBlock block;
-                bool ret = ReadBlockFromDisk(block, pindex, m_chainparams.GetConsensus());
-                assert(ret);
-
-                SendBlockTransactions(pfrom, *peer, block, req);
-                return;
+                block_pos = pindex->GetBlockPos();
             }
+        }
+
+        if (!block_pos.IsNull()) {
+            CBlock block;
+            const auto hash = ReadBlockFromDisk(block, block_pos, m_chainparams.GetConsensus());
+            // If height is above MAX_BLOCKTXN_DEPTH then this block cannot get
+            // pruned after we release cs_main above, so this read should never fail.
+            assert(hash && *hash == req.blockhash);
+
+            SendBlockTransactions(pfrom, *peer, block, req);
+            return;
         }
 
         // If an older block is requested (should never happen in practice,
@@ -5499,7 +5524,13 @@ void PeerManagerImpl::ProcessMessage(
 
     if (msg_type == NetMsgType::SPORK) {
         CSporkMessage spork;
-        vRecv >> spork;
+        try {
+            vRecv >> spork;
+        } catch (const std::ios_base::failure& e) {
+            // Attribute deserialization failures to the peer; the outer catch would otherwise silently drop.
+            Misbehaving(*peer, 100, strprintf("malformed spork received. peer=%d error=%s", pfrom.GetId(), e.what()));
+            return;
+        }
 
         uint256 hash = spork.GetHash();
         CInv spork_inv{MSG_SPORK, hash};

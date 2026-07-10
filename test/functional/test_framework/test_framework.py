@@ -2095,24 +2095,25 @@ class DashTestFramework(BitcoinTestFramework):
 
         self.wait_until(check_dkg_session, timeout=timeout, sleep=sleep)
 
+    def node_has_quorum_commitment(self, node, quorum_hash, llmq_type):
+        s = node.quorum("dkgstatus")
+        if "minableCommitments" not in s:
+            return False
+        commits = s["minableCommitments"]
+        for c in commits:
+            if c["llmqType"] != llmq_type:
+                continue
+            if c["quorumHash"] != quorum_hash:
+                continue
+            if c["quorumPublicKey"] == '0' * 96:
+                continue
+            return True
+        return False
+
     def wait_for_quorum_commitment(self, quorum_hash, mninfos, llmq_type=100, timeout=15):
         def check_dkg_comitments():
             for mn in mninfos:
-                s = mn.get_node(self).quorum("dkgstatus")
-                if "minableCommitments" not in s:
-                    return False
-                commits = s["minableCommitments"]
-                c_ok = False
-                for c in commits:
-                    if c["llmqType"] != llmq_type:
-                        continue
-                    if c["quorumHash"] != quorum_hash:
-                        continue
-                    if c["quorumPublicKey"] == '0' * 96:
-                        continue
-                    c_ok = True
-                    break
-                if not c_ok:
+                if not self.node_has_quorum_commitment(mn.get_node(self), quorum_hash, llmq_type):
                     return False
             return True
 
@@ -2200,6 +2201,9 @@ class DashTestFramework(BitcoinTestFramework):
 
         self.log.info("Waiting final commitment")
         self.wait_for_quorum_commitment(q, mninfos_online, llmq_type=llmq_type)
+
+        self.log.info("Waiting final commitment on mining node")
+        self.wait_until(lambda: self.node_has_quorum_commitment(self.nodes[0], q, llmq_type), timeout=15)
 
         self.log.info("Mining final commitment")
         self.bump_mocktime(1)

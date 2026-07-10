@@ -21,6 +21,36 @@
 #include <ranges>
 #include <string>
 
+int FindUnmatchedMasternodePayment(const std::vector<CTxOut>& expected,
+                                   const std::vector<CTxOut>& actual,
+                                   bool strict_multiplicity)
+{
+    if (!strict_multiplicity) {
+        for (size_t i = 0; i < expected.size(); ++i) {
+            const auto& txout = expected[i];
+            if (!std::ranges::any_of(actual, [&txout](const auto& txout2) { return txout == txout2; })) {
+                return static_cast<int>(i);
+            }
+        }
+        return -1;
+    }
+
+    std::vector<bool> consumed(actual.size(), false);
+    for (size_t i = 0; i < expected.size(); ++i) {
+        const auto& txout = expected[i];
+        bool found = false;
+        for (size_t j = 0; j < actual.size(); ++j) {
+            if (!consumed[j] && actual[j] == txout) {
+                consumed[j] = true;
+                found = true;
+                break;
+            }
+        }
+        if (!found) return static_cast<int>(i);
+    }
+    return -1;
+}
+
 CAmount PlatformShare(const CAmount reward)
 {
     const CAmount platformReward = reward * 375 / 1000;
@@ -184,7 +214,7 @@ CAmount GetMasternodePayment(int nHeight, CAmount blockValue, const Consensus::P
 }
 
 [[nodiscard]] bool CMNPaymentsProcessor::IsTransactionValid(const CTransaction& txNew, const CBlockIndex* pindexPrev, const CAmount blockSubsidy,
-                                                            const CAmount feeReward, MnRewardEra era)
+                                                            const CAmount feeReward, MnRewardEra era, bool strict_multiplicity)
 {
     const int nBlockHeight = pindexPrev  == nullptr ? 0 : pindexPrev->nHeight + 1;
     if (!DeploymentDIP0003Enforced(nBlockHeight, m_consensus_params)) {
@@ -198,19 +228,22 @@ CAmount GetMasternodePayment(int nHeight, CAmount blockValue, const Consensus::P
         return true;
     }
 
-    for (const auto& txout : voutMasternodePayments) {
-        bool found = std::ranges::any_of(txNew.vout, [&txout](const auto& txout2) { return txout == txout2; });
-        if (!found) {
-            std::string str_payout;
-            if (CTxDestination dest; ExtractDestination(txout.scriptPubKey, dest)) {
-                str_payout = "address=" + EncodeDestination(dest);
-            } else {
-                str_payout = "scriptPubKey=" + HexStr(txout.scriptPubKey);
-            }
-            LogPrintf("CMNPaymentsProcessor::%s -- ERROR! Failed to find expected payee %s amount=%lld height=%d\n",
-                      __func__, str_payout, txout.nValue, nBlockHeight);
-            return false;
+    // With strict multiplicity (v24 active, computed by the caller) each expected payment must be
+    // matched by a distinct coinbase output: duplicate expected outputs require duplicate coinbase
+    // outputs. Pre-v24 retains the legacy existence-only check to avoid tightening historical
+    // validation.
+    const int unmatched_idx = FindUnmatchedMasternodePayment(voutMasternodePayments, txNew.vout, strict_multiplicity);
+    if (unmatched_idx >= 0) {
+        const auto& txout = voutMasternodePayments[unmatched_idx];
+        std::string str_payout;
+        if (CTxDestination dest; ExtractDestination(txout.scriptPubKey, dest)) {
+            str_payout = "address=" + EncodeDestination(dest);
+        } else {
+            str_payout = "scriptPubKey=" + HexStr(txout.scriptPubKey);
         }
+        LogPrintf("CMNPaymentsProcessor::%s -- ERROR! Failed to find expected payee %s amount=%lld height=%d\n",
+                  __func__, str_payout, txout.nValue, nBlockHeight);
+        return false;
     }
     return true;
 }
@@ -339,12 +372,12 @@ bool CMNPaymentsProcessor::IsBlockValueValid(const CChain& active_chain, const C
     return true;
 }
 
-bool CMNPaymentsProcessor::IsBlockPayeeValid(const CChain& active_chain, const CTransaction& txNew, const CBlockIndex* pindexPrev, const CAmount blockSubsidy, const CAmount feeReward, MnRewardEra era, SuperBlockCheckType check_superblock)
+bool CMNPaymentsProcessor::IsBlockPayeeValid(const CChain& active_chain, const CTransaction& txNew, const CBlockIndex* pindexPrev, const CAmount blockSubsidy, const CAmount feeReward, MnRewardEra era, bool strict_multiplicity, SuperBlockCheckType check_superblock)
 {
     const int nBlockHeight = pindexPrev  == nullptr ? 0 : pindexPrev->nHeight + 1;
 
     // Check for correct masternode payment
-    if (IsTransactionValid(txNew, pindexPrev, blockSubsidy, feeReward, era)) {
+    if (IsTransactionValid(txNew, pindexPrev, blockSubsidy, feeReward, era, strict_multiplicity)) {
         LogPrint(BCLog::MNPAYMENTS, "CMNPaymentsProcessor::%s -- Valid masternode payment at height %d: %s", __func__, nBlockHeight, txNew.ToString()); /* Continued */
     } else {
         LogPrintf("CMNPaymentsProcessor::%s -- ERROR! Invalid masternode payment detected at height %d: %s", __func__, nBlockHeight, txNew.ToString()); /* Continued */
