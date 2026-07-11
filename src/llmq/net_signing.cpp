@@ -320,19 +320,31 @@ void NetSigning::WorkThreadDispatcher()
             }
         }
 
-        // Collect pending sig shares synchronously and dispatch each batch to a worker for parallel BLS verification
-        while (!workInterrupt) {
+        // Collect pending sig shares synchronously and dispatch each batch to a worker for parallel BLS verification.
+        // Batches awaiting verification are bounded so that under flood shares back up in the capped
+        // pending maps instead of migrating into the unbounded worker pool task queue.
+        //
+        // Each batch is bounded by actual share count (not unique-session count), so at most
+        // MAX_UNVERIFIED_BATCHES * MAX_SHARES_PER_BATCH shares can be sitting in / on the worker pool at once.
+        static constexpr int MAX_UNVERIFIED_BATCHES{4};
+        static constexpr size_t MAX_SHARES_PER_BATCH{32};
+        while (!workInterrupt && unverified_batches < MAX_UNVERIFIED_BATCHES) {
             std::unordered_map<NodeId, std::vector<CSigShare>> sigSharesByNodes;
             std::unordered_map<std::pair<Consensus::LLMQType, uint256>, CQuorumCPtr, StaticSaltedHasher> quorums;
 
-            const size_t nMaxBatchSize{32};
-            bool more_work = m_shares_manager->CollectPendingSigSharesToVerify(nMaxBatchSize, sigSharesByNodes, quorums);
+            bool more_work = m_shares_manager->CollectPendingSigSharesToVerify(MAX_SHARES_PER_BATCH, sigSharesByNodes, quorums);
 
             if (sigSharesByNodes.empty()) {
                 break;
             }
 
+            ++unverified_batches;
             worker_pool.push([this, sigSharesByNodes = std::move(sigSharesByNodes), quorums = std::move(quorums)](int) mutable {
+                // Ensures unverified_batches is decremented on every exit path, including exceptions.
+                struct UnverifiedBatchGuard {
+                    std::atomic<int>& count;
+                    ~UnverifiedBatchGuard() { --count; }
+                } guard{unverified_batches};
                 ProcessPendingSigShares(std::move(sigSharesByNodes), std::move(quorums));
             });
 

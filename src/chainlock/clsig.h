@@ -8,6 +8,7 @@
 #include <cstdint>
 
 class CChain;
+class CBlockIndex;
 class uint256;
 
 namespace Consensus {
@@ -27,6 +28,8 @@ uint256 GenSigRequestId(const int32_t nHeight);
 
 llmq::VerifyRecSigStatus VerifyChainLock(const Consensus::Params& params, const CChain& chain,
                                          const llmq::CQuorumManager& qman, const ChainLockSig& clsig);
+llmq::VerifyRecSigStatus VerifyChainLock(const Consensus::Params& params, const llmq::CQuorumManager& qman,
+                                         const ChainLockSig& clsig, const CBlockIndex* pindexStart);
 } // namespace chainlock
 
 #endif // BITCOIN_CHAINLOCK_CLSIG_H

@@ -8,6 +8,8 @@
 #include <key.h>
 #include <key_io.h>
 #include <test/util/setup_common.h>
+#include <uint256.h>
+#include <validation.h>
 #include <wallet/wallet.h>
 #include <wallet/walletdb.h>
 
@@ -16,12 +18,22 @@
 #include <memory>
 
 namespace wallet {
-std::unique_ptr<CWallet> CreateSyncedWallet(interfaces::Chain& chain, interfaces::CoinJoin::Loader& coinjoin_loader, CChain& cchain, ArgsManager& args, const CKey& key)
+std::unique_ptr<CWallet> CreateSyncedWallet(interfaces::Chain& chain, interfaces::CoinJoin::Loader& coinjoin_loader, ChainstateManager& chainman, ArgsManager& args, const CKey& key)
 {
+    struct ChainInfo {
+        int height;
+        uint256 tip_hash;
+        uint256 genesis_hash;
+    };
+    const ChainInfo chain_info{WITH_LOCK(chainman.GetMutex(), return (ChainInfo{
+        chainman.ActiveChain().Height(),
+        chainman.ActiveChain().Tip()->GetBlockHash(),
+        chainman.ActiveChain().Genesis()->GetBlockHash()}))};
+
     auto wallet = std::make_unique<CWallet>(&chain, &coinjoin_loader, "", args, CreateMockWalletDatabase());
     {
         LOCK(wallet->cs_wallet);
-        wallet->SetLastBlockProcessed(cchain.Height(), cchain.Tip()->GetBlockHash());
+        wallet->SetLastBlockProcessed(chain_info.height, chain_info.tip_hash);
     }
     wallet->LoadWallet();
     {
@@ -38,10 +50,10 @@ std::unique_ptr<CWallet> CreateSyncedWallet(interfaces::Chain& chain, interfaces
     }
     WalletRescanReserver reserver(*wallet);
     reserver.reserve();
-    CWallet::ScanResult result = wallet->ScanForWalletTransactions(cchain.Genesis()->GetBlockHash(), /*start_height=*/0, /*max_height=*/{}, reserver, /*fUpdate=*/false, /*save_progress=*/false);
+    CWallet::ScanResult result = wallet->ScanForWalletTransactions(chain_info.genesis_hash, /*start_height=*/0, /*max_height=*/{}, reserver, /*fUpdate=*/false, /*save_progress=*/false);
     BOOST_CHECK_EQUAL(result.status, CWallet::ScanResult::SUCCESS);
-    BOOST_CHECK_EQUAL(result.last_scanned_block, cchain.Tip()->GetBlockHash());
-    BOOST_CHECK_EQUAL(*result.last_scanned_height, cchain.Height());
+    BOOST_CHECK_EQUAL(result.last_scanned_block, chain_info.tip_hash);
+    BOOST_CHECK_EQUAL(*result.last_scanned_height, chain_info.height);
     BOOST_CHECK(result.last_failed_block.IsNull());
     return wallet;
 }

@@ -31,6 +31,7 @@ class CDeterministicMNManager;
 class CDBWrapper;
 class CEvoDB;
 class ChainstateManager;
+extern RecursiveMutex cs_main; // NOLINT(readability-redundant-declaration)
 namespace util {
 struct DbWrapperParams;
 } // namespace util
@@ -175,8 +176,18 @@ private:
 // which are not 100% at the chain tip.
 static constexpr int SIGN_HEIGHT_OFFSET{8};
 
+CBlockIndex* SelectQuorumForSigningStartBlock(const CChain& active_chain, int signHeight = -1 /*chain tip*/,
+                                              int signOffset = SIGN_HEIGHT_OFFSET) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
+
+CQuorumCPtr SelectQuorumForSigning(const Consensus::LLMQParams& llmq_params, const CQuorumManager& qman,
+                                   const uint256& selectionHash, const CBlockIndex* pindexStart);
+
 CQuorumCPtr SelectQuorumForSigning(const Consensus::LLMQParams& llmq_params, const CChain& active_chain, const CQuorumManager& qman,
                                    const uint256& selectionHash, int signHeight = -1 /*chain tip*/, int signOffset = SIGN_HEIGHT_OFFSET);
+
+VerifyRecSigStatus VerifyRecoveredSig(Consensus::LLMQType llmqType, const CQuorumManager& qman,
+                                      const CBlockIndex* pindexStart, const uint256& id, const uint256& msgHash,
+                                      const CBLSSignature& sig);
 
 // Verifies a recovered sig that was signed while the chain tip was at signedAtTip
 VerifyRecSigStatus VerifyRecoveredSig(Consensus::LLMQType llmqType, const CChain& active_chain, const CQuorumManager& qman,

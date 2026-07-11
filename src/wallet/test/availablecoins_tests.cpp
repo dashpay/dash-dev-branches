@@ -18,7 +18,7 @@ public:
     AvailableCoinsTestingSetup()
     {
         CreateAndProcessBlock({}, {});
-        wallet = CreateSyncedWallet(*m_node.chain, *m_node.coinjoin_loader, m_node.chainman->ActiveChain(), m_args, coinbaseKey);
+        wallet = CreateSyncedWallet(*m_node.chain, *m_node.coinjoin_loader, *m_node.chainman, m_args, coinbaseKey);
     }
 
     ~AvailableCoinsTestingSetup()
@@ -42,11 +42,12 @@ public:
         }
         CreateAndProcessBlock({CMutableTransaction(blocktx)}, GetScriptForRawPubKey(coinbaseKey.GetPubKey()));
 
+        const CBlockIndex* tip{WITH_LOCK(m_node.chainman->GetMutex(), return m_node.chainman->ActiveChain().Tip())};
         LOCK(wallet->cs_wallet);
-        wallet->SetLastBlockProcessed(wallet->GetLastBlockHeight() + 1, m_node.chainman->ActiveChain().Tip()->GetBlockHash());
+        wallet->SetLastBlockProcessed(tip->nHeight, tip->GetBlockHash());
         auto it = wallet->mapWallet.find(tx->GetHash());
         BOOST_CHECK(it != wallet->mapWallet.end());
-        it->second.m_state = TxStateConfirmed{m_node.chainman->ActiveChain().Tip()->GetBlockHash(), m_node.chainman->ActiveChain().Height(), /*index=*/1};
+        it->second.m_state = TxStateConfirmed{tip->GetBlockHash(), tip->nHeight, /*index=*/1};
         return it->second;
     }
 
@@ -57,11 +58,13 @@ BOOST_FIXTURE_TEST_CASE(BasicOutputTypesTest, AvailableCoinsTestingSetup)
 {
     CoinsResult available_coins;
     util::Result<CTxDestination> dest{util::Error{}};
-    LOCK(wallet->cs_wallet);
 
     // Verify our wallet has one usable coinbase UTXO before starting
     // This UTXO is a P2PK, so it should show up in the Other bucket
-    available_coins = AvailableCoins(*wallet);
+    {
+        LOCK(wallet->cs_wallet);
+        available_coins = AvailableCoins(*wallet);
+    }
     BOOST_CHECK_EQUAL(available_coins.size(), 1U);
     BOOST_CHECK_EQUAL(available_coins.other.size(), 1U);
 
@@ -73,10 +76,16 @@ BOOST_FIXTURE_TEST_CASE(BasicOutputTypesTest, AvailableCoinsTestingSetup)
     //   2. One UTXO from the change, due to payment address matching logic
 
     // Legacy (P2PKH)
-    dest = wallet->GetNewDestination("");
+    {
+        LOCK(wallet->cs_wallet);
+        dest = wallet->GetNewDestination("");
+    }
     BOOST_ASSERT(dest);
     AddTx(CRecipient{{GetScriptForDestination(*dest)}, 4 * COIN, /*fSubtractFeeFromAmount=*/true});
-    available_coins = AvailableCoins(*wallet);
+    {
+        LOCK(wallet->cs_wallet);
+        available_coins = AvailableCoins(*wallet);
+    }
     BOOST_CHECK_EQUAL(available_coins.legacy.size(), 2U);
 }
 

@@ -31,6 +31,11 @@ namespace {
 constexpr size_t MAX_SESSIONS_PER_PEER_FACTOR{4};
 constexpr size_t MIN_SESSIONS_PER_PEER{100};
 
+// Incoming QSIGSHARE/QBSIGSHARES traffic is cheap to admit but drains only at BLS verification
+// speed, so unverified shares are bounded and over-cap shares dropped without misbehaviour scoring.
+constexpr size_t MAX_PENDING_SIG_SHARES_PER_NODE{1000};
+constexpr size_t MAX_PENDING_SIG_SHARES_TOTAL{10000};
+
 size_t GetMaxSessionsForPeer(const Consensus::LLMQParams& params)
 {
     return std::max<size_t>(size_t(params.size) * MAX_SESSIONS_PER_PEER_FACTOR, MIN_SESSIONS_PER_PEER);
@@ -422,7 +427,7 @@ bool CSigSharesManager::ProcessMessageBatchedSigShares(const CNode& pfrom, const
     LOCK(cs);
     auto& nodeState = nodeStates[pfrom.GetId()];
     for (const auto& s : sigSharesToProcess) {
-        nodeState.pendingIncomingSigShares.Add(s.GetKey(), s);
+        TryAddPendingIncomingSigShare(pfrom.GetId(), nodeState, s);
     }
     return true;
 }
@@ -467,7 +472,7 @@ bool CSigSharesManager::ProcessMessageSigShare(NodeId fromId, const CSigShare& s
         }
 
         auto& nodeState = nodeStates[fromId];
-        nodeState.pendingIncomingSigShares.Add(sigShare.GetKey(), sigShare);
+        TryAddPendingIncomingSigShare(fromId, nodeState, sigShare);
     }
 
     LogPrint(BCLog::LLMQ_SIGS, "CSigSharesManager::%s -- signHash=%s, id=%s, msgHash=%s, member=%d, node=%d\n", __func__,
@@ -475,8 +480,35 @@ bool CSigSharesManager::ProcessMessageSigShare(NodeId fromId, const CSigShare& s
     return true;
 }
 
+bool CSigSharesManager::TryAddPendingIncomingSigShare(NodeId nodeId, CSigSharesNodeState& nodeState,
+                                                      const CSigShare& sigShare)
+{
+    AssertLockHeld(cs);
+
+    if (nodeState.banned) {
+        return false;
+    }
+    if (nodeState.pendingIncomingSigShares.Size() >= MAX_PENDING_SIG_SHARES_PER_NODE) {
+        LogPrint(BCLog::LLMQ_SIGS, "CSigSharesManager::%s -- per-node pending sig shares cap reached (%d), dropping sigShare. node=%d\n",
+                 __func__, MAX_PENDING_SIG_SHARES_PER_NODE, nodeId);
+        return false;
+    }
+    size_t total{0};
+    for (const auto& [_, ns] : nodeStates) {
+        // the size of nodeStates is limited by DEFAULT_MAX_PEER_CONNECTIONS(125) so it should not be performance issue
+        // The name of variable is intentionally mentioned in comment to make this code snippet relevant for possible changes in future
+        total += ns.pendingIncomingSigShares.Size();
+    }
+    if (total >= MAX_PENDING_SIG_SHARES_TOTAL) {
+        LogPrint(BCLog::LLMQ_SIGS, "CSigSharesManager::%s -- global pending sig shares cap reached (%d), dropping sigShare. node=%d\n",
+                 __func__, MAX_PENDING_SIG_SHARES_TOTAL, nodeId);
+        return false;
+    }
+    return nodeState.pendingIncomingSigShares.Add(sigShare.GetKey(), sigShare);
+}
+
 bool CSigSharesManager::CollectPendingSigSharesToVerify(
-    size_t maxUniqueSessions, std::unordered_map<NodeId, std::vector<CSigShare>>& retSigShares,
+    size_t maxShares, std::unordered_map<NodeId, std::vector<CSigShare>>& retSigShares,
     std::unordered_map<std::pair<Consensus::LLMQType, uint256>, CQuorumCPtr, StaticSaltedHasher>& retQuorums)
 {
     bool more_work{false};
@@ -487,16 +519,19 @@ bool CSigSharesManager::CollectPendingSigSharesToVerify(
             return false;
         }
 
-        // This will iterate node states in random order and pick one sig share at a time. This avoids processing
-        // of large batches at once from the same node while other nodes also provided shares. If we wouldn't do this,
-        // other nodes would be able to poison us with a large batch with N-1 valid shares and the last one being
-        // invalid, making batch verification fail and revert to per-share verification, which in turn would slow down
-        // the whole verification process
-        std::unordered_set<std::pair<NodeId, uint256>, StaticSaltedHasher> uniqueSignHashes;
+        // Iterate node states in random order and pick one sig share at a time. This ensures no single peer can
+        // dominate a batch and that a large flood from one peer cannot poison batch verification (an N-1 valid /
+        // 1 invalid batch would fall back to per-share verification and slow the whole pipeline).
+        //
+        // The batch is bounded by the number of shares actually added (maxShares), not by the count of unique
+        // (nodeId, signHash) sessions. Bounding by sessions could otherwise let a single session inflate the
+        // batch to the full pending-share cap, and, together with the in-flight batch cap, keep tens of thousands
+        // of shares outside the pending accounting.
+        size_t sharesAdded{0};
         IterateNodesRandom(
             nodeStates,
             [&]() {
-                return uniqueSignHashes.size() < maxUniqueSessions;
+                return sharesAdded < maxShares;
                 // TODO: remove NO_THREAD_SAFETY_ANALYSIS
                 // using here template IterateNodesRandom makes impossible to use lock annotation
             },
@@ -508,8 +543,8 @@ bool CSigSharesManager::CollectPendingSigSharesToVerify(
 
                 AssertLockHeld(cs);
                 if (const bool alreadyHave = this->sigShares.Has(sigShare.GetKey()); !alreadyHave) {
-                    uniqueSignHashes.emplace(nodeId, sigShare.GetSignHash());
                     retSigShares[nodeId].emplace_back(sigShare);
+                    ++sharesAdded;
                 }
                 ns.pendingIncomingSigShares.Erase(sigShare.GetKey());
                 return !ns.pendingIncomingSigShares.Empty();
@@ -744,7 +779,8 @@ bool CSigSharesManager::AsyncSignIfMember(Consensus::LLMQType llmqType, CSigning
             // the quorum list and no recovered signature has been created in the mean time
             const auto& llmq_params_opt = Params().GetLLMQ(llmqType);
             assert(llmq_params_opt.has_value());
-            return SelectQuorumForSigning(llmq_params_opt.value(), m_chainman.ActiveChain(), qman, id);
+            CChain& active_chain = *WITH_LOCK(::cs_main, return &m_chainman.ActiveChain());
+            return SelectQuorumForSigning(llmq_params_opt.value(), active_chain, qman, id);
         } else {
             return qman.GetQuorum(llmqType, quorumHash);
         }
@@ -1425,6 +1461,7 @@ void CSigSharesManager::MarkAsBanned(NodeId nodeId)
         sigSharesRequested.Erase(k);
     });
     nodeState.requestedSigShares.Clear();
+    nodeState.pendingIncomingSigShares.Clear();
     nodeState.banned = true;
 }
 

@@ -3322,7 +3322,7 @@ void PeerManagerImpl::ProcessHeadersMessage(CNode& pfrom, Peer& peer,
     const std::string msg_type = uses_compressed ? NetMsgType::GETHEADERS2 : NetMsgType::GETHEADERS;
     if (nCount == GetHeadersLimit(pfrom, uses_compressed)) {
         // Headers message had its maximum size; the peer may have more headers.
-        if (MaybeSendGetHeaders(pfrom, msg_type, m_chainman.ActiveChain().GetLocator(pindexLast), peer)) {
+        if (MaybeSendGetHeaders(pfrom, msg_type, WITH_LOCK(m_chainman.GetMutex(), return m_chainman.ActiveChain().GetLocator(pindexLast)), peer)) {
             LogPrint(BCLog::NET, "more %s (%d) to end to peer=%d (startheight:%d)\n",
                     msg_type, pindexLast->nHeight, pfrom.GetId(), peer.m_starting_height);
         }
@@ -4707,7 +4707,7 @@ void PeerManagerImpl::ProcessMessage(
                 pindex = m_chainman.ActiveChain().Next(pindex);
         }
 
-        const auto send_headers = [this /* for m_connman */, &hashStop, &pindex, &nodestate, &pfrom, &msgMaker](auto msg_type_internal, auto& v_headers, auto callback) {
+        const auto send_headers = [this /* for m_connman */, &hashStop, &pindex, &nodestate, &pfrom, &msgMaker](auto msg_type_internal, auto& v_headers, auto callback) EXCLUSIVE_LOCKS_REQUIRED(cs_main) {
             int nLimit = GetHeadersLimit(pfrom, msg_type_internal == NetMsgType::HEADERS2);
             for (; pindex; pindex = m_chainman.ActiveChain().Next(pindex)) {
                 v_headers.emplace_back(callback(pindex));

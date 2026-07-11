@@ -34,7 +34,7 @@ BOOST_AUTO_TEST_SUITE(evo_cbtx_tests)
 BOOST_FIXTURE_TEST_CASE(check_cbtx_best_chainlock_rejects_excessive_height_diff, RegTestingSetup)
 {
     const auto& consensus_params = Params().GetConsensus();
-    const auto& chain = m_node.chainman->ActiveChain();
+    const auto& chain = *WITH_LOCK(::cs_main, return &m_node.chainman->ActiveChain());
     auto& qman = *Assert(m_node.llmq_ctx)->qman;
     auto& chainlocks = *Assert(m_node.chainlocks);
 

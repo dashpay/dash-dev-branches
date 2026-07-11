@@ -324,7 +324,7 @@ public:
     std::optional<int32_t> getProposalFundedHeight(const uint256& proposal_hash) override
     {
         if (context().chain_helper != nullptr && context().chainman != nullptr) {
-            const int32_t nTipHeight = context().chainman->ActiveHeight();
+            const int32_t nTipHeight = WITH_LOCK(::cs_main, return context().chainman->ActiveHeight());
             for (const auto& trigger : context().chain_helper->superblocks->GetActiveTriggers()) {
                 if (!trigger || trigger->GetBlockHeight() > nTipHeight) continue;
                 for (const auto& hash : trigger->GetProposalHashes()) {
@@ -343,8 +343,12 @@ public:
             const auto tip_mn_list{context().dmnman->GetListAtChainTip()};
             if (const auto proposals{context().govman->GetApprovedProposals(tip_mn_list)}; !proposals.empty()) {
                 int32_t last_sb{0}, next_sb{0};
-                CSuperblock::GetNearestSuperblocksHeights(context().chainman->ActiveHeight(), last_sb, next_sb);
-                const CAmount budget{CSuperblock::GetPaymentsLimit(context().chainman->ActiveChain(), next_sb)};
+                CAmount budget{0};
+                {
+                    LOCK(::cs_main);
+                    CSuperblock::GetNearestSuperblocksHeights(context().chainman->ActiveHeight(), last_sb, next_sb);
+                    budget = CSuperblock::GetPaymentsLimit(context().chainman->ActiveChain(), next_sb);
+                }
                 for (const auto& proposal : proposals) {
                     UniValue json = proposal->GetJSONObject();
                     CAmount payment_amount{0};

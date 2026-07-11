@@ -534,7 +534,8 @@ static UniValue quorum_sign_helper(const JSONRPCRequest& request, Consensus::LLM
     } else {
         const auto pQuorum = [&]() {
             if (quorumHash.IsNull()) {
-                return llmq::SelectQuorumForSigning(llmq_params_opt.value(), chainman.ActiveChain(), *llmq_ctx.qman, id);
+                const CChain& active_chain = *WITH_LOCK(::cs_main, return &chainman.ActiveChain());
+                return llmq::SelectQuorumForSigning(llmq_params_opt.value(), active_chain, *llmq_ctx.qman, id);
             } else {
                 return llmq_ctx.qman->GetQuorum(llmqType, quorumHash);
             }
@@ -686,7 +687,8 @@ static RPCHelpMan quorum_verify()
         if (!request.params[5].isNull()) {
             signHeight = request.params[5].getInt<int>();
         }
-        return VerifyRecoveredSigLatestQuorums(*llmq_params_opt, chainman.ActiveChain(), *llmq_ctx.qman, signHeight, id, msgHash, sig);
+        const CChain& active_chain = *WITH_LOCK(::cs_main, return &chainman.ActiveChain());
+        return VerifyRecoveredSigLatestQuorums(*llmq_params_opt, active_chain, *llmq_ctx.qman, signHeight, id, msgHash, sig);
     }
 
     uint256 quorumHash(ParseHashV(request.params[4], "quorumHash"));
@@ -830,7 +832,8 @@ static RPCHelpMan quorum_selectquorum()
 
     UniValue ret(UniValue::VOBJ);
 
-    const auto quorum = llmq::SelectQuorumForSigning(llmq_params_opt.value(), chainman.ActiveChain(), *llmq_ctx.qman, id);
+    const CChain& active_chain = *WITH_LOCK(::cs_main, return &chainman.ActiveChain());
+    const auto quorum = llmq::SelectQuorumForSigning(llmq_params_opt.value(), active_chain, *llmq_ctx.qman, id);
     if (!quorum) {
         throw JSONRPCError(RPC_MISC_ERROR, "no quorums active");
     }
@@ -1116,7 +1119,8 @@ static RPCHelpMan verifychainlock()
     }
 
     const LLMQContext& llmq_ctx = EnsureLLMQContext(node);
-    return chainlock::VerifyChainLock(Params().GetConsensus(), chainman.ActiveChain(), *CHECK_NONFATAL(llmq_ctx.qman),
+    const CChain& active_chain = *WITH_LOCK(::cs_main, return &chainman.ActiveChain());
+    return chainlock::VerifyChainLock(Params().GetConsensus(), active_chain, *CHECK_NONFATAL(llmq_ctx.qman),
                                       chainlock::ChainLockSig{nBlockHeight, nBlockHash, sig}) ==
            llmq::VerifyRecSigStatus::Valid;
 },
@@ -1192,7 +1196,8 @@ static RPCHelpMan verifyislock()
     auto llmqType = Params().GetConsensus().llmqTypeDIP0024InstantSend;
     const auto llmq_params_opt = Params().GetLLMQ(llmqType);
     CHECK_NONFATAL(llmq_params_opt.has_value());
-    return VerifyRecoveredSigLatestQuorums(*llmq_params_opt, chainman.ActiveChain(), *CHECK_NONFATAL(llmq_ctx.qman),
+    const CChain& active_chain = *WITH_LOCK(::cs_main, return &chainman.ActiveChain());
+    return VerifyRecoveredSigLatestQuorums(*llmq_params_opt, active_chain, *CHECK_NONFATAL(llmq_ctx.qman),
                                            signHeight, id, txid, sig);
 },
     };
@@ -1231,8 +1236,9 @@ static RPCHelpMan submitchainlock()
 
     const ChainstateManager& chainman = EnsureChainman(node);
     const auto clsig{chainlock::ChainLockSig(nBlockHeight, nBlockHash, sig)};
+    const CChain& active_chain = *WITH_LOCK(::cs_main, return &chainman.ActiveChain());
     const llmq::VerifyRecSigStatus ret{
-        chainlock::VerifyChainLock(Params().GetConsensus(), chainman.ActiveChain(), *llmq_ctx.qman, clsig)};
+        chainlock::VerifyChainLock(Params().GetConsensus(), active_chain, *llmq_ctx.qman, clsig)};
     if (ret == llmq::VerifyRecSigStatus::NoQuorum) {
         LOCK(cs_main);
         const CBlockIndex* pIndex{chainman.ActiveChain().Tip()};

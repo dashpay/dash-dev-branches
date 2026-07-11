@@ -659,8 +659,8 @@ BOOST_AUTO_TEST_CASE(v19_boundary_validation_failure_restores_bls_scheme)
     auto& chainman = *Assert(setup.m_node.chainman.get());
     const CScript coinbase_pk = GetScriptForRawPubKey(setup.coinbaseKey.GetPubKey());
 
-    BOOST_REQUIRE(!DeploymentActiveAt(*chainman.ActiveChain().Tip(), chainman.GetConsensus(), Consensus::DEPLOYMENT_V19));
-    BOOST_REQUIRE(DeploymentActiveAfter(chainman.ActiveChain().Tip(), chainman.GetConsensus(), Consensus::DEPLOYMENT_V19));
+    BOOST_REQUIRE(WITH_LOCK(::cs_main, return !DeploymentActiveAt(*chainman.ActiveChain().Tip(), chainman.GetConsensus(), Consensus::DEPLOYMENT_V19)));
+    BOOST_REQUIRE(WITH_LOCK(::cs_main, return DeploymentActiveAfter(chainman.ActiveChain().Tip(), chainman.GetConsensus(), Consensus::DEPLOYMENT_V19)));
     struct ScopedBLSLegacySchemeRestore {
         explicit ScopedBLSLegacySchemeRestore(bool saved_scheme) : m_saved_scheme(saved_scheme) {}
         ~ScopedBLSLegacySchemeRestore() { bls::bls_legacy_scheme.store(m_saved_scheme); }
@@ -686,9 +686,9 @@ BOOST_AUTO_TEST_CASE(v19_boundary_validation_failure_restores_bls_scheme)
     BOOST_CHECK(bls::bls_legacy_scheme.load());
 
     CBlock connect_block = setup.CreateBlock({bad_tx}, coinbase_pk, chainman.ActiveChainstate());
-    const int height_before_invalid_block{chainman.ActiveChain().Height()};
+    const int height_before_invalid_block{WITH_LOCK(::cs_main, return chainman.ActiveChain().Height())};
     (void)chainman.ProcessNewBlock(std::make_shared<const CBlock>(connect_block), /*force_processing=*/true, /*new_block=*/nullptr);
-    BOOST_CHECK_EQUAL(chainman.ActiveChain().Height(), height_before_invalid_block);
+    BOOST_CHECK_EQUAL(WITH_LOCK(::cs_main, return chainman.ActiveChain().Height()), height_before_invalid_block);
     BOOST_CHECK(bls::bls_legacy_scheme.load());
 }
 

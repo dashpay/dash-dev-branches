@@ -46,7 +46,8 @@ ChainlockHandler::ChainlockHandler(chainlock::Chainlocks& chainlocks, Chainstate
     m_mn_sync{mn_sync},
     scheduler{std::make_unique<CScheduler>()},
     scheduler_thread{
-        std::make_unique<std::thread>(std::thread(util::TraceThread, "cl-schdlr", [&] { scheduler->serviceQueue(); }))}
+        std::make_unique<std::thread>(std::thread(util::TraceThread, "cl-schdlr", [&] { scheduler->serviceQueue(); }))},
+    seenChainLocks{MAX_SEEN_CHAINLOCKS}
 {
 }
 
@@ -71,8 +72,27 @@ void ChainlockHandler::Stop() { scheduler->stop(); }
 
 bool ChainlockHandler::AlreadyHave(const CInv& inv) const
 {
+    {
+        LOCK(cs);
+        if (seenChainLocks.count(inv.hash) != 0) {
+            return true;
+        }
+    }
+
+    chainlock::ChainLockSig clsig;
+    return m_chainlocks.GetChainLockByHash(inv.hash, clsig);
+}
+
+size_t ChainlockHandler::SeenChainLockCacheSizeForTesting() const
+{
     LOCK(cs);
-    return seenChainLocks.count(inv.hash) != 0;
+    return seenChainLocks.size();
+}
+
+size_t ChainlockHandler::SeenChainLockCacheMaxSizeForTesting() const
+{
+    LOCK(cs);
+    return seenChainLocks.max_size();
 }
 
 void ChainlockHandler::UpdateTxFirstSeenMap(const Uint256HashSet& tx, const int64_t& time)
@@ -91,18 +111,23 @@ MessageProcessingResult ChainlockHandler::ProcessNewChainLock(const NodeId from,
 
     {
         LOCK(cs);
-        if (!seenChainLocks.emplace(hash, GetTime<std::chrono::seconds>()).second) {
+        if (seenChainLocks.count(hash) != 0) {
             return {};
         }
+        seenChainLocks.insert({hash, GetTime<std::chrono::seconds>()});
 
-        // height is expect to check twice: preliminary (for optimization) and inside UpdateBestsChainlock (as mutex is not kept during validation)
+        // Height is checked twice: preliminary (for optimization) and inside
+        // UpdateBestChainlock, as this mutex is not kept during validation.
         if (clsig.getHeight() <= m_chainlocks.GetBestChainLockHeight()) {
-            // no need to process older/same CLSIGs
+            // Remember the hash so AlreadyHave() suppresses repeated requests
+            // for stale CLSIG announcements.
             return {};
         }
     }
 
-    if (const auto ret = chainlock::VerifyChainLock(Params().GetConsensus(), m_chainman.ActiveChain(), qman, clsig);
+    const CBlockIndex* pindex_start = WITH_LOCK(::cs_main,
+        return llmq::SelectQuorumForSigningStartBlock(m_chainman.ActiveChain(), clsig.getHeight()));
+    if (const auto ret = chainlock::VerifyChainLock(Params().GetConsensus(), qman, clsig, pindex_start);
         ret != llmq::VerifyRecSigStatus::Valid) {
         LogPrint(BCLog::CHAINLOCKS, "ChainlockHandler::%s -- invalid CLSIG (%s), status=%d peer=%d\n", __func__,
                  clsig.ToString(), std23::to_underlying(ret), from);
@@ -295,7 +320,9 @@ void ChainlockHandler::Cleanup()
         LOCK(cs);
         for (auto it = seenChainLocks.begin(); it != seenChainLocks.end();) {
             if (GetTime<std::chrono::seconds>() - it->second >= CLEANUP_SEEN_TIMEOUT) {
-                it = seenChainLocks.erase(it);
+                const auto hash = it->first;
+                ++it;
+                seenChainLocks.erase(hash);
             } else {
                 ++it;
             }

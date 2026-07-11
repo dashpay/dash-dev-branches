@@ -985,7 +985,7 @@ static RPCHelpMan getgovernanceinfo()
     obj.pushKV("lastsuperblock", nLastSuperblock);
     obj.pushKV("nextsuperblock", nNextSuperblock);
     obj.pushKV("fundingthreshold", CHECK_NONFATAL(node.dmnman)->GetListAtChainTip().GetCounts().m_valid_weighted / 10);
-    obj.pushKV("governancebudget", ValueFromAmount(CSuperblock::GetPaymentsLimit(chainman.ActiveChain(), nNextSuperblock)));
+    obj.pushKV("governancebudget", ValueFromAmount(WITH_LOCK(::cs_main, return CSuperblock::GetPaymentsLimit(chainman.ActiveChain(), nNextSuperblock))));
 
     return obj;
 },
@@ -1014,7 +1014,7 @@ static RPCHelpMan getsuperblockbudget()
     }
 
     const ChainstateManager& chainman = EnsureAnyChainman(request.context);
-    return ValueFromAmount(CSuperblock::GetPaymentsLimit(chainman.ActiveChain(), nBlockHeight));
+    return ValueFromAmount(WITH_LOCK(::cs_main, return CSuperblock::GetPaymentsLimit(chainman.ActiveChain(), nBlockHeight)));
 },
     };
 }

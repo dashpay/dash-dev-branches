@@ -27,4 +27,13 @@ llmq::VerifyRecSigStatus VerifyChainLock(const Consensus::Params& params, const 
     return llmq::VerifyRecoveredSig(llmqType, chain, qman, clsig.getHeight(), request_id, clsig.getBlockHash(),
                                     clsig.getSig());
 }
+
+llmq::VerifyRecSigStatus VerifyChainLock(const Consensus::Params& params, const llmq::CQuorumManager& qman,
+                                         const chainlock::ChainLockSig& clsig, const CBlockIndex* pindexStart)
+{
+    const auto llmqType = params.llmqTypeChainLocks;
+    const uint256 request_id = GenSigRequestId(clsig.getHeight());
+
+    return llmq::VerifyRecoveredSig(llmqType, qman, pindexStart, request_id, clsig.getBlockHash(), clsig.getSig());
+}
 } // namespace chainlock

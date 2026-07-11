@@ -66,7 +66,7 @@ BOOST_AUTO_TEST_CASE(verify_mnhf_specialtx_tests)
 
     auto& chainman = Assert(m_node.chainman);
     auto& qman = *Assert(m_node.llmq_ctx)->qman;
-    const CBlockIndex* pindex = chainman->ActiveChain().Tip();
+    const CBlockIndex* pindex = WITH_LOCK(::cs_main, return chainman->ActiveChain().Tip());
     uint256 hash = GetRandHash();
     TxValidationState state;
 

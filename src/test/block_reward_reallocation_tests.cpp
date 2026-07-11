@@ -159,7 +159,7 @@ BOOST_FIXTURE_TEST_CASE(block_reward_reallocation, TestChainBRRBeforeActivationS
     CKey ownerKey;
     CBLSSecretKey operatorKey;
     auto utxos = BuildSimpleUtxoMap(m_coinbase_txns);
-    auto tx = CreateProRegTx(m_node.chainman->ActiveChain(), *m_node.mempool, utxos, 1, GenerateRandomAddress(), coinbaseKey, ownerKey, operatorKey);
+    auto tx = WITH_LOCK(::cs_main, return CreateProRegTx(m_node.chainman->ActiveChain(), *m_node.mempool, utxos, 1, GenerateRandomAddress(), coinbaseKey, ownerKey, operatorKey));
 
     CreateAndProcessBlock({tx}, coinbasePubKey);
 
@@ -191,7 +191,7 @@ BOOST_FIXTURE_TEST_CASE(block_reward_reallocation, TestChainBRRBeforeActivationS
         LOCK(cs_main);
         dmnman.UpdatedBlockTip(m_node.chainman->ActiveChain().Tip());
     }
-    BOOST_CHECK(m_node.chainman->ActiveChain().Height() < Params().GetConsensus().BRRHeight);
+    BOOST_CHECK(WITH_LOCK(::cs_main, return m_node.chainman->ActiveChain().Height()) < Params().GetConsensus().BRRHeight);
     CreateAndProcessBlock({}, coinbasePubKey);
 
     {
@@ -252,7 +252,7 @@ BOOST_FIXTURE_TEST_CASE(block_reward_reallocation, TestChainBRRBeforeActivationS
             BOOST_CHECK_EQUAL(pblocktemplate->voutMasternodePayments[0].nValue, masternode_payment);
         }
     }
-    BOOST_CHECK(DeploymentActiveAfter(m_node.chainman->ActiveChain().Tip(), consensus_params, Consensus::DEPLOYMENT_V20));
+    BOOST_CHECK(WITH_LOCK(::cs_main, return DeploymentActiveAfter(m_node.chainman->ActiveChain().Tip(), consensus_params, Consensus::DEPLOYMENT_V20)));
     // Allocation of block subsidy is 60% MN, 20% miners and 20% treasury
     {
         // Reward split should reach ~75/25 after reallocation is done
@@ -273,7 +273,7 @@ BOOST_FIXTURE_TEST_CASE(block_reward_reallocation, TestChainBRRBeforeActivationS
         BOOST_CHECK_EQUAL(pblocktemplate->voutMasternodePayments[0].nValue, masternode_payment);
         BOOST_CHECK_EQUAL(pblocktemplate->voutMasternodePayments[0].nValue, 106300596); // 0.75
     }
-    BOOST_CHECK(!DeploymentActiveAfter(m_node.chainman->ActiveChain().Tip(), consensus_params, Consensus::DEPLOYMENT_MN_RR));
+    BOOST_CHECK(WITH_LOCK(::cs_main, return !DeploymentActiveAfter(m_node.chainman->ActiveChain().Tip(), consensus_params, Consensus::DEPLOYMENT_MN_RR)));
 
     // Reward split should stay ~75/25 after reallocation is done,
     // check 10 next superblocks
@@ -299,7 +299,7 @@ BOOST_FIXTURE_TEST_CASE(block_reward_reallocation, TestChainBRRBeforeActivationS
         BOOST_CHECK_EQUAL(pblocktemplate->voutMasternodePayments[payment_index].nValue, masternode_payment);
     }
 
-    BOOST_CHECK(DeploymentActiveAfter(m_node.chainman->ActiveChain().Tip(), consensus_params, Consensus::DEPLOYMENT_MN_RR));
+    BOOST_CHECK(WITH_LOCK(::cs_main, return DeploymentActiveAfter(m_node.chainman->ActiveChain().Tip(), consensus_params, Consensus::DEPLOYMENT_MN_RR)));
     { // At this moment Masternode reward should be reallocated to platform
         // Allocation of block subsidy is 60% MN, 20% miners and 20% treasury
         LOCK(cs_main);

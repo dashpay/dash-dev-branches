@@ -520,7 +520,7 @@ static RPCHelpMan getblockfrompeer()
 
     // Fetching blocks before the node has syncing past their height can prevent block files from
     // being pruned, so we avoid it if the node is in prune mode.
-    if (index->nHeight > chainman.ActiveChain().Tip()->nHeight && node::fPruneMode) {
+    if (index->nHeight > WITH_LOCK(::cs_main, return chainman.ActiveChain().Tip()->nHeight) && node::fPruneMode) {
         throw JSONRPCError(RPC_MISC_ERROR, "In prune mode, only blocks that the node has already synced previously can be fetched from a peer");
     }
 
@@ -1910,13 +1910,12 @@ static RPCHelpMan getchaintxstats()
 {
     ChainstateManager& chainman = EnsureAnyChainman(request.context);
 
-    CChain& active_chain = chainman.ActiveChain();
     const CBlockIndex* pindex;
     int blockcount = 30 * 24 * 60 * 60 / chainman.GetParams().GetConsensus().nPowTargetSpacing; // By default: 1 month
 
     if (request.params[1].isNull()) {
         LOCK(cs_main);
-        pindex = active_chain.Tip();
+        pindex = chainman.ActiveChain().Tip();
     } else {
         uint256 hash(ParseHashV(request.params[1], "blockhash"));
         LOCK(cs_main);
@@ -1924,7 +1923,7 @@ static RPCHelpMan getchaintxstats()
         if (!pindex) {
             throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Block not found");
         }
-        if (!active_chain.Contains(pindex)) {
+        if (!chainman.ActiveChain().Contains(pindex)) {
             throw JSONRPCError(RPC_INVALID_PARAMETER, "Block is not in main chain");
         }
     }

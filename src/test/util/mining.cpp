@@ -86,7 +86,7 @@ std::shared_ptr<CBlock> PrepareBlock(const NodeContext& node, const CScript& coi
             .CreateNewBlock(coinbase_scriptPubKey)
             ->block);
 
-    block->nTime = Assert(node.chainman)->ActiveChain().Tip()->GetMedianTimePast() + 1;
+    block->nTime = WITH_LOCK(::cs_main, return Assert(node.chainman)->ActiveChain().Tip()->GetMedianTimePast()) + 1;
     block->hashMerkleRoot = BlockMerkleRoot(*block);
 
     return block;

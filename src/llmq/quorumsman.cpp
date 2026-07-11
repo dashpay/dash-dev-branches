@@ -518,23 +518,26 @@ void CQuorumManager::MigrateOldQuorumDB(CEvoDB& evoDb) const
     LogPrint(BCLog::LLMQ, "CQuorumManager::%s -- done\n", __func__);
 }
 
-CQuorumCPtr SelectQuorumForSigning(const Consensus::LLMQParams& llmq_params, const CChain& active_chain, const CQuorumManager& qman,
-                                   const uint256& selectionHash, int signHeight, int signOffset)
+CBlockIndex* SelectQuorumForSigningStartBlock(const CChain& active_chain, int signHeight, int signOffset)
 {
-    size_t poolSize = llmq_params.signingActiveQuorumCount;
-
-    CBlockIndex* pindexStart;
-    {
-        LOCK(::cs_main);
-        if (signHeight == -1) {
-            signHeight = active_chain.Height();
-        }
-        int startBlockHeight = signHeight - signOffset;
-        if (startBlockHeight > active_chain.Height() || startBlockHeight < 0) {
-            return {};
-        }
-        pindexStart = active_chain[startBlockHeight];
+    AssertLockHeld(::cs_main);
+    if (signHeight == -1) {
+        signHeight = active_chain.Height();
     }
+    const int startBlockHeight = signHeight - signOffset;
+    if (startBlockHeight > active_chain.Height() || startBlockHeight < 0) {
+        return nullptr;
+    }
+    return active_chain[startBlockHeight];
+}
+
+CQuorumCPtr SelectQuorumForSigning(const Consensus::LLMQParams& llmq_params, const CQuorumManager& qman,
+                                   const uint256& selectionHash, const CBlockIndex* pindexStart)
+{
+    if (pindexStart == nullptr) {
+        return nullptr;
+    }
+    size_t poolSize = llmq_params.signingActiveQuorumCount;
 
     // don't remove connections for the currently in-progress DKG round
     if (IsQuorumRotationEnabled(llmq_params, pindexStart)) {
@@ -581,13 +584,20 @@ CQuorumCPtr SelectQuorumForSigning(const Consensus::LLMQParams& llmq_params, con
     }
 }
 
-VerifyRecSigStatus VerifyRecoveredSig(Consensus::LLMQType llmqType, const CChain& active_chain, const CQuorumManager& qman,
-                        int signedAtHeight, const uint256& id, const uint256& msgHash, const CBLSSignature& sig,
-                        const int signOffset)
+CQuorumCPtr SelectQuorumForSigning(const Consensus::LLMQParams& llmq_params, const CChain& active_chain, const CQuorumManager& qman,
+                                   const uint256& selectionHash, int signHeight, int signOffset)
+{
+    const CBlockIndex* pindexStart = WITH_LOCK(::cs_main, return SelectQuorumForSigningStartBlock(active_chain, signHeight, signOffset));
+    return SelectQuorumForSigning(llmq_params, qman, selectionHash, pindexStart);
+}
+
+VerifyRecSigStatus VerifyRecoveredSig(Consensus::LLMQType llmqType, const CQuorumManager& qman,
+                                      const CBlockIndex* pindexStart, const uint256& id, const uint256& msgHash,
+                                      const CBLSSignature& sig)
 {
     const auto& llmq_params_opt = Params().GetLLMQ(llmqType);
     assert(llmq_params_opt.has_value());
-    auto quorum = SelectQuorumForSigning(llmq_params_opt.value(), active_chain, qman, id, signedAtHeight, signOffset);
+    auto quorum = SelectQuorumForSigning(llmq_params_opt.value(), qman, id, pindexStart);
     if (!quorum) {
         return VerifyRecSigStatus::NoQuorum;
     }
@@ -595,6 +605,14 @@ VerifyRecSigStatus VerifyRecoveredSig(Consensus::LLMQType llmqType, const CChain
     SignHash signHash{llmqType, quorum->qc->quorumHash, id, msgHash};
     const bool ret = sig.VerifyInsecure(quorum->qc->quorumPublicKey, signHash.Get());
     return ret ? VerifyRecSigStatus::Valid : VerifyRecSigStatus::Invalid;
+}
+
+VerifyRecSigStatus VerifyRecoveredSig(Consensus::LLMQType llmqType, const CChain& active_chain, const CQuorumManager& qman,
+                        int signedAtHeight, const uint256& id, const uint256& msgHash, const CBLSSignature& sig,
+                        const int signOffset)
+{
+    const CBlockIndex* pindexStart = WITH_LOCK(::cs_main, return SelectQuorumForSigningStartBlock(active_chain, signedAtHeight, signOffset));
+    return VerifyRecoveredSig(llmqType, qman, pindexStart, id, msgHash, sig);
 }
 
 } // namespace llmq

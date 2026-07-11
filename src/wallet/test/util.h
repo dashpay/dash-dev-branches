@@ -8,7 +8,7 @@
 #include <memory>
 
 class ArgsManager;
-class CChain;
+class ChainstateManager;
 class CKey;
 namespace interfaces {
 class Chain;
@@ -20,7 +20,7 @@ class Loader;
 namespace wallet {
 class CWallet;
 
-std::unique_ptr<CWallet> CreateSyncedWallet(interfaces::Chain& chain, interfaces::CoinJoin::Loader& coinjoin_loader, CChain& cchain, ArgsManager& args, const CKey& key);
+std::unique_ptr<CWallet> CreateSyncedWallet(interfaces::Chain& chain, interfaces::CoinJoin::Loader& coinjoin_loader, ChainstateManager& chainman, ArgsManager& args, const CKey& key);
 } // namespace wallet
 
 #endif // BITCOIN_WALLET_TEST_UTIL_H

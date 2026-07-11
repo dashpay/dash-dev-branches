@@ -617,7 +617,7 @@ BOOST_AUTO_TEST_CASE(CreateNewBlock_validity)
     std::vector<CTransactionRef> txFirst;
 
     auto createAndProcessEmptyBlock = [&]() {
-        int i = m_node.chainman->ActiveChain().Height() % blockinfo_size;
+        int i = WITH_LOCK(::cs_main, return m_node.chainman->ActiveChain().Height()) % blockinfo_size;
         CBlock *pblock = &pemptyblocktemplate->block; // pointer for convenience
         {
             LOCK(cs_main);

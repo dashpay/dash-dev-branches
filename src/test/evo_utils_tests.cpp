@@ -18,7 +18,7 @@ BOOST_AUTO_TEST_SUITE(evo_utils_tests)
 void Test(NodeContext& node)
 {
     using namespace llmq;
-    auto tip = node.chainman->ActiveTip();
+    auto tip = WITH_LOCK(::cs_main, return node.chainman->ActiveTip());
     const auto& consensus_params = Params().GetConsensus();
     BOOST_CHECK_EQUAL(node.chainman->IsQuorumTypeEnabled(consensus_params.llmqTypeDIP0024InstantSend, tip,
                                                          /*optDIP0024IsActive=*/false, /*optHaveDIP0024Quorums=*/false),

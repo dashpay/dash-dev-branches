@@ -762,10 +762,16 @@ static RPCHelpMan getassetunlockstatuses()
 
     if (!request.params[1].isNull()) {
         nSpecificCoreHeight = request.params[1].getInt<int>();
-        if (nSpecificCoreHeight.value() < 0 || nSpecificCoreHeight.value() > chainman.ActiveChain().Height()) {
-            throw JSONRPCError(RPC_INVALID_PARAMETER, "Block height out of range");
+        const CBlockIndex* pBlockIndex{nullptr};
+        {
+            LOCK(::cs_main);
+            if (nSpecificCoreHeight.value() < 0 || nSpecificCoreHeight.value() > chainman.ActiveChain().Height()) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER, "Block height out of range");
+            }
+            pBlockIndex = chainman.ActiveChain()[nSpecificCoreHeight.value()];
         }
-        poolCL = std::make_optional(chain_helper.GetCreditPool(chainman.ActiveChain()[nSpecificCoreHeight.value()]));
+        CHECK_NONFATAL(pBlockIndex);
+        poolCL = std::make_optional(chain_helper.GetCreditPool(pBlockIndex));
     }
     else {
         const auto pBlockIndexBestCL = [&]() -> const CBlockIndex* {

@@ -15,6 +15,7 @@
 
 #include <thread>
 
+#include <atomic>
 #include <memory>
 
 class CSporkManager;
@@ -72,6 +73,7 @@ private:
     std::thread shares_cleaning_thread;
     std::thread shares_dispatcher_thread;
     mutable ctpl::thread_pool worker_pool;
+    std::atomic<int> unverified_batches{0};
 
     CThreadInterrupt workInterrupt;
 };

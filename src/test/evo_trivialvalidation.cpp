@@ -64,8 +64,8 @@ void trivialvalidation_runner(const ChainstateManager& chainman, const std::stri
             BOOST_CHECK(test[2].get_str() == "basic" || test[2].get_str() == "legacy");
             // Determine which pindexPrev to supply based on whether we want to validate legacy or basic
             // TODO: Introduce trivial validation test vectors for extended addresses
-            const CBlockIndex* pindexPrev{(test[2].get_str() == "basic") ? chainman.ActiveChain()[100]
-                                                                         : chainman.ActiveChain()[98]};
+            const CBlockIndex* pindexPrev{WITH_LOCK(::cs_main, return (test[2].get_str() == "basic") ? chainman.ActiveChain()[100]
+                                                                                                     : chainman.ActiveChain()[98])};
             assert(pindexPrev);
             // Raw transaction
             CDataStream stream(ParseHex(test[3].get_str()), SER_NETWORK, PROTOCOL_VERSION);
