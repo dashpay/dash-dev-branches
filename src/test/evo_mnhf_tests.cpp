@@ -3,6 +3,8 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <bls/bls.h>
+#include <chainparams.h>
+#include <consensus/params.h>
 #include <consensus/validation.h>
 #include <evo/mnhftx.h>
 #include <evo/specialtx.h>
@@ -81,6 +83,54 @@ BOOST_AUTO_TEST_CASE(verify_mnhf_specialtx_tests)
         CheckMNHFTx(*chainman, qman, CTransaction(tx), pindex, state);
         BOOST_CHECK_EQUAL(state.ToString(), "bad-mnhf-non-ehf");
     }
+}
+
+/**
+ * Reconfigure the permanent "testdummy" deployment (never buried, present on
+ * every network) as an EHF deployment with a window entirely in the future.
+ * This stands in for a version bit that has just been *reused* by a newer
+ * deployment: DIP-0023 allows a later deployment to reuse a bit as long as its
+ * window is later than the previous one's. We deliberately avoid referencing a
+ * real deployment such as v24 here, since those get buried and removed from
+ * vDeployments over time, which would break this fixture.
+ */
+struct MnhfBitReuseSetup : public RegTestingSetup {
+    MnhfBitReuseSetup()
+        : RegTestingSetup{{"-vbparams=testdummy:2000000000:9223372036854775807:0:250:200:150:5:1"}}
+    {
+    }
+};
+
+/**
+ * DIP-0023 bit reuse: Dash buries old deployments and drops them from
+ * vDeployments, so on reindex a historical MnEHF signal for a buried deployment
+ * must stay valid even after its bit is reused by a newer deployment whose
+ * window has not started yet.
+ *
+ * Here the reused bit (testdummy) has a future window. A query at a time before
+ * that window represents revalidating a buried signal mined by the earlier (now
+ * removed) deployment that owned the bit. The out-of-range check runs before the
+ * useEHF check, so this exercises the same code path regardless of useEHF; we
+ * still set useehf=1 above so the scenario matches a reused EHF bit exactly.
+ *
+ * On unpatched develop IsValidMNActivation() returns true for this case (the
+ * out-of-range deployment is skipped and the unknown-bit fallback accepts it),
+ * so the block stays valid on reindex. PR #7446 makes it return false, which
+ * rejects a block that was accepted before the reuse -> consensus divergence.
+ */
+BOOST_FIXTURE_TEST_CASE(mnhf_bit_reuse_reindex_tests, MnhfBitReuseSetup)
+{
+    const CChainParams& params = Params();
+    const auto& reused = params.GetConsensus().vDeployments[Consensus::DEPLOYMENT_TESTDUMMY];
+    const int reused_bit = reused.bit;
+    const int64_t before_window = reused.nStartTime - 1; // buried-signal era, before the reuse window
+
+    // Sanity: a genuinely unknown/retired bit still validates (unchanged fallback).
+    BOOST_CHECK(params.IsValidMNActivation(/*nBit=*/5, before_window));
+
+    // Bit reuse: the buried signal predates the reused deployment's window.
+    // DIP-0023 compatibility requires it to remain valid on reindex.
+    BOOST_CHECK(params.IsValidMNActivation(reused_bit, before_window));
 }
 
 BOOST_AUTO_TEST_SUITE_END()
