@@ -26,7 +26,7 @@ class DashGovernanceTest (DashTestFramework):
         self.add_wallet_options(parser)
 
     def set_test_params(self):
-        self.set_dash_test_params(2, 1)
+        self.set_dash_test_params(1, 0)
 
     def prepare_object(self, object_type, parent_hash, creation_time, revision, name, amount):
         payment_address = self.nodes[0].getnewaddress()

@@ -11,6 +11,11 @@
 
 namespace Consensus {
 
+//! The largest quorum size the signing protocol supports. The signing session inventory
+//! and batched sig-share messages are bounded against this value, so quorum sizes above it
+//! (only reachable through the devnet/regtest size overrides) cannot sign end-to-end.
+constexpr int MAX_LLMQ_SIZE{400};
+
 enum class LLMQType : uint8_t {
     LLMQ_NONE = 0xff,
 

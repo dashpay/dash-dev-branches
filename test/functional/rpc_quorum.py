@@ -19,12 +19,16 @@ class RPCMasternodeTest(DashTestFramework):
         self.add_wallet_options(parser)
 
     def set_test_params(self):
-        self.set_dash_test_params(4, 3)
+        # A single-member quorum exercises the same per-member `quorum info`
+        # output the test asserts, so one masternode is sufficient.
+        self.set_dash_test_params(2, 1)
+        self.set_dash_llmq_test_params(1, 1)
 
     def run_test(self):
         self.nodes[0].sporkupdate("SPORK_17_QUORUM_DKG_ENABLED", 0)
         self.wait_for_sporks_same()
-        quorum_hash = self.mine_quorum()
+        self.mine_until_mns_confirmed_for_next_dkg()
+        quorum_hash = self.mine_quorum_single_member()
 
         quorum_info = self.nodes[0].quorum("info", 100, quorum_hash)
         for idx in range(0, self.mn_count):

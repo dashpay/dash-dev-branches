@@ -5,12 +5,18 @@
 #include <test/util/llmq_tests.h>
 #include <test/util/setup_common.h>
 
+#include <chainparams.h>
+#include <chainparamsbase.h>
 #include <consensus/params.h>
 #include <llmq/params.h>
+#include <util/system.h>
 
 #include <boost/test/unit_test.hpp>
 
+#include <algorithm>
 #include <limits>
+#include <memory>
+#include <string>
 
 using namespace llmq;
 using namespace llmq::testutils;
@@ -204,6 +210,62 @@ BOOST_AUTO_TEST_CASE(llmq_params_calculations_overflow_test)
     params.signingActiveQuorumCount = std::numeric_limits<int>::max();
     cycles = params.max_cycles(1000);
     BOOST_CHECK_EQUAL(cycles, 0); // 1000 / max_int = 0
+}
+
+//! Build chain params for `chain` with a single LLMQ size/threshold override applied.
+static std::unique_ptr<const CChainParams> ChainParamsWithLLMQOverride(const std::string& chain,
+                                                                       const std::string& arg,
+                                                                       int size, int threshold)
+{
+    ArgsManager args;
+    args.ForceSetArg(arg, strprintf("%d:%d", size, threshold));
+    return CreateChainParams(args, chain);
+}
+
+static int LLMQSize(const CChainParams& params, LLMQType type)
+{
+    const auto& llmqs = params.GetConsensus().llmqs;
+    const auto it = std::ranges::find_if(llmqs, [type](const auto& llmq) { return llmq.type == type; });
+    BOOST_REQUIRE(it != llmqs.end());
+    return it->size;
+}
+
+// Quorum sizes above MAX_LLMQ_SIZE cannot sign end-to-end: signing session inventories and
+// batched sig-share messages are bounded by that same maximum, so a node running such a quorum
+// would drop its peers' sig shares. Reject the override at chain-parameter construction instead.
+BOOST_AUTO_TEST_CASE(llmq_params_size_override_bounds_test)
+{
+    constexpr int kMax = Consensus::MAX_LLMQ_SIZE;
+
+    const std::pair<std::string, LLMQType> regtest_overrides[]{
+        {"-llmqtestparams", LLMQType::LLMQ_TEST},
+        {"-llmqtestinstantsendparams", LLMQType::LLMQ_TEST_INSTANTSEND},
+        {"-llmqtestplatformparams", LLMQType::LLMQ_TEST_PLATFORM},
+    };
+
+    for (const auto& [arg, type] : regtest_overrides) {
+        // Normal custom values keep working
+        const auto small = ChainParamsWithLLMQOverride(CBaseChainParams::REGTEST, arg, 5, 3);
+        BOOST_CHECK_EQUAL(LLMQSize(*small, type), 5);
+
+        // Exactly the maximum is accepted
+        const auto at_max = ChainParamsWithLLMQOverride(CBaseChainParams::REGTEST, arg, kMax, kMax * 2 / 3);
+        BOOST_CHECK_EQUAL(LLMQSize(*at_max, type), kMax);
+
+        // One above the maximum is rejected
+        BOOST_CHECK_THROW(ChainParamsWithLLMQOverride(CBaseChainParams::REGTEST, arg, kMax + 1, kMax * 2 / 3),
+                          std::runtime_error);
+    }
+
+    // Same bounds for the devnet override
+    const auto devnet_small = ChainParamsWithLLMQOverride(CBaseChainParams::DEVNET, "-llmqdevnetparams", 12, 6);
+    BOOST_CHECK_EQUAL(LLMQSize(*devnet_small, LLMQType::LLMQ_DEVNET), 12);
+
+    const auto devnet_at_max = ChainParamsWithLLMQOverride(CBaseChainParams::DEVNET, "-llmqdevnetparams", kMax, kMax / 2);
+    BOOST_CHECK_EQUAL(LLMQSize(*devnet_at_max, LLMQType::LLMQ_DEVNET), kMax);
+
+    BOOST_CHECK_THROW(ChainParamsWithLLMQOverride(CBaseChainParams::DEVNET, "-llmqdevnetparams", kMax + 1, kMax / 2),
+                      std::runtime_error);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

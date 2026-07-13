@@ -1186,6 +1186,10 @@ void CRegTestParams::UpdateLLMQTestParametersFromArgs(const ArgsManager& args, c
     if (!ParseInt32(vParams[1], &threshold)) {
         throw std::runtime_error(strprintf("Invalid %s threshold (%s)", llmq_name, vParams[1]));
     }
+    if (size > Consensus::MAX_LLMQ_SIZE) {
+        throw std::runtime_error(strprintf("Invalid %s size (%d), must not exceed the maximum supported quorum size (%d)",
+                                           llmq_name, size, Consensus::MAX_LLMQ_SIZE));
+    }
     LogPrintf("Setting %s parameters to size=%ld, threshold=%ld\n", llmq_name, size, threshold);
     UpdateLLMQTestParameters(size, threshold, llmqType);
 }
@@ -1351,6 +1355,10 @@ void CDevNetParams::UpdateLLMQDevnetParametersFromArgs(const ArgsManager& args)
     }
     if (!ParseInt32(vParams[1], &threshold)) {
         throw std::runtime_error(strprintf("Invalid LLMQ_DEVNET threshold (%s)", vParams[1]));
+    }
+    if (size > Consensus::MAX_LLMQ_SIZE) {
+        throw std::runtime_error(strprintf("Invalid LLMQ_DEVNET size (%d), must not exceed the maximum supported quorum size (%d)",
+                                           size, Consensus::MAX_LLMQ_SIZE));
     }
     LogPrintf("Setting LLMQ_DEVNET parameters to size=%ld, threshold=%ld\n", size, threshold);
     UpdateLLMQDevnetParameters(size, threshold);

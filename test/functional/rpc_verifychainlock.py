@@ -21,9 +21,11 @@ class RPCVerifyChainLockTest(DashTestFramework):
         self.add_wallet_options(parser)
 
     def set_test_params(self):
-        # -whitelist is needed to avoid the trickling logic on node0
-        self.set_dash_test_params(5, 3, [["-whitelist=127.0.0.1"], [], [], [], []])
-        self.set_dash_llmq_test_params(3, 2)
+        # -whitelist is needed to avoid the trickling logic on node0.
+        # A single-member quorum still produces real ChainLocks; node1 stays a
+        # non-masternode so it can be isolated to test divergent ChainLock state.
+        self.set_dash_test_params(3, 1, [["-whitelist=127.0.0.1"], [], []])
+        self.set_dash_llmq_test_params(1, 1)
 
     def cl_helper(self, height, chainlock, mempool):
         return {'height': height, 'chainlock': chainlock, 'mempool': mempool}
@@ -33,7 +35,8 @@ class RPCVerifyChainLockTest(DashTestFramework):
         node1 = self.nodes[1]
         self.nodes[0].sporkupdate("SPORK_17_QUORUM_DKG_ENABLED", 0)
         self.wait_for_sporks_same()
-        self.mine_quorum()
+        self.mine_until_mns_confirmed_for_next_dkg()
+        self.mine_quorum_single_member()
         self.wait_for_chainlocked_block(node0, self.generate(node0, 1, sync_fun=self.no_op)[0])
         chainlock = node0.getbestchainlock()
         block_hash = chainlock["blockhash"]

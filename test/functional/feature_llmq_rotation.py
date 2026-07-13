@@ -80,6 +80,10 @@ class LLMQQuorumRotationTest(DashTestFramework):
             assert_equal(dkg_info['active_dkgs'], 0)
             assert_equal(dkg_info['next_dkg'], next_dkg)
 
+        mn = self.mninfo[0]
+        self.log.info("Check that an empty proTxHash falls back to the local masternode's own proTxHash")
+        assert_equal(mn.get_node(self).quorum("dkginfo", ""), mn.get_node(self).quorum("dkginfo", mn.proTxHash))
+
         #Mine 2 quorums so that Chainlocks can be available: Need them to include CL in CbTx as soon as v20 activates
         self.log.info("Mining 2 quorums")
         h_0 = self.mine_quorum()

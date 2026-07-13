@@ -2136,6 +2136,26 @@ class DashTestFramework(BitcoinTestFramework):
         self.bump_mocktime(1, nodes=nodes)
         self.generate(self.nodes[0], num_blocks, sync_fun=lambda: self.sync_blocks(nodes))
 
+    def get_upcoming_dkg_predictions(self, node, llmq_type):
+        # 'quorum dkginfo' upcoming DKG entries of the given type per registered masternode
+        return {mn.proTxHash: [d for d in node.quorum("dkginfo", mn.proTxHash)["upcoming_dkgs"]
+                               if d["llmqType"] == llmq_type]
+                for mn in self.mninfo}
+
+    def verify_upcoming_dkg_predictions(self, predictions, quorum_info):
+        # 'quorum info' lists members in member-index order
+        members = [m["proTxHash"] for m in quorum_info["members"]]
+        work_height = quorum_info["height"] - quorum_info["quorumIndex"] - 8
+        for proTxHash, entries in predictions.items():
+            [entry] = [d for d in entries if d["quorumHeight"] == quorum_info["height"]]
+            if not entry["known"]:
+                # no prediction was possible (e.g. pre-v20); the RPC must tell why
+                assert "reason" in entry
+                continue
+            assert_equal(entry["workBlockHeight"], work_height)
+            assert_equal(entry["workBlockHash"], self.nodes[0].getblockhash(work_height))
+            assert_equal(entry["isMember"], proTxHash in members)
+
     def mine_quorum(self, llmq_type_name="llmq_test", llmq_type=100, expected_connections=None, expected_members=None, expected_contributions=None, expected_complaints=0, expected_justifications=0, expected_commitments=None, mninfos_online=None, mninfos_valid=None, skip_maturity=False):
         spork21_active = self.nodes[0].spork('show')['SPORK_21_QUORUM_ALL_CONNECTED'] <= 1
         spork23_active = self.nodes[0].spork('show')['SPORK_23_QUORUM_POSE'] <= 1
@@ -2161,7 +2181,14 @@ class DashTestFramework(BitcoinTestFramework):
 
         # move forward to next DKG
         llmq_cycle_len = 24
+        work_diff_depth = 8
         skip_count = llmq_cycle_len - (self.nodes[0].getblockcount() % llmq_cycle_len)
+        # a tip already within the work-diff window of the upcoming DKG means its members are
+        # predictable via 'quorum dkginfo'; capture now and verify once the quorum is formed
+        predictions = None
+        if skip_count <= work_diff_depth:
+            self.log.info(f"Capturing upcoming DKG membership predictions {skip_count} blocks ahead")
+            predictions = self.get_upcoming_dkg_predictions(mninfos_online[0].get_node(self), llmq_type)
         if skip_count != 0:
             self.bump_mocktime(1)
             self.generate(self.nodes[0], skip_count, sync_fun=lambda: self.sync_blocks(nodes))
@@ -2216,6 +2243,8 @@ class DashTestFramework(BitcoinTestFramework):
         new_quorum = self.nodes[0].quorum("list", 1)[llmq_type_name][0]
         assert_equal(q, new_quorum)
         quorum_info = self.nodes[0].quorum("info", llmq_type, new_quorum)
+        if predictions is not None:
+            self.verify_upcoming_dkg_predictions(predictions, quorum_info)
 
         if not skip_maturity:
             # Mine 8 (SIGN_HEIGHT_OFFSET) more blocks to make sure that the new quorum gets eligible for signing sessions
@@ -2228,6 +2257,66 @@ class DashTestFramework(BitcoinTestFramework):
             assert not check_banned(self.nodes[0], mn)
 
         return new_quorum
+
+    def mine_until_mns_confirmed_for_next_dkg(self):
+        """Advance the chain until the next non-rotating DKG cycle can select members.
+
+        Members are picked from the masternode list of the work block, which sits
+        WORK_DIFF_DEPTH (8) blocks below the cycle's base block, and only masternodes
+        that already carry a confirmedHash there are eligible. Masternodes registered
+        shortly before a cycle are still unconfirmed at its work block, so that cycle
+        would select nobody and produce no quorum at all. Skip such cycles by mining
+        to the next base block, one whole cycle at a time.
+
+        A work block above the tip is checked at the tip instead: masternodes are
+        registered before this runs and a confirmedHash is never unset again, so
+        whatever is confirmed at the tip stays confirmed at any later work block.
+        """
+        node = self.nodes[0]
+        dkg_interval = 24
+        work_diff_depth = 8
+        expected_mns = {mn.proTxHash for mn in self.mninfo}
+        # Confirmation takes nMasternodeMinimumConfirmations (1 on regtest) blocks after
+        # registration, so at most two cycles of headroom are needed: registration can
+        # fall just below a base block, leaving the cycle after it still unconfirmed.
+        for attempt in range(3):
+            height = node.getblockcount()
+            next_base_height = height + dkg_interval - (height % dkg_interval)
+            work_height = min(height, next_base_height - work_diff_depth)
+            # A masternode missing from the work block's list is as unselectable as an
+            # unconfirmed one, so require every masternode to be present and confirmed.
+            confirmed_mns = {mn['proRegTxHash'] for mn in node.protx('diff', 1, work_height)['mnList']
+                             if int(mn['confirmedHash'], 16) != 0}
+            if expected_mns.issubset(confirmed_mns):
+                return
+            assert attempt < 2, f"masternodes are still unconfirmed at work block {work_height}"
+            self.log.info(f"Skipping DKG cycle with base height={next_base_height}: not all "
+                          f"masternodes are confirmed at its work block {work_height}")
+            self.bump_mocktime(1)
+            self.generate(node, next_base_height - height)
+
+    def mine_quorum_single_member(self):
+        """Mine a single-member (llmq_size == 1) quorum and return its hash.
+
+        mine_quorum can't be reused for these: a one-member DKG has no
+        inter-member connections or probes, so its phase and connection waits
+        never complete.
+        """
+        node = self.nodes[0]
+        quorums = node.quorum('list')['llmq_test']
+
+        skip_count = 24 - (node.getblockcount() % 24)
+        if skip_count != 0:
+            self.bump_mocktime(1)
+            self.generate(node, skip_count)
+        time.sleep(1)
+        self.generate(node, 30)
+        new_quorums_list = node.quorum('list')['llmq_test']
+
+        self.log.info(f"Test Quorums at height={node.getblockcount()} : {new_quorums_list}")
+        assert new_quorums_list != quorums
+
+        return (set(new_quorums_list) - set(quorums)).pop()
 
     def mine_cycle_quorum(self):
         spork21_active = self.nodes[0].spork('show')['SPORK_21_QUORUM_ALL_CONNECTED'] <= 1
@@ -2253,6 +2342,12 @@ class DashTestFramework(BitcoinTestFramework):
         skip_count = llmq_cycle_len - (cur_block % llmq_cycle_len)
         # move forward to next 3 DKG rounds for the first quorum
         extra_blocks = 0 if self.cycle_quorum_is_ready else llmq_cycle_len * 3
+        # a tip already within the work-diff window of the cycle base means both quorums of
+        # the cycle are predictable via 'quorum dkginfo'; capture and verify once they form
+        predictions = None
+        if extra_blocks + skip_count <= 8:
+            self.log.info(f"Capturing upcoming DKG membership predictions {skip_count} blocks ahead")
+            predictions = self.get_upcoming_dkg_predictions(mninfos_online[0].get_node(self), llmq_type)
         self.move_blocks(nodes, extra_blocks + skip_count)
         self.log.info('Moved from block %d to %d' % (cur_block, self.nodes[0].getblockcount()))
 
@@ -2267,6 +2362,9 @@ class DashTestFramework(BitcoinTestFramework):
         self.wait_for_quorum_connections(q_0, expected_connections, mninfos_online, llmq_type_name, wait_proc=lambda: self.bump_mocktime(1))
         if spork23_active:
             self.wait_for_masternode_probes(q_0, mninfos_online, wait_proc=lambda: self.bump_mocktime(1), llmq_type_name=llmq_type_name)
+
+        # the cycle's work block is mined, so index-1 participation is already predictable
+        predictions_mid_cycle = self.get_upcoming_dkg_predictions(mninfos_online[0].get_node(self), llmq_type)
 
         self.move_blocks(nodes, 1)
 
@@ -2339,6 +2437,10 @@ class DashTestFramework(BitcoinTestFramework):
 
         quorum_info_0 = self.nodes[0].quorum("info", llmq_type, q_0)
         quorum_info_1 = self.nodes[0].quorum("info", llmq_type, q_1)
+        if predictions is not None:
+            self.verify_upcoming_dkg_predictions(predictions, quorum_info_0)
+            self.verify_upcoming_dkg_predictions(predictions, quorum_info_1)
+        self.verify_upcoming_dkg_predictions(predictions_mid_cycle, quorum_info_1)
         # Mine 8 (SIGN_HEIGHT_OFFSET) more blocks to make sure that the new quorum gets eligible for signing sessions
         self.generate(self.nodes[0], 8, sync_fun=lambda: self.sync_blocks(nodes))
 

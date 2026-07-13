@@ -7,6 +7,7 @@
 
 #include <bls/bls.h>
 #include <evo/types.h>
+#include <llmq/params.h>
 #include <llmq/signhash.h>
 #include <llmq/signing.h>
 
@@ -42,8 +43,8 @@ using SigShareKey = std::pair<uint256, uint16_t>;
 
 constexpr uint32_t UNINITIALIZED_SESSION_ID{std::numeric_limits<uint32_t>::max()};
 
-// 400 is the maximum quorum size, so this is also the maximum number of sigs we need to support
-constexpr size_t MAX_MSGS_TOTAL_BATCHED_SIGS{400};
+// The maximum quorum size is also the maximum number of sigs we need to support
+constexpr size_t MAX_MSGS_TOTAL_BATCHED_SIGS{Consensus::MAX_LLMQ_SIZE};
 
 class CSigShare : virtual public CSigBase
 {
