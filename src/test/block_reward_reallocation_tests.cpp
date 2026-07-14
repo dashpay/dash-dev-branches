@@ -15,7 +15,6 @@
 #include <chainparams.h>
 #include <deploymentstatus.h>
 #include <node/miner.h>
-#include <node/transaction.h>
 #include <script/interpreter.h>
 #include <script/sign.h>
 #include <script/signingprovider.h>
@@ -28,9 +27,8 @@
 #include <vector>
 
 using node::BlockAssembler;
-using node::GetTransaction;
 
-using SimpleUTXOMap = std::map<COutPoint, std::pair<int, CAmount>>;
+using SimpleUTXOMap = std::map<COutPoint, Coin>;
 
 struct TestChainBRRBeforeActivationSetup : public TestChainSetup
 {
@@ -47,28 +45,28 @@ static SimpleUTXOMap BuildSimpleUtxoMap(const std::vector<CTransactionRef>& txs)
     SimpleUTXOMap utxos;
     for (auto [i, tx] : std23::views::enumerate(txs)) {
         for (auto [j, output] : std23::views::enumerate(tx->vout)) {
-            utxos.try_emplace(COutPoint(tx->GetHash(), j), std::make_pair((int)i + 1, output.nValue));
+            utxos.try_emplace(COutPoint(tx->GetHash(), j), Coin(output, static_cast<int>(i) + 1, /*fCoinBaseIn=*/false));
         }
     }
     return utxos;
 }
 
-static std::vector<COutPoint> SelectUTXOs(const CChain& active_chain, SimpleUTXOMap& utoxs, CAmount amount, CAmount& changeRet)
+static SimpleUTXOMap SelectUTXOs(const CChain& active_chain, SimpleUTXOMap& utoxs, CAmount amount, CAmount& changeRet)
 {
     changeRet = 0;
 
-    std::vector<COutPoint> selectedUtxos;
+    SimpleUTXOMap selectedUtxos;
     CAmount selectedAmount = 0;
     while (!utoxs.empty()) {
         bool found = false;
         for (auto it = utoxs.begin(); it != utoxs.end(); ++it) {
-            if (active_chain.Height() - it->second.first < 101) {
+            if (active_chain.Height() - it->second.nHeight < 101) {
                 continue;
             }
 
             found = true;
-            selectedAmount += it->second.second;
-            selectedUtxos.emplace_back(it->first);
+            selectedAmount += it->second.out.nValue;
+            selectedUtxos.emplace(it->first, it->second);
             utoxs.erase(it);
             break;
         }
@@ -82,34 +80,31 @@ static std::vector<COutPoint> SelectUTXOs(const CChain& active_chain, SimpleUTXO
     return selectedUtxos;
 }
 
-static void FundTransaction(const CChain& active_chain, CMutableTransaction& tx, SimpleUTXOMap& utoxs, const CScript& scriptPayout, CAmount amount)
+// Returns the coins being spent so the caller can sign without a chain/mempool lookup.
+static SimpleUTXOMap FundTransaction(const ChainstateManager& chainman, CMutableTransaction& tx, SimpleUTXOMap& utoxs, const CScript& scriptPayout, CAmount amount)
 {
     CAmount change;
-    auto inputs = SelectUTXOs(active_chain, utoxs, amount, change);
+    auto inputs = WITH_LOCK(::cs_main, return SelectUTXOs(chainman.ActiveChain(), utoxs, amount, change));
     for (const auto& input : inputs) {
-        tx.vin.emplace_back(input);
+        tx.vin.emplace_back(input.first);
     }
     tx.vout.emplace_back(amount, scriptPayout);
     if (change != 0) {
         tx.vout.emplace_back(change, scriptPayout);
     }
+    return inputs;
 }
 
-static void SignTransaction(const CTxMemPool& mempool, CMutableTransaction& tx, const CKey& coinbaseKey)
+static void SignTransaction(CMutableTransaction& tx, const SimpleUTXOMap& coins, const CKey& coinbaseKey)
 {
     FillableSigningProvider tempKeystore;
     tempKeystore.AddKeyPubKey(coinbaseKey, coinbaseKey.GetPubKey());
 
-    for (auto [i, input] : std23::views::enumerate(tx.vin)) {
-        uint256 hashBlock;
-        CTransactionRef txFrom = GetTransaction(/*block_index=*/nullptr, &mempool, input.prevout.hash,
-                                                Params().GetConsensus(), hashBlock);
-        BOOST_REQUIRE(txFrom);
-        BOOST_REQUIRE(SignSignature(tempKeystore, *txFrom, tx, i, SIGHASH_ALL));
-    }
+    std::map<int, bilingual_str> input_errors;
+    BOOST_REQUIRE(::SignTransaction(tx, &tempKeystore, coins, SIGHASH_ALL, input_errors));
 }
 
-static CMutableTransaction CreateProRegTx(const CChain& active_chain, const CTxMemPool& mempool, SimpleUTXOMap& utxos, int port, const CScript& scriptPayout, const CKey& coinbaseKey, CKey& ownerKeyRet, CBLSSecretKey& operatorKeyRet)
+static CMutableTransaction CreateProRegTx(const ChainstateManager& chainman, SimpleUTXOMap& utxos, int port, const CScript& scriptPayout, const CKey& coinbaseKey, CKey& ownerKeyRet, CBLSSecretKey& operatorKeyRet)
 {
     ownerKeyRet.MakeNewKey(true);
     operatorKeyRet.MakeNewKey();
@@ -128,10 +123,10 @@ static CMutableTransaction CreateProRegTx(const CChain& active_chain, const CTxM
     CMutableTransaction tx;
     tx.nVersion = 3;
     tx.nType = TRANSACTION_PROVIDER_REGISTER;
-    FundTransaction(active_chain, tx, utxos, scriptPayout, dmn_types::Regular.collat_amount);
+    const auto spent = FundTransaction(chainman, tx, utxos, scriptPayout, dmn_types::Regular.collat_amount);
     proTx.inputsHash = CalcTxInputsHash(CTransaction(tx));
     SetTxPayload(tx, proTx);
-    SignTransaction(mempool, tx, coinbaseKey);
+    SignTransaction(tx, spent, coinbaseKey);
 
     return tx;
 }
@@ -159,7 +154,7 @@ BOOST_FIXTURE_TEST_CASE(block_reward_reallocation, TestChainBRRBeforeActivationS
     CKey ownerKey;
     CBLSSecretKey operatorKey;
     auto utxos = BuildSimpleUtxoMap(m_coinbase_txns);
-    auto tx = WITH_LOCK(::cs_main, return CreateProRegTx(m_node.chainman->ActiveChain(), *m_node.mempool, utxos, 1, GenerateRandomAddress(), coinbaseKey, ownerKey, operatorKey));
+    auto tx = CreateProRegTx(*m_node.chainman, utxos, 1, GenerateRandomAddress(), coinbaseKey, ownerKey, operatorKey);
 
     CreateAndProcessBlock({tx}, coinbasePubKey);
 

@@ -5,8 +5,6 @@
 #ifndef BITCOIN_KERNEL_COINSTATS_H
 #define BITCOIN_KERNEL_COINSTATS_H
 
-#include <chain.h>
-#include <coins.h>
 #include <consensus/amount.h>
 #include <streams.h>
 #include <uint256.h>
@@ -16,6 +14,9 @@
 #include <optional>
 
 class CCoinsView;
+class Coin;
+class COutPoint;
+class CScript;
 namespace node {
 class BlockManager;
 } // namespace node

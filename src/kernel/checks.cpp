@@ -7,21 +7,24 @@
 #include <bls/bls.h>
 #include <key.h>
 #include <random.h>
+#include <util/translation.h>
+
+#include <memory>
 
 namespace kernel {
 
-std::optional<SanityCheckError> SanityChecks(const Context&)
+std::optional<bilingual_str> SanityChecks(const Context&)
 {
     if (!ECC_InitSanityCheck()) {
-        return SanityCheckError::ERROR_ECC;
+        return Untranslated("Elliptic curve cryptography sanity check failure. Aborting.");
     }
 
     if (!BLSInit()) {
-        return SanityCheckError::ERROR_BLS;
+        return Untranslated("BLS cryptographic sanity check failure. Aborting.");
     }
 
     if (!Random_SanityCheck()) {
-        return SanityCheckError::ERROR_RANDOM;
+        return Untranslated("OS cryptographic RNG sanity check failure. Aborting.");
     }
 
     return std::nullopt;

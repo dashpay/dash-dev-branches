@@ -91,7 +91,7 @@ not-json
             "outbound": [
                 {
                     "number": 12,
-                    "title": "title with --> marker-like text",
+                    "title": f"title with {handle_potential_conflicts.COMMENT_START} --> marker-like text",
                     "url": "https://github.com/dashpay/dash/pull/12",
                     "files": ["src/net.cpp"],
                 }
@@ -103,7 +103,22 @@ not-json
         extracted = handle_potential_conflicts.extract_state(body)
 
         self.assertEqual(state, extracted)
-        self.assertNotIn("title with --> marker-like text", body.split("-->")[0])
+        self.assertTrue(body.startswith("## Potential PR merge conflicts"))
+        self.assertTrue(body.rstrip("\n").endswith(handle_potential_conflicts.COMMENT_END))
+
+    def test_extract_state_from_legacy_marker_first_comment(self):
+        state = {
+            "outbound": [
+                {"number": 2, "title": "two", "url": "https://example.test/2", "files": []},
+            ],
+            "inbound": {},
+        }
+        body = handle_potential_conflicts.render_comment_body(state)
+        marker_index = body.rfind(handle_potential_conflicts.COMMENT_START)
+        legacy_body = body[marker_index:] + body[:marker_index]
+
+        self.assertTrue(legacy_body.startswith(handle_potential_conflicts.COMMENT_START))
+        self.assertEqual(state, handle_potential_conflicts.extract_state(legacy_body))
 
     def test_rendered_comment_escapes_markdown_content(self):
         body = handle_potential_conflicts.render_comment_body({

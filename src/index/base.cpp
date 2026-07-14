@@ -377,7 +377,7 @@ void BaseIndex::Interrupt()
     m_interrupt();
 }
 
-bool BaseIndex::Start(CChainState& active_chainstate)
+bool BaseIndex::Start(Chainstate& active_chainstate)
 {
     m_chainstate = &active_chainstate;
     // Need to register this ValidationInterface before running Init(), so that

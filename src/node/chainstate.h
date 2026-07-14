@@ -10,6 +10,8 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <tuple>
+#include <validation.h>
 
 class CChainstateHelper;
 class CDeterministicMNManager;
@@ -27,21 +29,34 @@ class path;
 } // namespace fs
 
 namespace node {
-enum class ChainstateLoadingError {
-    ERROR_LOADING_BLOCK_DB,
-    ERROR_BAD_GENESIS_BLOCK,
-    ERROR_BAD_DEVNET_GENESIS_BLOCK,
-    ERROR_PRUNED_NEEDS_REINDEX,
-    ERROR_LOAD_GENESIS_BLOCK_FAILED,
-    ERROR_CHAINSTATE_UPGRADE_FAILED,
-    ERROR_REPLAYBLOCKS_FAILED,
-    ERROR_LOADCHAINTIP_FAILED,
-    ERROR_GENERIC_BLOCKDB_OPEN_FAILED,
-    ERROR_COMMITING_EVO_DB,
-    ERROR_UPGRADING_EVO_DB,
-    ERROR_UPGRADING_SIGNALS_DB,
-    SHUTDOWN_PROBED,
+struct CacheSizes;
+
+struct ChainstateLoadOptions {
+    CTxMemPool* mempool{nullptr};
+    bool block_tree_db_in_memory{false};
+    bool coins_db_in_memory{false};
+    bool dash_dbs_in_memory{false};
+    bool reindex{false};
+    bool reindex_chainstate{false};
+    bool prune{false};
+    int8_t bls_threads{0};
+    int16_t worker_count{0};
+    int64_t max_recsigs_age{0};
+    int64_t check_blocks{DEFAULT_CHECKBLOCKS};
+    int64_t check_level{DEFAULT_CHECKLEVEL};
+    std::function<bool()> check_interrupt;
+    std::function<void()> coins_error_cb;
+    std::function<void(bool)> notify_bls_state;
 };
+
+//! Chainstate load status. Simple applications can just check for the success
+//! case, and treat other cases as errors. More complex applications may want to
+//! try reindexing in the generic failure case, and pass an interrupt callback
+//! and exit cleanly in the interrupted case.
+enum class ChainstateLoadStatus { SUCCESS, FAILURE, FAILURE_INCOMPATIBLE_DB, INTERRUPTED };
+
+//! Chainstate load status code and optional error string.
+using ChainstateLoadResult = std::tuple<ChainstateLoadStatus, bilingual_str>;
 
 /** This sequence can have 4 types of outcomes:
  *
@@ -54,23 +69,9 @@ enum class ChainstateLoadingError {
  *  4. Hard failure
  *    - a failure that definitively cannot be recovered from with a reindex
  *
- *  Currently, LoadChainstate returns a std::optional<ChainstateLoadingError>
- *  which:
- *
- *  - if has_value()
- *      - Either "Soft failure", "Hard failure", or "Shutdown requested",
- *        differentiable by the specific enumerator.
- *
- *        Note that a return value of SHUTDOWN_PROBED means ONLY that "during
- *        this sequence, when we explicitly checked shutdown_requested() at
- *        arbitrary points, one of those calls returned true". Therefore, a
- *        return value other than SHUTDOWN_PROBED does not guarantee that
- *        shutdown hasn't been called indirectly.
- *  - else
- *      - Success!
+ *  LoadChainstate returns a (status code, error string) tuple.
  */
-std::optional<ChainstateLoadingError> LoadChainstate(bool fReset,
-                                                     ChainstateManager& chainman,
+ChainstateLoadResult LoadChainstate(ChainstateManager& chainman,
                                                      CMasternodeMetaMan& mn_metaman,
                                                      CSporkManager& sporkman,
                                                      chainlock::Chainlocks& chainlocks,
@@ -79,21 +80,9 @@ std::optional<ChainstateLoadingError> LoadChainstate(bool fReset,
                                                      std::unique_ptr<CDeterministicMNManager>& dmnman,
                                                      std::unique_ptr<CEvoDB>& evodb,
                                                      std::unique_ptr<LLMQContext>& llmq_ctx,
-                                                     CTxMemPool* mempool,
                                                      const fs::path& data_dir,
-                                                     bool fPruneMode,
-                                                     bool fReindexChainState,
-                                                     int64_t nBlockTreeDBCache,
-                                                     int64_t nCoinDBCache,
-                                                     int64_t nCoinCacheUsage,
-                                                     bool block_tree_db_in_memory,
-                                                     bool coins_db_in_memory,
-                                                     bool dash_dbs_in_memory,
-                                                     int8_t bls_threads,
-                                                     int16_t worker_count,
-                                                     int64_t max_recsigs_age,
-                                                     std::function<bool()> shutdown_requested = nullptr,
-                                                     std::function<void()> coins_error_cb = nullptr);
+                                                     const CacheSizes& cache_sizes,
+                                                     const ChainstateLoadOptions& options);
 
 /** Initialize Dash-specific components during chainstate initialization */
 void DashChainstateSetup(ChainstateManager& chainman,
@@ -118,20 +107,8 @@ void DashChainstateSetupClose(std::unique_ptr<CChainstateHelper>& chain_helper,
                               std::unique_ptr<LLMQContext>& llmq_ctx,
                               CTxMemPool* mempool);
 
-enum class ChainstateLoadVerifyError {
-    ERROR_BLOCK_FROM_FUTURE,
-    ERROR_CORRUPTED_BLOCK_DB,
-    ERROR_EVO_DB_SANITY_FAILED,
-    ERROR_GENERIC_FAILURE,
-};
-
-std::optional<ChainstateLoadVerifyError> VerifyLoadedChainstate(ChainstateManager& chainman,
-                                                                CEvoDB& evodb,
-                                                                bool fReset,
-                                                                bool fReindexChainState,
-                                                                int check_blocks,
-                                                                int check_level,
-                                                                std::function<void(bool)> notify_bls_state = nullptr);
+ChainstateLoadResult VerifyLoadedChainstate(ChainstateManager& chainman, CEvoDB& evodb,
+                                            const ChainstateLoadOptions& options);
 } // namespace node
 
 #endif // BITCOIN_NODE_CHAINSTATE_H

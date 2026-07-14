@@ -87,7 +87,7 @@ iwyu_tool.py \
   "src/compat" \
   "src/dbwrapper.cpp" \
   "src/init" \
-  "src/kernel/mempool_persist.cpp" \
+  "src/kernel" \
   "src/node/chainstate.cpp" \
   "src/node/minisketchwrapper.cpp" \
   "src/policy/feerate.cpp" \

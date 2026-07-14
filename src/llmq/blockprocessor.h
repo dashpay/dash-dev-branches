@@ -25,7 +25,7 @@ class CBlock;
 class CBlockIndex;
 class CBLSSignature;
 class CChain;
-class CChainState;
+class Chainstate;
 class CDataStream;
 class CDeterministicMNManager;
 class CEvoDB;
@@ -41,7 +41,7 @@ class CQuorumSnapshotManager;
 class CQuorumBlockProcessor
 {
 private:
-    CChainState& m_chainstate;
+    Chainstate& m_chainstate;
     CDeterministicMNManager& m_dmnman;
     CEvoDB& m_evoDb;
     CQuorumSnapshotManager& m_qsnapman;
@@ -58,7 +58,7 @@ public:
     CQuorumBlockProcessor() = delete;
     CQuorumBlockProcessor(const CQuorumBlockProcessor&) = delete;
     CQuorumBlockProcessor& operator=(const CQuorumBlockProcessor&) = delete;
-    explicit CQuorumBlockProcessor(CChainState& chainstate, CDeterministicMNManager& dmnman, CEvoDB& evoDb,
+    explicit CQuorumBlockProcessor(Chainstate& chainstate, CDeterministicMNManager& dmnman, CEvoDB& evoDb,
                                    CQuorumSnapshotManager& qsnapman, int8_t bls_threads);
     ~CQuorumBlockProcessor();
 

@@ -48,7 +48,7 @@ static void LoadExternalBlockFile(benchmark::Bench& bench)
         fclose(file);
     }
 
-    CChainState& chainstate{testing_setup->m_node.chainman->ActiveChainstate()};
+    Chainstate& chainstate{testing_setup->m_node.chainman->ActiveChainstate()};
     std::multimap<uint256, FlatFilePos> blocks_with_unknown_parent;
     FlatFilePos pos;
     bench.run([&] {

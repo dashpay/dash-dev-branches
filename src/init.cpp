@@ -157,8 +157,6 @@ using kernel::DumpMempool;
 
 using node::CacheSizes;
 using node::CalculateCacheSizes;
-using node::ChainstateLoadingError;
-using node::ChainstateLoadVerifyError;
 using node::DashChainstateSetupClose;
 using node::DEFAULT_PERSIST_MEMPOOL;
 using node::DEFAULT_PRINTPRIORITY;
@@ -355,7 +353,7 @@ void PrepareShutdown(NodeContext& node)
     // FlushStateToDisk generates a ChainStateFlushed callback, which we should avoid missing
     if (node.chainman) {
         LOCK(cs_main);
-        for (CChainState* chainstate : node.chainman->GetAll()) {
+        for (Chainstate* chainstate : node.chainman->GetAll()) {
             if (chainstate->CanFlushToDisk()) {
                 chainstate->ForceFlushStateToDisk();
             }
@@ -425,7 +423,7 @@ void PrepareShutdown(NodeContext& node)
 
     if (node.chainman) {
         LOCK(cs_main);
-        for (CChainState* chainstate : node.chainman->GetAll()) {
+        for (Chainstate* chainstate : node.chainman->GetAll()) {
             if (chainstate->CanFlushToDisk()) {
                 chainstate->ForceFlushStateToDisk();
                 chainstate->ResetCoinsViews();
@@ -1474,21 +1472,8 @@ static bool LockDataDirectory(bool probeOnly)
 bool AppInitSanityChecks(const kernel::Context& kernel)
 {
     // ********************************************************* Step 4: sanity checks
-    auto maybe_error = kernel::SanityChecks(kernel);
-
-    if (maybe_error.has_value()) {
-        switch (maybe_error.value()) {
-        case kernel::SanityCheckError::ERROR_ECC:
-            InitError(Untranslated("Elliptic curve cryptography sanity check failure. Aborting."));
-            break;
-        case kernel::SanityCheckError::ERROR_BLS:
-            InitError(Untranslated("BLS cryptographic sanity check failure. Aborting."));
-            break;
-        case kernel::SanityCheckError::ERROR_RANDOM:
-            InitError(Untranslated("OS cryptographic RNG sanity check failure. Aborting."));
-            break;
-        } // no default case, so the compiler can warn about missing cases
-
+    if (auto error = kernel::SanityChecks(kernel)) {
+        InitError(*error);
         return InitError(strprintf(_("Initialization sanity check failed. %s is shutting down."), PACKAGE_NAME));
     }
 
@@ -2036,145 +2021,84 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
          */
         node.mn_sync = std::make_unique<CMasternodeSync>(std::make_unique<NodeSyncNotifierImpl>(*node.connman, *node.netfulfilledman));
 
-        const bool fReset = fReindex;
         bilingual_str strLoadError;
+
+        node::ChainstateLoadOptions options;
+        options.mempool = Assert(node.mempool.get());
+        options.reindex = node::fReindex;
+        options.reindex_chainstate = fReindexChainState;
+        options.prune = node::fPruneMode;
+        options.bls_threads = [&args]() -> int8_t {
+            int64_t threads = args.GetIntArg("-parbls", llmq::DEFAULT_BLSCHECK_THREADS);
+            if (threads <= 0) {
+                // -parbls=0 means autodetect (number of cores - 1 validator threads)
+                // -parbls=-n means "leave n cores free" (number of cores - n - 1 validator threads)
+                threads += GetNumCores();
+            }
+            // Subtract 1 because the main thread counts towards the par threads
+            const int64_t adjusted_threads = std::clamp<int64_t>(threads, 1, int64_t{llmq::MAX_BLSCHECK_THREADS} + 1) - 1;
+            return static_cast<int8_t>(adjusted_threads);
+        }();
+        options.worker_count = llmq::DEFAULT_WORKER_COUNT;
+        options.max_recsigs_age = args.GetIntArg("-maxrecsigsage", llmq::DEFAULT_MAX_RECOVERED_SIGS_AGE);
+        options.check_blocks = args.GetIntArg("-checkblocks", DEFAULT_CHECKBLOCKS);
+        options.check_level = args.GetIntArg("-checklevel", DEFAULT_CHECKLEVEL);
+        options.check_interrupt = ShutdownRequested;
+        options.coins_error_cb = [] {
+            uiInterface.ThreadSafeMessageBox(
+                _("Error reading from database, shutting down."),
+                "", CClientUIInterface::MSG_ERROR);
+        };
+        options.notify_bls_state = [](bool bls_state) {
+            LogPrintf("%s: bls_legacy_scheme=%d\n", __func__, bls_state);
+        };
 
         uiInterface.InitMessage(_("Loading block index…").translated);
         const auto load_block_index_start_time{SteadyClock::now()};
-        std::optional<ChainstateLoadingError> maybe_load_error;
-        try {
-            maybe_load_error = LoadChainstate(fReset,
-                                              chainman,
-                                              *node.mn_metaman,
-                                              *node.sporkman,
-                                              *node.chainlocks,
-                                              *node.mn_sync,
-                                              node.chain_helper,
-                                              node.dmnman,
-                                              node.evodb,
-                                              node.llmq_ctx,
-                                              Assert(node.mempool.get()),
-                                              args.GetDataDirNet(),
-                                              fPruneMode,
-                                              fReindexChainState,
-                                              cache_sizes.block_tree_db,
-                                              cache_sizes.coins_db,
-                                              cache_sizes.coins,
-                                              /*block_tree_db_in_memory=*/false,
-                                              /*coins_db_in_memory=*/false,
-                                              /*dash_dbs_in_memory=*/false,
-                                              /*bls_threads=*/[&args]() -> int8_t {
-                                                  int8_t threads = args.GetIntArg("-parbls", llmq::DEFAULT_BLSCHECK_THREADS);
-                                                  if (threads <= 0) {
-                                                      // -parbls=0 means autodetect (number of cores - 1 validator threads)
-                                                      // -parbls=-n means "leave n cores free" (number of cores - n - 1 validator threads)
-                                                      threads += GetNumCores();
-                                                  }
-                                                  // Subtract 1 because the main thread counts towards the par threads
-                                                  return std::clamp<int8_t>(threads - 1, 0, llmq::MAX_BLSCHECK_THREADS);
-                                              }(),
-                                              llmq::DEFAULT_WORKER_COUNT,
-                                              args.GetIntArg("-maxrecsigsage", llmq::DEFAULT_MAX_RECOVERED_SIGS_AGE),
-                                              /*shutdown_requested=*/ShutdownRequested,
-                                              /*coins_error_cb=*/[]() {
-                                                  uiInterface.ThreadSafeMessageBox(
-                                                      _("Error reading from database, shutting down."),
-                                                      "", CClientUIInterface::MSG_ERROR);
-                                              });
-        } catch (const std::exception& e) {
-            LogPrintf("%s\n", e.what());
-            maybe_load_error = ChainstateLoadingError::ERROR_GENERIC_BLOCKDB_OPEN_FAILED;
-        }
-        if (maybe_load_error.has_value()) {
-            switch (maybe_load_error.value()) {
-            case ChainstateLoadingError::ERROR_LOADING_BLOCK_DB:
-                strLoadError = _("Error loading block database");
-                break;
-            case ChainstateLoadingError::ERROR_BAD_GENESIS_BLOCK:
-                // If the loaded chain has a wrong genesis, bail out immediately
-                // (we're likely using a testnet datadir, or the other way around).
-                return InitError(_("Incorrect or no genesis block found. Wrong datadir for network?"));
-            case ChainstateLoadingError::ERROR_BAD_DEVNET_GENESIS_BLOCK:
-                return InitError(_("Incorrect or no devnet genesis block found. Wrong datadir for devnet specified?"));
-            case ChainstateLoadingError::ERROR_PRUNED_NEEDS_REINDEX:
-                strLoadError = _("You need to rebuild the database using -reindex to go back to unpruned mode.  This will redownload the entire blockchain");
-                break;
-            case ChainstateLoadingError::ERROR_LOAD_GENESIS_BLOCK_FAILED:
-                strLoadError = _("Error initializing block database");
-                break;
-            case ChainstateLoadingError::ERROR_CHAINSTATE_UPGRADE_FAILED:
-                return InitError(_("Unsupported chainstate database format found. "
-                                   "Please restart with -reindex-chainstate. This will "
-                                   "rebuild the chainstate database."));
-            case ChainstateLoadingError::ERROR_REPLAYBLOCKS_FAILED:
-                strLoadError = _("Unable to replay blocks. You will need to rebuild the database using -reindex-chainstate.");
-                break;
-            case ChainstateLoadingError::ERROR_LOADCHAINTIP_FAILED:
-                strLoadError = _("Error initializing block database");
-                break;
-            case ChainstateLoadingError::ERROR_GENERIC_BLOCKDB_OPEN_FAILED:
-                strLoadError = _("Error opening block database");
-                break;
-            case ChainstateLoadingError::ERROR_COMMITING_EVO_DB:
-                strLoadError = _("Failed to commit Evo database");
-                break;
-            case ChainstateLoadingError::ERROR_UPGRADING_EVO_DB:
-                strLoadError = _("Failed to upgrade Evo database");
-                break;
-            case ChainstateLoadingError::ERROR_UPGRADING_SIGNALS_DB:
-                strLoadError = _("Error upgrading evo database for EHF");
-                break;
-            case ChainstateLoadingError::SHUTDOWN_PROBED:
-                break;
-            }
-        } else {
-            std::optional<ChainstateLoadVerifyError> maybe_verify_error;
+        auto catch_exceptions = [](auto&& fn) -> node::ChainstateLoadResult {
             try {
-                uiInterface.InitMessage(_("Verifying blocks…").translated);
-                auto check_blocks = args.GetIntArg("-checkblocks", DEFAULT_CHECKBLOCKS);
-                if (chainman.m_blockman.m_have_pruned && check_blocks > MIN_BLOCKS_TO_KEEP) {
-                    LogWarning("pruned datadir may not have more than %d blocks; only checking available blocks\n",
-                                      MIN_BLOCKS_TO_KEEP);
-                }
-                maybe_verify_error = VerifyLoadedChainstate(chainman,
-                                                            *Assert(node.evodb.get()),
-                                                            fReset,
-                                                            fReindexChainState,
-                                                            check_blocks,
-                                                            args.GetIntArg("-checklevel", DEFAULT_CHECKLEVEL),
-                                                            [](bool bls_state) {
-                                                                LogPrintf("%s: bls_legacy_scheme=%d\n", __func__, bls_state);
-                                                            });
+                return fn();
             } catch (const std::exception& e) {
                 LogPrintf("%s\n", e.what());
-                maybe_verify_error = ChainstateLoadVerifyError::ERROR_GENERIC_FAILURE;
+                return {node::ChainstateLoadStatus::FAILURE, _("Error opening block database")};
             }
-            if (maybe_verify_error.has_value()) {
-                switch (maybe_verify_error.value()) {
-                case ChainstateLoadVerifyError::ERROR_BLOCK_FROM_FUTURE:
-                    strLoadError = _("The block database contains a block which appears to be from the future. "
-                                     "This may be due to your computer's date and time being set incorrectly. "
-                                     "Only rebuild the block database if you are sure that your computer's date and time are correct");
-                    break;
-                case ChainstateLoadVerifyError::ERROR_CORRUPTED_BLOCK_DB:
-                    strLoadError = _("Corrupted block database detected");
-                    break;
-                case ChainstateLoadVerifyError::ERROR_EVO_DB_SANITY_FAILED:
-                    strLoadError = _("Error initializing block database");
-                    break;
-                case ChainstateLoadVerifyError::ERROR_GENERIC_FAILURE:
-                    strLoadError = _("Error opening block database");
-                    break;
-                }
-            } else {
-                fLoaded = true;
-                LogPrintf(" block index %15dms\n", Ticks<std::chrono::milliseconds>(SteadyClock::now() - load_block_index_start_time));
+        };
+        auto [status, error] = catch_exceptions([&] {
+            return LoadChainstate(chainman,
+                                  *node.mn_metaman,
+                                  *node.sporkman,
+                                  *node.chainlocks,
+                                  *node.mn_sync,
+                                  node.chain_helper,
+                                  node.dmnman,
+                                  node.evodb,
+                                  node.llmq_ctx,
+                                  args.GetDataDirNet(),
+                                  cache_sizes,
+                                  options);
+        });
+        if (status == node::ChainstateLoadStatus::SUCCESS) {
+            uiInterface.InitMessage(_("Verifying blocks…").translated);
+            if (chainman.m_blockman.m_have_pruned && options.check_blocks > MIN_BLOCKS_TO_KEEP) {
+                LogWarning("pruned datadir may not have more than %d blocks; only checking available blocks\n",
+                           MIN_BLOCKS_TO_KEEP);
             }
+            std::tie(status, error) = catch_exceptions([&] {
+                return VerifyLoadedChainstate(chainman, *Assert(node.evodb), options);
+            });
+        }
+        if (status == node::ChainstateLoadStatus::SUCCESS) {
+            fLoaded = true;
+            LogPrintf(" block index %15dms\n", Ticks<std::chrono::milliseconds>(SteadyClock::now() - load_block_index_start_time));
+        } else if (status == node::ChainstateLoadStatus::FAILURE_INCOMPATIBLE_DB) {
+            return InitError(error);
+        } else {
+            strLoadError = error;
         }
 
         if (!fLoaded && !ShutdownRequested()) {
             // first suggest a reindex
-            if (!fReset) {
+            if (!options.reindex) {
                 bool fRet = uiInterface.ThreadSafeQuestion(
                     strLoadError + Untranslated(".\n\n") + _("Do you want to rebuild the block database now?"),
                     strLoadError.original + ".\nPlease restart with -reindex or -reindex-chainstate to recover.",
@@ -2398,7 +2322,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     if (fPruneMode) {
         if (!fReindex) {
             LOCK(cs_main);
-            for (CChainState* chainstate : chainman.GetAll()) {
+            for (Chainstate* chainstate : chainman.GetAll()) {
                 uiInterface.InitMessage(_("Pruning blockstore…").translated);
                 chainstate->PruneAndFlush();
             }

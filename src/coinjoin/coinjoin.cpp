@@ -199,7 +199,7 @@ std::string CCoinJoinBaseSession::GetStateString() const
     }
 }
 
-bool CCoinJoinBaseSession::IsValidInOuts(CChainState& active_chainstate, const llmq::CInstantSendManager& isman,
+bool CCoinJoinBaseSession::IsValidInOuts(Chainstate& active_chainstate, const llmq::CInstantSendManager& isman,
                                          const CTxMemPool& mempool, const std::vector<CTxIn>& vin,
                                          const std::vector<CTxOut>& vout, PoolMessage& nMessageIDRet,
                                          bool* fConsumeCollateralRet) const

@@ -21,7 +21,7 @@ extern RecursiveMutex cs_main; // NOLINT(readability-redundant-declaration)
 
 class CBlock;
 class CBlockIndex;
-class CChainState;
+class Chainstate;
 class CCoinsView;
 namespace chainlock { class Chainlocks; }
 namespace kernel {
@@ -65,7 +65,7 @@ void CalculatePercentilesBySize(CAmount result[NUM_GETBLOCKSTATS_PERCENTILES], s
  */
 UniValue CreateUTXOSnapshot(
     node::NodeContext& node,
-    CChainState& chainstate,
+    Chainstate& chainstate,
     AutoFile& afile,
     const fs::path& path,
     const fs::path& tmppath);

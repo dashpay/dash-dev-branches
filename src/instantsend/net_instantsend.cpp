@@ -37,7 +37,7 @@ constexpr int OLD_ACTIVE_SET_FAILURE_MISBEHAVIOR_SCORE{20};
 constexpr auto WORK_THREAD_SLEEP_INTERVAL{std::chrono::milliseconds{100}};
 } // namespace
 
-static std::optional<int> GetBlockHeight(llmq::CInstantSendManager& is_manager, const CChainState& chainstate,
+static std::optional<int> GetBlockHeight(llmq::CInstantSendManager& is_manager, const Chainstate& chainstate,
                                          const uint256& hash)
 {
     if (hash.IsNull()) {

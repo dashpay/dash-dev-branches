@@ -40,7 +40,7 @@ public:
 public:
     bool hasQueue(const uint256& hash) const override;
     bool doForClient(const std::string& name, const std::function<void(CCoinJoinClientManager&)>& func) override EXCLUSIVE_LOCKS_REQUIRED(!cs_wallet_manager_map);
-    MessageProcessingResult processMessage(CNode& peer, CChainState& chainstate, CConnman& connman, CTxMemPool& mempool,
+    MessageProcessingResult processMessage(CNode& peer, Chainstate& chainstate, CConnman& connman, CTxMemPool& mempool,
                                            std::string_view msg_type, CDataStream& vRecv) override EXCLUSIVE_LOCKS_REQUIRED(!cs_ProcessDSQueue, !cs_wallet_manager_map);
     std::optional<CCoinJoinQueue> getQueueFromHash(const uint256& hash) const override;
     std::optional<int> getQueueSize() const override;
@@ -205,7 +205,7 @@ void CJWalletManagerImpl::DoMaintenance(CConnman& connman)
     }
 }
 
-MessageProcessingResult CJWalletManagerImpl::processMessage(CNode& pfrom, CChainState& chainstate, CConnman& connman,
+MessageProcessingResult CJWalletManagerImpl::processMessage(CNode& pfrom, Chainstate& chainstate, CConnman& connman,
                                                             CTxMemPool& mempool, std::string_view msg_type,
                                                             CDataStream& vRecv)
 {

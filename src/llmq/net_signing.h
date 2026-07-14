@@ -24,6 +24,18 @@ namespace llmq {
 class CSigSharesManager;
 class CSigningManager;
 
+//! Decode a QBSIGSHARES payload into its vector of CBatchedSigShares.
+//!
+//! The inner sigShares vector of each batch is bounded by CBatchedSigShares's
+//! SERIALIZE_METHODS via LIMITED_VECTOR, but many individually-valid batches
+//! could still exceed the total sig-share cap, so this bounds the outer batch
+//! count and checks the running total of inner sig shares as it decodes,
+//! stopping before an attacker forces us through the full cross product of the
+//! per-vector limits. A wire count above the cap (outer batch count or running
+//! inner total) throws std::ios_base::failure once detected, leaving the caller
+//! to log, ban, and rethrow uniformly.
+std::vector<CBatchedSigShares> UnserializeBatchedSigShares(CDataStream& vRecv);
+
 class NetSigning final : public NetHandler, public CValidationInterface
 {
 public:

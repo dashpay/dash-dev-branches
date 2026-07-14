@@ -20,7 +20,7 @@
 using node::ReadBlockFromDisk;
 
 namespace chainlock {
-ChainLockSigner::ChainLockSigner(CChainState& chainstate, const chainlock::Chainlocks& chainlocks,
+ChainLockSigner::ChainLockSigner(Chainstate& chainstate, const chainlock::Chainlocks& chainlocks,
                                  ChainlockHandler& clhandler, const llmq::CInstantSendManager& isman,
                                  const llmq::CQuorumManager& qman, llmq::CSigningManager& sigman,
                                  llmq::CSigSharesManager& shareman, const CMasternodeSync& mn_sync) :

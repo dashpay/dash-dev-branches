@@ -18,7 +18,6 @@
 #include <messagesigner.h>
 #include <mempool_args.h>
 #include <netbase.h>
-#include <node/transaction.h>
 #include <policy/policy.h>
 #include <pow.h>
 #include <script/interpreter.h>
@@ -35,9 +34,7 @@
 #include <optional>
 #include <vector>
 
-using node::GetTransaction;
-
-using SimpleUTXOMap = std::map<COutPoint, std::pair<int, CAmount>>;
+using SimpleUTXOMap = std::map<COutPoint, Coin>;
 
 static SimpleUTXOMap BuildSimpleUtxoMap(const std::vector<CTransactionRef>& txs)
 {
@@ -45,28 +42,28 @@ static SimpleUTXOMap BuildSimpleUtxoMap(const std::vector<CTransactionRef>& txs)
     for (size_t i = 0; i < txs.size(); i++) {
         auto& tx = txs[i];
         for (size_t j = 0; j < tx->vout.size(); j++) {
-            utxos.emplace(COutPoint(tx->GetHash(), j), std::make_pair((int)i + 1, tx->vout[j].nValue));
+            utxos.emplace(COutPoint(tx->GetHash(), j), Coin(tx->vout[j], static_cast<int>(i) + 1, /*fCoinBaseIn=*/false));
         }
     }
     return utxos;
 }
 
-static std::vector<COutPoint> SelectUTXOs(const CChain& active_chain, SimpleUTXOMap& utoxs, CAmount amount, CAmount& changeRet)
+static SimpleUTXOMap SelectUTXOs(const CChain& active_chain, SimpleUTXOMap& utoxs, CAmount amount, CAmount& changeRet)
 {
     changeRet = 0;
 
-    std::vector<COutPoint> selectedUtxos;
+    SimpleUTXOMap selectedUtxos;
     CAmount selectedAmount = 0;
     while (!utoxs.empty()) {
         bool found = false;
         for (auto it = utoxs.begin(); it != utoxs.end(); ++it) {
-            if (active_chain.Height() - it->second.first < 101) {
+            if (active_chain.Height() - it->second.nHeight < 101) {
                 continue;
             }
 
             found = true;
-            selectedAmount += it->second.second;
-            selectedUtxos.emplace_back(it->first);
+            selectedAmount += it->second.out.nValue;
+            selectedUtxos.emplace(it->first, it->second);
             utoxs.erase(it);
             break;
         }
@@ -80,34 +77,39 @@ static std::vector<COutPoint> SelectUTXOs(const CChain& active_chain, SimpleUTXO
     return selectedUtxos;
 }
 
-static void FundTransaction(const CChain& active_chain, CMutableTransaction& tx, SimpleUTXOMap& utoxs, const CScript& scriptPayout, CAmount amount, const CKey& coinbaseKey)
+// Returns the coins being spent so the caller can sign without a chain/mempool lookup.
+static SimpleUTXOMap FundTransaction(const ChainstateManager& chainman, CMutableTransaction& tx, SimpleUTXOMap& utoxs, const CScript& scriptPayout, CAmount amount)
 {
     CAmount change;
-    auto inputs = SelectUTXOs(active_chain, utoxs, amount, change);
-    for (size_t i = 0; i < inputs.size(); i++) {
-        tx.vin.emplace_back(CTxIn(inputs[i]));
+    auto inputs = WITH_LOCK(::cs_main, return SelectUTXOs(chainman.ActiveChain(), utoxs, amount, change));
+    for (const auto& input : inputs) {
+        tx.vin.emplace_back(CTxIn(input.first));
     }
     tx.vout.emplace_back(CTxOut(amount, scriptPayout));
     if (change != 0) {
         tx.vout.emplace_back(CTxOut(change, scriptPayout));
     }
+    return inputs;
 }
 
-static void SignTransaction(const CTxMemPool& mempool, CMutableTransaction& tx, const CKey& coinbaseKey)
+static void SignTransaction(CMutableTransaction& tx, const SimpleUTXOMap& coins, const CKey& coinbaseKey)
 {
     FillableSigningProvider tempKeystore;
     tempKeystore.AddKeyPubKey(coinbaseKey, coinbaseKey.GetPubKey());
 
-    for (size_t i = 0; i < tx.vin.size(); i++) {
-        uint256 hashBlock;
-        CTransactionRef txFrom = GetTransaction(/*block_index=*/nullptr, &mempool, tx.vin[i].prevout.hash,
-                                                Params().GetConsensus(), hashBlock);
-        BOOST_REQUIRE(txFrom);
-        BOOST_REQUIRE(SignSignature(tempKeystore, *txFrom, tx, i, SIGHASH_ALL));
-    }
+    std::map<int, bilingual_str> input_errors;
+    BOOST_REQUIRE(::SignTransaction(tx, &tempKeystore, coins, SIGHASH_ALL, input_errors));
 }
 
-static CMutableTransaction CreateProRegTx(const CChain& active_chain, const CTxMemPool& mempool, SimpleUTXOMap& utxos, int port, const CScript& scriptPayout, const CKey& coinbaseKey, CKey& ownerKeyRet, CBLSSecretKey& operatorKeyRet)
+static CMutableTransaction CreateSpendTx(const ChainstateManager& chainman, SimpleUTXOMap& utxos, const CScript& scriptPayout, CAmount amount, const CKey& coinbaseKey)
+{
+    CMutableTransaction tx;
+    const auto spent = FundTransaction(chainman, tx, utxos, scriptPayout, amount);
+    SignTransaction(tx, spent, coinbaseKey);
+    return tx;
+}
+
+static CMutableTransaction CreateProRegTx(const ChainstateManager& chainman, SimpleUTXOMap& utxos, int port, const CScript& scriptPayout, const CKey& coinbaseKey, CKey& ownerKeyRet, CBLSSecretKey& operatorKeyRet)
 {
     ownerKeyRet.MakeNewKey(true);
     operatorKeyRet.MakeNewKey();
@@ -126,15 +128,51 @@ static CMutableTransaction CreateProRegTx(const CChain& active_chain, const CTxM
     CMutableTransaction tx;
     tx.nVersion = 3;
     tx.nType = TRANSACTION_PROVIDER_REGISTER;
-    FundTransaction(active_chain, tx, utxos, scriptPayout, dmn_types::Regular.collat_amount, coinbaseKey);
+    const auto spent = FundTransaction(chainman, tx, utxos, scriptPayout, dmn_types::Regular.collat_amount);
     proTx.inputsHash = CalcTxInputsHash(CTransaction(tx));
     SetTxPayload(tx, proTx);
-    SignTransaction(mempool, tx, coinbaseKey);
+    SignTransaction(tx, spent, coinbaseKey);
 
     return tx;
 }
 
-static CMutableTransaction CreateProUpServTx(const CChain& active_chain, const CTxMemPool& mempool, SimpleUTXOMap& utxos, const uint256& proTxHash, const CBLSSecretKey& operatorKey, int port, const CScript& scriptOperatorPayout, const CKey& coinbaseKey)
+static COutPoint GetCollateralOutpoint(const CMutableTransaction& tx)
+{
+    for (size_t i = 0; i < tx.vout.size(); ++i) {
+        if (tx.vout[i].nValue == dmn_types::Regular.collat_amount) {
+            return COutPoint(tx.GetHash(), i);
+        }
+    }
+    return COutPoint();
+}
+
+// ProRegTx that references a pre-existing collateral output instead of funding the collateral inline.
+static CMutableTransaction CreateProRegTxExternalCollateral(const ChainstateManager& chainman, SimpleUTXOMap& utxos, int port, const COutPoint& collateralOutpoint, const CScript& scriptPayout, const CKey& ownerKey, const CBLSSecretKey& operatorKey, const CKey& collateralKey, const CKey& coinbaseKey)
+{
+    CProRegTx proTx;
+    proTx.nVersion = ProTxVersion::GetMax(!bls::bls_legacy_scheme, /*is_extended_addr=*/false);
+    proTx.netInfo = NetInfoInterface::MakeNetInfo(proTx.nVersion);
+    BOOST_CHECK_EQUAL(proTx.netInfo->AddEntry(NetInfoPurpose::CORE_P2P, strprintf("1.1.1.1:%d", port)),
+                      NetInfoStatus::Success);
+    proTx.collateralOutpoint = collateralOutpoint;
+    proTx.keyIDOwner = ownerKey.GetPubKey().GetID();
+    proTx.pubKeyOperator.Set(operatorKey.GetPublicKey(), bls::bls_legacy_scheme.load());
+    proTx.keyIDVoting = ownerKey.GetPubKey().GetID();
+    proTx.scriptPayout = scriptPayout;
+
+    CMutableTransaction tx;
+    tx.nVersion = 3;
+    tx.nType = TRANSACTION_PROVIDER_REGISTER;
+    const auto spent = FundTransaction(chainman, tx, utxos, scriptPayout, dmn_types::Regular.collat_amount);
+    proTx.inputsHash = CalcTxInputsHash(CTransaction(tx));
+    CMessageSigner::SignMessage(proTx.MakeSignString(), proTx.vchSig, collateralKey);
+    SetTxPayload(tx, proTx);
+    SignTransaction(tx, spent, coinbaseKey);
+
+    return tx;
+}
+
+static CMutableTransaction CreateProUpServTx(const ChainstateManager& chainman, SimpleUTXOMap& utxos, const uint256& proTxHash, const CBLSSecretKey& operatorKey, int port, const CScript& scriptOperatorPayout, const CKey& coinbaseKey)
 {
     CProUpServTx proTx;
     proTx.nVersion = ProTxVersion::GetMax(!bls::bls_legacy_scheme, /*is_extended_addr=*/false);
@@ -147,16 +185,16 @@ static CMutableTransaction CreateProUpServTx(const CChain& active_chain, const C
     CMutableTransaction tx;
     tx.nVersion = 3;
     tx.nType = TRANSACTION_PROVIDER_UPDATE_SERVICE;
-    FundTransaction(active_chain, tx, utxos, GetScriptForDestination(PKHash(coinbaseKey.GetPubKey())), 1 * COIN, coinbaseKey);
+    const auto spent = FundTransaction(chainman, tx, utxos, GetScriptForDestination(PKHash(coinbaseKey.GetPubKey())), 1 * COIN);
     proTx.inputsHash = CalcTxInputsHash(CTransaction(tx));
     proTx.sig = operatorKey.Sign(::SerializeHash(proTx), bls::bls_legacy_scheme);
     SetTxPayload(tx, proTx);
-    SignTransaction(mempool, tx, coinbaseKey);
+    SignTransaction(tx, spent, coinbaseKey);
 
     return tx;
 }
 
-static CMutableTransaction CreateProUpRegTx(const CChain& active_chain, const CTxMemPool& mempool, SimpleUTXOMap& utxos, const uint256& proTxHash, const CKey& mnKey, const CBLSPublicKey& pubKeyOperator, const CKeyID& keyIDVoting, const CScript& scriptPayout, const CKey& coinbaseKey)
+static CMutableTransaction CreateProUpRegTx(const ChainstateManager& chainman, SimpleUTXOMap& utxos, const uint256& proTxHash, const CKey& mnKey, const CBLSPublicKey& pubKeyOperator, const CKeyID& keyIDVoting, const CScript& scriptPayout, const CKey& coinbaseKey)
 {
     CProUpRegTx proTx;
     proTx.nVersion = ProTxVersion::GetMax(!bls::bls_legacy_scheme, /*is_extended_addr=*/false);
@@ -168,16 +206,16 @@ static CMutableTransaction CreateProUpRegTx(const CChain& active_chain, const CT
     CMutableTransaction tx;
     tx.nVersion = 3;
     tx.nType = TRANSACTION_PROVIDER_UPDATE_REGISTRAR;
-    FundTransaction(active_chain, tx, utxos, GetScriptForDestination(PKHash(coinbaseKey.GetPubKey())), 1 * COIN, coinbaseKey);
+    const auto spent = FundTransaction(chainman, tx, utxos, GetScriptForDestination(PKHash(coinbaseKey.GetPubKey())), 1 * COIN);
     proTx.inputsHash = CalcTxInputsHash(CTransaction(tx));
     CHashSigner::SignHash(::SerializeHash(proTx), mnKey, proTx.vchSig);
     SetTxPayload(tx, proTx);
-    SignTransaction(mempool, tx, coinbaseKey);
+    SignTransaction(tx, spent, coinbaseKey);
 
     return tx;
 }
 
-static CMutableTransaction CreateProUpRevTx(const CChain& active_chain, const CTxMemPool& mempool, SimpleUTXOMap& utxos, const uint256& proTxHash, const CBLSSecretKey& operatorKey, const CKey& coinbaseKey)
+static CMutableTransaction CreateProUpRevTx(const ChainstateManager& chainman, SimpleUTXOMap& utxos, const uint256& proTxHash, const CBLSSecretKey& operatorKey, const CKey& coinbaseKey)
 {
     CProUpRevTx proTx;
     proTx.nVersion = ProTxVersion::GetMax(!bls::bls_legacy_scheme, /*is_extended_addr=*/false);
@@ -186,11 +224,11 @@ static CMutableTransaction CreateProUpRevTx(const CChain& active_chain, const CT
     CMutableTransaction tx;
     tx.nVersion = 3;
     tx.nType = TRANSACTION_PROVIDER_UPDATE_REVOKE;
-    FundTransaction(active_chain, tx, utxos, GetScriptForDestination(PKHash(coinbaseKey.GetPubKey())), 1 * COIN, coinbaseKey);
+    const auto spent = FundTransaction(chainman, tx, utxos, GetScriptForDestination(PKHash(coinbaseKey.GetPubKey())), 1 * COIN);
     proTx.inputsHash = CalcTxInputsHash(CTransaction(tx));
     proTx.sig = operatorKey.Sign(::SerializeHash(proTx), bls::bls_legacy_scheme);
     SetTxPayload(tx, proTx);
-    SignTransaction(mempool, tx, coinbaseKey);
+    SignTransaction(tx, spent, coinbaseKey);
 
     return tx;
 }
@@ -237,17 +275,12 @@ static CDeterministicMNCPtr FindPayoutDmn(CDeterministicMNManager& dmnman, const
     return nullptr;
 }
 
-static bool CheckTransactionSignature(const CTxMemPool& mempool, const CMutableTransaction& tx)
+static bool CheckTransactionSignature(const CMutableTransaction& tx, const SimpleUTXOMap& coins)
 {
     for (unsigned int i = 0; i < tx.vin.size(); i++) {
         const auto& txin = tx.vin[i];
-        uint256 hashBlock;
-        CTransactionRef txFrom = GetTransaction(/*block_index=*/nullptr, &mempool, txin.prevout.hash,
-                                                Params().GetConsensus(), hashBlock);
-        BOOST_REQUIRE(txFrom);
-
-        CAmount amount = txFrom->vout[txin.prevout.n].nValue;
-        if (!VerifyScript(txin.scriptSig, txFrom->vout[txin.prevout.n].scriptPubKey, STANDARD_SCRIPT_VERIFY_FLAGS, MutableTransactionSignatureChecker(&tx, i, amount, MissingDataBehavior::ASSERT_FAIL))) {
+        const CTxOut& from = coins.at(txin.prevout).out;
+        if (!VerifyScript(txin.scriptSig, from.scriptPubKey, STANDARD_SCRIPT_VERIFY_FLAGS, MutableTransactionSignatureChecker(&tx, i, from.nValue, MissingDataBehavior::ASSERT_FAIL))) {
             return false;
         }
     }
@@ -267,7 +300,7 @@ void FuncDIP3Activation(TestChainSetup& setup)
     CKey ownerKey;
     CBLSSecretKey operatorKey;
     CTxDestination payoutDest = DecodeDestination("yRq1Ky1AfFmf597rnotj7QRxsDUKePVWNF");
-    auto tx = WITH_LOCK(::cs_main, return CreateProRegTx(chainman.ActiveChain(), *(setup.m_node.mempool), utxos, 1, GetScriptForDestination(payoutDest), setup.coinbaseKey, ownerKey, operatorKey));
+    auto tx = CreateProRegTx(chainman, utxos, 1, GetScriptForDestination(payoutDest), setup.coinbaseKey, ownerKey, operatorKey);
     std::vector<CMutableTransaction> txns = {tx};
 
     const CScript coinbase_pk = GetScriptForRawPubKey(setup.coinbaseKey.GetPubKey());
@@ -309,7 +342,7 @@ void FuncV19Activation(TestChainSetup& setup)
     CKey collateral_key;
     collateral_key.MakeNewKey(false);
     auto collateralScript = GetScriptForDestination(PKHash(collateral_key.GetPubKey()));
-    auto tx_reg = WITH_LOCK(::cs_main, return CreateProRegTx(chainman.ActiveChain(), *(setup.m_node.mempool), utxos, 1, collateralScript, setup.coinbaseKey, owner_key, operator_key));
+    auto tx_reg = CreateProRegTx(chainman, utxos, 1, collateralScript, setup.coinbaseKey, owner_key, operator_key);
     auto tx_reg_hash = tx_reg.GetHash();
 
     const CScript coinbase_pk = GetScriptForRawPubKey(setup.coinbaseKey.GetPubKey());
@@ -331,7 +364,7 @@ void FuncV19Activation(TestChainSetup& setup)
     // update
     CBLSSecretKey operator_key_new;
     operator_key_new.MakeNewKey();
-    auto tx_upreg = WITH_LOCK(::cs_main, return CreateProUpRegTx(chainman.ActiveChain(), *(setup.m_node.mempool), utxos, tx_reg_hash, owner_key, operator_key_new.GetPublicKey(), owner_key.GetPubKey().GetID(), collateralScript, setup.coinbaseKey));
+    auto tx_upreg = CreateProUpRegTx(chainman, utxos, tx_reg_hash, owner_key, operator_key_new.GetPublicKey(), owner_key.GetPubKey().GetID(), collateralScript, setup.coinbaseKey);
 
     block = std::make_shared<CBlock>(setup.CreateBlock({tx_upreg}, coinbase_pk, chainman.ActiveChainstate()));
     BOOST_REQUIRE(chainman.ProcessNewBlock(block, true, nullptr));
@@ -350,9 +383,8 @@ void FuncV19Activation(TestChainSetup& setup)
     tx_spend.vin.emplace_back(collateralOutpoint);
     tx_spend.vout.emplace_back(999.99 * COIN, collateralScript);
 
-    FillableSigningProvider signing_provider;
-    signing_provider.AddKeyPubKey(collateral_key, collateral_key.GetPubKey());
-    BOOST_REQUIRE(SignSignature(signing_provider, CTransaction(tx_reg), tx_spend, 0, SIGHASH_ALL));
+    const auto spend_coins = BuildSimpleUtxoMap({MakeTransactionRef(tx_reg)});
+    SignTransaction(tx_spend, spend_coins, collateral_key);
     block = std::make_shared<CBlock>(setup.CreateBlock({tx_spend}, coinbase_pk, chainman.ActiveChainstate()));
     BOOST_REQUIRE(chainman.ProcessNewBlock(block, true, nullptr));
     BOOST_REQUIRE(!DeploymentActiveAfter(tip_index(), chainman.GetConsensus(), Consensus::DEPLOYMENT_V19));
@@ -447,8 +479,8 @@ void FuncProUpRegTxVersionHandlingBeforeV24(TestChainSetup& setup)
     auto utxos = BuildSimpleUtxoMap(setup.m_coinbase_txns);
     CKey owner_key;
     CBLSSecretKey operator_key;
-    auto tx_reg = WITH_LOCK(::cs_main, return CreateProRegTx(chainman.ActiveChain(), *(setup.m_node.mempool), utxos, 1, GenerateRandomAddress(),
-                                 setup.coinbaseKey, owner_key, operator_key));
+    auto tx_reg = CreateProRegTx(chainman, utxos, 1, GenerateRandomAddress(),
+                                 setup.coinbaseKey, owner_key, operator_key);
     const auto proTxHash = tx_reg.GetHash();
     setup.CreateAndProcessBlock({tx_reg}, coinbase_pk);
     sync_dmn_tip();
@@ -465,9 +497,9 @@ void FuncProUpRegTxVersionHandlingBeforeV24(TestChainSetup& setup)
     BOOST_REQUIRE(!bls::bls_legacy_scheme.load());
 
     const auto payoutScript = GenerateRandomAddress();
-    auto tx_upreg = WITH_LOCK(::cs_main, return CreateProUpRegTx(chainman.ActiveChain(), *(setup.m_node.mempool), utxos, proTxHash, owner_key,
+    auto tx_upreg = CreateProUpRegTx(chainman, utxos, proTxHash, owner_key,
                                      operator_key.GetPublicKey(), owner_key.GetPubKey().GetID(), payoutScript,
-                                     setup.coinbaseKey));
+                                     setup.coinbaseKey);
     const auto opt_upreg = GetTxPayload<CProUpRegTx>(tx_upreg);
     BOOST_REQUIRE(opt_upreg);
     BOOST_CHECK_EQUAL(opt_upreg->nVersion, ProTxVersion::BasicBLS);
@@ -484,9 +516,9 @@ void FuncProUpRegTxVersionHandlingBeforeV24(TestChainSetup& setup)
     CBLSSecretKey operator_key_new;
     operator_key_new.MakeNewKey();
     const auto payoutScript2 = GenerateRandomAddress();
-    auto tx_upreg2 = WITH_LOCK(::cs_main, return CreateProUpRegTx(chainman.ActiveChain(), *(setup.m_node.mempool), utxos, proTxHash, owner_key,
+    auto tx_upreg2 = CreateProUpRegTx(chainman, utxos, proTxHash, owner_key,
                                       operator_key_new.GetPublicKey(), owner_key.GetPubKey().GetID(), payoutScript2,
-                                      setup.coinbaseKey));
+                                      setup.coinbaseKey);
     setup.CreateAndProcessBlock({tx_upreg2}, coinbase_pk);
     sync_dmn_tip();
 
@@ -510,12 +542,12 @@ void FuncProUpRegTxVersionHandlingBeforeV24(TestChainSetup& setup)
     CMutableTransaction tx_upreg3;
     tx_upreg3.nVersion = 3;
     tx_upreg3.nType = TRANSACTION_PROVIDER_UPDATE_REGISTRAR;
-    WITH_LOCK(::cs_main, FundTransaction(chainman.ActiveChain(), tx_upreg3, utxos, GetScriptForDestination(PKHash(setup.coinbaseKey.GetPubKey())),
-                    1 * COIN, setup.coinbaseKey));
+    const auto spent_upreg3 = FundTransaction(chainman, tx_upreg3, utxos, GetScriptForDestination(PKHash(setup.coinbaseKey.GetPubKey())),
+                                              1 * COIN);
     proTxLegacy.inputsHash = CalcTxInputsHash(CTransaction(tx_upreg3));
     CHashSigner::SignHash(::SerializeHash(proTxLegacy), owner_key, proTxLegacy.vchSig);
     SetTxPayload(tx_upreg3, proTxLegacy);
-    SignTransaction(*(setup.m_node.mempool), tx_upreg3, setup.coinbaseKey);
+    SignTransaction(tx_upreg3, spent_upreg3, setup.coinbaseKey);
 
     setup.CreateAndProcessBlock({tx_upreg3}, coinbase_pk);
     sync_dmn_tip();
@@ -546,8 +578,8 @@ void FuncProUpRegTxV4OnLegacyRejected(TestChainSetup& setup)
     auto utxos = BuildSimpleUtxoMap(setup.m_coinbase_txns);
     CKey owner_key;
     CBLSSecretKey operator_key;
-    auto tx_reg = WITH_LOCK(::cs_main, return CreateProRegTx(chainman.ActiveChain(), *(setup.m_node.mempool), utxos, 1, GenerateRandomAddress(),
-                                 setup.coinbaseKey, owner_key, operator_key));
+    auto tx_reg = CreateProRegTx(chainman, utxos, 1, GenerateRandomAddress(),
+                                 setup.coinbaseKey, owner_key, operator_key);
     const auto proTxHash = tx_reg.GetHash();
     setup.CreateAndProcessBlock({tx_reg}, coinbase_pk);
     sync_dmn_tip();
@@ -575,12 +607,12 @@ void FuncProUpRegTxV4OnLegacyRejected(TestChainSetup& setup)
     CMutableTransaction tx;
     tx.nVersion = 3;
     tx.nType = TRANSACTION_PROVIDER_UPDATE_REGISTRAR;
-    WITH_LOCK(::cs_main, FundTransaction(chainman.ActiveChain(), tx, utxos, GetScriptForDestination(PKHash(setup.coinbaseKey.GetPubKey())),
-                    1 * COIN, setup.coinbaseKey));
+    const auto spent = FundTransaction(chainman, tx, utxos, GetScriptForDestination(PKHash(setup.coinbaseKey.GetPubKey())),
+                                       1 * COIN);
     proTx.inputsHash = CalcTxInputsHash(CTransaction(tx));
     CHashSigner::SignHash(::SerializeHash(proTx), owner_key, proTx.vchSig);
     SetTxPayload(tx, proTx);
-    SignTransaction(*(setup.m_node.mempool), tx, setup.coinbaseKey);
+    SignTransaction(tx, spent, setup.coinbaseKey);
 
     TxValidationState val_state;
     {
@@ -618,10 +650,8 @@ void FuncProUpRegTxV2CannotBypassV4PayoutCollateralReuse(TestChainSetup& setup)
     const auto script_collateral = GetScriptForDestination(PKHash(collateral_key.GetPubKey()));
     const auto script_payout = GenerateRandomAddress();
 
-    CMutableTransaction tx_collateral;
-    WITH_LOCK(::cs_main, FundTransaction(chainman.ActiveChain(), tx_collateral, utxos, script_collateral, dmn_types::Regular.collat_amount,
-                    setup.coinbaseKey));
-    SignTransaction(*(setup.m_node.mempool), tx_collateral, setup.coinbaseKey);
+    auto tx_collateral = CreateSpendTx(chainman, utxos, script_collateral, dmn_types::Regular.collat_amount,
+                                       setup.coinbaseKey);
     setup.CreateAndProcessBlock({tx_collateral}, coinbase_pk);
     sync_dmn_tip();
 
@@ -633,22 +663,17 @@ void FuncProUpRegTxV2CannotBypassV4PayoutCollateralReuse(TestChainSetup& setup)
     pro_reg.pubKeyOperator.Set(operator_key.GetPublicKey(), bls::bls_legacy_scheme.load());
     pro_reg.keyIDVoting = owner_key.GetPubKey().GetID();
     pro_reg.payouts = {{script_payout, CMasternodePayoutShare::MAX_REWARD}};
-    for (size_t i = 0; i < tx_collateral.vout.size(); ++i) {
-        if (tx_collateral.vout[i].nValue == dmn_types::Regular.collat_amount) {
-            pro_reg.collateralOutpoint = COutPoint(tx_collateral.GetHash(), i);
-            break;
-        }
-    }
+    pro_reg.collateralOutpoint = GetCollateralOutpoint(tx_collateral);
 
     CMutableTransaction tx_reg;
     tx_reg.nVersion = 3;
     tx_reg.nType = TRANSACTION_PROVIDER_REGISTER;
-    WITH_LOCK(::cs_main, FundTransaction(chainman.ActiveChain(), tx_reg, utxos, GetScriptForDestination(PKHash(setup.coinbaseKey.GetPubKey())),
-                    1 * COIN, setup.coinbaseKey));
+    const auto spent_reg = FundTransaction(chainman, tx_reg, utxos, GetScriptForDestination(PKHash(setup.coinbaseKey.GetPubKey())),
+                                           1 * COIN);
     pro_reg.inputsHash = CalcTxInputsHash(CTransaction(tx_reg));
     CMessageSigner::SignMessage(pro_reg.MakeSignString(), pro_reg.vchSig, collateral_key);
     SetTxPayload(tx_reg, pro_reg);
-    SignTransaction(*(setup.m_node.mempool), tx_reg, setup.coinbaseKey);
+    SignTransaction(tx_reg, spent_reg, setup.coinbaseKey);
     const auto proTxHash = tx_reg.GetHash();
     setup.CreateAndProcessBlock({tx_reg}, coinbase_pk);
     sync_dmn_tip();
@@ -659,22 +684,10 @@ void FuncProUpRegTxV2CannotBypassV4PayoutCollateralReuse(TestChainSetup& setup)
     BOOST_CHECK_EQUAL(dmn->pdmnState->payouts.size(), 1U);
     BOOST_CHECK(dmn->pdmnState->payouts.front().scriptPayout == script_payout);
 
-    CProUpRegTx pro_upreg;
-    pro_upreg.nVersion = ProTxVersion::BasicBLS;
-    pro_upreg.proTxHash = proTxHash;
-    pro_upreg.pubKeyOperator.Set(operator_key.GetPublicKey(), bls::bls_legacy_scheme.load());
-    pro_upreg.keyIDVoting = owner_key.GetPubKey().GetID();
-    pro_upreg.scriptPayout = script_collateral;
-
-    CMutableTransaction tx_upreg;
-    tx_upreg.nVersion = 3;
-    tx_upreg.nType = TRANSACTION_PROVIDER_UPDATE_REGISTRAR;
-    WITH_LOCK(::cs_main, FundTransaction(chainman.ActiveChain(), tx_upreg, utxos, GetScriptForDestination(PKHash(setup.coinbaseKey.GetPubKey())),
-                    1 * COIN, setup.coinbaseKey));
-    pro_upreg.inputsHash = CalcTxInputsHash(CTransaction(tx_upreg));
-    CHashSigner::SignHash(::SerializeHash(pro_upreg), owner_key, pro_upreg.vchSig);
-    SetTxPayload(tx_upreg, pro_upreg);
-    SignTransaction(*(setup.m_node.mempool), tx_upreg, setup.coinbaseKey);
+    // The registrar update reuses the collateral script as payout; GetMax() is BasicBLS while v24 (but not
+    // multi-payout) is active, which is exactly the version whose payee-reuse handling is under test.
+    auto tx_upreg = CreateProUpRegTx(chainman, utxos, proTxHash, owner_key, operator_key.GetPublicKey(),
+                                     owner_key.GetPubKey().GetID(), script_collateral, setup.coinbaseKey);
 
     TxValidationState val_state;
     {
@@ -731,10 +744,8 @@ void FuncMNPaymentMultiplicityV24Boundary(TestChainSetup& setup)
     const auto script_collateral = GetScriptForDestination(PKHash(collateral_key.GetPubKey()));
 
     // Fund the collateral.
-    CMutableTransaction tx_collateral;
-    WITH_LOCK(::cs_main, FundTransaction(chainman.ActiveChain(), tx_collateral, utxos, script_collateral, dmn_types::Regular.collat_amount,
-                    setup.coinbaseKey));
-    SignTransaction(*(setup.m_node.mempool), tx_collateral, setup.coinbaseKey);
+    auto tx_collateral = CreateSpendTx(chainman, utxos, script_collateral, dmn_types::Regular.collat_amount,
+                                       setup.coinbaseKey);
     setup.CreateAndProcessBlock({tx_collateral}, coinbase_pk);
     sync_dmn_tip();
 
@@ -762,12 +773,12 @@ void FuncMNPaymentMultiplicityV24Boundary(TestChainSetup& setup)
     CMutableTransaction tx_reg;
     tx_reg.nVersion = 3;
     tx_reg.nType = TRANSACTION_PROVIDER_REGISTER;
-    WITH_LOCK(::cs_main, FundTransaction(chainman.ActiveChain(), tx_reg, utxos, GetScriptForDestination(PKHash(setup.coinbaseKey.GetPubKey())),
-                    1 * COIN, setup.coinbaseKey));
+    const auto spent_reg = FundTransaction(chainman, tx_reg, utxos, GetScriptForDestination(PKHash(setup.coinbaseKey.GetPubKey())),
+                                           1 * COIN);
     pro_reg.inputsHash = CalcTxInputsHash(CTransaction(tx_reg));
     CMessageSigner::SignMessage(pro_reg.MakeSignString(), pro_reg.vchSig, collateral_key);
     SetTxPayload(tx_reg, pro_reg);
-    SignTransaction(*(setup.m_node.mempool), tx_reg, setup.coinbaseKey);
+    SignTransaction(tx_reg, spent_reg, setup.coinbaseKey);
     const auto proTxHash = tx_reg.GetHash();
     setup.CreateAndProcessBlock({tx_reg}, coinbase_pk);
     sync_dmn_tip();
@@ -789,12 +800,12 @@ void FuncMNPaymentMultiplicityV24Boundary(TestChainSetup& setup)
     CMutableTransaction tx_ups;
     tx_ups.nVersion = 3;
     tx_ups.nType = TRANSACTION_PROVIDER_UPDATE_SERVICE;
-    WITH_LOCK(::cs_main, FundTransaction(chainman.ActiveChain(), tx_ups, utxos, GetScriptForDestination(PKHash(setup.coinbaseKey.GetPubKey())),
-                    1 * COIN, setup.coinbaseKey));
+    const auto spent_ups = FundTransaction(chainman, tx_ups, utxos, GetScriptForDestination(PKHash(setup.coinbaseKey.GetPubKey())),
+                                           1 * COIN);
     pro_ups.inputsHash = CalcTxInputsHash(CTransaction(tx_ups));
     pro_ups.sig = operator_key.Sign(::SerializeHash(pro_ups), bls::bls_legacy_scheme);
     SetTxPayload(tx_ups, pro_ups);
-    SignTransaction(*(setup.m_node.mempool), tx_ups, setup.coinbaseKey);
+    SignTransaction(tx_ups, spent_ups, setup.coinbaseKey);
     setup.CreateAndProcessBlock({tx_ups}, coinbase_pk);
     sync_dmn_tip();
     BOOST_REQUIRE(dmnman.GetListAtChainTip().GetMN(proTxHash)->pdmnState->scriptOperatorPayout == shared_script);
@@ -991,6 +1002,8 @@ void FuncDIP3Protx(TestChainSetup& setup)
     auto sync_dmn_tip = [&] { dmnman.UpdatedBlockTip(tip_index()); };
 
     auto utxos = BuildSimpleUtxoMap(setup.m_coinbase_txns);
+    // Snapshot kept for signature checks below, since FundTransaction() consumes utxos.
+    const SimpleUTXOMap coins{utxos};
 
     const CScript coinbase_pk = GetScriptForRawPubKey(setup.coinbaseKey.GetPubKey());
     int nHeight = tip_height();
@@ -1004,7 +1017,7 @@ void FuncDIP3Protx(TestChainSetup& setup)
     for (size_t i = 0; i < 6; i++) {
         CKey ownerKey;
         CBLSSecretKey operatorKey;
-        auto tx = WITH_LOCK(::cs_main, return CreateProRegTx(chainman.ActiveChain(), *(setup.m_node.mempool), utxos, port++, GenerateRandomAddress(), setup.coinbaseKey, ownerKey, operatorKey));
+        auto tx = CreateProRegTx(chainman, utxos, port++, GenerateRandomAddress(), setup.coinbaseKey, ownerKey, operatorKey);
         dmnHashes.emplace_back(tx.GetHash());
         ownerKeys.emplace(tx.GetHash(), ownerKey);
         operatorKeys.emplace(tx.GetHash(), operatorKey);
@@ -1024,8 +1037,8 @@ void FuncDIP3Protx(TestChainSetup& setup)
                                         chainman.ActiveChainstate().CoinsTip(), chainman, dummy_state, true));
         }
         // But the signature should not verify anymore
-        BOOST_REQUIRE(CheckTransactionSignature(*(setup.m_node.mempool), tx));
-        BOOST_REQUIRE(!CheckTransactionSignature(*(setup.m_node.mempool), tx2));
+        BOOST_REQUIRE(CheckTransactionSignature(tx, coins));
+        BOOST_REQUIRE(!CheckTransactionSignature(tx2, coins));
 
         setup.CreateAndProcessBlock({tx}, coinbase_pk);
         sync_dmn_tip();
@@ -1064,7 +1077,7 @@ void FuncDIP3Protx(TestChainSetup& setup)
         for (size_t j = 0; j < 3; j++) {
             CKey ownerKey;
             CBLSSecretKey operatorKey;
-            auto tx = WITH_LOCK(::cs_main, return CreateProRegTx(chainman.ActiveChain(), *(setup.m_node.mempool), utxos, port++, GenerateRandomAddress(), setup.coinbaseKey, ownerKey, operatorKey));
+            auto tx = CreateProRegTx(chainman, utxos, port++, GenerateRandomAddress(), setup.coinbaseKey, ownerKey, operatorKey);
             dmnHashes.emplace_back(tx.GetHash());
             ownerKeys.emplace(tx.GetHash(), ownerKey);
             operatorKeys.emplace(tx.GetHash(), operatorKey);
@@ -1082,7 +1095,7 @@ void FuncDIP3Protx(TestChainSetup& setup)
     }
 
     // test ProUpServTx
-    auto tx = WITH_LOCK(::cs_main, return CreateProUpServTx(chainman.ActiveChain(), *(setup.m_node.mempool), utxos, dmnHashes[0], operatorKeys[dmnHashes[0]], 1000, CScript(), setup.coinbaseKey));
+    auto tx = CreateProUpServTx(chainman, utxos, dmnHashes[0], operatorKeys[dmnHashes[0]], 1000, CScript(), setup.coinbaseKey);
     setup.CreateAndProcessBlock({tx}, coinbase_pk);
     sync_dmn_tip();
     BOOST_CHECK_EQUAL(tip_height(), nHeight + 1);
@@ -1092,7 +1105,7 @@ void FuncDIP3Protx(TestChainSetup& setup)
     BOOST_REQUIRE(dmn != nullptr && dmn->pdmnState->netInfo->GetPrimary().GetPort() == 1000);
 
     // test ProUpRevTx
-    tx = WITH_LOCK(::cs_main, return CreateProUpRevTx(chainman.ActiveChain(), *(setup.m_node.mempool), utxos, dmnHashes[0], operatorKeys[dmnHashes[0]], setup.coinbaseKey));
+    tx = CreateProUpRevTx(chainman, utxos, dmnHashes[0], operatorKeys[dmnHashes[0]], setup.coinbaseKey);
     setup.CreateAndProcessBlock({tx}, coinbase_pk);
     sync_dmn_tip();
     BOOST_CHECK_EQUAL(tip_height(), nHeight + 1);
@@ -1121,7 +1134,7 @@ void FuncDIP3Protx(TestChainSetup& setup)
     CBLSSecretKey newOperatorKey;
     newOperatorKey.MakeNewKey();
     dmn = dmnman.GetListAtChainTip().GetMN(dmnHashes[0]);
-    tx = WITH_LOCK(::cs_main, return CreateProUpRegTx(chainman.ActiveChain(), *(setup.m_node.mempool), utxos, dmnHashes[0], ownerKeys[dmnHashes[0]], newOperatorKey.GetPublicKey(), ownerKeys[dmnHashes[0]].GetPubKey().GetID(), dmn->pdmnState->scriptPayout, setup.coinbaseKey));
+    tx = CreateProUpRegTx(chainman, utxos, dmnHashes[0], ownerKeys[dmnHashes[0]], newOperatorKey.GetPublicKey(), ownerKeys[dmnHashes[0]].GetPubKey().GetID(), dmn->pdmnState->scriptPayout, setup.coinbaseKey);
     // check malleability protection again, but this time by also relying on the signature inside the ProUpRegTx
     auto tx2 = MalleateProTxPayout<CProUpRegTx>(tx);
     TxValidationState dummy_state;
@@ -1132,15 +1145,15 @@ void FuncDIP3Protx(TestChainSetup& setup)
         BOOST_REQUIRE(!CheckProUpRegTx(CTransaction(tx2), chainman.ActiveChain().Tip(), dmnman,
                                        chainman.ActiveChainstate().CoinsTip(), chainman, dummy_state, true));
     }
-    BOOST_REQUIRE(CheckTransactionSignature(*(setup.m_node.mempool), tx));
-    BOOST_REQUIRE(!CheckTransactionSignature(*(setup.m_node.mempool), tx2));
+    BOOST_REQUIRE(CheckTransactionSignature(tx, coins));
+    BOOST_REQUIRE(!CheckTransactionSignature(tx2, coins));
     // now process the block
     setup.CreateAndProcessBlock({tx}, coinbase_pk);
     sync_dmn_tip();
     BOOST_CHECK_EQUAL(tip_height(), nHeight + 1);
     nHeight++;
 
-    tx = WITH_LOCK(::cs_main, return CreateProUpServTx(chainman.ActiveChain(), *(setup.m_node.mempool), utxos, dmnHashes[0], newOperatorKey, 100, CScript(), setup.coinbaseKey));
+    tx = CreateProUpServTx(chainman, utxos, dmnHashes[0], newOperatorKey, 100, CScript(), setup.coinbaseKey);
     setup.CreateAndProcessBlock({tx}, coinbase_pk);
     sync_dmn_tip();
     BOOST_CHECK_EQUAL(tip_height(), nHeight + 1);
@@ -1184,6 +1197,8 @@ void FuncTestMempoolReorg(TestChainSetup& setup)
     const CScript coinbase_pk = GetScriptForRawPubKey(setup.coinbaseKey.GetPubKey());
     int nHeight = tip_height();
     auto utxos = BuildSimpleUtxoMap(setup.m_coinbase_txns);
+    // Snapshot kept to sign the double-spend below, since FundTransaction() consumes utxos.
+    const SimpleUTXOMap coins{utxos};
 
     CKey ownerKey;
     CKey payoutKey;
@@ -1199,9 +1214,7 @@ void FuncTestMempoolReorg(TestChainSetup& setup)
     auto scriptCollateral = GetScriptForDestination(PKHash(collateralKey.GetPubKey()));
 
     // Create a MN with an external collateral
-    CMutableTransaction tx_collateral;
-    WITH_LOCK(::cs_main, FundTransaction(chainman.ActiveChain(), tx_collateral, utxos, scriptCollateral, dmn_types::Regular.collat_amount, setup.coinbaseKey));
-    SignTransaction(*(setup.m_node.mempool), tx_collateral, setup.coinbaseKey);
+    auto tx_collateral = CreateSpendTx(chainman, utxos, scriptCollateral, dmn_types::Regular.collat_amount, setup.coinbaseKey);
 
     auto block = std::make_shared<CBlock>(setup.CreateBlock({tx_collateral}, coinbase_pk, chainman.ActiveChainstate()));
     BOOST_REQUIRE(chainman.ProcessNewBlock(block, true, nullptr));
@@ -1209,30 +1222,8 @@ void FuncTestMempoolReorg(TestChainSetup& setup)
     BOOST_CHECK_EQUAL(tip_height(), nHeight + 1);
     BOOST_CHECK_EQUAL(block->GetHash(), tip_hash());
 
-    CProRegTx payload;
-    payload.nVersion = ProTxVersion::GetMax(!bls::bls_legacy_scheme, /*is_extended_addr=*/false);
-    payload.netInfo = NetInfoInterface::MakeNetInfo(payload.nVersion);
-    BOOST_CHECK_EQUAL(payload.netInfo->AddEntry(NetInfoPurpose::CORE_P2P, "1.1.1.1:1"), NetInfoStatus::Success);
-    payload.keyIDOwner = ownerKey.GetPubKey().GetID();
-    payload.pubKeyOperator.Set(operatorKey.GetPublicKey(), bls::bls_legacy_scheme.load());
-    payload.keyIDVoting = ownerKey.GetPubKey().GetID();
-    payload.scriptPayout = scriptPayout;
-
-    for (size_t i = 0; i < tx_collateral.vout.size(); ++i) {
-        if (tx_collateral.vout[i].nValue == dmn_types::Regular.collat_amount) {
-            payload.collateralOutpoint = COutPoint(tx_collateral.GetHash(), i);
-            break;
-        }
-    }
-
-    CMutableTransaction tx_reg;
-    tx_reg.nVersion = 3;
-    tx_reg.nType = TRANSACTION_PROVIDER_REGISTER;
-    WITH_LOCK(::cs_main, FundTransaction(chainman.ActiveChain(), tx_reg, utxos, scriptPayout, dmn_types::Regular.collat_amount, setup.coinbaseKey));
-    payload.inputsHash = CalcTxInputsHash(CTransaction(tx_reg));
-    CMessageSigner::SignMessage(payload.MakeSignString(), payload.vchSig, collateralKey);
-    SetTxPayload(tx_reg, payload);
-    SignTransaction(*(setup.m_node.mempool), tx_reg, setup.coinbaseKey);
+    const auto collateralOutpoint = GetCollateralOutpoint(tx_collateral);
+    auto tx_reg = CreateProRegTxExternalCollateral(chainman, utxos, 1, collateralOutpoint, scriptPayout, ownerKey, operatorKey, collateralKey, setup.coinbaseKey);
 
     CTxMemPool testPool{MemPoolOptionsForTest(setup.m_node)};
     if (setup.m_node.dmnman) {
@@ -1242,7 +1233,7 @@ void FuncTestMempoolReorg(TestChainSetup& setup)
     LOCK2(cs_main, testPool.cs);
 
     // Create ProUpServ and test block reorg which double-spend ProRegTx
-    auto tx_up_serv = CreateProUpServTx(chainman.ActiveChain(), *(setup.m_node.mempool), utxos, tx_reg.GetHash(), operatorKey, 2, CScript(), setup.coinbaseKey);
+    auto tx_up_serv = CreateProUpServTx(chainman, utxos, tx_reg.GetHash(), operatorKey, 2, CScript(), setup.coinbaseKey);
     testPool.addUnchecked(entry.FromTx(tx_up_serv));
     // A disconnected block would insert ProRegTx back into mempool
     testPool.addUnchecked(entry.FromTx(tx_reg));
@@ -1252,7 +1243,7 @@ void FuncTestMempoolReorg(TestChainSetup& setup)
     CMutableTransaction tx_reg_ds;
     tx_reg_ds.vin = tx_reg.vin;
     tx_reg_ds.vout.emplace_back(0, CScript() << OP_RETURN);
-    SignTransaction(*(setup.m_node.mempool), tx_reg_ds, setup.coinbaseKey);
+    SignTransaction(tx_reg_ds, coins, setup.coinbaseKey);
 
     // Check mempool as if a new block with tx_reg_ds was connected instead of the old one with tx_reg
     std::vector<CTransactionRef> block_reorg;
@@ -1270,7 +1261,7 @@ void FuncTestMempoolDualProregtx(TestChainSetup& setup)
     // Create a MN
     CKey ownerKey1;
     CBLSSecretKey operatorKey1;
-    auto tx_reg1 = WITH_LOCK(::cs_main, return CreateProRegTx(chainman.ActiveChain(), *(setup.m_node.mempool), utxos, 1, GenerateRandomAddress(), setup.coinbaseKey, ownerKey1, operatorKey1));
+    auto tx_reg1 = CreateProRegTx(chainman, utxos, 1, GenerateRandomAddress(), setup.coinbaseKey, ownerKey1, operatorKey1);
 
     // Create a MN with an external collateral that references tx_reg1
     CKey ownerKey;
@@ -1285,30 +1276,8 @@ void FuncTestMempoolDualProregtx(TestChainSetup& setup)
 
     auto scriptPayout = GetScriptForDestination(PKHash(payoutKey.GetPubKey()));
 
-    CProRegTx payload;
-    payload.nVersion = ProTxVersion::GetMax(!bls::bls_legacy_scheme, /*is_extended_addr=*/false);
-    payload.netInfo = NetInfoInterface::MakeNetInfo(payload.nVersion);
-    BOOST_CHECK_EQUAL(payload.netInfo->AddEntry(NetInfoPurpose::CORE_P2P, "1.1.1.1:2"), NetInfoStatus::Success);
-    payload.keyIDOwner = ownerKey.GetPubKey().GetID();
-    payload.pubKeyOperator.Set(operatorKey.GetPublicKey(), bls::bls_legacy_scheme.load());
-    payload.keyIDVoting = ownerKey.GetPubKey().GetID();
-    payload.scriptPayout = scriptPayout;
-
-    for (size_t i = 0; i < tx_reg1.vout.size(); ++i) {
-        if (tx_reg1.vout[i].nValue == dmn_types::Regular.collat_amount) {
-            payload.collateralOutpoint = COutPoint(tx_reg1.GetHash(), i);
-            break;
-        }
-    }
-
-    CMutableTransaction tx_reg2;
-    tx_reg2.nVersion = 3;
-    tx_reg2.nType = TRANSACTION_PROVIDER_REGISTER;
-    WITH_LOCK(::cs_main, FundTransaction(chainman.ActiveChain(), tx_reg2, utxos, scriptPayout, dmn_types::Regular.collat_amount, setup.coinbaseKey));
-    payload.inputsHash = CalcTxInputsHash(CTransaction(tx_reg2));
-    CMessageSigner::SignMessage(payload.MakeSignString(), payload.vchSig, collateralKey);
-    SetTxPayload(tx_reg2, payload);
-    SignTransaction(*(setup.m_node.mempool), tx_reg2, setup.coinbaseKey);
+    const auto collateralOutpoint = GetCollateralOutpoint(tx_reg1);
+    auto tx_reg2 = CreateProRegTxExternalCollateral(chainman, utxos, 2, collateralOutpoint, scriptPayout, ownerKey, operatorKey, collateralKey, setup.coinbaseKey);
 
     CTxMemPool testPool{MemPoolOptionsForTest(setup.m_node)};
     if (setup.m_node.dmnman) {
@@ -1349,9 +1318,7 @@ void FuncVerifyDB(TestChainSetup& setup)
     auto scriptCollateral = GetScriptForDestination(PKHash(collateralKey.GetPubKey()));
 
     // Create a MN with an external collateral
-    CMutableTransaction tx_collateral;
-    WITH_LOCK(::cs_main, FundTransaction(chainman.ActiveChain(), tx_collateral, utxos, scriptCollateral, dmn_types::Regular.collat_amount, setup.coinbaseKey));
-    SignTransaction(*(setup.m_node.mempool), tx_collateral, setup.coinbaseKey);
+    auto tx_collateral = CreateSpendTx(chainman, utxos, scriptCollateral, dmn_types::Regular.collat_amount, setup.coinbaseKey);
 
     auto block = std::make_shared<CBlock>(setup.CreateBlock({tx_collateral}, coinbase_pk, chainman.ActiveChainstate()));
     BOOST_REQUIRE(chainman.ProcessNewBlock(block, true, nullptr));
@@ -1359,30 +1326,8 @@ void FuncVerifyDB(TestChainSetup& setup)
     BOOST_CHECK_EQUAL(tip_height(), nHeight + 1);
     BOOST_CHECK_EQUAL(block->GetHash(), tip_hash());
 
-    CProRegTx payload;
-    payload.nVersion = ProTxVersion::GetMax(!bls::bls_legacy_scheme, /*is_extended_addr=*/false);
-    payload.netInfo = NetInfoInterface::MakeNetInfo(payload.nVersion);
-    BOOST_CHECK_EQUAL(payload.netInfo->AddEntry(NetInfoPurpose::CORE_P2P, "1.1.1.1:1"), NetInfoStatus::Success);
-    payload.keyIDOwner = ownerKey.GetPubKey().GetID();
-    payload.pubKeyOperator.Set(operatorKey.GetPublicKey(), bls::bls_legacy_scheme.load());
-    payload.keyIDVoting = ownerKey.GetPubKey().GetID();
-    payload.scriptPayout = scriptPayout;
-
-    for (size_t i = 0; i < tx_collateral.vout.size(); ++i) {
-        if (tx_collateral.vout[i].nValue == dmn_types::Regular.collat_amount) {
-            payload.collateralOutpoint = COutPoint(tx_collateral.GetHash(), i);
-            break;
-        }
-    }
-
-    CMutableTransaction tx_reg;
-    tx_reg.nVersion = 3;
-    tx_reg.nType = TRANSACTION_PROVIDER_REGISTER;
-    WITH_LOCK(::cs_main, FundTransaction(chainman.ActiveChain(), tx_reg, utxos, scriptPayout, dmn_types::Regular.collat_amount, setup.coinbaseKey));
-    payload.inputsHash = CalcTxInputsHash(CTransaction(tx_reg));
-    CMessageSigner::SignMessage(payload.MakeSignString(), payload.vchSig, collateralKey);
-    SetTxPayload(tx_reg, payload);
-    SignTransaction(*(setup.m_node.mempool), tx_reg, setup.coinbaseKey);
+    const auto collateralOutpoint = GetCollateralOutpoint(tx_collateral);
+    auto tx_reg = CreateProRegTxExternalCollateral(chainman, utxos, 1, collateralOutpoint, scriptPayout, ownerKey, operatorKey, collateralKey, setup.coinbaseKey);
 
     auto tx_reg_hash = tx_reg.GetHash();
 
@@ -1395,8 +1340,8 @@ void FuncVerifyDB(TestChainSetup& setup)
 
     // Now spend the collateral while updating the same MN
     SimpleUTXOMap collateral_utxos;
-    collateral_utxos.emplace(payload.collateralOutpoint, std::make_pair(1, 1000));
-    auto proUpRevTx = WITH_LOCK(::cs_main, return CreateProUpRevTx(chainman.ActiveChain(), *(setup.m_node.mempool), collateral_utxos, tx_reg_hash, operatorKey, collateralKey));
+    collateral_utxos.emplace(collateralOutpoint, Coin(tx_collateral.vout[collateralOutpoint.n], /*nHeightIn=*/1, /*fCoinBaseIn=*/false));
+    auto proUpRevTx = CreateProUpRevTx(chainman, collateral_utxos, tx_reg_hash, operatorKey, collateralKey);
 
     block = std::make_shared<CBlock>(setup.CreateBlock({proUpRevTx}, coinbase_pk, chainman.ActiveChainstate()));
     BOOST_REQUIRE(chainman.ProcessNewBlock(block, true, nullptr));

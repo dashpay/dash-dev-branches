@@ -14,7 +14,7 @@
 #include <thread>
 #include <vector>
 
-class CChainState;
+class Chainstate;
 
 namespace Consensus {
 struct LLMQParams;
@@ -44,7 +44,7 @@ class NetInstantSend final : public NetHandler, public CValidationInterface
 public:
     NetInstantSend(PeerManagerInternal* peer_manager, llmq::CInstantSendManager& is_manager,
                    instantsend::InstantSendSigner* signer, llmq::CSigningManager& sigman, llmq::CQuorumManager& qman,
-                   const chainlock::Chainlocks& chainlocks, CChainState& chainstate, CTxMemPool& mempool,
+                   const chainlock::Chainlocks& chainlocks, Chainstate& chainstate, CTxMemPool& mempool,
                    const CMasternodeSync& mn_sync) :
         NetHandler(peer_manager),
         m_is_manager{is_manager},
@@ -113,7 +113,7 @@ private:
     llmq::CSigningManager& m_sigman;
     llmq::CQuorumManager& m_qman;
     const chainlock::Chainlocks& m_chainlocks;
-    CChainState& m_chainstate;
+    Chainstate& m_chainstate;
     CTxMemPool& m_mempool;
     const CMasternodeSync& m_mn_sync;
 

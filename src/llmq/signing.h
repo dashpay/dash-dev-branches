@@ -20,7 +20,7 @@
 #include <unordered_map>
 #include <variant>
 
-class CChainState;
+class Chainstate;
 class CDataStream;
 class CDBBatch;
 class CDBWrapper;

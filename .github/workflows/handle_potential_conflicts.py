@@ -154,7 +154,10 @@ def normalize_state(state: Any) -> dict[str, Any]:
 
 
 def extract_state(body: str) -> dict[str, Any]:
-    marker_index = body.find(COMMENT_START)
+    # The state block is rendered last, but comments written before that change
+    # start with it. Anchor on the last marker unless the body opens with one,
+    # so marker-like text in advisory content cannot shadow the real block.
+    marker_index = 0 if body.startswith(COMMENT_START) else body.rfind(COMMENT_START)
     if marker_index == -1:
         return normalize_state({})
 
@@ -218,9 +221,6 @@ def render_comment_body(state: dict[str, Any]) -> str:
     state_json = json.dumps(state, sort_keys=True, separators=(",", ":"))
     state_encoded = base64.b64encode(state_json.encode("utf8")).decode("ascii")
     lines = [
-        COMMENT_START,
-        state_encoded,
-        COMMENT_END,
         "## Potential PR merge conflicts",
         "",
         "This is advisory only. It does not block CI, but it marks PRs that will likely need a rebase depending on merge order.",
@@ -246,6 +246,14 @@ def render_comment_body(state: dict[str, Any]) -> str:
         ])
         inbound_items = sorted(state["inbound"].values(), key=lambda item: int(item["number"]))
         lines.extend(format_pr_line(item) for item in inbound_items)
+
+    # The state block goes last so notification previews start with the advisory text.
+    lines.extend([
+        "",
+        COMMENT_START,
+        state_encoded,
+        COMMENT_END,
+    ])
 
     return "\n".join(lines).rstrip() + "\n"
 

@@ -30,7 +30,7 @@ namespace Consensus {
 struct Params;
 };
 
-class CChainState;
+class Chainstate;
 
 /** This is connected to the logger. Can be used to redirect logs to any other log */
 extern const std::function<void(const std::string&)> G_TEST_LOG_FUN;
@@ -145,7 +145,9 @@ struct TestChainSetup : public TestingSetup
 {
     TestChainSetup(int num_blocks,
                    const std::string& chain_name = CBaseChainParams::REGTEST,
-                   const std::vector<const char*>& extra_args = {});
+                   const std::vector<const char*>& extra_args = {},
+                   const bool coins_db_in_memory = true,
+                   const bool block_tree_db_in_memory = true);
     ~TestChainSetup();
 
     /**
@@ -155,7 +157,7 @@ struct TestChainSetup : public TestingSetup
      */
     CBlock CreateAndProcessBlock(const std::vector<CMutableTransaction>& txns,
                                  const CScript& scriptPubKey,
-                                 CChainState* chainstate = nullptr);
+                                 Chainstate* chainstate = nullptr);
 
     /**
      * Create a new block with just given transactions, coinbase paying to
@@ -163,7 +165,7 @@ struct TestChainSetup : public TestingSetup
      */
     CBlock CreateBlock(const std::vector<CMutableTransaction>& txns,
                        const CScript& scriptPubKey,
-                       CChainState& chainstate);
+                       Chainstate& chainstate);
 
     //! Mine a series of new blocks on the active chain.
     void mineBlocks(int num_blocks);
@@ -219,8 +221,11 @@ struct TestChainSetup : public TestingSetup
  * Testing fixture that pre-creates a 100-block REGTEST-mode block chain
  */
 struct TestChain100Setup : public TestChainSetup {
-    TestChain100Setup(const std::string& chain_name = CBaseChainParams::REGTEST,
-                      const std::vector<const char*>& extra_args = {});
+    TestChain100Setup(
+        const std::string& chain_name = CBaseChainParams::REGTEST,
+        const std::vector<const char*>& extra_args = {},
+        const bool coins_db_in_memory = true,
+        const bool block_tree_db_in_memory = true);
 };
 
 /**

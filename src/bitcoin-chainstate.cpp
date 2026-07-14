@@ -26,6 +26,7 @@
 #include <masternode/meta.h>
 #include <masternode/sync.h>
 #include <node/blockstorage.h>
+#include <node/caches.h>
 #include <node/chainstate.h>
 #include <scheduler.h>
 #include <script/sigcache.h>
@@ -101,8 +102,16 @@ int main(int argc, char* argv[])
 
     std::unique_ptr<LLMQContext> llmq_ctx;
     std::unique_ptr<CChainstateHelper> chain_helper;
-    auto rv = node::LoadChainstate(/*fReset=*/false,
-                                   std::ref(chainman),
+    node::CacheSizes cache_sizes;
+    cache_sizes.block_tree_db = 2 << 20;
+    cache_sizes.coins_db = 2 << 22;
+    cache_sizes.coins = (450 << 20) - (2 << 20) - (2 << 22);
+    node::ChainstateLoadOptions options;
+    options.bls_threads = 1;
+    options.worker_count = 1;
+    options.max_recsigs_age = 1;
+    options.check_interrupt = [] { return false; };
+    auto [status, error] = node::LoadChainstate(chainman,
                                    metaman,
                                    sporkman,
                                    chainlocks,
@@ -111,38 +120,21 @@ int main(int argc, char* argv[])
                                    dmnman,
                                    evodb,
                                    llmq_ctx,
-                                   /*mempool=*/nullptr,
                                    gArgs.GetDataDirNet(),
-                                   /*fPruneMode=*/false,
-                                   /*fReindexChainState=*/false,
-                                   2 << 20,
-                                   2 << 22,
-                                   (450 << 20) - (2 << 20) - (2 << 22),
-                                   /*block_tree_db_in_memory=*/false,
-                                   /*coins_db_in_memory=*/false,
-                                   /*dash_dbs_in_memory=*/false,
-                                   /*bls_threads=*/1,
-                                   /*worker_count=*/1,
-                                   /*max_recsigs_age=*/1,
-                                   /*shutdown_requested=*/[]() { return false; },
-                                   /*coins_error_cb=*/[]() {});
-    if (rv.has_value()) {
+                                   cache_sizes,
+                                   options);
+    if (status != node::ChainstateLoadStatus::SUCCESS) {
         std::cerr << "Failed to load Chain state from your datadir." << std::endl;
         goto epilogue;
     } else {
-        auto maybe_verify_error = node::VerifyLoadedChainstate(std::ref(chainman),
-                                                               *evodb,
-                                                               false,
-                                                               false,
-                                                               DEFAULT_CHECKBLOCKS,
-                                                               DEFAULT_CHECKLEVEL);
-        if (maybe_verify_error.has_value()) {
+        std::tie(status, error) = node::VerifyLoadedChainstate(std::ref(chainman), *evodb, options);
+        if (status != node::ChainstateLoadStatus::SUCCESS) {
             std::cerr << "Failed to verify loaded Chain state from your datadir." << std::endl;
             goto epilogue;
         }
     }
 
-    for (CChainState* chainstate : WITH_LOCK(::cs_main, return chainman.GetAll())) {
+    for (Chainstate* chainstate : WITH_LOCK(::cs_main, return chainman.GetAll())) {
         BlockValidationState state;
         if (!chainstate->ActivateBestChain(state, nullptr)) {
             std::cerr << "Failed to connect best block (" << state.ToString() << ")" << std::endl;
@@ -283,7 +275,7 @@ epilogue:
     GetMainSignals().FlushBackgroundCallbacks();
     {
         LOCK(cs_main);
-        for (CChainState* chainstate : chainman.GetAll()) {
+        for (Chainstate* chainstate : chainman.GetAll()) {
             if (chainstate->CanFlushToDisk()) {
                 chainstate->ForceFlushStateToDisk();
                 chainstate->ResetCoinsViews();

@@ -25,7 +25,7 @@
 
 #include <univalue.h>
 
-class CChainState;
+class Chainstate;
 class CBLSPublicKey;
 class CBlockIndex;
 class ChainstateManager;
@@ -304,7 +304,7 @@ protected:
 
     virtual void SetNull() EXCLUSIVE_LOCKS_REQUIRED(cs_coinjoin);
 
-    bool IsValidInOuts(CChainState& active_chainstate, const llmq::CInstantSendManager& isman,
+    bool IsValidInOuts(Chainstate& active_chainstate, const llmq::CInstantSendManager& isman,
                        const CTxMemPool& mempool, const std::vector<CTxIn>& vin, const std::vector<CTxOut>& vout,
                        PoolMessage& nMessageIDRet, bool* fConsumeCollateralRet) const;
 

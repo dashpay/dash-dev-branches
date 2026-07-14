@@ -154,7 +154,7 @@ public:
 public:
     SERIALIZE_METHODS(CBatchedSigShares, obj)
     {
-        READWRITE(VARINT(obj.sessionId), obj.sigShares);
+        READWRITE(VARINT(obj.sessionId), LIMITED_VECTOR(obj.sigShares, MAX_MSGS_TOTAL_BATCHED_SIGS));
     }
 
     [[nodiscard]] std::string ToInvString() const;

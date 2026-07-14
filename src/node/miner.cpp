@@ -69,7 +69,7 @@ BlockAssembler::Options::Options()
     nBlockMaxSize = DEFAULT_BLOCK_MAX_SIZE;
 }
 
-BlockAssembler::BlockAssembler(CChainState& chainstate, const NodeContext& node, const CTxMemPool* mempool, const Options& options) :
+BlockAssembler::BlockAssembler(Chainstate& chainstate, const NodeContext& node, const CTxMemPool* mempool, const Options& options) :
       m_blockman(chainstate.m_blockman),
       m_chain_helper(chainstate.ChainHelper()),
       m_chainstate(chainstate),
@@ -103,7 +103,7 @@ static BlockAssembler::Options DefaultOptions()
     return options;
 }
 
-BlockAssembler::BlockAssembler(CChainState& chainstate, const NodeContext& node, const CTxMemPool* mempool)
+BlockAssembler::BlockAssembler(Chainstate& chainstate, const NodeContext& node, const CTxMemPool* mempool)
     : BlockAssembler(chainstate, node, mempool, DefaultOptions()) {}
 
 void BlockAssembler::resetBlock()

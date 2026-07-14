@@ -33,7 +33,7 @@ namespace instantsend {
 class InstantSendSigner final : public llmq::CRecoveredSigsListener
 {
 private:
-    CChainState& m_chainstate;
+    Chainstate& m_chainstate;
     const chainlock::Chainlocks& m_chainlocks;
     llmq::CInstantSendManager& m_isman;
     llmq::CSigningManager& m_sigman;
@@ -66,7 +66,7 @@ public:
     InstantSendSigner() = delete;
     InstantSendSigner(const InstantSendSigner&) = delete;
     InstantSendSigner& operator=(const InstantSendSigner&) = delete;
-    explicit InstantSendSigner(CChainState& chainstate, const chainlock::Chainlocks& chainlocks,
+    explicit InstantSendSigner(Chainstate& chainstate, const chainlock::Chainlocks& chainlocks,
                                llmq::CInstantSendManager& isman, llmq::CSigningManager& sigman,
                                llmq::CSigSharesManager& shareman, llmq::CQuorumManager& qman, CSporkManager& sporkman,
                                CTxMemPool& mempool, const CMasternodeSync& mn_sync);

@@ -17,11 +17,11 @@ race:bitcoin-qt
 # deadlock (TODO fix)
 # To reproduce, see:
 # https://github.com/bitcoin/bitcoin/issues/19303#issuecomment-1514926359
-deadlock:CChainState::ConnectTip
+deadlock:Chainstate::ConnectTip
 deadlock:wallet_tests::CreateWallet
 
 # deadlock false positive (see: https://github.com/dashpay/dash/pull/4563)
-deadlock:CChainState::ConnectTip
+deadlock:Chainstate::ConnectTip
 
 # Intentional deadlock in tests
 deadlock:sync_tests::potential_deadlock_detected
