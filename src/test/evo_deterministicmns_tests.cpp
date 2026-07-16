@@ -15,8 +15,8 @@
 #include <evo/specialtx.h>
 #include <evo/specialtxman.h>
 #include <llmq/context.h>
-#include <messagesigner.h>
 #include <mempool_args.h>
+#include <messagesigner.h>
 #include <netbase.h>
 #include <policy/policy.h>
 #include <pow.h>
@@ -725,6 +725,7 @@ void FuncMNPaymentMultiplicityV24Boundary(TestChainSetup& setup)
     // Start in the pre-v24 window: v19 active (basic BLS scheme) so we can register a v2 MN, but
     // v24 -- and thus strict multiplicity matching -- not yet active.
     BOOST_REQUIRE(DeploymentActiveAfter(tip_index(), consensus, Consensus::DEPLOYMENT_V19));
+    BOOST_REQUIRE(!DeploymentActiveAfter(tip_index(), consensus, Consensus::DEPLOYMENT_MN_RR));
     BOOST_REQUIRE(!DeploymentActiveAfter(tip_index(), chainman, Consensus::DEPLOYMENT_V24));
     BOOST_REQUIRE(!bls::bls_legacy_scheme.load());
 
@@ -887,6 +888,7 @@ void FuncMNPaymentMultiplicityV24Boundary(TestChainSetup& setup)
         sync_dmn_tip();
     }
     BOOST_REQUIRE(DeploymentActiveAfter(tip_index(), chainman, Consensus::DEPLOYMENT_V24));
+    BOOST_REQUIRE(!DeploymentActiveAfter(tip_index(), consensus, Consensus::DEPLOYMENT_MN_RR));
 
     // ---- Post-v24: strict multiplicity matching REJECTS the same merge (two expected outputs, one
     // distinct actual). Rejection is observed as the tip not advancing.
@@ -1451,9 +1453,15 @@ static void SmlCache(TestChainSetup& setup)
 
 BOOST_AUTO_TEST_SUITE(evo_dip3_activation_tests)
 
+// FuncDIP3Protx registers six masternodes in successive blocks. Height 109 is the lowest boundary
+// that keeps two mature coinbases available for every 1000 DASH collateral; height 108 runs out on
+// the sixth registration.
+constexpr int DIP3_ACTIVATION_HEIGHT{109};
+
 struct TestChainDIP3BeforeActivationSetup : public TestChainSetup {
     TestChainDIP3BeforeActivationSetup() :
-        TestChainSetup(430)
+        TestChainSetup(DIP3_ACTIVATION_HEIGHT - 2, CBaseChainParams::REGTEST, {"-dip3params=109:500"},
+                       /*coins_db_in_memory=*/true, /*block_tree_db_in_memory=*/true)
     {
     }
 };
@@ -1466,39 +1474,12 @@ struct TestChainDIP3Setup : public TestChainDIP3BeforeActivationSetup {
     }
 };
 
-struct TestChainV19BeforeActivationSetup : public TestChainSetup {
-    TestChainV19BeforeActivationSetup();
-};
-
-struct TestChainV19Setup : public TestChainV19BeforeActivationSetup {
-    TestChainV19Setup()
-    {
-        const CScript coinbase_pk = GetScriptForRawPubKey(coinbaseKey.GetPubKey());
-        // Activate V19
-        for (int i = 0; i < 5; ++i) {
-            CreateAndProcessBlock({}, coinbase_pk);
-        }
-        bool v19_just_activated{WITH_LOCK(::cs_main, return DeploymentActiveAfter(m_node.chainman->ActiveChain().Tip(), m_node.chainman->GetConsensus(), Consensus::DEPLOYMENT_V19) &&
-            !DeploymentActiveAt(*m_node.chainman->ActiveChain().Tip(), m_node.chainman->GetConsensus(), Consensus::DEPLOYMENT_V19))};
-        assert(v19_just_activated);
-    }
-};
-
-// 5 blocks earlier
-TestChainV19BeforeActivationSetup::TestChainV19BeforeActivationSetup() :
-    TestChainSetup(494, CBaseChainParams::REGTEST, {"-testactivationheight=v19@500", "-testactivationheight=v20@500", "-testactivationheight=mn_rr@500"})
-{
-    bool v19_active{WITH_LOCK(::cs_main, return DeploymentActiveAfter(m_node.chainman->ActiveChain().Tip(), m_node.chainman->GetConsensus(),
-                                          Consensus::DEPLOYMENT_V19))};
-    assert(!v19_active);
-}
-
 struct TestChainV24SignalBeforeV19Setup : public TestChainSetup {
     TestChainV24SignalBeforeV19Setup() :
         TestChainSetup(494, CBaseChainParams::REGTEST,
                        {"-testactivationheight=v19@500", "-testactivationheight=v20@500",
-                        "-testactivationheight=mn_rr@500",
-                        "-vbparams=v24:0:9999999999:0:500:400:300:5:0"})
+                        "-testactivationheight=mn_rr@511", "-vbparams=v24:0:9999999999:510:1:1:1:5:0"},
+                       /*coins_db_in_memory=*/true, /*block_tree_db_in_memory=*/true)
     {
         assert(WITH_LOCK(::cs_main, return !DeploymentActiveAfter(m_node.chainman->ActiveChain().Tip(), m_node.chainman->GetConsensus(),
                                       Consensus::DEPLOYMENT_V19)));
@@ -1507,21 +1488,17 @@ struct TestChainV24SignalBeforeV19Setup : public TestChainSetup {
     }
 };
 
-// v19/v20/mn_rr active at height 500, with v24 signalled but still PENDING (not yet locked in).
-// The 500-block window means v24 locks in well after v19, so this fixture stops in the window
-// where basic-BLS (v2) registrations are valid but strict multiplicity matching is off, letting
-// a single test cross the v24 activation boundary.
-struct TestChainV24PendingSetup : public TestChainSetup {
-    TestChainV24PendingSetup() :
-        TestChainSetup(494, CBaseChainParams::REGTEST,
-                       {"-testactivationheight=v19@500", "-testactivationheight=v20@500",
-                        "-testactivationheight=mn_rr@500",
-                        "-vbparams=v24:0:9999999999:0:500:400:300:5:0"})
+// Advance the shared v24 chain just far enough that v19/v20 are active while v24 remains held in
+// LOCKED_IN by its minimum activation height. Delaying mn_rr until the block after v24 keeps the
+// subsidy-only masternode reward even on both sides of the boundary, so the duplicate-payment
+// helper does not need to mine to the next subsidy epoch.
+struct TestChainV24PendingSetup : public TestChainV24SignalBeforeV19Setup {
+    TestChainV24PendingSetup()
     {
         const CScript coinbase_pk = GetScriptForRawPubKey(coinbaseKey.GetPubKey());
         auto& chainman = *Assert(m_node.chainman);
         auto& dmnman = *Assert(m_node.dmnman);
-        // Mine just enough to activate v19/v20/mn_rr (height 500) while keeping v24 pending.
+        // Mine just enough to activate v19/v20 (height 500) while keeping v24 and mn_rr pending.
         for (int i = 0; i < 20 && WITH_LOCK(::cs_main, return !DeploymentActiveAfter(chainman.ActiveChain().Tip(), chainman.GetConsensus(), Consensus::DEPLOYMENT_V19)); ++i) {
             CreateAndProcessBlock({}, coinbase_pk);
             dmnman.UpdatedBlockTip(WITH_LOCK(::cs_main, return chainman.ActiveChain().Tip()));
