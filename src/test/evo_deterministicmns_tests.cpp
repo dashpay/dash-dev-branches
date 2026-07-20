@@ -163,7 +163,8 @@ static CMutableTransaction CreateProRegTxExternalCollateral(const ChainstateMana
     CMutableTransaction tx;
     tx.nVersion = 3;
     tx.nType = TRANSACTION_PROVIDER_REGISTER;
-    const auto spent = FundTransaction(chainman, tx, utxos, scriptPayout, dmn_types::Regular.collat_amount);
+    // The collateral is external (referenced via collateralOutpoint), so this tx only needs to fund a fee.
+    const auto spent = FundTransaction(chainman, tx, utxos, scriptPayout, /*amount=*/1 * COIN);
     proTx.inputsHash = CalcTxInputsHash(CTransaction(tx));
     CMessageSigner::SignMessage(proTx.MakeSignString(), proTx.vchSig, collateralKey);
     SetTxPayload(tx, proTx);

@@ -10,7 +10,6 @@
 #include <primitives/transaction.h>
 #include <sync.h>
 
-#include <chrono>
 #include <limits>
 #include <map>
 #include <memory>
@@ -39,8 +38,6 @@ class UniValue;
 
 namespace governance {
 class SuperblockManager;
-// How long a requested governance inv hash remains in the request cache.
-inline constexpr std::chrono::seconds RELIABLE_PROPAGATION_TIME{60};
 } // namespace governance
 
 using vote_time_pair_t = std::pair<CGovernanceVote, int64_t>;

@@ -32,7 +32,8 @@ namespace {
 constexpr std::chrono::seconds GOVERNANCE_DELETION_DELAY{10min};
 constexpr std::chrono::seconds GOVERNANCE_ORPHAN_EXPIRATION_TIME{10min};
 constexpr std::chrono::seconds MAX_TIME_FUTURE_DEVIATION{1h};
-using governance::RELIABLE_PROPAGATION_TIME;
+// Margin below MAX_TIME_FUTURE_DEVIATION so lagging-clock peers don't reject near-limit objects.
+constexpr std::chrono::seconds RELIABLE_PROPAGATION_TIME{60};
 
 bool IsSyncableObject(const std::shared_ptr<CGovernanceObject>& govobj)
 {

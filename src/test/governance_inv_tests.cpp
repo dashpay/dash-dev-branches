@@ -7,14 +7,12 @@
 #include <governance/governance.h>
 #include <governance/net_governance.h>
 #include <governance/object.h>
-#include <masternode/meta.h>
 #include <masternode/sync.h>
 #include <net.h>
 #include <net_processing.h>
 #include <netfulfilledman.h>
 #include <node/connection_types.h>
 #include <protocol.h>
-#include <scheduler.h>
 #include <streams.h>
 #include <uint256.h>
 #include <util/strencodings.h>
@@ -30,7 +28,6 @@
 #include <atomic>
 #include <chrono>
 #include <memory>
-#include <thread>
 #include <vector>
 
 using namespace std::chrono_literals;
@@ -39,16 +36,16 @@ namespace {
 struct GovernanceInvSetup : public TestingSetup {
     GovernanceInvSetup() : TestingSetup{CBaseChainParams::MAIN}
     {
-        // ConfirmInventoryRequest and CheckAndRemove short-circuit on
-        // !IsBlockchainSynced(); CheckAndRemove also asserts metaman.IsValid().
-        // NetGovernance::AlreadyHave gates on m_gov_manager.IsValid().
+        // ConfirmInventoryRequest and the NetGovernance object/vote handlers
+        // short-circuit on !IsBlockchainSynced().
         BOOST_REQUIRE(m_node.mn_sync);
         m_node.mn_sync->SwitchToNextAsset();
         BOOST_REQUIRE(m_node.mn_sync->IsBlockchainSynced());
 
         BOOST_REQUIRE(m_node.mn_metaman);
-        BOOST_REQUIRE(m_node.mn_metaman->LoadCache(/*load_cache=*/false));
-
+        // Note: mn_metaman is left unloaded. No test here reaches
+        // CGovernanceObject::ProcessVote, which asserts metaman.IsValid() -- a vote whose
+        // parent object exists would, and would need it loaded first.
         m_node.govman = std::make_unique<CGovernanceManager>(*m_node.mn_metaman, *m_node.chainman, *m_node.chain_helper->superblocks, *m_node.dmnman, *m_node.mn_sync);
         // Match runtime preconditions: NetGovernance::AlreadyHave claims we
         // already have the inv when governance isn't loaded (e.g.
@@ -73,7 +70,8 @@ struct GovernanceInvSetup : public TestingSetup {
             m_node.peerman.get(), *m_node.govman, *m_node.mn_sync,
             *m_node.netfulfilledman, *m_node.connman));
 
-        // Anchor the mocked clock so SetMockTime advances are deterministic.
+        // Anchor the clock so the object and vote timestamps the tests build
+        // from GetTime() are deterministic. Nothing advances it.
         SetMockTime(1'700'000'000s);
     }
     ~GovernanceInvSetup() {
@@ -173,6 +171,13 @@ void ProcessGovernanceVote(NetGovernance& net_gov, CNode& peer, const CGovernanc
     vote_stream << vote;
     net_gov.ProcessMessage(peer, NetMsgType::MNGOVERNANCEOBJECTVOTE, vote_stream);
 }
+
+void AssertMisbehaviorScore(PeerManager& peerman, const CNode& peer, int expected)
+{
+    CNodeStateStats stats;
+    BOOST_REQUIRE(peerman.GetNodeStateStats(peer.GetId(), stats));
+    BOOST_CHECK_EQUAL(stats.m_misbehavior_score, expected);
+}
 } // namespace
 
 BOOST_FIXTURE_TEST_SUITE(governance_inv_tests, GovernanceInvSetup)
@@ -186,21 +191,8 @@ BOOST_AUTO_TEST_CASE(per_object_vote_sync_is_fulfilled_request_limited)
     m_node.mn_sync->SwitchToNextAsset();
     BOOST_REQUIRE(m_node.mn_sync->IsSynced());
 
-    in_addr peer_in_addr{};
-    peer_in_addr.s_addr = htonl(0x01020305);
-    CNode peer{/*id=*/1,
-               /*sock=*/nullptr,
-               /*addrIn=*/CAddress{CService{peer_in_addr, 8333}, NODE_NETWORK},
-               /*nKeyedNetGroupIn=*/0,
-               /*nLocalHostNonceIn=*/0,
-               /*addrBindIn=*/CAddress{},
-               /*addrNameIn=*/std::string{},
-               /*conn_type_in=*/ConnectionType::INBOUND,
-               /*inbound_onion=*/false};
-    peer.nVersion = PROTOCOL_VERSION;
-    peer.SetCommonVersion(PROTOCOL_VERSION);
-    m_node.peerman->InitializeNode(peer, NODE_NETWORK);
-    peer.fSuccessfullyConnected = true;
+    auto peer{MakeGovernanceInvPeer(/*id=*/1)};
+    m_node.peerman->InitializeNode(*peer, NODE_NETWORK);
 
     auto make_request_stream = [](const uint256& object_hash, const CBloomFilter& filter) {
         CDataStream stream{SER_NETWORK, PROTOCOL_VERSION};
@@ -211,9 +203,7 @@ BOOST_AUTO_TEST_CASE(per_object_vote_sync_is_fulfilled_request_limited)
     NetGovernance net_gov(m_node.peerman.get(), *m_node.govman, *m_node.mn_sync,
                           *m_node.netfulfilledman, *m_node.connman);
     auto& connman = static_cast<ConnmanTestMsg&>(*m_node.connman);
-    CNodeStateStats stats;
-    BOOST_REQUIRE(m_node.peerman->GetNodeStateStats(peer.GetId(), stats));
-    BOOST_CHECK_EQUAL(stats.m_misbehavior_score, 0);
+    AssertMisbehaviorScore(*m_node.peerman, *peer, 0);
 
     const CBloomFilter vote_filter{1, 0.001, 0, BLOOM_UPDATE_NONE};
     CGovernanceObject postponed_object{uint256(), /*revision=*/1, GetTime(), uint256::ONE, /*data=*/{}};
@@ -223,17 +213,15 @@ BOOST_AUTO_TEST_CASE(per_object_vote_sync_is_fulfilled_request_limited)
     const std::string postponed_vote_sync_request{strprintf("%s-votes-%s", NetMsgType::MNGOVERNANCESYNC,
                                                             postponed_object_hash.ToString())};
     auto postponed_stream = make_request_stream(postponed_object_hash, vote_filter);
-    net_gov.ProcessMessage(peer, NetMsgType::MNGOVERNANCESYNC, postponed_stream);
+    net_gov.ProcessMessage(*peer, NetMsgType::MNGOVERNANCESYNC, postponed_stream);
 
-    BOOST_CHECK(!m_node.netfulfilledman->HasFulfilledRequest(peer.addr, postponed_vote_sync_request));
-    BOOST_REQUIRE(m_node.peerman->GetNodeStateStats(peer.GetId(), stats));
-    BOOST_CHECK_EQUAL(stats.m_misbehavior_score, 0);
+    BOOST_CHECK(!m_node.netfulfilledman->HasFulfilledRequest(peer->addr, postponed_vote_sync_request));
+    AssertMisbehaviorScore(*m_node.peerman, *peer, 0);
 
     auto duplicate_postponed_stream = make_request_stream(postponed_object_hash, vote_filter);
-    net_gov.ProcessMessage(peer, NetMsgType::MNGOVERNANCESYNC, duplicate_postponed_stream);
+    net_gov.ProcessMessage(*peer, NetMsgType::MNGOVERNANCESYNC, duplicate_postponed_stream);
 
-    BOOST_REQUIRE(m_node.peerman->GetNodeStateStats(peer.GetId(), stats));
-    BOOST_CHECK_EQUAL(stats.m_misbehavior_score, 0);
+    AssertMisbehaviorScore(*m_node.peerman, *peer, 0);
 
     CGovernanceObject syncable_object{uint256(), /*revision=*/1, GetTime() + 1, uint256S("02"), /*data=*/{}};
     m_node.govman->AddGovernanceObjectForTesting(syncable_object);
@@ -241,103 +229,93 @@ BOOST_AUTO_TEST_CASE(per_object_vote_sync_is_fulfilled_request_limited)
     const uint256 syncable_object_hash{syncable_object.GetHash()};
     const std::string syncable_vote_sync_request{strprintf("%s-votes-%s", NetMsgType::MNGOVERNANCESYNC,
                                                            syncable_object_hash.ToString())};
-    BOOST_CHECK(!m_node.netfulfilledman->HasFulfilledRequest(peer.addr, syncable_vote_sync_request));
+    BOOST_CHECK(!m_node.netfulfilledman->HasFulfilledRequest(peer->addr, syncable_vote_sync_request));
 
-    connman.FlushSendBuffer(peer);
+    connman.FlushSendBuffer(*peer);
     auto syncable_object_fetch_stream = make_request_stream(syncable_object_hash, CBloomFilter{});
-    net_gov.ProcessMessage(peer, NetMsgType::MNGOVERNANCESYNC, syncable_object_fetch_stream);
+    net_gov.ProcessMessage(*peer, NetMsgType::MNGOVERNANCESYNC, syncable_object_fetch_stream);
 
-    BOOST_CHECK_EQUAL(CountQueuedInventory(peer, CInv{MSG_GOVERNANCE_OBJECT, syncable_object_hash}), 1U);
-    BOOST_CHECK(!m_node.netfulfilledman->HasFulfilledRequest(peer.addr, syncable_vote_sync_request));
-    BOOST_CHECK_EQUAL(CountQueuedMessages(peer, NetMsgType::SYNCSTATUSCOUNT), 0U);
-    BOOST_REQUIRE(m_node.peerman->GetNodeStateStats(peer.GetId(), stats));
-    BOOST_CHECK_EQUAL(stats.m_misbehavior_score, 0);
+    BOOST_CHECK_EQUAL(CountQueuedInventory(*peer, CInv{MSG_GOVERNANCE_OBJECT, syncable_object_hash}), 1U);
+    BOOST_CHECK(!m_node.netfulfilledman->HasFulfilledRequest(peer->addr, syncable_vote_sync_request));
+    BOOST_CHECK_EQUAL(CountQueuedMessages(*peer, NetMsgType::SYNCSTATUSCOUNT), 0U);
+    AssertMisbehaviorScore(*m_node.peerman, *peer, 0);
 
-    connman.FlushSendBuffer(peer);
+    connman.FlushSendBuffer(*peer);
     auto duplicate_syncable_object_fetch_stream = make_request_stream(syncable_object_hash, CBloomFilter{});
-    net_gov.ProcessMessage(peer, NetMsgType::MNGOVERNANCESYNC, duplicate_syncable_object_fetch_stream);
+    net_gov.ProcessMessage(*peer, NetMsgType::MNGOVERNANCESYNC, duplicate_syncable_object_fetch_stream);
 
-    BOOST_CHECK_EQUAL(CountQueuedInventory(peer, CInv{MSG_GOVERNANCE_OBJECT, syncable_object_hash}), 1U);
-    BOOST_CHECK(!m_node.netfulfilledman->HasFulfilledRequest(peer.addr, syncable_vote_sync_request));
-    BOOST_CHECK_EQUAL(CountQueuedMessages(peer, NetMsgType::SYNCSTATUSCOUNT), 0U);
-    BOOST_REQUIRE(m_node.peerman->GetNodeStateStats(peer.GetId(), stats));
-    BOOST_CHECK_EQUAL(stats.m_misbehavior_score, 0);
+    BOOST_CHECK_EQUAL(CountQueuedInventory(*peer, CInv{MSG_GOVERNANCE_OBJECT, syncable_object_hash}), 1U);
+    BOOST_CHECK(!m_node.netfulfilledman->HasFulfilledRequest(peer->addr, syncable_vote_sync_request));
+    BOOST_CHECK_EQUAL(CountQueuedMessages(*peer, NetMsgType::SYNCSTATUSCOUNT), 0U);
+    AssertMisbehaviorScore(*m_node.peerman, *peer, 0);
 
-    connman.FlushSendBuffer(peer);
+    connman.FlushSendBuffer(*peer);
     auto syncable_stream = make_request_stream(syncable_object_hash, vote_filter);
-    net_gov.ProcessMessage(peer, NetMsgType::MNGOVERNANCESYNC, syncable_stream);
+    net_gov.ProcessMessage(*peer, NetMsgType::MNGOVERNANCESYNC, syncable_stream);
 
-    BOOST_CHECK(m_node.netfulfilledman->HasFulfilledRequest(peer.addr, syncable_vote_sync_request));
-    BOOST_CHECK_EQUAL(CountQueuedMessages(peer, NetMsgType::SYNCSTATUSCOUNT), 1U);
-    BOOST_REQUIRE(m_node.peerman->GetNodeStateStats(peer.GetId(), stats));
-    BOOST_CHECK_EQUAL(stats.m_misbehavior_score, 0);
+    BOOST_CHECK(m_node.netfulfilledman->HasFulfilledRequest(peer->addr, syncable_vote_sync_request));
+    BOOST_CHECK_EQUAL(CountQueuedMessages(*peer, NetMsgType::SYNCSTATUSCOUNT), 1U);
+    AssertMisbehaviorScore(*m_node.peerman, *peer, 0);
 
     auto duplicate_syncable_stream = make_request_stream(syncable_object_hash, vote_filter);
-    net_gov.ProcessMessage(peer, NetMsgType::MNGOVERNANCESYNC, duplicate_syncable_stream);
+    net_gov.ProcessMessage(*peer, NetMsgType::MNGOVERNANCESYNC, duplicate_syncable_stream);
 
-    BOOST_REQUIRE(m_node.peerman->GetNodeStateStats(peer.GetId(), stats));
-    BOOST_CHECK_EQUAL(stats.m_misbehavior_score, 20);
+    AssertMisbehaviorScore(*m_node.peerman, *peer, 20);
 
-    connman.FlushSendBuffer(peer);
+    connman.FlushSendBuffer(*peer);
     CGovernanceObject empty_filter_object{uint256(), /*revision=*/1, GetTime() + 2, uint256S("03"), /*data=*/{}};
     m_node.govman->AddPostponedObject(empty_filter_object);
     const uint256 empty_filter_object_hash{empty_filter_object.GetHash()};
     const std::string empty_filter_vote_request{strprintf("%s-votes-%s", NetMsgType::MNGOVERNANCESYNC,
                                                           empty_filter_object_hash.ToString())};
     auto empty_filter_stream = make_request_stream(empty_filter_object_hash, CBloomFilter{});
-    net_gov.ProcessMessage(peer, NetMsgType::MNGOVERNANCESYNC, empty_filter_stream);
+    net_gov.ProcessMessage(*peer, NetMsgType::MNGOVERNANCESYNC, empty_filter_stream);
 
-    BOOST_CHECK_EQUAL(CountQueuedInventory(peer, CInv{MSG_GOVERNANCE_OBJECT, empty_filter_object_hash}), 1U);
-    BOOST_CHECK(!m_node.netfulfilledman->HasFulfilledRequest(peer.addr, empty_filter_vote_request));
-    BOOST_CHECK_EQUAL(CountQueuedMessages(peer, NetMsgType::SYNCSTATUSCOUNT), 0U);
-    BOOST_REQUIRE(m_node.peerman->GetNodeStateStats(peer.GetId(), stats));
-    BOOST_CHECK_EQUAL(stats.m_misbehavior_score, 20);
+    BOOST_CHECK_EQUAL(CountQueuedInventory(*peer, CInv{MSG_GOVERNANCE_OBJECT, empty_filter_object_hash}), 1U);
+    BOOST_CHECK(!m_node.netfulfilledman->HasFulfilledRequest(peer->addr, empty_filter_vote_request));
+    BOOST_CHECK_EQUAL(CountQueuedMessages(*peer, NetMsgType::SYNCSTATUSCOUNT), 0U);
+    AssertMisbehaviorScore(*m_node.peerman, *peer, 20);
 
-    connman.FlushSendBuffer(peer);
+    connman.FlushSendBuffer(*peer);
     auto duplicate_empty_filter_stream = make_request_stream(empty_filter_object_hash, CBloomFilter{});
-    net_gov.ProcessMessage(peer, NetMsgType::MNGOVERNANCESYNC, duplicate_empty_filter_stream);
+    net_gov.ProcessMessage(*peer, NetMsgType::MNGOVERNANCESYNC, duplicate_empty_filter_stream);
 
-    BOOST_CHECK_EQUAL(CountQueuedInventory(peer, CInv{MSG_GOVERNANCE_OBJECT, empty_filter_object_hash}), 1U);
-    BOOST_CHECK(!m_node.netfulfilledman->HasFulfilledRequest(peer.addr, empty_filter_vote_request));
-    BOOST_CHECK_EQUAL(CountQueuedMessages(peer, NetMsgType::SYNCSTATUSCOUNT), 0U);
-    BOOST_REQUIRE(m_node.peerman->GetNodeStateStats(peer.GetId(), stats));
-    BOOST_CHECK_EQUAL(stats.m_misbehavior_score, 20);
+    BOOST_CHECK_EQUAL(CountQueuedInventory(*peer, CInv{MSG_GOVERNANCE_OBJECT, empty_filter_object_hash}), 1U);
+    BOOST_CHECK(!m_node.netfulfilledman->HasFulfilledRequest(peer->addr, empty_filter_vote_request));
+    BOOST_CHECK_EQUAL(CountQueuedMessages(*peer, NetMsgType::SYNCSTATUSCOUNT), 0U);
+    AssertMisbehaviorScore(*m_node.peerman, *peer, 20);
 
     const uint256 unknown_vote_hash{uint256S("09")};
     const std::string unknown_vote_request{strprintf("%s-votes-%s", NetMsgType::MNGOVERNANCESYNC,
                                                      unknown_vote_hash.ToString())};
     auto unknown_vote_stream = make_request_stream(unknown_vote_hash, vote_filter);
-    net_gov.ProcessMessage(peer, NetMsgType::MNGOVERNANCESYNC, unknown_vote_stream);
+    net_gov.ProcessMessage(*peer, NetMsgType::MNGOVERNANCESYNC, unknown_vote_stream);
 
-    BOOST_CHECK(!m_node.netfulfilledman->HasFulfilledRequest(peer.addr, unknown_vote_request));
-    BOOST_REQUIRE(m_node.peerman->GetNodeStateStats(peer.GetId(), stats));
-    BOOST_CHECK_EQUAL(stats.m_misbehavior_score, 20);
+    BOOST_CHECK(!m_node.netfulfilledman->HasFulfilledRequest(peer->addr, unknown_vote_request));
+    AssertMisbehaviorScore(*m_node.peerman, *peer, 20);
 
     auto duplicate_unknown_vote_stream = make_request_stream(unknown_vote_hash, vote_filter);
-    net_gov.ProcessMessage(peer, NetMsgType::MNGOVERNANCESYNC, duplicate_unknown_vote_stream);
+    net_gov.ProcessMessage(*peer, NetMsgType::MNGOVERNANCESYNC, duplicate_unknown_vote_stream);
 
-    BOOST_CHECK(!m_node.netfulfilledman->HasFulfilledRequest(peer.addr, unknown_vote_request));
-    BOOST_REQUIRE(m_node.peerman->GetNodeStateStats(peer.GetId(), stats));
-    BOOST_CHECK_EQUAL(stats.m_misbehavior_score, 20);
+    BOOST_CHECK(!m_node.netfulfilledman->HasFulfilledRequest(peer->addr, unknown_vote_request));
+    AssertMisbehaviorScore(*m_node.peerman, *peer, 20);
 
     const uint256 object_fetch_hash{uint256S("0a")};
     const std::string object_fetch_request{strprintf("%s-votes-%s", NetMsgType::MNGOVERNANCESYNC,
                                                      object_fetch_hash.ToString())};
     auto object_fetch_stream = make_request_stream(object_fetch_hash, CBloomFilter{});
-    net_gov.ProcessMessage(peer, NetMsgType::MNGOVERNANCESYNC, object_fetch_stream);
+    net_gov.ProcessMessage(*peer, NetMsgType::MNGOVERNANCESYNC, object_fetch_stream);
 
-    BOOST_CHECK(!m_node.netfulfilledman->HasFulfilledRequest(peer.addr, object_fetch_request));
-    BOOST_REQUIRE(m_node.peerman->GetNodeStateStats(peer.GetId(), stats));
-    BOOST_CHECK_EQUAL(stats.m_misbehavior_score, 20);
+    BOOST_CHECK(!m_node.netfulfilledman->HasFulfilledRequest(peer->addr, object_fetch_request));
+    AssertMisbehaviorScore(*m_node.peerman, *peer, 20);
 
     auto duplicate_object_fetch_stream = make_request_stream(object_fetch_hash, CBloomFilter{});
-    net_gov.ProcessMessage(peer, NetMsgType::MNGOVERNANCESYNC, duplicate_object_fetch_stream);
+    net_gov.ProcessMessage(*peer, NetMsgType::MNGOVERNANCESYNC, duplicate_object_fetch_stream);
 
-    BOOST_CHECK(!m_node.netfulfilledman->HasFulfilledRequest(peer.addr, object_fetch_request));
-    BOOST_REQUIRE(m_node.peerman->GetNodeStateStats(peer.GetId(), stats));
-    BOOST_CHECK_EQUAL(stats.m_misbehavior_score, 20);
+    BOOST_CHECK(!m_node.netfulfilledman->HasFulfilledRequest(peer->addr, object_fetch_request));
+    AssertMisbehaviorScore(*m_node.peerman, *peer, 20);
 
-    m_node.peerman->FinalizeNode(peer);
+    m_node.peerman->FinalizeNode(*peer);
 }
 
 BOOST_AUTO_TEST_CASE(governance_objects_require_peer_announcement_or_request)
@@ -358,9 +336,7 @@ BOOST_AUTO_TEST_CASE(governance_objects_require_peer_announcement_or_request)
     m_node.peerman->InitializeNode(*second_announcing_peer, NODE_NETWORK);
     m_node.peerman->InitializeNode(*unsolicited_peer, NODE_NETWORK);
 
-    CNodeStateStats stats;
-    BOOST_REQUIRE(m_node.peerman->GetNodeStateStats(announcing_peer->GetId(), stats));
-    BOOST_CHECK_EQUAL(stats.m_misbehavior_score, 0);
+    AssertMisbehaviorScore(*m_node.peerman, *announcing_peer, 0);
 
     const CGovernanceObject govobj{MakeGovernanceObject(GetTime<std::chrono::seconds>().count(), uint256S("21"))};
     const CInv object_inv{MSG_GOVERNANCE_OBJECT, govobj.GetHash()};
@@ -380,22 +356,19 @@ BOOST_AUTO_TEST_CASE(governance_objects_require_peer_announcement_or_request)
     ProcessGovernanceObject(net_gov, *announcing_peer, govobj);
     BOOST_CHECK(
         !WITH_LOCK(::cs_main, return m_node.peerman->PeerConsumeObjectRequest(announcing_peer->GetId(), object_inv)));
-    BOOST_REQUIRE(m_node.peerman->GetNodeStateStats(announcing_peer->GetId(), stats));
-    BOOST_CHECK_EQUAL(stats.m_misbehavior_score, 0);
+    AssertMisbehaviorScore(*m_node.peerman, *announcing_peer, 0);
 
     ProcessGovernanceObject(net_gov, *second_announcing_peer, govobj);
     // Consumption is per-peer: the second announcer's own entry is accepted and consumed,
     // independent of the first peer's already-consumed entry.
     BOOST_CHECK(!WITH_LOCK(::cs_main,
                            return m_node.peerman->PeerConsumeObjectRequest(second_announcing_peer->GetId(), object_inv)));
-    BOOST_REQUIRE(m_node.peerman->GetNodeStateStats(second_announcing_peer->GetId(), stats));
-    BOOST_CHECK_EQUAL(stats.m_misbehavior_score, 0);
+    AssertMisbehaviorScore(*m_node.peerman, *second_announcing_peer, 0);
 
     const CGovernanceObject unsolicited_govobj{MakeGovernanceObject(GetTime<std::chrono::seconds>().count() + 1, uint256S("22"))};
     ProcessGovernanceObject(net_gov, *unsolicited_peer, unsolicited_govobj);
     BOOST_CHECK(!m_node.govman->HaveObjectForHash(unsolicited_govobj.GetHash()));
-    BOOST_REQUIRE(m_node.peerman->GetNodeStateStats(unsolicited_peer->GetId(), stats));
-    BOOST_CHECK_EQUAL(stats.m_misbehavior_score, 0);
+    AssertMisbehaviorScore(*m_node.peerman, *unsolicited_peer, 0);
 
     m_node.peerman->FinalizeNode(*announcing_peer);
     m_node.peerman->FinalizeNode(*second_announcing_peer);
@@ -422,15 +395,13 @@ BOOST_AUTO_TEST_CASE(governance_votes_require_peer_announcement_or_request)
     m_node.peerman->InitializeNode(*unsolicited_peer, NODE_NETWORK);
 
     auto& connman = static_cast<ConnmanTestMsg&>(*m_node.connman);
-    CNodeStateStats stats;
 
     const CGovernanceVote vote{MakeGovernanceVote(uint256S("31"))};
     const CInv vote_inv{MSG_GOVERNANCE_OBJECT_VOTE, vote.GetHash()};
 
     ProcessGovernanceVote(net_gov, *unsolicited_peer, vote);
     BOOST_CHECK_EQUAL(CountQueuedMessages(*unsolicited_peer, NetMsgType::MNGOVERNANCESYNC), 0U);
-    BOOST_REQUIRE(m_node.peerman->GetNodeStateStats(unsolicited_peer->GetId(), stats));
-    BOOST_CHECK_EQUAL(stats.m_misbehavior_score, 0);
+    AssertMisbehaviorScore(*m_node.peerman, *unsolicited_peer, 0);
 
     ProcessInv(*m_node.peerman, *announcing_peer, vote_inv);
     ProcessInv(*m_node.peerman, *second_announcing_peer, vote_inv);
@@ -438,8 +409,7 @@ BOOST_AUTO_TEST_CASE(governance_votes_require_peer_announcement_or_request)
     connman.FlushSendBuffer(*announcing_peer);
     ProcessGovernanceVote(net_gov, *announcing_peer, vote);
     BOOST_CHECK_EQUAL(CountQueuedMessages(*announcing_peer, NetMsgType::MNGOVERNANCESYNC), 1U);
-    BOOST_REQUIRE(m_node.peerman->GetNodeStateStats(announcing_peer->GetId(), stats));
-    BOOST_CHECK_EQUAL(stats.m_misbehavior_score, 0);
+    AssertMisbehaviorScore(*m_node.peerman, *announcing_peer, 0);
 
     connman.FlushSendBuffer(*second_announcing_peer);
     ProcessGovernanceVote(net_gov, *second_announcing_peer, vote);
@@ -449,8 +419,7 @@ BOOST_AUTO_TEST_CASE(governance_votes_require_peer_announcement_or_request)
     // orphan-request side effect.
     BOOST_CHECK(!WITH_LOCK(::cs_main,
                            return m_node.peerman->PeerConsumeObjectRequest(second_announcing_peer->GetId(), vote_inv)));
-    BOOST_REQUIRE(m_node.peerman->GetNodeStateStats(second_announcing_peer->GetId(), stats));
-    BOOST_CHECK_EQUAL(stats.m_misbehavior_score, 0);
+    AssertMisbehaviorScore(*m_node.peerman, *second_announcing_peer, 0);
 
     m_node.peerman->FinalizeNode(*announcing_peer);
     m_node.peerman->FinalizeNode(*second_announcing_peer);
