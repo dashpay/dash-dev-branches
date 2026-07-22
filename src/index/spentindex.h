@@ -8,13 +8,7 @@
 #include <index/base.h>
 #include <index/spentindex_types.h>
 
-#include <map>
-
 static constexpr bool DEFAULT_SPENTINDEX{false};
-
-struct CSpentIndexTxInfo {
-    std::map<CSpentIndexKey, CSpentIndexValue, CSpentIndexKeyCompare> mSpentInfo;
-};
 
 /**
  * SpentIndex tracks which transactions spend specific outputs.
@@ -51,10 +45,9 @@ protected:
         bool EraseSpentIndex(const std::vector<CSpentIndexKey>& keys);
     };
 
-    bool WriteBlock(const CBlock& block, const CBlockIndex* pindex) override;
+    bool CustomAppend(const interfaces::BlockInfo& block) override;
 
-    /// Custom rewind to handle spent index cleanup
-    bool Rewind(const CBlockIndex* current_tip, const CBlockIndex* new_tip) override;
+    bool CustomRewind(const interfaces::BlockKey& current_tip, const interfaces::BlockKey& new_tip) override;
 
     BaseIndex::DB& GetDB() const override;
     const char* GetName() const override { return "spentindex"; }
@@ -64,7 +57,7 @@ protected:
 
 public:
     /// Constructs a new SpentIndex.
-    explicit SpentIndex(size_t n_cache_size, bool f_memory = false, bool f_wipe = false);
+    explicit SpentIndex(std::unique_ptr<interfaces::Chain> chain, size_t n_cache_size, bool f_memory = false, bool f_wipe = false);
 
     /// Destructor
     virtual ~SpentIndex() override;

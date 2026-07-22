@@ -88,4 +88,8 @@ struct CSpentIndexKeyCompare {
 
 using CSpentIndexEntry = std::pair<CSpentIndexKey, CSpentIndexValue>;
 
+struct CSpentIndexTxInfo {
+    std::map<CSpentIndexKey, CSpentIndexValue, CSpentIndexKeyCompare> mSpentInfo;
+};
+
 #endif // BITCOIN_INDEX_SPENTINDEX_TYPES_H

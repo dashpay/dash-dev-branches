@@ -11,7 +11,7 @@ import re
 import subprocess
 import sys
 
-EXPECTED_CIRCULAR_DEPENDENCIES = (
+EXPECTED_BITCOIN_CIRCULAR_DEPENDENCIES = (
     "chainparamsbase -> util/system -> chainparamsbase",
     "node/blockstorage -> validation -> node/blockstorage",
     "node/utxo_snapshot -> validation -> node/utxo_snapshot",
@@ -22,7 +22,13 @@ EXPECTED_CIRCULAR_DEPENDENCIES = (
     "wallet/wallet -> wallet/walletdb -> wallet/wallet",
     "kernel/coinstats -> validation -> kernel/coinstats",
     "kernel/mempool_persist -> validation -> kernel/mempool_persist",
-    # Dash
+
+    # Temporary, removed in followup https://github.com/bitcoin/bitcoin/pull/24230
+    "index/base -> node/context -> net_processing -> index/blockfilterindex -> index/base",
+    "index/base -> node/context -> net_processing -> index/txindex -> index/base",
+)
+
+EXPECTED_DASH_CIRCULAR_DEPENDENCIES = (
     "banman -> common/bloom -> evo/assetlocktx -> llmq/quorumsman -> llmq/blockprocessor -> net -> banman",
     "coinjoin/client -> coinjoin/util -> wallet/wallet -> psbt -> node/transaction -> net_processing -> coinjoin/walletman -> coinjoin/client",
     "common/bloom -> evo/assetlocktx -> llmq/commitment -> evo/deterministicmns -> evo/simplifiedmns -> merkleblock -> common/bloom",
@@ -50,6 +56,8 @@ EXPECTED_CIRCULAR_DEPENDENCIES = (
     "qt/guiutil -> qt/qvalidatedlineedit -> qt/guiutil",
     "wallet/coinjoin -> wallet/receive -> wallet/coinjoin",
 )
+
+EXPECTED_CIRCULAR_DEPENDENCIES = EXPECTED_BITCOIN_CIRCULAR_DEPENDENCIES + EXPECTED_DASH_CIRCULAR_DEPENDENCIES
 
 CODE_DIR = "src"
 

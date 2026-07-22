@@ -2260,43 +2260,43 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
 
     // ********************************************************* Step 8: start indexers
     if (args.GetBoolArg("-txindex", DEFAULT_TXINDEX)) {
-        g_txindex = std::make_unique<TxIndex>(cache_sizes.tx_index, false, fReindex);
-        if (!g_txindex->Start(chainman.ActiveChainstate())) {
+        g_txindex = std::make_unique<TxIndex>(interfaces::MakeChain(node), cache_sizes.tx_index, false, fReindex);
+        if (!g_txindex->Start()) {
             return false;
         }
     }
 
     if (args.GetBoolArg("-addressindex", DEFAULT_ADDRESSINDEX)) {
-        g_addressindex = std::make_unique<AddressIndex>(cache_sizes.address_index, false, fReindex);
-        if (!g_addressindex->Start(chainman.ActiveChainstate())) {
+        g_addressindex = std::make_unique<AddressIndex>(interfaces::MakeChain(node), cache_sizes.address_index, false, fReindex);
+        if (!g_addressindex->Start()) {
             return false;
         }
     }
 
     if (args.GetBoolArg("-timestampindex", DEFAULT_TIMESTAMPINDEX)) {
-        g_timestampindex = std::make_unique<TimestampIndex>(cache_sizes.timestamp_index, false, fReindex);
-        if (!g_timestampindex->Start(chainman.ActiveChainstate())) {
+        g_timestampindex = std::make_unique<TimestampIndex>(interfaces::MakeChain(node), cache_sizes.timestamp_index, false, fReindex);
+        if (!g_timestampindex->Start()) {
             return false;
         }
     }
 
     if (args.GetBoolArg("-spentindex", DEFAULT_SPENTINDEX)) {
-        g_spentindex = std::make_unique<SpentIndex>(cache_sizes.spent_index, false, fReindex);
-        if (!g_spentindex->Start(chainman.ActiveChainstate())) {
+        g_spentindex = std::make_unique<SpentIndex>(interfaces::MakeChain(node), cache_sizes.spent_index, false, fReindex);
+        if (!g_spentindex->Start()) {
             return false;
         }
     }
 
     for (const auto& filter_type : g_enabled_filter_types) {
-        InitBlockFilterIndex(filter_type, cache_sizes.filter_index, false, fReindex);
-        if (!GetBlockFilterIndex(filter_type)->Start(chainman.ActiveChainstate())) {
+        InitBlockFilterIndex([&]{ return interfaces::MakeChain(node); }, filter_type, cache_sizes.filter_index, false, fReindex);
+        if (!GetBlockFilterIndex(filter_type)->Start()) {
             return false;
         }
     }
 
     if (args.GetBoolArg("-coinstatsindex", DEFAULT_COINSTATSINDEX)) {
-        g_coin_stats_index = std::make_unique<CoinStatsIndex>(/* cache size */ 0, false, fReindex);
-        if (!g_coin_stats_index->Start(chainman.ActiveChainstate())) {
+        g_coin_stats_index = std::make_unique<CoinStatsIndex>(interfaces::MakeChain(node), /* cache size */ 0, false, fReindex);
+        if (!g_coin_stats_index->Start()) {
             return false;
         }
     }

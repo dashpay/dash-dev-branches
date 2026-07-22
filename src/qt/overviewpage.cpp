@@ -21,6 +21,7 @@
 #include <interfaces/coinjoin.h>
 
 #include <algorithm>
+#include <limits>
 #include <map>
 #include <cmath>
 
@@ -518,6 +519,10 @@ void OverviewPage::coinJoinStatus(bool fForce)
 
     if (!fForce && (clientModel->node().shutdownRequested() || !clientModel->masternodeSync().isBlockchainSynced())) return;
 
+    // Forced updates are triggered by mode changes (advanced UI, CoinJoin or privacy toggled),
+    // the status has to be re-rendered even if the block height didn't change
+    if (fForce) nCachedNumBlocks = std::numeric_limits<int>::max();
+
     // Disable any PS UI for masternode or when autobackup is disabled or failed for whatever reason
     if (clientModel->node().isMasternode() || nWalletBackups <= 0) {
         DisableCoinJoinCompletely();
@@ -577,11 +582,7 @@ void OverviewPage::coinJoinStatus(bool fForce)
     int nBestHeight = clientModel->node().getNumBlocks();
 
     // We are processing more than 1 block per second, we'll just leave
-    bool tooFast{false};
-    walletModel->withCoinJoin([&](auto& client) {
-        tooFast = nBestHeight > client.getCachedBlocks() && GetTime() - nLastDSProgressBlockTime <= 1;
-    });
-    if (tooFast) return;
+    if (nBestHeight > nCachedNumBlocks && GetTime() - nLastDSProgressBlockTime <= 1) return;
     nLastDSProgressBlockTime = GetTime();
 
     QString strKeysLeftText(tr("keys left: %1").arg(walletModel->getKeysLeftSinceAutoBackup()));
@@ -596,15 +597,11 @@ void OverviewPage::coinJoinStatus(bool fForce)
 
     QString strCoinJoinName = QString::fromStdString(gCoinJoinName);
     bool notMixing{false};
-    bool refreshProgress{false};
-    walletModel->withCoinJoin([&](auto& client) {
-        notMixing = !client.isMixing();
-        if (notMixing && nBestHeight != client.getCachedBlocks()) {
-            client.setCachedBlocks(nBestHeight);
-            refreshProgress = true;
-        }
-    });
-    if (refreshProgress) updateCoinJoinProgress();
+    walletModel->withCoinJoin([&](auto& client) { notMixing = !client.isMixing(); });
+    if (notMixing && nBestHeight != nCachedNumBlocks) {
+        nCachedNumBlocks = nBestHeight;
+        updateCoinJoinProgress();
+    }
     if (notMixing) {
         setWidgetsVisible(false);
         ui->toggleCoinJoin->setText(tr("Start %1").arg(strCoinJoinName));
@@ -688,16 +685,14 @@ void OverviewPage::coinJoinStatus(bool fForce)
     }
 
     // check coinjoin status and unlock if needed
-    bool refreshProgressTail{false};
+    if (nBestHeight != nCachedNumBlocks) {
+        // Balance and number of transactions might have changed
+        nCachedNumBlocks = nBestHeight;
+        updateCoinJoinProgress();
+    }
     walletModel->withCoinJoin([&](auto& client) {
-        if (nBestHeight != client.getCachedBlocks()) {
-            // Balance and number of transactions might have changed
-            client.setCachedBlocks(nBestHeight);
-            refreshProgressTail = true;
-        }
         ui->labelSubmittedDenom->setText(m_privacy ? "####" : QString(client.getSessionDenoms().c_str()));
     });
-    if (refreshProgressTail) updateCoinJoinProgress();
 
     setWidgetsVisible(true);
 }
@@ -734,7 +729,7 @@ void OverviewPage::toggleCoinJoin(){
             if(!ctx.isValid())
             {
                 //unlock was cancelled
-                walletModel->withCoinJoin([](auto& client) { client.resetCachedBlocks(); });
+                nCachedNumBlocks = std::numeric_limits<int>::max();
                 QMessageBox::warning(this, strCoinJoinName,
                     tr("Wallet is locked and user declined to unlock. Disabling %1.").arg(strCoinJoinName),
                     QMessageBox::Ok, QMessageBox::Ok);
@@ -745,8 +740,8 @@ void OverviewPage::toggleCoinJoin(){
 
     }
 
+    nCachedNumBlocks = std::numeric_limits<int>::max();
     walletModel->withCoinJoin([&](auto& client) {
-        client.resetCachedBlocks();
         if (client.isMixing()) {
             ui->toggleCoinJoin->setText(tr("Start %1").arg(strCoinJoinName));
             client.resetPool();

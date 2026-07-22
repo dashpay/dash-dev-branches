@@ -40,10 +40,10 @@ protected:
         bool EraseTimestampIndex(const CTimestampIndexKey& key);
     };
 
-    bool WriteBlock(const CBlock& block, const CBlockIndex* pindex) override;
+    bool CustomAppend(const interfaces::BlockInfo& block) override;
 
     /// Custom rewind to handle timestamp index cleanup
-    bool Rewind(const CBlockIndex* current_tip, const CBlockIndex* new_tip) override;
+    bool CustomRewind(const interfaces::BlockKey& current_tip, const interfaces::BlockKey& new_tip) override;
 
     BaseIndex::DB& GetDB() const override;
     const char* GetName() const override { return "timestampindex"; }
@@ -53,7 +53,7 @@ protected:
 
 public:
     /// Constructs a new TimestampIndex.
-    explicit TimestampIndex(size_t n_cache_size, bool f_memory = false, bool f_wipe = false);
+    explicit TimestampIndex(std::unique_ptr<interfaces::Chain> chain, size_t n_cache_size, bool f_memory = false, bool f_wipe = false);
 
     /// Destructor
     virtual ~TimestampIndex() override;

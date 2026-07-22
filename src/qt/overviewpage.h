@@ -11,6 +11,7 @@
 #include <QFont>
 #include <QWidget>
 
+#include <limits>
 #include <memory>
 
 class ClientModel;
@@ -58,6 +59,8 @@ private:
     BitcoinUnit m_display_bitcoin_unit;
     bool fShowAdvancedCJUI;
     int cachedNumISLocks{-1};
+    //! Block height at which the CoinJoin status was last rendered
+    int nCachedNumBlocks{std::numeric_limits<int>::max()};
 
     TxViewDelegate *txdelegate;
     std::unique_ptr<TransactionFilterProxy> filter;

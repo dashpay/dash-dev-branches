@@ -19,7 +19,7 @@
 #include <util/strencodings.h>
 #include <util/system.h>
 
-#include <index/spentindex.h>
+#include <index/spentindex_types.h>
 
 #include <evo/assetlocktx.h>
 #include <evo/cbtx.h>

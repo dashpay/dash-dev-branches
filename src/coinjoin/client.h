@@ -99,6 +99,7 @@ private:
 
     bool JoinExistingQueue(CAmount nBalanceNeedsAnonymized, CConnman& connman);
     bool StartNewQueue(CAmount nBalanceNeedsAnonymized, CConnman& connman);
+    CDeterministicMNCPtr GetRandomNotUsedMasternode();
 
     /// step 0: select denominated inputs and txouts
     bool SelectDenominate(std::string& strErrorRet, std::vector<CTxDSIn>& vecTxDSInRet);
@@ -170,13 +171,12 @@ private:
     std::deque<CCoinJoinClientSession> deqSessions GUARDED_BY(cs_deqsessions);
 
     int nCachedLastSuccessBlock{0};
-    int nMinBlocksToWait{1}; // how many blocks to wait for after one successful mixing tx in non-multisession mode
-    bilingual_str strAutoDenomResult;
+    // how many blocks to wait for after one successful mixing tx in non-multisession mode
+    static constexpr int nMinBlocksToWait{1};
 
     // Keep track of current block height
     int nCachedBlockHeight{0};
 
-    int nCachedNumBlocks{std::numeric_limits<int>::max()};    // used for the overview screen
     bool fCreateAutoBackups{true}; // builtin support for automatic backups
 
     bool WaitForAnotherBlock() const;
@@ -209,9 +209,6 @@ public:
 
     void ProcessPendingDsaRequest(CConnman& connman) EXCLUSIVE_LOCKS_REQUIRED(!cs_deqsessions);
 
-    void AddUsedMasternode(const uint256& proTxHash);
-    CDeterministicMNCPtr GetRandomNotUsedMasternode();
-
     void UpdatedSuccessBlock();
 
     void UpdatedBlockTip(const CBlockIndex* pindex);
@@ -220,9 +217,6 @@ public:
         EXCLUSIVE_LOCKS_REQUIRED(!cs_deqsessions);
 
     // interfaces::CoinJoin::Client overrides
-    void resetCachedBlocks() override { nCachedNumBlocks = std::numeric_limits<int>::max(); }
-    int getCachedBlocks() const override { return nCachedNumBlocks; }
-    void setCachedBlocks(int nCachedBlocks) override { nCachedNumBlocks = nCachedBlocks; }
     void disableAutobackups() override { fCreateAutoBackups = false; }
     void resetPool() override EXCLUSIVE_LOCKS_REQUIRED(!cs_deqsessions);
     UniValue getJsonInfo() const override EXCLUSIVE_LOCKS_REQUIRED(!cs_deqsessions);
