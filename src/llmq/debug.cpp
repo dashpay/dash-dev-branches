@@ -128,8 +128,9 @@ UniValue CDKGDebugManager::ToJson(int detailLevel) const
     LOCK(cs_lockStatus);
 
     UniValue ret(UniValue::VOBJ);
-    ret.pushKV("time", localStatus.nTime);
-    ret.pushKV("timeStr", FormatISO8601DateTime(localStatus.nTime));
+    const int64_t time{TicksSinceEpoch<std::chrono::seconds>(localStatus.time)};
+    ret.pushKV("time", time);
+    ret.pushKV("timeStr", FormatISO8601DateTime(time));
 
     // TODO Support array of sessions
     UniValue sessionsArrJson(UniValue::VARR);
@@ -160,7 +161,7 @@ void CDKGDebugManager::ResetLocalSessionStatus(Consensus::LLMQType llmqType, int
     }
 
     localStatus.sessions.erase(it);
-    localStatus.nTime = GetAdjustedTime();
+    localStatus.time = GetAdjustedTime();
 }
 
 void CDKGDebugManager::InitLocalSessionStatus(const Consensus::LLMQParams& llmqParams, int quorumIndex, const uint256& quorumHash, int quorumHeight)
@@ -192,7 +193,7 @@ void CDKGDebugManager::UpdateLocalSessionStatus(Consensus::LLMQType llmqType, in
     }
 
     if (func(it->second)) {
-        localStatus.nTime = GetAdjustedTime();
+        localStatus.time = GetAdjustedTime();
     }
 }
 
@@ -206,7 +207,7 @@ void CDKGDebugManager::UpdateLocalMemberStatus(Consensus::LLMQType llmqType, int
     }
 
     if (func(it->second.members.at(memberIdx))) {
-        localStatus.nTime = GetAdjustedTime();
+        localStatus.time = GetAdjustedTime();
     }
 }
 

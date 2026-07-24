@@ -9,6 +9,7 @@
 #include <governance/vote.h>
 #include <governance/votedb.h>
 #include <sync.h>
+#include <util/time.h>
 
 #include <span.h>
 
@@ -87,7 +88,7 @@ static constexpr double GOVERNANCE_FILTER_FP_RATE = 0.001;
 static constexpr CAmount GOVERNANCE_PROPOSAL_FEE_TX = (1 * COIN);
 static constexpr int64_t GOVERNANCE_FEE_CONFIRMATIONS = 6;
 static constexpr int64_t GOVERNANCE_MIN_RELAY_FEE_CONFIRMATIONS = 1;
-static constexpr int64_t GOVERNANCE_UPDATE_MIN = 60 * 60;
+static constexpr std::chrono::hours GOVERNANCE_UPDATE_MIN{1};
 
 // FOR SEEN MAP ARRAYS - GOVERNANCE OBJECTS AND VOTES
 enum class SeenObjectStatus {
@@ -97,21 +98,14 @@ enum class SeenObjectStatus {
     Unknown
 };
 
-using vote_time_pair_t = std::pair<CGovernanceVote, int64_t>;
-
-inline bool operator<(const vote_time_pair_t& p1, const vote_time_pair_t& p2)
-{
-    return (p1.first < p2.first);
-}
-
 struct vote_instance_t {
     vote_outcome_enum_t eOutcome;
-    int64_t nTime;
+    NodeSeconds last_update;
     int64_t nCreationTime;
 
-    explicit vote_instance_t(vote_outcome_enum_t eOutcomeIn = VOTE_OUTCOME_NONE, int64_t nTimeIn = 0, int64_t nCreationTimeIn = 0) :
+    explicit vote_instance_t(vote_outcome_enum_t eOutcomeIn = VOTE_OUTCOME_NONE, NodeSeconds last_update_in = {}, int64_t nCreationTimeIn = 0) :
         eOutcome(eOutcomeIn),
-        nTime(nTimeIn),
+        last_update(last_update_in),
         nCreationTime(nCreationTimeIn)
     {
     }
@@ -120,7 +114,8 @@ struct vote_instance_t {
     {
         int nOutcome;
         SER_WRITE(obj, nOutcome = int(obj.eOutcome));
-        READWRITE(nOutcome, obj.nTime, obj.nCreationTime);
+        // Preserve the historical integer Unix-seconds representation on disk.
+        READWRITE(nOutcome, Using<ChronoFormatter<int64_t>>(obj.last_update), obj.nCreationTime);
         SER_READ(obj, obj.eOutcome = vote_outcome_enum_t(nOutcome));
     }
 };
@@ -192,6 +187,7 @@ private:
 public:
     CGovernanceObject();
     CGovernanceObject(const uint256& nHashParentIn, int nRevisionIn, int64_t nTime, const uint256& nCollateralHashIn, const std::string& strDataHexIn);
+    CGovernanceObject(const uint256& nHashParentIn, int nRevisionIn, NodeClock::time_point time, const uint256& nCollateralHashIn, const std::string& strDataHexIn);
     CGovernanceObject(const CGovernanceObject& other);
     template <typename Stream>
     CGovernanceObject(deserialize_type, Stream& s) { s >> *this; }
@@ -207,6 +203,7 @@ public:
         return WITH_LOCK(cs, return fExpired);
     }
     GovernanceObject GetObjectType() const { return m_obj.type; }
+    NodeSeconds CreationTime() const { return NodeSeconds{std::chrono::seconds{m_obj.time}}; }
     int64_t GetCreationTime() const { return m_obj.time; }
     int64_t GetDeletionTime() const EXCLUSIVE_LOCKS_REQUIRED(!cs)
     {

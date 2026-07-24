@@ -336,23 +336,22 @@ BOOST_AUTO_TEST_CASE(entry_rejects_outputs_above_wire_cap_before_materializing)
 
 BOOST_AUTO_TEST_CASE(queue_timeout_bounds)
 {
-    CCoinJoinQueue dsq;
-    dsq.nDenom = CoinJoin::AmountToDenomination(CoinJoin::GetSmallestDenomination());
-    dsq.m_protxHash = uint256::ONE;
-    dsq.nTime = GetAdjustedTime();
+    const auto now{std::chrono::time_point_cast<std::chrono::seconds>(GetAdjustedTime())};
+    CCoinJoinQueue dsq{CoinJoin::AmountToDenomination(CoinJoin::GetSmallestDenomination()),
+                       COutPoint{}, uint256::ONE, now, /*fReady=*/false};
     // current time -> not out of bounds
     BOOST_CHECK(!dsq.IsTimeOutOfBounds());
 
     // Too old (beyond COINJOIN_QUEUE_TIMEOUT)
-    SetMockTime(GetTime() + (COINJOIN_QUEUE_TIMEOUT + 1));
+    SetMockTime((now + std::chrono::seconds{COINJOIN_QUEUE_TIMEOUT + 1}).time_since_epoch());
     BOOST_CHECK(dsq.IsTimeOutOfBounds());
 
     // Too far in the future
-    SetMockTime(GetTime() - 2 * (COINJOIN_QUEUE_TIMEOUT + 1)); // move back to anchor baseline
-    dsq.nTime = GetAdjustedTime() + (COINJOIN_QUEUE_TIMEOUT + 1);
+    SetMockTime((now - std::chrono::seconds{COINJOIN_QUEUE_TIMEOUT + 1}).time_since_epoch());
+    dsq.nTime = TicksSinceEpoch<std::chrono::seconds>(now + std::chrono::seconds{COINJOIN_QUEUE_TIMEOUT + 1});
     BOOST_CHECK(dsq.IsTimeOutOfBounds());
 
     // Reset mock time
-    SetMockTime(0);
+    SetMockTime(0s);
 }
 BOOST_AUTO_TEST_SUITE_END()

@@ -55,11 +55,16 @@ bool CCoinJoinQueue::CheckSignature(const CBLSPublicKey& blsPubKey) const
     return true;
 }
 
-bool CCoinJoinQueue::IsTimeOutOfBounds(int64_t current_time) const
+bool CCoinJoinQueue::IsTimeOutOfBounds(NodeSeconds current_time) const
 {
-    if (current_time < 0 || nTime < 0) return true;
-    return current_time - nTime > COINJOIN_QUEUE_TIMEOUT ||
-           nTime - current_time > COINJOIN_QUEUE_TIMEOUT;
+    const auto queue_time{Time()};
+    if (current_time < NodeSeconds{} || queue_time < NodeSeconds{}) return true;
+    return std::chrono::abs(current_time - queue_time) > std::chrono::seconds{COINJOIN_QUEUE_TIMEOUT};
+}
+
+bool CCoinJoinQueue::IsTimeOutOfBounds() const
+{
+    return IsTimeOutOfBounds(std::chrono::time_point_cast<std::chrono::seconds>(GetAdjustedTime()));
 }
 
 [[nodiscard]] std::string CCoinJoinQueue::ToString() const

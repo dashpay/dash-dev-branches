@@ -9,6 +9,7 @@
 #include <uint256.h>
 #include <llmq/params.h>
 
+#include <chrono>
 #include <limits>
 #include <vector>
 
@@ -176,6 +177,10 @@ struct Params {
     int64_t nPowTargetTimespan;
     int nPowKGWHeight;
     int nPowDGWHeight;
+    std::chrono::seconds PowTargetSpacing() const
+    {
+        return std::chrono::seconds{nPowTargetSpacing};
+    }
     int64_t DifficultyAdjustmentInterval() const { return nPowTargetTimespan / nPowTargetSpacing; }
     /** The best chain should have at least this much work */
     uint256 nMinimumChainWork;

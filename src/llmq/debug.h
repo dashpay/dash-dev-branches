@@ -8,6 +8,7 @@
 #include <consensus/params.h>
 #include <sync.h>
 #include <univalue.h>
+#include <util/time.h>
 
 #include <functional>
 #include <unordered_set>
@@ -84,7 +85,7 @@ public:
 };
 
 struct CDKGDebugStatus {
-    int64_t nTime{0};
+    NodeClock::time_point time{};
     std::map<std::pair<Consensus::LLMQType, int>, CDKGDebugSessionStatus> sessions;
 };
 

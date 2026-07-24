@@ -27,17 +27,18 @@ static CBLSSecretKey MakeSecretKey()
     return sk;
 }
 
+static CCoinJoinQueue MakeQueue(int denom, NodeClock::time_point time, bool fReady, const COutPoint& outpoint)
+{
+    return CCoinJoinQueue{denom, outpoint, uint256::ONE, time, fReady};
+}
+
 BOOST_AUTO_TEST_CASE(queue_sign_and_verify)
 {
     // Build active MN manager with operator key using node context wiring
     CActiveMasternodeManager mn_activeman(*Assert(m_node.connman), *Assert(m_node.dmnman), MakeSecretKey());
 
-    CCoinJoinQueue q;
-    q.nDenom = CoinJoin::AmountToDenomination(CoinJoin::GetSmallestDenomination());
-    q.masternodeOutpoint = COutPoint(uint256S("aa"), 1);
-    q.m_protxHash = uint256::ONE;
-    q.nTime = GetAdjustedTime();
-    q.fReady = false;
+    auto q{MakeQueue(CoinJoin::AmountToDenomination(CoinJoin::GetSmallestDenomination()),
+                     GetAdjustedTime(), /*fReady=*/false, COutPoint{uint256S("aa"), 1})};
 
     // Sign and verify with corresponding pubkey
     q.vchSig = mn_activeman.SignBasic(q.GetSignatureHash());
@@ -47,12 +48,9 @@ BOOST_AUTO_TEST_CASE(queue_sign_and_verify)
 
 BOOST_AUTO_TEST_CASE(queue_hashes_and_equality)
 {
-    CCoinJoinQueue a, b;
-    a.nDenom = b.nDenom = CoinJoin::AmountToDenomination(CoinJoin::GetSmallestDenomination());
-    a.masternodeOutpoint = b.masternodeOutpoint = COutPoint(uint256S("bb"), 2);
-    a.m_protxHash = b.m_protxHash = uint256::ONE;
-    a.nTime = b.nTime = GetAdjustedTime();
-    a.fReady = b.fReady = true;
+    const auto a{MakeQueue(CoinJoin::AmountToDenomination(CoinJoin::GetSmallestDenomination()),
+                           GetAdjustedTime(), /*fReady=*/true, COutPoint{uint256S("bb"), 2})};
+    const auto b{a};
 
     BOOST_CHECK(a == b);
     BOOST_CHECK(a.GetHash() == b.GetHash());
@@ -73,31 +71,28 @@ BOOST_AUTO_TEST_CASE(queue_denomination_validation)
 
 BOOST_AUTO_TEST_CASE(queue_timestamp_validation)
 {
-    CCoinJoinQueue q;
-    q.nDenom = CoinJoin::AmountToDenomination(CoinJoin::GetSmallestDenomination());
-    q.masternodeOutpoint = COutPoint(uint256S("cc"), 3);
-    q.m_protxHash = uint256::ONE;
-
-    int64_t current_time = GetAdjustedTime();
+    const int denom{CoinJoin::AmountToDenomination(CoinJoin::GetSmallestDenomination())};
+    const COutPoint outpoint{uint256S("cc"), 3};
+    const auto current_time{std::chrono::time_point_cast<std::chrono::seconds>(GetAdjustedTime())};
 
     // Test valid timestamp (current time)
-    q.nTime = current_time;
+    auto q{MakeQueue(denom, current_time, /*fReady=*/false, outpoint)};
     BOOST_CHECK(!q.IsTimeOutOfBounds(current_time));
 
     // Test timestamp slightly in future (within COINJOIN_QUEUE_TIMEOUT = 30)
-    q.nTime = current_time + 15; // 15 seconds in future
+    q = MakeQueue(denom, current_time + 15s, /*fReady=*/false, outpoint);
     BOOST_CHECK(!q.IsTimeOutOfBounds(current_time));
 
     // Test timestamp slightly in past (within COINJOIN_QUEUE_TIMEOUT = 30)
-    q.nTime = current_time - 15; // 15 seconds ago
+    q = MakeQueue(denom, current_time - 15s, /*fReady=*/false, outpoint);
     BOOST_CHECK(!q.IsTimeOutOfBounds(current_time));
 
     // Test timestamp too far in future (outside COINJOIN_QUEUE_TIMEOUT = 30)
-    q.nTime = current_time + 60; // 60 seconds in future
+    q = MakeQueue(denom, current_time + 60s, /*fReady=*/false, outpoint);
     BOOST_CHECK(q.IsTimeOutOfBounds(current_time));
 
     // Test timestamp too far in past (outside COINJOIN_QUEUE_TIMEOUT = 30)
-    q.nTime = current_time - 60; // 60 seconds ago
+    q = MakeQueue(denom, current_time - 60s, /*fReady=*/false, outpoint);
     BOOST_CHECK(q.IsTimeOutOfBounds(current_time));
 }
 
@@ -109,25 +104,25 @@ BOOST_AUTO_TEST_CASE(queue_timestamp_extreme_values)
 
     // Negative timestamps are rejected by the guard
     q.nTime = INT64_MIN;
-    BOOST_CHECK(q.IsTimeOutOfBounds(INT64_MAX));
+    BOOST_CHECK(q.IsTimeOutOfBounds(NodeSeconds{std::chrono::seconds{INT64_MAX}}));
 
     q.nTime = INT64_MAX;
-    BOOST_CHECK(q.IsTimeOutOfBounds(INT64_MIN));
+    BOOST_CHECK(q.IsTimeOutOfBounds(NodeSeconds{std::chrono::seconds{INT64_MIN}}));
 
     q.nTime = INT64_MIN;
-    BOOST_CHECK(q.IsTimeOutOfBounds(INT64_MIN));
+    BOOST_CHECK(q.IsTimeOutOfBounds(NodeSeconds{std::chrono::seconds{INT64_MIN}}));
 
     // Large positive timestamp with same value: zero diff, in bounds
     q.nTime = INT64_MAX;
-    BOOST_CHECK(!q.IsTimeOutOfBounds(INT64_MAX));
+    BOOST_CHECK(!q.IsTimeOutOfBounds(NodeSeconds{std::chrono::seconds{INT64_MAX}}));
 
     // Zero vs extreme positive: huge gap, out of bounds
     q.nTime = 0;
-    BOOST_CHECK(q.IsTimeOutOfBounds(INT64_MAX));
+    BOOST_CHECK(q.IsTimeOutOfBounds(NodeSeconds{std::chrono::seconds{INT64_MAX}}));
 
     // Zero vs negative: rejected by guard
     q.nTime = 0;
-    BOOST_CHECK(q.IsTimeOutOfBounds(INT64_MIN));
+    BOOST_CHECK(q.IsTimeOutOfBounds(NodeSeconds{std::chrono::seconds{INT64_MIN}}));
 }
 
 static_assert(CoinJoin::CalculateAmountPriority(MAX_MONEY) == -(MAX_MONEY / COIN));
@@ -145,26 +140,15 @@ BOOST_AUTO_TEST_CASE(calculate_amount_priority_guard)
     BOOST_CHECK_EQUAL(CoinJoin::CalculateAmountPriority(MAX_MONEY + 1), 0);
 }
 
-static CCoinJoinQueue MakeQueue(int denom, int64_t nTime, bool fReady, const COutPoint& outpoint)
-{
-    CCoinJoinQueue q;
-    q.nDenom = denom;
-    q.masternodeOutpoint = outpoint;
-    q.m_protxHash = uint256::ONE;
-    q.nTime = nTime;
-    q.fReady = fReady;
-    return q;
-}
-
 BOOST_AUTO_TEST_CASE(queuemanager_checkqueue_removes_timeouts)
 {
     CoinJoinQueueManager man;
     const int denom = CoinJoin::AmountToDenomination(CoinJoin::GetSmallestDenomination());
-    const int64_t now = GetAdjustedTime();
+    const auto now{GetAdjustedTime()};
     // Non-expired
     man.AddQueue(MakeQueue(denom, now, false, COutPoint(uint256S("11"), 0)));
     // Expired (too old)
-    man.AddQueue(MakeQueue(denom, now - COINJOIN_QUEUE_TIMEOUT - 1, false, COutPoint(uint256S("12"), 0)));
+    man.AddQueue(MakeQueue(denom, now - std::chrono::seconds{COINJOIN_QUEUE_TIMEOUT + 1}, false, COutPoint(uint256S("12"), 0)));
 
     BOOST_CHECK_EQUAL(man.GetQueueSize(), 2);
     man.CheckQueue();
@@ -176,7 +160,7 @@ BOOST_AUTO_TEST_CASE(queuemanager_getqueueitem_marks_tried_once)
 {
     CoinJoinQueueManager man;
     const int denom = CoinJoin::AmountToDenomination(CoinJoin::GetSmallestDenomination());
-    const int64_t now = GetAdjustedTime();
+    const auto now{GetAdjustedTime()};
     CCoinJoinQueue dsq = MakeQueue(denom, now, false, COutPoint(uint256S("21"), 0));
     man.AddQueue(dsq);
 
@@ -192,7 +176,7 @@ BOOST_AUTO_TEST_CASE(queuemanager_has_queue_from_masternode_readiness)
 {
     CoinJoinQueueManager man;
     const int denom = CoinJoin::AmountToDenomination(CoinJoin::GetSmallestDenomination());
-    const int64_t now = GetAdjustedTime();
+    const auto now{GetAdjustedTime()};
     const COutPoint mn(uint256S("31"), 0);
     // Single queue from `mn` with fReady=false.
     man.AddQueue(MakeQueue(denom, now, /*fReady=*/false, mn));
@@ -220,7 +204,7 @@ BOOST_AUTO_TEST_CASE(queuemanager_try_check_duplicate)
 {
     CoinJoinQueueManager man;
     const int denom = CoinJoin::AmountToDenomination(CoinJoin::GetSmallestDenomination());
-    const int64_t now = GetAdjustedTime();
+    const auto now{GetAdjustedTime()};
     const COutPoint mn(uint256S("41"), 0);
     const COutPoint other_mn(uint256S("42"), 0);
 
@@ -236,7 +220,7 @@ BOOST_AUTO_TEST_CASE(queuemanager_try_check_duplicate)
     // Exact duplicate.
     BOOST_CHECK(is_dup(seed));
     // Same masternode + same readiness, different nTime: the "too many dsqs" guard still flags it.
-    BOOST_CHECK(is_dup(MakeQueue(denom, now + 1, /*fReady=*/false, mn)));
+    BOOST_CHECK(is_dup(MakeQueue(denom, now + 1s, /*fReady=*/false, mn)));
     // Same masternode but different readiness: allowed.
     BOOST_CHECK(!is_dup(MakeQueue(denom, now, /*fReady=*/true, mn)));
     // Different masternode: allowed.

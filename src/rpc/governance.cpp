@@ -117,10 +117,9 @@ static RPCHelpMan gobject_check()
 
     int nRevision = 1;
 
-    int64_t nTime = GetAdjustedTime();
     std::string strDataHex = request.params[0].get_str();
 
-    CGovernanceObject govobj(hashParent, nRevision, nTime, uint256(), strDataHex);
+    CGovernanceObject govobj(hashParent, nRevision, GetAdjustedTime(), uint256(), strDataHex);
 
     if (govobj.GetObjectType() == GovernanceObject::PROPOSAL) {
         std::string strValidationError;

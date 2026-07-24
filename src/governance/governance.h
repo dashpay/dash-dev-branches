@@ -7,8 +7,10 @@
 
 #include <cachemap.h>
 #include <cachemultimap.h>
+#include <governance/vote.h>
 #include <primitives/transaction.h>
 #include <sync.h>
+#include <util/time.h>
 
 #include <limits>
 #include <map>
@@ -28,7 +30,6 @@ template<typename T>
 class CFlatDB;
 class CGovernanceException;
 class CGovernanceObject;
-class CGovernanceVote;
 class CInv;
 class CMasternodeMetaMan;
 class CMasternodeSync;
@@ -38,9 +39,26 @@ class UniValue;
 
 namespace governance {
 class SuperblockManager;
-} // namespace governance
 
-using vote_time_pair_t = std::pair<CGovernanceVote, int64_t>;
+struct OrphanVote {
+    CGovernanceVote vote;
+    NodeSeconds expiration;
+
+    OrphanVote() = default;
+    OrphanVote(const CGovernanceVote& vote, NodeSeconds expiration) : vote(vote), expiration(expiration) {}
+
+    SERIALIZE_METHODS(OrphanVote, obj)
+    {
+        // Preserve the historical integer Unix-seconds representation on disk.
+        READWRITE(obj.vote, Using<ChronoFormatter<int64_t>>(obj.expiration));
+    }
+};
+
+inline bool operator<(const OrphanVote& lhs, const OrphanVote& rhs)
+{
+    return lhs.vote < rhs.vote;
+}
+} // namespace governance
 
 static constexpr int RATE_BUFFER_SIZE = 5;
 static constexpr bool DEFAULT_GOVERNANCE_ENABLE{true};
@@ -157,7 +175,7 @@ protected:
     };
 
     using txout_m_t = std::map<COutPoint, last_object_rec>;
-    using vote_cmm_t = CacheMultiMap<uint256, vote_time_pair_t>;
+    using vote_cmm_t = CacheMultiMap<uint256, governance::OrphanVote>;
 
 protected:
     static constexpr int MAX_CACHE_SIZE = 1000000;

@@ -10,6 +10,7 @@
 #include <pubkey.h>
 #include <saltedhasher.h>
 #include <sync.h>
+#include <util/time.h>
 
 #include <array>
 #include <optional>
@@ -99,13 +100,15 @@ public:
     SporkValue nValue{0};
     int64_t nTimeSigned{0};
 
-    CSporkMessage(SporkId nSporkID, SporkValue nValue, int64_t nTimeSigned) :
+    CSporkMessage(SporkId nSporkID, SporkValue nValue, NodeClock::time_point time_signed) :
         nSporkID(nSporkID),
         nValue(nValue),
-        nTimeSigned(nTimeSigned)
+        nTimeSigned(TicksSinceEpoch<std::chrono::seconds>(time_signed))
         {}
 
     CSporkMessage() = default;
+
+    NodeSeconds TimeSigned() const { return NodeSeconds{std::chrono::seconds{nTimeSigned}}; }
 
     SERIALIZE_METHODS(CSporkMessage, obj)
     {

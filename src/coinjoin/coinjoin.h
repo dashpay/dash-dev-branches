@@ -219,14 +219,16 @@ public:
 
     CCoinJoinQueue() = default;
 
-    CCoinJoinQueue(int nDenom, const COutPoint& outpoint, const uint256& proTxHash, int64_t nTime, bool fReady) :
+    CCoinJoinQueue(int nDenom, const COutPoint& outpoint, const uint256& proTxHash, NodeClock::time_point time, bool fReady) :
         nDenom(nDenom),
         masternodeOutpoint(outpoint),
         m_protxHash(proTxHash),
-        nTime(nTime),
+        nTime(TicksSinceEpoch<std::chrono::seconds>(time)),
         fReady(fReady)
     {
     }
+
+    NodeSeconds Time() const { return NodeSeconds{std::chrono::seconds{nTime}}; }
 
     SERIALIZE_METHODS(CCoinJoinQueue, obj)
     {
@@ -243,7 +245,8 @@ public:
     [[nodiscard]] bool CheckSignature(const CBLSPublicKey& blsPubKey) const;
 
     /// Check if a queue is too old or too far into the future
-    [[nodiscard]] bool IsTimeOutOfBounds(int64_t current_time = GetAdjustedTime()) const;
+    [[nodiscard]] bool IsTimeOutOfBounds(NodeSeconds current_time) const;
+    [[nodiscard]] bool IsTimeOutOfBounds() const;
 
     [[nodiscard]] std::string ToString() const;
 
@@ -273,11 +276,11 @@ public:
     {
     }
 
-    CCoinJoinBroadcastTx(CTransactionRef _tx, const COutPoint& _outpoint, const uint256& proTxHash, int64_t _sigTime) :
+    CCoinJoinBroadcastTx(CTransactionRef _tx, const COutPoint& _outpoint, const uint256& proTxHash, NodeClock::time_point time) :
         tx(std::move(_tx)),
         masternodeOutpoint(_outpoint),
         m_protxHash(proTxHash),
-        sigTime(_sigTime)
+        sigTime(TicksSinceEpoch<std::chrono::seconds>(time))
     {
     }
 

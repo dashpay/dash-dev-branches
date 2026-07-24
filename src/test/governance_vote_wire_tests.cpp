@@ -2,7 +2,9 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include <governance/vote.h>
+#include <evo/deterministicmns.h>
+#include <governance/governance.h>
+#include <governance/object.h>
 #include <primitives/transaction.h>
 #include <serialize.h>
 #include <streams.h>
@@ -91,6 +93,52 @@ BOOST_AUTO_TEST_CASE(ser_disk_deserialization_unaffected)
     CGovernanceVote vote;
     BOOST_REQUIRE_NO_THROW(ss >> vote);
     BOOST_CHECK_EQUAL(ss.size(), 0U);
+}
+
+BOOST_AUTO_TEST_CASE(extreme_timestamp_is_rejected_without_overflow)
+{
+    CGovernanceVote vote;
+    vote.SetTime(std::numeric_limits<int64_t>::max());
+
+    BOOST_CHECK(!vote.IsValid(CDeterministicMNList{}, /*useVotingKey=*/false));
+}
+
+BOOST_AUTO_TEST_CASE(chrono_cache_times_preserve_disk_encoding)
+{
+    CDataStream vote_stream = MakeVoteWire(CGovernanceVote::COMPACT_SIG_SIZE);
+    CGovernanceVote vote;
+    vote_stream >> vote;
+
+    constexpr int64_t expiration{1'700'000'600};
+    const governance::OrphanVote orphan_vote{vote, NodeSeconds{std::chrono::seconds{expiration}}};
+
+    CDataStream chrono_encoding{SER_DISK, PROTOCOL_VERSION};
+    chrono_encoding << orphan_vote;
+    CDataStream integer_encoding{SER_DISK, PROTOCOL_VERSION};
+    integer_encoding << vote << expiration;
+    BOOST_CHECK_EQUAL_COLLECTIONS(
+        chrono_encoding.begin(), chrono_encoding.end(), integer_encoding.begin(), integer_encoding.end());
+
+    governance::OrphanVote decoded;
+    chrono_encoding >> decoded;
+    BOOST_CHECK(decoded.vote.GetHash() == vote.GetHash());
+    BOOST_CHECK_EQUAL(decoded.expiration.time_since_epoch().count(), expiration);
+
+    constexpr int64_t creation_time{1'700'000'000};
+    const vote_instance_t vote_instance{
+        VOTE_OUTCOME_YES, NodeSeconds{std::chrono::seconds{expiration}}, creation_time};
+    CDataStream chrono_vote_instance{SER_DISK, PROTOCOL_VERSION};
+    chrono_vote_instance << vote_instance;
+    CDataStream integer_vote_instance{SER_DISK, PROTOCOL_VERSION};
+    integer_vote_instance << int{VOTE_OUTCOME_YES} << expiration << creation_time;
+    BOOST_CHECK_EQUAL_COLLECTIONS(
+        chrono_vote_instance.begin(), chrono_vote_instance.end(), integer_vote_instance.begin(), integer_vote_instance.end());
+
+    vote_instance_t decoded_vote_instance;
+    chrono_vote_instance >> decoded_vote_instance;
+    BOOST_CHECK_EQUAL(decoded_vote_instance.eOutcome, VOTE_OUTCOME_YES);
+    BOOST_CHECK_EQUAL(decoded_vote_instance.last_update.time_since_epoch().count(), expiration);
+    BOOST_CHECK_EQUAL(decoded_vote_instance.nCreationTime, creation_time);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

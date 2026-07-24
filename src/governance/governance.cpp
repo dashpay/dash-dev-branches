@@ -279,25 +279,25 @@ void CGovernanceManager::CheckOrphanVotes(CGovernanceObject& govobj)
     AssertLockNotHeld(cs_relay);
 
     uint256 nHash = govobj.GetHash();
-    std::vector<vote_time_pair_t> vecVotePairs;
-    cmmapOrphanVotes.GetAll(nHash, vecVotePairs);
+    std::vector<governance::OrphanVote> orphan_votes;
+    cmmapOrphanVotes.GetAll(nHash, orphan_votes);
 
     ScopedLockBool guard(cs_store, fRateChecksEnabled, false);
 
-    int64_t nNow = GetAdjustedTime();
+    const auto now{std::chrono::time_point_cast<std::chrono::seconds>(GetAdjustedTime())};
     const auto tip_mn_list = m_dmnman.GetListAtChainTip();
-    for (const auto& pairVote : vecVotePairs) {
-        const auto& [vote, time] = pairVote;
+    for (const auto& orphan_vote : orphan_votes) {
+        const auto& vote = orphan_vote.vote;
         bool fRemove = false;
         CGovernanceException e;
-        if (time < nNow) {
+        if (orphan_vote.expiration < now) {
             fRemove = true;
         } else if (govobj.ProcessVote(m_mn_metaman, fRateChecksEnabled, tip_mn_list, vote, e)) {
             RelayVote(vote);
             fRemove = true;
         }
         if (fRemove) {
-            cmmapOrphanVotes.Erase(nHash, pairVote);
+            cmmapOrphanVotes.Erase(nHash, orphan_vote);
         }
     }
 }
@@ -734,21 +734,21 @@ bool CGovernanceManager::MasternodeRateCheck(const CGovernanceObject& govobj, bo
     }
 
     const COutPoint& masternodeOutpoint = govobj.GetMasternodeOutpoint();
-    int64_t nTimestamp = govobj.GetCreationTime();
-    int64_t nNow = GetAdjustedTime();
-    int64_t nSuperblockCycleSeconds = Params().GetConsensus().nSuperblockCycle * Params().GetConsensus().nPowTargetSpacing;
+    const auto timestamp{govobj.CreationTime()};
+    const auto now{std::chrono::time_point_cast<std::chrono::seconds>(GetAdjustedTime())};
+    const auto superblock_cycle{Params().GetConsensus().nSuperblockCycle * Params().GetConsensus().PowTargetSpacing()};
 
     std::string strHash = govobj.GetHash().ToString();
 
-    if (nTimestamp < nNow - 2 * nSuperblockCycleSeconds) {
+    if (timestamp < now - 2 * superblock_cycle) {
         LogPrint(BCLog::GOBJECT, "CGovernanceManager::MasternodeRateCheck -- object %s rejected due to too old timestamp, masternode = %s, timestamp = %d, current time = %d\n",
-            strHash, masternodeOutpoint.ToStringShort(), nTimestamp, nNow);
+            strHash, masternodeOutpoint.ToStringShort(), govobj.GetCreationTime(), TicksSinceEpoch<std::chrono::seconds>(now));
         return false;
     }
 
-    if (nTimestamp > nNow + count_seconds(MAX_TIME_FUTURE_DEVIATION)) {
+    if (timestamp > now + MAX_TIME_FUTURE_DEVIATION) {
         LogPrint(BCLog::GOBJECT, "CGovernanceManager::MasternodeRateCheck -- object %s rejected due to too new (future) timestamp, masternode = %s, timestamp = %d, current time = %d\n",
-            strHash, masternodeOutpoint.ToStringShort(), nTimestamp, nNow);
+            strHash, masternodeOutpoint.ToStringShort(), govobj.GetCreationTime(), TicksSinceEpoch<std::chrono::seconds>(now));
         return false;
     }
 
@@ -761,12 +761,12 @@ bool CGovernanceManager::MasternodeRateCheck(const CGovernanceObject& govobj, bo
     }
 
     // Allow 1 trigger per mn per cycle, with a small fudge factor
-    double dMaxRate = 2 * 1.1 / double(nSuperblockCycleSeconds);
+    double dMaxRate = 2 * 1.1 / static_cast<double>(count_seconds(superblock_cycle));
 
     // Temporary copy to check rate after new timestamp is added
     CRateCheckBuffer buffer = it->second.triggerBuffer;
 
-    buffer.AddTimestamp(nTimestamp);
+    buffer.AddTimestamp(govobj.GetCreationTime());
     double dRate = buffer.GetRate();
 
     if (dRate < dMaxRate) {
@@ -774,7 +774,7 @@ bool CGovernanceManager::MasternodeRateCheck(const CGovernanceObject& govobj, bo
     }
 
     LogPrint(BCLog::GOBJECT, "CGovernanceManager::MasternodeRateCheck -- Rate too high: object hash = %s, masternode = %s, object timestamp = %d, rate = %f, max rate = %f\n",
-        strHash, masternodeOutpoint.ToStringShort(), nTimestamp, dRate, dMaxRate);
+        strHash, masternodeOutpoint.ToStringShort(), govobj.GetCreationTime(), dRate, dMaxRate);
 
     if (fUpdateFailStatus) {
         it->second.fStatusOK = false;
@@ -824,8 +824,7 @@ bool CGovernanceManager::ProcessVote(const CGovernanceVote& vote, CGovernanceExc
         std::string msg{strprintf("CGovernanceManager::%s -- Unknown parent object %s, MN outpoint = %s", __func__,
             nHashGovobj.ToString(), vote.GetMasternodeOutpoint().ToStringShort())};
         exception = CGovernanceException(msg, GOVERNANCE_EXCEPTION_WARNING);
-        if (cmmapOrphanVotes.Insert(nHashGovobj, vote_time_pair_t(vote, count_seconds(GetTime<std::chrono::seconds>() +
-                                                                                      GOVERNANCE_ORPHAN_EXPIRATION_TIME)))) {
+        if (cmmapOrphanVotes.Insert(nHashGovobj, governance::OrphanVote{vote, Now<NodeSeconds>() + GOVERNANCE_ORPHAN_EXPIRATION_TIME})) {
             hashToRequest = nHashGovobj; // Caller should request this object
         }
         LogPrint(BCLog::GOBJECT, "%s\n", msg);
@@ -884,20 +883,19 @@ void CGovernanceManager::CheckPostponedObjects()
 
 
     // Perform additional relays for triggers
-    int64_t nNow = GetAdjustedTime();
-    int64_t nSuperblockCycleSeconds = Params().GetConsensus().nSuperblockCycle * Params().GetConsensus().nPowTargetSpacing;
+    const auto now{std::chrono::time_point_cast<std::chrono::seconds>(GetAdjustedTime())};
+    const auto superblock_cycle{Params().GetConsensus().nSuperblockCycle * Params().GetConsensus().PowTargetSpacing()};
 
     for (auto it = setAdditionalRelayObjects.begin(); it != setAdditionalRelayObjects.end();) {
         auto itObject = mapObjects.find(*it);
         if (itObject != mapObjects.end()) {
             const auto& govobj = *Assert(itObject->second);
 
-            int64_t nTimestamp = govobj.GetCreationTime();
+            const auto timestamp{govobj.CreationTime()};
 
-            bool fValid = (nTimestamp <= nNow + count_seconds(MAX_TIME_FUTURE_DEVIATION)) &&
-                          (nTimestamp >= nNow - 2 * nSuperblockCycleSeconds);
-            bool fReady = (nTimestamp <=
-                           nNow + count_seconds(MAX_TIME_FUTURE_DEVIATION) - count_seconds(RELIABLE_PROPAGATION_TIME));
+            const bool fValid{timestamp <= now + MAX_TIME_FUTURE_DEVIATION &&
+                              timestamp >= now - 2 * superblock_cycle};
+            const bool fReady{timestamp <= now + MAX_TIME_FUTURE_DEVIATION - RELIABLE_PROPAGATION_TIME};
 
             if (fValid) {
                 if (fReady) {
@@ -1093,15 +1091,14 @@ std::vector<uint256> CGovernanceManager::GetOrphanVoteObjectHashes()
 {
     LOCK(cs_store);
 
-    int64_t nNow = GetTime<std::chrono::seconds>().count();
+    const auto now{Now<NodeSeconds>()};
 
     // Clean up expired orphan votes
     const vote_cmm_t::list_t& items = cmmapOrphanVotes.GetItemList();
     for (auto it = items.begin(); it != items.end();) {
         auto prevIt = it;
         ++it;
-        const auto& [_, time] = prevIt->value;
-        if (time < nNow) {
+        if (prevIt->value.expiration < now) {
             cmmapOrphanVotes.Erase(prevIt->key, prevIt->value);
         }
     }

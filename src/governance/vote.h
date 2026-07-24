@@ -10,6 +10,7 @@
 #include <serialize.h>
 #include <uint256.h>
 #include <util/string.h>
+#include <util/time.h>
 
 class CBLSPublicKey;
 class CDeterministicMNList;
@@ -85,6 +86,7 @@ public:
     CGovernanceVote(const COutPoint& outpointMasternodeIn, const uint256& nParentHashIn, vote_signal_enum_t eVoteSignalIn, vote_outcome_enum_t eVoteOutcomeIn);
 
     int64_t GetTimestamp() const { return nTime; }
+    NodeSeconds Time() const { return NodeSeconds{std::chrono::seconds{nTime}}; }
 
     vote_signal_enum_t GetSignal() const { return nVoteSignal; }
 
@@ -96,6 +98,10 @@ public:
     {
         nTime = nTimeIn;
         UpdateHash();
+    }
+    void SetTime(NodeClock::time_point time)
+    {
+        SetTime(TicksSinceEpoch<std::chrono::seconds>(time));
     }
 
     void SetSignature(const std::vector<unsigned char>& vchSigIn) { vchSig = vchSigIn; }
