@@ -9,7 +9,6 @@
 
 #include <chainparams.h>
 #include <core_io.h>
-#include <fs.h>
 #include <instantsend/instantsend.h>
 #include <llmq/context.h>
 #include <node/mempool_persist_args.h>
@@ -20,6 +19,7 @@
 #include <rpc/util.h>
 #include <txmempool.h>
 #include <univalue.h>
+#include <util/fs.h>
 #include <util/helpers.h>
 #include <util/moneystr.h>
 #include <util/strencodings.h>

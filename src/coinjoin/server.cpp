@@ -192,6 +192,7 @@ void CCoinJoinServer::ProcessDSQUEUE(NodeId from, CDataStream& vRecv)
         LogPrint(BCLog::COINJOIN, "DSQUEUE -- new CoinJoin queue, masternode=%s, queue=%s\n", dmn->proTxHash.ToString(), dsq.ToString());
 
         if (!m_queueman.TryAddQueue(dsq)) return;
+        WITH_LOCK(cs_main, m_peer_manager->PeerForgetObjectRequest(CInv{MSG_DSQ, dsq.GetHash()}));
         m_peer_manager->PeerRelayDSQ(dsq);
     }
 }

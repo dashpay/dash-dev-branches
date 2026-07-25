@@ -8,7 +8,6 @@
 #include <addrman.h>
 #include <chainparams.h>
 #include <clientversion.h>
-#include <fs.h>
 #include <hash.h>
 #include <logging/timer.h>
 #include <netbase.h>
@@ -17,6 +16,8 @@
 #include <streams.h>
 #include <tinyformat.h>
 #include <univalue.h>
+#include <util/fs.h>
+#include <util/fs_helpers.h>
 #include <util/settings.h>
 #include <util/system.h>
 #include <util/translation.h>

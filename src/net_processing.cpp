@@ -33,6 +33,7 @@
 #include <tinyformat.h>
 #include <txmempool.h>
 #include <txorphanage.h>
+#include <txrequest.h>
 #include <util/check.h>
 #include <util/std23.h>
 #include <util/strencodings.h>
@@ -79,20 +80,20 @@ using node::fImporting;
 using node::fPruneMode;
 using node::fReindex;
 
-/** Maximum number of in-flight objects from a peer */
-static constexpr int32_t MAX_PEER_OBJECT_IN_FLIGHT = 100;
-/** Maximum number of announced objects from a peer */
-static constexpr int32_t MAX_PEER_OBJECT_ANNOUNCEMENTS = 2 * MAX_INV_SZ;
-/** How many microseconds to delay requesting transactions from inbound peers */
-static constexpr auto INBOUND_PEER_TX_DELAY{2s};
+/** Maximum number of in-flight object requests from a peer. It is not a hard limit, but the
+ *  threshold at which point the OVERLOADED_PEER_OBJECT_DELAY kicks in. */
+static constexpr int32_t MAX_PEER_OBJECT_REQUEST_IN_FLIGHT = 100;
+/** Maximum number of announced objects from a peer.
+ *  Unlike Bitcoin, this is not reduced to 5000: governance vote sync legitimately announces up to
+ *  MAX_INV_SZ objects from a single peer (see CGovernanceManager). */
+static constexpr int32_t MAX_PEER_OBJECT_ANNOUNCEMENTS = std::max<int32_t>(5000, 2 * MAX_INV_SZ);
+/** How long to delay requesting transactions from non-preferred peers */
+static constexpr auto NONPREF_PEER_TX_DELAY{2s};
+/** How long to delay requesting objects from overloaded peers (see
+ *  MAX_PEER_OBJECT_REQUEST_IN_FLIGHT). */
+static constexpr auto OVERLOADED_PEER_OBJECT_DELAY{2s};
 /** How long to wait before downloading a transaction from an additional peer */
 static constexpr auto GETDATA_TX_INTERVAL{60s};
-/** Maximum delay for transaction requests to avoid biasing some peers over others. */
-static constexpr auto MAX_GETDATA_RANDOM_DELAY{2s};
-/** How long to wait (expiry * factor microseconds) before expiring an in-flight getdata request to a peer */
-static constexpr int64_t TX_EXPIRY_INTERVAL_FACTOR = 10;
-static_assert(INBOUND_PEER_TX_DELAY >= MAX_GETDATA_RANDOM_DELAY,
-"To preserve security, MAX_GETDATA_RANDOM_DELAY should not exceed INBOUND_PEER_DELAY");
 /** Limit to avoid sending big packets. Not used in processing incoming GETDATA for compatibility */
 static const unsigned int MAX_GETDATA_SZ = 1000;
 
@@ -509,69 +510,6 @@ struct CNodeState {
     //! Time of last new block announcement
     int64_t m_last_block_announcement{0};
 
-    /*
-     * State associated with objects download.
-     *
-     * Tx download algorithm:
-     *
-     *   When inv comes in, queue up (process_time, inv) inside the peer's
-     *   CNodeState (m_object_process_time) as long as m_object_announced for the peer
-     *   isn't too big (MAX_PEER_OBJECT_ANNOUNCEMENTS).
-     *
-     *   The process_time for a objects is set to nNow for outbound peers,
-     *   nNow + 2 seconds for inbound peers. This is the time at which we'll
-     *   consider trying to request the objects from the peer in
-     *   SendMessages(). The delay for inbound peers is to allow outbound peers
-     *   a chance to announce before we request from inbound peers, to prevent
-     *   an adversary from using inbound connections to blind us to a
-     *   objects (InvBlock).
-     *
-     *   When we call SendMessages() for a given peer,
-     *   we will loop over the objects in m_object_process_time, looking
-     *   at the objects whose process_time <= nNow. We'll request each
-     *   such objects that we don't have already and that hasn't been
-     *   requested from another peer recently, up until we hit the
-     *   MAX_PEER_OBJECT_IN_FLIGHT limit for the peer. Then we'll update
-     *   g_already_asked_for for each requested inv, storing the time of the
-     *   GETDATA request. We use g_already_asked_for to coordinate objects
-     *   requests amongst our peers.
-     *
-     *   For objects that we still need but we have already recently
-     *   requested from some other peer, we'll reinsert (process_time, inv)
-     *   back into the peer's m_object_process_time at the point in the future at
-     *   which the most recent GETDATA request would time out (ie
-     *   GetObjectInterval + the request time stored in g_already_asked_for).
-     *   We add an additional delay for inbound peers, again to prefer
-     *   attempting download from outbound peers first.
-     *   We also add an extra small random delay up to 2 seconds
-     *   to avoid biasing some peers over others. (e.g., due to fixed ordering
-     *   of peer processing in ThreadMessageHandler).
-     *
-     *   When we receive a objects from a peer, we remove the inv from the
-     *   peer's m_object_in_flight set and from their recently announced set
-     *   (m_object_announced).  We also clear g_already_asked_for for that entry, so
-     *   that if somehow the objects is not accepted but also not added to
-     *   the reject filter, then we will eventually redownload from other
-     *   peers.
-     */
-    struct ObjectDownloadState {
-        /* Track when to attempt download of announced objects (process
-         * time in micros -> inv)
-         */
-        std::multimap<std::chrono::microseconds, CInv> m_object_process_time;
-
-        //! Store all the objects a peer has recently announced
-        std::set<CInv> m_object_announced;
-
-        //! Store objects which were requested by us, with timestamp
-        std::map<CInv, std::chrono::microseconds> m_object_in_flight;
-
-        //! Periodically check for stuck getdata requests
-        std::chrono::microseconds m_check_expiry_timer{0};
-    };
-
-    ObjectDownloadState m_object_download;
-
     //! Whether this peer is an inbound connection
     const bool m_is_inbound;
 
@@ -655,6 +593,7 @@ public:
     bool PeerIsBanned(const NodeId node_id) override EXCLUSIVE_LOCKS_REQUIRED(cs_main, !m_peer_mutex);
     void PeerEraseObjectRequest(const NodeId nodeid, const CInv& inv) override EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
     bool PeerConsumeObjectRequest(NodeId nodeid, const CInv& inv) override EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
+    void PeerForgetObjectRequest(const CInv& inv) override EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
     void PeerPushInventory(NodeId nodeid, const CInv& inv) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
     void PeerRelayInv(const CInv& inv) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
     void PeerRelayInvFiltered(const CInv& inv, const CTransaction& relatedTx) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
@@ -681,11 +620,14 @@ private:
      */
     void RelayInvFiltered(const CInv& inv, const uint256& relatedTxHash) EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
 
-    void EraseObjectRequest(NodeId nodeid, const CInv& inv) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
-    bool ConsumeObjectRequest(NodeId nodeid, const CInv& inv) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
-
-    void RequestObject(NodeId nodeid, const CInv& inv, std::chrono::microseconds current_time, bool fForce = false)
+    /** Register with m_object_request that an inv has been received from a peer, computing the
+     *  request delay from the peer's preferredness and in-flight load. */
+    void AddObjectAnnouncement(const CNode& node, const CInv& inv, std::chrono::microseconds current_time)
         EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
+
+    /** Delete all announcements of a transaction across all peers, under both inv types it may
+     *  have been announced with (MSG_TX and MSG_DSTX). */
+    void ForgetTx(const uint256& txid) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 
     /** Helper to process result of external handlers of message */
     void PostProcessMessage(MessageProcessingResult&& ret, NodeId node) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
@@ -1105,6 +1047,11 @@ private:
     /** Storage for orphan information */
     TxOrphanage m_orphanage;
 
+    /** Tracks announced inventories (transactions and all Dash-specific object types), and which
+     *  peer to request them from next. All policy (preferredness, delays, per-type expiry) is
+     *  decided by the callers; see AddObjectAnnouncement and the getdata section of SendMessages. */
+    TxRequestTracker m_object_request GUARDED_BY(::cs_main);
+
     void AddToCompactExtraTransactions(const CTransactionRef& tx) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex);
 
     /** Orphan/conflicted/etc transactions that are kept for compact block reconstruction.
@@ -1116,10 +1063,6 @@ private:
 
     std::vector<std::unique_ptr<NetHandler>> m_handlers;
 };
-
-// Keeps track of the time (in microseconds) when transactions were requested last time
-unordered_limitedmap<uint256, std::chrono::microseconds, StaticSaltedHasher> g_already_asked_for(MAX_INV_SZ, MAX_INV_SZ * 2);
-unordered_limitedmap<uint256, std::chrono::microseconds, StaticSaltedHasher> g_erased_object_requests(MAX_INV_SZ, MAX_INV_SZ * 2);
 
 const CNodeState* PeerManagerImpl::State(NodeId pnode) const EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
@@ -1408,7 +1351,7 @@ bool PeerManagerImpl::TipMayBeStale()
 
 bool PeerManagerImpl::CanDirectFetch()
 {
-    return m_chainman.ActiveChain().Tip()->Time() > GetAdjustedTime() - m_chainparams.GetConsensus().PowTargetSpacing() * 20;
+    return m_chainman.ActiveChain().Tip()->Time() > NodeClock::now() - m_chainparams.GetConsensus().PowTargetSpacing() * 20;
 }
 
 static bool PeerHasHeader(CNodeState *state, const CBlockIndex *pindex) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
@@ -1573,63 +1516,6 @@ void PeerManagerImpl::PushNodeVersion(CNode& pnode, const Peer& peer)
     }
 }
 
-void PeerManagerImpl::EraseObjectRequest(NodeId nodeid, const CInv& inv)
-{
-    AssertLockHeld(cs_main);
-
-    CNodeState* state = State(nodeid);
-    if (state == nullptr)
-        return;
-
-    LogPrint(BCLog::NET, "%s -- inv=(%s)\n", __func__, inv.ToString());
-    g_already_asked_for.erase(inv.hash);
-    g_erased_object_requests.insert(std::make_pair(inv.hash, GetTime<std::chrono::microseconds>()));
-
-    state->m_object_download.m_object_announced.erase(inv);
-    state->m_object_download.m_object_in_flight.erase(inv);
-}
-
-bool PeerManagerImpl::ConsumeObjectRequest(NodeId nodeid, const CInv& inv)
-{
-    AssertLockHeld(cs_main);
-
-    CNodeState* state = State(nodeid);
-    if (state == nullptr)
-        return false;
-
-    LogPrint(BCLog::NET, "%s -- inv=(%s)\n", __func__, inv.ToString());
-    auto& object_download = state->m_object_download;
-    const bool announced = object_download.m_object_announced.erase(inv) != 0;
-    const bool in_flight = object_download.m_object_in_flight.erase(inv) != 0;
-    // Any leftover m_object_process_time entry for this inv is left in place (removing it here
-    // would be an O(n) scan). The SendMessages drain skips queued entries whose per-peer
-    // announced/in-flight state was already consumed, so no redundant GETDATA is issued -- and we
-    // deliberately do not set the global g_erased_object_requests marker (avoids poisoning it via
-    // an unsolicited push).
-    return announced || in_flight;
-}
-
-std::chrono::microseconds GetObjectRequestTime(const CInv& inv) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
-{
-    AssertLockHeld(cs_main);
-    auto it = g_already_asked_for.find(inv.hash);
-    if (it != g_already_asked_for.end()) {
-        return it->second;
-    }
-    return {};
-}
-
-void UpdateObjectRequestTime(const CInv& inv, std::chrono::microseconds request_time) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
-{
-    AssertLockHeld(cs_main);
-    auto it = g_already_asked_for.find(inv.hash);
-    if (it == g_already_asked_for.end()) {
-        g_already_asked_for.insert(std::make_pair(inv.hash, request_time));
-    } else {
-        g_already_asked_for.update(it, request_time);
-    }
-}
-
 std::chrono::microseconds GetObjectInterval(int invType)
 {
     // some messages need to be re-requested faster when the first announcing peer did not answer to GETDATA
@@ -1646,82 +1532,47 @@ std::chrono::microseconds GetObjectInterval(int invType)
     }
 }
 
-std::chrono::microseconds GetObjectExpiryInterval(int invType)
-{
-    return GetObjectInterval(invType) * TX_EXPIRY_INTERVAL_FACTOR;
-}
-
-std::chrono::microseconds GetObjectRandomDelay(int invType)
-{
-    if (invType == MSG_TX) {
-        return GetRandMicros(MAX_GETDATA_RANDOM_DELAY);
-    }
-    return {};
-}
-
-std::chrono::microseconds CalculateObjectGetDataTime(const CInv& inv, std::chrono::microseconds current_time, bool is_masternode, bool use_inbound_delay) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
-{
-    AssertLockHeld(cs_main);
-    std::chrono::microseconds process_time;
-    const auto last_request_time = GetObjectRequestTime(inv);
-    // First time requesting this tx
-    if (last_request_time.count() == 0) {
-        process_time = current_time;
-    } else {
-        // Randomize the delay to avoid biasing some peers over others (such as due to
-        // fixed ordering of peer processing in ThreadMessageHandler)
-        process_time = last_request_time + GetObjectInterval(inv.type) + GetObjectRandomDelay(inv.type);
-    }
-
-    // We delay processing announcements from inbound peers
-    if (inv.IsMsgTx() && !is_masternode && use_inbound_delay) process_time += INBOUND_PEER_TX_DELAY;
-
-    return process_time;
-}
-
-void PeerManagerImpl::RequestObject(NodeId nodeid, const CInv& inv, std::chrono::microseconds current_time, bool fForce)
+void PeerManagerImpl::AddObjectAnnouncement(const CNode& node, const CInv& inv, std::chrono::microseconds current_time)
 {
     AssertLockHeld(cs_main);
 
-    CNodeState* state = State(nodeid);
-    if (state == nullptr)
-        return;
+    const CNodeState* state = State(node.GetId());
+    if (state == nullptr) return;
 
-    CNodeState::ObjectDownloadState& peer_download_state = state->m_object_download;
-    if (peer_download_state.m_object_announced.size() >= MAX_PEER_OBJECT_ANNOUNCEMENTS ||
-            peer_download_state.m_object_process_time.size() >= MAX_PEER_OBJECT_ANNOUNCEMENTS ||
-            peer_download_state.m_object_announced.count(inv)) {
-        // Too many queued announcements from this peer, or we already have
-        // this announcement
+    if (m_object_request.Count(node.GetId()) >= MAX_PEER_OBJECT_ANNOUNCEMENTS) {
+        // Too many queued announcements from this peer
         return;
     }
-    peer_download_state.m_object_announced.insert(inv);
 
-    // Calculate the time to try requesting this transaction. Use
-    // fPreferredDownload as a proxy for outbound peers.
-    std::chrono::microseconds process_time = CalculateObjectGetDataTime(inv, current_time, /*is_masternode=*/m_nodeman != nullptr,
-                                                                        !state->fPreferredDownload);
+    // Decide the TxRequestTracker parameters for this announcement:
+    // - "preferred": if fPreferredDownload is set (= outbound, or PF_NOBAN permission)
+    // - "reqtime": current time plus delays for:
+    //   - NONPREF_PEER_TX_DELAY for MSG_TX announcements from non-preferred connections. Other
+    //     object types -- including MSG_DSTX (used for the orphan-parent fetch, which wants the
+    //     CoinJoin metadata) and the Dash-specific consensus types -- are never delayed, and
+    //     neither is anything in masternode mode. This matches the pre-txrequest Dash behavior.
+    //   - OVERLOADED_PEER_OBJECT_DELAY for announcements from peers which have at least
+    //     MAX_PEER_OBJECT_REQUEST_IN_FLIGHT requests in flight.
+    const bool preferred = state->fPreferredDownload;
+    auto delay{0us};
+    if (inv.IsMsgTx() && !preferred && m_nodeman == nullptr) delay += NONPREF_PEER_TX_DELAY;
+    const bool overloaded = m_object_request.CountInFlight(node.GetId()) >= MAX_PEER_OBJECT_REQUEST_IN_FLIGHT;
+    if (overloaded) delay += OVERLOADED_PEER_OBJECT_DELAY;
 
-    peer_download_state.m_object_process_time.emplace(process_time, inv);
+    m_object_request.ReceivedInv(node.GetId(), inv, preferred, current_time + delay);
+}
 
-    if (fForce) {
-        // make sure this object is actually requested ASAP
-        g_erased_object_requests.erase(inv.hash);
-        g_already_asked_for.erase(inv.hash);
-    }
-
-    LogPrint(BCLog::NET, "%s -- inv=(%s), current_time=%d, process_time=%d, delta=%d\n", __func__, inv.ToString(), current_time.count(), process_time.count(), (process_time - current_time).count());
+void PeerManagerImpl::ForgetTx(const uint256& txid)
+{
+    AssertLockHeld(cs_main);
+    m_object_request.ForgetTxHash(CInv(MSG_TX, txid));
+    m_object_request.ForgetTxHash(CInv(MSG_DSTX, txid));
 }
 
 size_t PeerManagerImpl::GetRequestedObjectCount(NodeId nodeid) const
 {
     AssertLockHeld(cs_main);
-
-    const CNodeState* state = State(nodeid);
-    if (state == nullptr)
-        return 0;
-
-    return state->m_object_download.m_object_process_time.size();
+    return m_object_request.Count(nodeid);
 }
 
 void PeerManagerImpl::AddExtraHandler(std::unique_ptr<NetHandler>&& handler)
@@ -1783,6 +1634,7 @@ void PeerManagerImpl::InitializeNode(CNode& node, ServiceFlags our_services) {
     {
         LOCK(cs_main);
         m_node_states.emplace_hint(m_node_states.end(), std::piecewise_construct, std::forward_as_tuple(nodeid), std::forward_as_tuple(node.IsInboundConn()));
+        assert(m_object_request.Count(nodeid) == 0);
     }
     PeerRef peer = std::make_shared<Peer>(nodeid, our_services);
     {
@@ -1848,6 +1700,7 @@ void PeerManagerImpl::FinalizeNode(const CNode& node) {
         }
     }
     m_orphanage.EraseForPeer(nodeid);
+    m_object_request.DisconnectedPeer(nodeid);
     if (m_txreconciliation) m_txreconciliation->ForgetPeer(nodeid);
     m_num_preferred_download_peers -= state->fPreferredDownload;
     m_peers_downloading_from -= (!state->vBlocksInFlight.empty());
@@ -1864,6 +1717,7 @@ void PeerManagerImpl::FinalizeNode(const CNode& node) {
         assert(m_peers_downloading_from == 0);
         assert(m_outbound_peers_with_protect_from_disconnect == 0);
         assert(m_orphanage.Size() == 0);
+        assert(m_object_request.Size() == 0);
     }
     } // cs_main
 
@@ -2190,6 +2044,10 @@ void PeerManagerImpl::BlockConnected(const std::shared_ptr<const CBlock>& pblock
         while (have_candidates) {
             have_candidates = ProcessOrphanTx(/*node_id=*/-1);
         }
+        for (const auto& ptx : pblock->vtx) {
+            // Confirmed transactions no longer need to be requested.
+            ForgetTx(ptx->GetHash());
+        }
     }
 
     m_orphanage.EraseForBlock(*pblock);
@@ -2480,13 +2338,25 @@ void PeerManagerImpl::AskPeersForTransaction(const uint256& txid)
         }
     }
     {
-        CInv inv(MSG_TX, txid);
         LOCK(cs_main);
+        const auto current_time{GetTime<std::chrono::microseconds>()};
+        // Register a fresh, preferred (undelayed) MSG_TX announcement from each peer we intend to
+        // ask, so the transaction is requested ASAP. We deliberately do not forget existing
+        // announcements for this txid: any live candidate/request from another peer must survive as
+        // a fallback, and there is nothing to "unstick" -- the tracker deletes a txid's COMPLETED
+        // announcements automatically once no live one remains, so a completed entry only lingers
+        // while some peer is still being tried. If a peer here already has an announcement,
+        // ReceivedInv is a no-op and the existing one (in flight or queued) keeps its place.
         for (PeerRef& peer : peersToAsk) {
+            // The peer may have been disconnected (and its tracker state wiped by DisconnectedPeer)
+            // after we collected it above but before we took cs_main. Registering an announcement
+            // for a gone peer would leave a candidate that is never requested and could block the
+            // live fallback peers, so skip it.
+            if (State(peer->m_id) == nullptr) continue;
             LogPrintf("PeerManagerImpl::%s -- txid=%s: asking other peer %d for correct TX\n", __func__,
                       txid.ToString(), peer->m_id);
 
-            RequestObject(peer->m_id, inv, GetTime<std::chrono::microseconds>(), /*fForce=*/true);
+            m_object_request.ReceivedInv(peer->m_id, CInv(MSG_TX, txid), /*preferred=*/true, current_time);
         }
     }
 }
@@ -3376,6 +3246,7 @@ bool PeerManagerImpl::ProcessOrphanTx(NodeId node_id)
             _RelayTransaction(porphanTx->GetHash());
             m_orphanage.AddChildrenToWorkSet(*porphanTx, node_id);
             m_orphanage.EraseTx(orphanHash);
+            ForgetTx(orphanHash);
             break;
         } else if (state.GetResult() != TxValidationResult::TX_MISSING_INPUTS) {
             if (state.IsInvalid()) {
@@ -3391,6 +3262,7 @@ bool PeerManagerImpl::ProcessOrphanTx(NodeId node_id)
             LogPrint(BCLog::MEMPOOL, "   removed orphan tx %s\n", orphanHash.ToString());
             m_recent_rejects.insert(orphanHash);
             m_orphanage.EraseTx(orphanHash);
+            ForgetTx(orphanHash);
             break;
         }
     }
@@ -3759,12 +3631,15 @@ void PeerManagerImpl::PostProcessMessage(MessageProcessingResult&& result, NodeI
         if (peer) Misbehaving(*peer, result.m_error->score, result.m_error->message);
     }
     if (result.m_to_erase) {
-        WITH_LOCK(cs_main, EraseObjectRequest(node, result.m_to_erase.value()));
+        WITH_LOCK(cs_main, m_object_request.ReceivedResponse(node, result.m_to_erase.value()));
     }
     for (const auto& tx : result.m_transactions) {
         WITH_LOCK(cs_main, _RelayTransaction(tx));
     }
     for (const auto& inv : result.m_inventory) {
+        // An inv being relayed is available locally, so there is no need to request it from
+        // anyone anymore.
+        WITH_LOCK(cs_main, m_object_request.ForgetTxHash(inv));
         RelayInv(inv);
     }
 }
@@ -4486,7 +4361,7 @@ void PeerManagerImpl::ProcessMessage(
                     }
                     bool allowWhileInIBD = allowWhileInIBDObjs.count(inv.type);
                     if (allowWhileInIBD || !m_chainman.ActiveChainstate().IsInitialBlockDownload()) {
-                        RequestObject(pfrom.GetId(), inv, current_time);
+                        AddObjectAnnouncement(pfrom, inv, current_time);
                     }
                 }
             }
@@ -4798,7 +4673,11 @@ void PeerManagerImpl::ProcessMessage(
         CInv inv(nInvType, tx.GetHash());
         {
             LOCK(cs_main);
-            EraseObjectRequest(pfrom.GetId(), inv);
+            // A MSG_TX request may be answered with a DSTX message and vice versa (a getdata for
+            // either type serves the underlying transaction), so complete whichever announcement
+            // type the request was tracked under.
+            m_object_request.ReceivedResponse(pfrom.GetId(), CInv(MSG_TX, txid));
+            m_object_request.ReceivedResponse(pfrom.GetId(), CInv(MSG_DSTX, txid));
         }
 
         // Process custom logic, no matter if tx will be accepted to mempool later or not
@@ -4842,6 +4721,7 @@ void PeerManagerImpl::ProcessMessage(
                 m_dstxman.AddDSTX(dstx);
             }
 
+            ForgetTx(tx.GetHash());
             _RelayTransaction(tx.GetHash());
             m_orphanage.AddChildrenToWorkSet(tx, peer->m_id);
 
@@ -4879,18 +4759,22 @@ void PeerManagerImpl::ProcessMessage(
                 const auto current_time{GetTime<std::chrono::microseconds>()};
 
                 for (const uint256& parent_txid : unique_parents) {
-                    CInv _inv(MSG_TX, parent_txid);
+                    // We don't know if the parent was a regular or a mixing tx, so ask for it as
+                    // MSG_DSTX: a getdata for MSG_DSTX is answered with the DSTX wrapper when the
+                    // peer has one and with a plain TX otherwise, while a MSG_TX getdata would
+                    // lose the metadata of a zero-fee DSTX. Announcing both types would get the
+                    // parent fetched twice, as the tracker keys announcements on the full inv.
+                    CInv _inv(MSG_DSTX, parent_txid);
                     AddKnownInv(*peer, _inv.hash);
-                    if (!AlreadyHave(_inv)) RequestObject(pfrom.GetId(), _inv, current_time);
-                    // We don't know if the previous tx was a regular or a mixing one, try both
-                    CInv _inv2(MSG_DSTX, parent_txid);
-                    AddKnownInv(*peer, _inv2.hash);
-                    if (!AlreadyHave(_inv2)) RequestObject(pfrom.GetId(), _inv2, current_time);
+                    if (!AlreadyHave(_inv)) AddObjectAnnouncement(pfrom, _inv, current_time);
                 }
 
                 if (m_orphanage.AddTx(ptx, pfrom.GetId())) {
                     AddToCompactExtraTransactions(ptx);
                 }
+                // Once added to the orphan pool, a tx is considered AlreadyHave, and we shouldn't
+                // request it anymore.
+                ForgetTx(tx.GetHash());
 
                 // DoS prevention: do not allow m_orphans to grow unbounded (see CVE-2012-3789)
                 unsigned int nMaxOrphanTxSize = (unsigned int)std::max((int64_t)0, gArgs.GetIntArg("-maxorphantxsize", DEFAULT_MAX_ORPHAN_TRANSACTIONS_SIZE)) * 1000000;
@@ -4900,10 +4784,12 @@ void PeerManagerImpl::ProcessMessage(
                 // We will continue to reject this tx since it has rejected
                 // parents so avoid re-requesting it from other peers.
                 m_recent_rejects.insert(tx.GetHash());
+                ForgetTx(tx.GetHash());
                 m_llmq_ctx->isman->TransactionIsRemoved(ptx);
             }
         } else {
             m_recent_rejects.insert(tx.GetHash());
+            ForgetTx(tx.GetHash());
             if (RecursiveDynamicUsage(*ptx) < 100000) {
                 AddToCompactExtraTransactions(ptx);
             }
@@ -5566,13 +5452,14 @@ void PeerManagerImpl::ProcessMessage(
 
         uint256 hash = spork.GetHash();
         CInv spork_inv{MSG_SPORK, hash};
-        WITH_LOCK(::cs_main, EraseObjectRequest(pfrom.GetId(), spork_inv));
+        WITH_LOCK(::cs_main, m_object_request.ReceivedResponse(pfrom.GetId(), spork_inv));
         auto opt_signer = m_sporkman.GetValidSporkSigner(spork);
         if (!opt_signer) {
             Misbehaving(*peer, 100, strprintf("invalid spork received. peer=%d", pfrom.GetId()));
             return;
         }
         if (m_sporkman.ProcessSpork(spork, *opt_signer, strprintf(" peer=%d", pfrom.GetId()))) {
+            WITH_LOCK(::cs_main, m_object_request.ForgetTxHash(spork_inv));
             RelayInv(spork_inv);
         }
         return;
@@ -5613,28 +5500,22 @@ void PeerManagerImpl::ProcessMessage(
         return;
     }
     if (msg_type == NetMsgType::NOTFOUND) {
-        // Remove the NOTFOUND transactions from the peer
+        // Remove the NOTFOUND objects from the peer
         std::vector<CInv> vInv;
         vRecv >> vInv;
-        if (vInv.size() > MAX_PEER_OBJECT_IN_FLIGHT + MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
+        // A malicious peer can send a NOTFOUND entry per tracked announcement, so bound the
+        // message size by the announcement cap rather than the (soft) in-flight limit.
+        if (vInv.size() > MAX_PEER_OBJECT_ANNOUNCEMENTS + MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
             Misbehaving(*peer, 20, strprintf("notfound message size = %u", vInv.size()));
             return;
         }
 
         LOCK(cs_main);
-        CNodeState *state = State(pfrom.GetId());
         for (CInv &inv : vInv) {
             if (inv.IsKnownType()) {
-                // If we receive a NOTFOUND message for a txid we requested, erase
-                // it from our data structures for this peer.
-                auto in_flight_it = state->m_object_download.m_object_in_flight.find(inv);
-                if (in_flight_it == state->m_object_download.m_object_in_flight.end()) {
-                    // Skip any further work if this is a spurious NOTFOUND
-                    // message.
-                    continue;
-                }
-                state->m_object_download.m_object_in_flight.erase(in_flight_it);
-                state->m_object_download.m_object_announced.erase(inv);
+                // If we receive a NOTFOUND message for an inv we requested, mark the announcement
+                // as completed, so a fallback peer can be tried.
+                m_object_request.ReceivedResponse(pfrom.GetId(), inv);
             }
         }
         return;
@@ -5664,7 +5545,7 @@ void PeerManagerImpl::ProcessMessage(
                 chainlock::ChainLockSig clsig;
                 vRecv >> clsig;
                 const uint256& hash = ::SerializeHash(clsig);
-                WITH_LOCK(::cs_main, EraseObjectRequest(pfrom.GetId(), CInv{MSG_CLSIG, hash}));
+                WITH_LOCK(::cs_main, m_object_request.ReceivedResponse(pfrom.GetId(), CInv{MSG_CLSIG, hash}));
                 PostProcessMessage(m_clhandler.ProcessNewChainLock(pfrom.GetId(), clsig, *m_llmq_ctx->qman, hash), pfrom.GetId());
             }
             return; // CLSIG
@@ -6218,7 +6099,7 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
 
         if (!state.fSyncStarted && CanServeBlocks(*peer) && !fImporting && !fReindex && pto->CanRelay()) {
             // Only actively request headers from a single peer, unless we're close to end of initial download.
-            if ((nSyncStarted == 0 && sync_blocks_and_headers_from_peer) || m_chainman.m_best_header->Time() > GetAdjustedTime() - std::chrono::seconds{nMaxTipAge}) {
+            if ((nSyncStarted == 0 && sync_blocks_and_headers_from_peer) || m_chainman.m_best_header->Time() > NodeClock::now() - std::chrono::seconds{nMaxTipAge}) {
                 const CBlockIndex* pindexStart = m_chainman.m_best_header;
                 /* If possible, start at the block preceding the currently
                    best known header.  This ensures that we always get a
@@ -6239,7 +6120,7 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
                          // Convert HEADERS_DOWNLOAD_TIMEOUT_PER_HEADER to microseconds before scaling
                          // to maintain precision
                          std::chrono::microseconds{HEADERS_DOWNLOAD_TIMEOUT_PER_HEADER} *
-                         Ticks<std::chrono::seconds>(GetAdjustedTime() - m_chainman.m_best_header->Time()) / consensusParams.nPowTargetSpacing
+                         Ticks<std::chrono::seconds>(NodeClock::now() - m_chainman.m_best_header->Time()) / consensusParams.nPowTargetSpacing
                         );
                     nSyncStarted++;
                 }
@@ -6620,7 +6501,7 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
         // Check for headers sync timeouts
         if (state.fSyncStarted && state.m_headers_sync_timeout < std::chrono::microseconds::max()) {
             // Detect whether this is a stalling initial-headers-sync peer
-            if (m_chainman.m_best_header->Time() <= GetAdjustedTime() - std::chrono::seconds{nMaxTipAge}) {
+            if (m_chainman.m_best_header->Time() <= NodeClock::now() - std::chrono::seconds{nMaxTipAge}) {
                 if (current_time > state.m_headers_sync_timeout && nSyncStarted == 1 && (m_num_preferred_download_peers - state.fPreferredDownload >= 1)) {
                     // Disconnect a peer (without NetPermissionFlags::NoBan permission) if it is our only sync peer,
                     // and we have others we could be using instead.
@@ -6680,74 +6561,28 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
         // Message: getdata (non-blocks)
         //
 
-        // For robustness, expire old requests after a long timeout, so that
-        // we can resume downloading objects from a peer even if they
-        // were unresponsive in the past.
-        // Eventually we should consider disconnecting peers, but this is
-        // conservative.
-        if (state.m_object_download.m_check_expiry_timer <= current_time) {
-            for (auto it=state.m_object_download.m_object_in_flight.begin(); it != state.m_object_download.m_object_in_flight.end();) {
-                if (it->second <= current_time - GetObjectExpiryInterval(it->first.type)) {
-                    LogPrint(BCLog::NET, "timeout of inflight object %s from peer=%d\n", it->first.ToString(), pto->GetId());
-                    state.m_object_download.m_object_announced.erase(it->first);
-                    state.m_object_download.m_object_in_flight.erase(it++);
-                } else {
-                    ++it;
-                }
-            }
-            // On average, we do this check every GetObjectExpiryInterval. Randomize
-            // so that we're not doing this for all peers at the same time.
-            state.m_object_download.m_check_expiry_timer = current_time + GetObjectExpiryInterval(MSG_TX)/2 + GetRandMicros(GetObjectExpiryInterval(MSG_TX));
+        // DASH unlike Bitcoin, this loop requests all Dash-specific object types too. The request
+        // expiry doubles as the fallback-to-another-peer trigger, so time-sensitive object types
+        // use a shorter per-type interval (see GetObjectInterval).
+        std::vector<std::pair<NodeId, CInv>> expired;
+        auto requestable = m_object_request.GetRequestable(pto->GetId(), current_time, &expired);
+        for (const auto& entry : expired) {
+            LogPrint(BCLog::NET, "timeout of inflight object %s from peer=%d\n", entry.second.ToString(), entry.first);
         }
-
-        // DASH this code also handles non-TXs (Dash specific messages)
-        auto& object_process_time = state.m_object_download.m_object_process_time;
-        while (!object_process_time.empty() && object_process_time.begin()->first <= current_time && state.m_object_download.m_object_in_flight.size() < MAX_PEER_OBJECT_IN_FLIGHT) {
-            const CInv inv = object_process_time.begin()->second;
-            // Erase this entry from object_process_time (it may be added back for
-            // processing at a later time, see below)
-            object_process_time.erase(object_process_time.begin());
-            // Drop stale entries whose per-peer request was already consumed or received (no
-            // longer announced or in-flight), so a consumed announcement is not re-requested.
-            // This covers ConsumeObjectRequest, which erases that state without setting the
-            // global g_erased_object_requests marker checked below.
-            if (state.m_object_download.m_object_announced.count(inv) == 0 &&
-                state.m_object_download.m_object_in_flight.count(inv) == 0) {
-                continue;
-            }
-            if (g_erased_object_requests.count(inv.hash)) {
-                LogPrint(BCLog::NET, "%s -- GETDATA skipping inv=(%s), peer=%d\n", __func__, inv.ToString(), pto->GetId());
-                state.m_object_download.m_object_announced.erase(inv);
-                state.m_object_download.m_object_in_flight.erase(inv);
-                continue;
-            }
+        for (const CInv& inv : requestable) {
             if (!AlreadyHave(inv)) {
-                // If this object was last requested more than GetObjectInterval ago,
-                // then request.
-                const auto last_request_time = GetObjectRequestTime(inv);
-                if (last_request_time <= current_time - GetObjectInterval(inv.type)) {
-                    LogPrint(BCLog::NET, "Requesting %s peer=%d\n", inv.ToString(), pto->GetId());
-                    vGetData.push_back(inv);
-                    if (vGetData.size() >= MAX_GETDATA_SZ) {
-                        m_connman.PushMessage(pto, msgMaker.Make(NetMsgType::GETDATA, vGetData));
-                        vGetData.clear();
-                    }
-                    UpdateObjectRequestTime(inv, current_time);
-                    state.m_object_download.m_object_in_flight.emplace(inv, current_time);
-                } else {
-                    // This object is in flight from someone else; queue
-                    // up processing to happen after the download times out
-                    // (with a slight delay for inbound peers, to prefer
-                    // requests to outbound peers).
-                    const auto next_process_time = CalculateObjectGetDataTime(inv, current_time, is_masternode, !state.fPreferredDownload);
-                    object_process_time.emplace(next_process_time, inv);
-                    LogPrint(BCLog::NET, "%s -- GETDATA re-queue inv=(%s), next_process_time=%d, delta=%d, peer=%d\n", __func__, inv.ToString(), next_process_time.count(), (next_process_time - current_time).count(), pto->GetId());
+                LogPrint(BCLog::NET, "Requesting %s peer=%d\n", inv.ToString(), pto->GetId());
+                vGetData.push_back(inv);
+                if (vGetData.size() >= MAX_GETDATA_SZ) {
+                    m_connman.PushMessage(pto, msgMaker.Make(NetMsgType::GETDATA, vGetData));
+                    vGetData.clear();
                 }
+                m_object_request.RequestedTx(pto->GetId(), inv, current_time + GetObjectInterval(inv.type));
             } else {
-                // We have already seen this object, no need to download.
-                state.m_object_download.m_object_announced.erase(inv);
-                state.m_object_download.m_object_in_flight.erase(inv);
-                LogPrint(BCLog::NET, "%s -- GETDATA already seen inv=(%s), peer=%d\n", __func__, inv.ToString(), pto->GetId());
+                // We have already seen this object, no need to download. This is for belated
+                // announcements of objects which arrived via another peer; the tracker has no
+                // direct means to remove them once the object is received elsewhere.
+                m_object_request.ForgetTxHash(inv);
             }
         }
 
@@ -6773,12 +6608,20 @@ bool PeerManagerImpl::PeerIsBanned(const NodeId node_id)
 
 void PeerManagerImpl::PeerEraseObjectRequest(const NodeId nodeid, const CInv& inv)
 {
-    EraseObjectRequest(nodeid, inv);
+    // Completing only this peer's announcement is deliberate: an invalid or unusable object must
+    // not stop us from fetching it from honest peers. Cleanup across peers happens once the object
+    // is accepted and AlreadyHave(inv) turns true.
+    m_object_request.ReceivedResponse(nodeid, inv);
 }
 
 bool PeerManagerImpl::PeerConsumeObjectRequest(NodeId nodeid, const CInv& inv)
 {
-    return ConsumeObjectRequest(nodeid, inv);
+    return m_object_request.ReceivedResponse(nodeid, inv);
+}
+
+void PeerManagerImpl::PeerForgetObjectRequest(const CInv& inv)
+{
+    m_object_request.ForgetTxHash(inv);
 }
 
 void PeerManagerImpl::PeerPushInventory(NodeId nodeid, const CInv& inv)

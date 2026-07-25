@@ -7,10 +7,10 @@
 
 #include <consensus/amount.h>
 #include <core_io.h>
-#include <fs.h>
 #include <kernel/coinstats.h>
 #include <streams.h>
 #include <sync.h>
+#include <util/fs.h>
 
 #include <cstdint>
 #include <functional>

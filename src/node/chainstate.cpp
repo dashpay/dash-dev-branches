@@ -17,6 +17,7 @@
 #include <txdb.h>
 #include <txmempool.h>
 #include <uint256.h>
+#include <util/fs.h>
 #include <util/translation.h>
 #include <validation.h>
 

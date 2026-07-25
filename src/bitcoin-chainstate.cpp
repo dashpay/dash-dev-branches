@@ -89,7 +89,6 @@ int main(int argc, char* argv[])
     // SETUP: Chainstate
     const ChainstateManager::Options chainman_opts{
         .chainparams = chainparams,
-        .adjusted_time_callback = NodeClock::now,
     };
     ChainstateManager chainman{chainman_opts};
 
@@ -127,7 +126,7 @@ int main(int argc, char* argv[])
         std::cerr << "Failed to load Chain state from your datadir." << std::endl;
         goto epilogue;
     } else {
-        std::tie(status, error) = node::VerifyLoadedChainstate(std::ref(chainman), *evodb, options);
+        std::tie(status, error) = node::VerifyLoadedChainstate(chainman, *evodb, options);
         if (status != node::ChainstateLoadStatus::SUCCESS) {
             std::cerr << "Failed to verify loaded Chain state from your datadir." << std::endl;
             goto epilogue;

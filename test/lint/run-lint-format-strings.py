@@ -22,6 +22,7 @@ FALSE_POSITIVES = [
     ("src/rpc/evo.cpp", "strprintf(it->second, nParamNum)"),
     ("src/stacktraces.cpp", "strprintf(fmtStr, i, si.pc, lstr, fstr)"),
     ("src/util/system.cpp", "strprintf(_(COPYRIGHT_HOLDERS).translated, COPYRIGHT_HOLDERS_SUBSTITUTION)"),
+    ("src/test/translation_tests.cpp", "strprintf(format, arg)"),
     ("src/validationinterface.cpp", "LogPrint(BCLog::VALIDATION, fmt \"\\n\", __VA_ARGS__)"),
     ("src/wallet/wallet.h",  "WalletLogPrintf(std::string fmt, Params... parameters)"),
     ("src/wallet/wallet.h", "LogPrintf((\"%s \" + fmt).c_str(), GetDisplayName(), parameters...)"),

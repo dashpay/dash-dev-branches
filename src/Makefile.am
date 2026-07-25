@@ -194,6 +194,7 @@ BITCOIN_CORE_H = \
   coinjoin/walletman.h \
   coins.h \
   common/bloom.h \
+  common/init.h \
   common/run_command.h \
   common/url.h \
   compat/assumptions.h \
@@ -236,7 +237,6 @@ BITCOIN_CORE_H = \
   external_signer.h \
   flat-database.h \
   flatfile.h \
-  fs.h \
   governance/common.h \
   governance/governance.h \
   governance/net_governance.h \
@@ -407,6 +407,7 @@ BITCOIN_CORE_H = \
   txdb.h \
   txmempool.h \
   txorphanage.h \
+  txrequest.h \
   undo.h \
   unordered_lru_cache.h \
   util/asmap.h \
@@ -418,6 +419,8 @@ BITCOIN_CORE_H = \
   util/error.h \
   util/fastrange.h \
   util/fees.h \
+  util/fs.h \
+  util/fs_helpers.h \
   util/getuniquepath.h \
   util/golombrice.h \
   util/hash_type.h \
@@ -650,6 +653,7 @@ libbitcoin_node_a_SOURCES = \
   txdb.cpp \
   txmempool.cpp \
   txorphanage.cpp \
+  txrequest.cpp \
   validation.cpp \
   validationinterface.cpp \
   versionbits.cpp \
@@ -947,6 +951,7 @@ libbitcoin_common_a_SOURCES = \
   chainparams.cpp \
   coins.cpp \
   common/bloom.cpp \
+  common/init.cpp \
   common/run_command.cpp \
   compressor.cpp \
   core_read.cpp \
@@ -1006,7 +1011,6 @@ libbitcoin_util_a_SOURCES = \
   clientversion.cpp \
   coinjoin/common.cpp \
   coinjoin/options.cpp \
-  fs.cpp \
   interfaces/echo.cpp \
   interfaces/handler.cpp \
   interfaces/init.cpp \
@@ -1025,6 +1029,8 @@ libbitcoin_util_a_SOURCES = \
   util/edge.cpp \
   util/error.cpp \
   util/fees.cpp \
+  util/fs.cpp \
+  util/fs_helpers.cpp \
   util/getuniquepath.cpp \
   util/hasher.cpp \
   util/message.cpp \
@@ -1269,7 +1275,6 @@ libdashkernel_la_SOURCES = \
   evo/specialtx_filter.cpp \
   evo/specialtxman.cpp \
   flatfile.cpp \
-  fs.cpp \
   governance/common.cpp \
   governance/object.cpp \
   governance/superblock.cpp \
@@ -1351,6 +1356,8 @@ libdashkernel_la_SOURCES = \
   uint256.cpp \
   util/bytevectorhash.cpp \
   util/check.cpp \
+  util/fs.cpp \
+  util/fs_helpers.cpp \
   util/getuniquepath.cpp \
   util/hasher.cpp \
   util/message.cpp \

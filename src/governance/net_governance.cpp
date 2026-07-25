@@ -195,7 +195,9 @@ void NetGovernance::ProcessMessage(CNode& peer, const std::string& msg_type, CDa
             return;
         }
 
-        if (!WITH_LOCK(::cs_main, return m_gov_manager.ProcessObject(peer.GetLogString(), nHash, govobj))) {
+        if (WITH_LOCK(::cs_main, return m_gov_manager.ProcessObject(peer.GetLogString(), nHash, govobj))) {
+            WITH_LOCK(::cs_main, m_peer_manager->PeerForgetObjectRequest(CInv{MSG_GOVERNANCE_OBJECT, nHash}));
+        } else {
             // apply node's ban score
             m_peer_manager->PeerMisbehaving(peer.GetId(), 20);
         }
@@ -244,6 +246,7 @@ void NetGovernance::ProcessMessage(CNode& peer, const std::string& msg_type, CDa
         uint256 hashToRequest;
         if (m_gov_manager.ProcessVote(vote, exception, hashToRequest)) {
             LogPrint(BCLog::GOBJECT, "MNGOVERNANCEOBJECTVOTE -- %s new\n", strHash);
+            WITH_LOCK(::cs_main, m_peer_manager->PeerForgetObjectRequest(CInv{MSG_GOVERNANCE_OBJECT_VOTE, nHash}));
             m_node_sync.BumpAssetLastTime("MNGOVERNANCEOBJECTVOTE");
 
             if (!m_node_sync.IsSynced()) {

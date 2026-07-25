@@ -13,13 +13,13 @@
 #include <consensus/consensus.h>
 #include <core_io.h>
 #include <key_io.h>
-#include <fs.h>
 #include <policy/policy.h>
 #include <primitives/transaction.h>
 #include <script/script.h>
 #include <script/sign.h>
 #include <script/signingprovider.h>
 #include <univalue.h>
+#include <util/fs.h>
 #include <util/moneystr.h>
 #include <util/strencodings.h>
 #include <util/string.h>

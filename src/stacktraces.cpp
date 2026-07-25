@@ -7,10 +7,10 @@
 #endif // HAVE_CONFIG_H
 
 #include <stacktraces.h>
-#include <fs.h>
 #include <logging.h>
 #include <streams.h>
 #include <threadsafety.h>
+#include <util/fs.h>
 #include <util/strencodings.h>
 
 #include <map>

@@ -13,7 +13,6 @@
 #include <consensus/consensus.h>
 #include <crypto/common.h>
 #include <external_signer.h>
-#include <fs.h>
 #include <interfaces/chain.h>
 #include <interfaces/wallet.h>
 #include <key.h>
@@ -31,6 +30,8 @@
 #include <txmempool.h>
 #include <util/check.h>
 #include <util/error.h>
+#include <util/fs.h>
+#include <util/fs_helpers.h>
 #include <util/moneystr.h>
 #include <util/string.h>
 #include <util/time.h>

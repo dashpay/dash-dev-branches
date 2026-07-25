@@ -6,9 +6,9 @@
 #ifndef BITCOIN_NODE_UTXO_SNAPSHOT_H
 #define BITCOIN_NODE_UTXO_SNAPSHOT_H
 
-#include <fs.h>
-#include <uint256.h>
 #include <serialize.h>
+#include <uint256.h>
+#include <util/fs.h>
 #include <validation.h>
 
 #include <optional>

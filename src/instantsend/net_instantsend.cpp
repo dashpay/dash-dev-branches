@@ -288,6 +288,8 @@ void NetInstantSend::ProcessMessage(CNode& pfrom, const std::string& msg_type, C
                  islock->txid.ToString(), hash.ToString(), from);
 
         m_is_manager.EnqueueInstantSendLock(from, hash, std::move(islock));
+        // Enqueued locks count as AlreadyHave, no need to request them from anyone anymore.
+        WITH_LOCK(::cs_main, m_peer_manager->PeerForgetObjectRequest(CInv{MSG_ISDLOCK, hash}));
     }
 }
 

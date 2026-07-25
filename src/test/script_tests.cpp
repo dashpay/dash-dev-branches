@@ -16,6 +16,7 @@
 #include <test/util/random.h>
 #include <test/util/setup_common.h>
 #include <test/util/transaction_utils.h>
+#include <util/fs.h>
 #include <util/strencodings.h>
 
 #if defined(HAVE_CONSENSUS_LIB)

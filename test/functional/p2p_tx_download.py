@@ -37,16 +37,13 @@ class TestP2PConn(P2PInterface):
 
 # Constants from net_processing
 GETDATA_TX_INTERVAL = 60  # seconds
-MAX_GETDATA_RANDOM_DELAY = 2  # seconds
-INBOUND_PEER_TX_DELAY = 2  # seconds
-MAX_GETDATA_IN_FLIGHT = 100
-MAX_BLOCKS_IN_TRANSIT_PER_PEER = 16
-MAX_NOTFOUND_SIZE = MAX_GETDATA_IN_FLIGHT + MAX_BLOCKS_IN_TRANSIT_PER_PEER
-TX_EXPIRY_INTERVAL = GETDATA_TX_INTERVAL * 10
+NONPREF_PEER_TX_DELAY = 2  # seconds
+OVERLOADED_PEER_OBJECT_DELAY = 2  # seconds
+MAX_PEER_OBJECT_REQUEST_IN_FLIGHT = 100
 
 # Python test constants
 NUM_INBOUND = 10
-MAX_GETDATA_INBOUND_WAIT = GETDATA_TX_INTERVAL + MAX_GETDATA_RANDOM_DELAY + INBOUND_PEER_TX_DELAY
+MAX_GETDATA_INBOUND_WAIT = GETDATA_TX_INTERVAL + NONPREF_PEER_TX_DELAY
 
 
 class TxDownloadTest(BitcoinTestFramework):
@@ -59,7 +56,7 @@ class TxDownloadTest(BitcoinTestFramework):
         txid = 0xdeadbeef
 
         self.log.info("Announce the txid from each incoming peer to node 0")
-        msg = msg_inv([CInv(t=1, h=txid)])
+        msg = msg_inv([CInv(t=MSG_TX, h=txid)])
         for p in self.nodes[0].p2ps:
             p.send_and_ping(msg)
 
@@ -86,11 +83,9 @@ class TxDownloadTest(BitcoinTestFramework):
 
         self.log.info(
             "Announce the transaction to all nodes from all {} incoming peers, but never send it".format(NUM_INBOUND))
-        msg = msg_inv([CInv(t=1, h=txid)])
+        msg = msg_inv([CInv(t=MSG_TX, h=txid)])
         for p in self.peers:
             p.send_and_ping(msg)
-            p.sync_with_ping()
-            self.bump_mocktime(1)
 
         self.log.info("Put the tx in node 0's mempool")
         self.nodes[0].sendrawtransaction(tx['hex'])
@@ -103,62 +98,123 @@ class TxDownloadTest(BitcoinTestFramework):
         #   peer, plus
         # * the first time it is re-requested from the outbound peer, plus
         # * 2 seconds to avoid races
-        timeout = 2 + (MAX_GETDATA_RANDOM_DELAY + INBOUND_PEER_TX_DELAY) + (
-            GETDATA_TX_INTERVAL + MAX_GETDATA_RANDOM_DELAY)
-        self.log.info("Tx should be received at node 1 after {} seconds".format(timeout))
-        self.sync_mempools(timeout=timeout)
+        assert self.nodes[1].getpeerinfo()[0]['inbound'] == False
+        timeout = 2 + NONPREF_PEER_TX_DELAY + GETDATA_TX_INTERVAL
+        self.log.info("Tx should be received at node 1 after {} seconds of node time".format(timeout))
+        # The relay needs several SendMessages cycles, so advance node time in 1 s steps rather than
+        # one jump -- but no further than the expected worst case. Once mocktime reaches the deadline
+        # we stop advancing it, so a relay-delay regression (tx needing more than `timeout`
+        # node-seconds) makes the test fail instead of silently advancing mocktime until it passes.
+        deadline = self.mocktime + timeout
+
+        def tx_relayed():
+            if self.mocktime < deadline:
+                self.bump_mocktime(1)
+            return tx['txid'] in self.nodes[1].getrawmempool()
+        self.wait_until(tx_relayed)
 
     def test_in_flight_max(self):
-        self.log.info("Test that we don't request more than {} transactions from any peer, every {} minutes".format(
-            MAX_GETDATA_IN_FLIGHT, TX_EXPIRY_INTERVAL / 60))
-        txids = [i for i in range(MAX_GETDATA_IN_FLIGHT + 2)]
+        self.log.info("Test that we don't load peers with more than {} transaction requests immediately".format(MAX_PEER_OBJECT_REQUEST_IN_FLIGHT))
+        txids = [i for i in range(MAX_PEER_OBJECT_REQUEST_IN_FLIGHT + 2)]
 
         p = self.nodes[0].p2ps[0]
 
         with p2p_lock:
             p.tx_getdata_count = 0
 
-        p.send_message(msg_inv([CInv(t=1, h=i) for i in txids]))
-
-        def wait_for_tx_getdata(target):
-            self.bump_mocktime(1)
-            return p.tx_getdata_count >= target
-
-        p.wait_until(lambda: wait_for_tx_getdata(MAX_GETDATA_IN_FLIGHT))
-
+        for i in range(MAX_PEER_OBJECT_REQUEST_IN_FLIGHT):
+            p.send_message(msg_inv([CInv(t=MSG_TX, h=txids[i])]))
+        p.sync_with_ping()
+        self.bump_mocktime(NONPREF_PEER_TX_DELAY)
+        p.wait_until(lambda: p.tx_getdata_count >= MAX_PEER_OBJECT_REQUEST_IN_FLIGHT)
+        for i in range(MAX_PEER_OBJECT_REQUEST_IN_FLIGHT, len(txids)):
+            p.send_message(msg_inv([CInv(t=MSG_TX, h=txids[i])]))
+        p.sync_with_ping()
+        self.log.info("No more than {} requests should be seen within {} seconds after announcement".format(MAX_PEER_OBJECT_REQUEST_IN_FLIGHT, NONPREF_PEER_TX_DELAY + OVERLOADED_PEER_OBJECT_DELAY - 1))
+        self.bump_mocktime(NONPREF_PEER_TX_DELAY + OVERLOADED_PEER_OBJECT_DELAY - 1)
+        p.sync_with_ping()
         with p2p_lock:
-            assert_equal(p.tx_getdata_count, MAX_GETDATA_IN_FLIGHT)
+            assert_equal(p.tx_getdata_count, MAX_PEER_OBJECT_REQUEST_IN_FLIGHT)
+        self.log.info("If we wait {} seconds after announcement, we should eventually get more requests".format(NONPREF_PEER_TX_DELAY + OVERLOADED_PEER_OBJECT_DELAY))
+        self.bump_mocktime(1)
+        p.wait_until(lambda: p.tx_getdata_count == len(txids))
 
-        self.log.info("Now check that if we send a NOTFOUND for a transaction, we'll get one more request")
-        p.send_message(msg_notfound(vec=[CInv(t=1, h=txids[0])]))
-        p.wait_until(lambda: wait_for_tx_getdata(MAX_GETDATA_IN_FLIGHT + 1), timeout=10)
+    def test_expiry_fallback(self):
+        self.log.info('Check that expiry will select another peer for download')
+        TXID = 0xffaa
+        peer1 = self.nodes[0].add_p2p_connection(TestP2PConn())
+        peer2 = self.nodes[0].add_p2p_connection(TestP2PConn())
+        for p in [peer1, peer2]:
+            p.send_and_ping(msg_inv([CInv(t=MSG_TX, h=TXID)]))
+        self.bump_mocktime(NONPREF_PEER_TX_DELAY)
+        # One of the peers is asked for the tx
+        peer2.wait_until(lambda: sum(p.tx_getdata_count for p in [peer1, peer2]) == 1)
         with p2p_lock:
-            assert_equal(p.tx_getdata_count, MAX_GETDATA_IN_FLIGHT + 1)
+            peer_expiry, peer_fallback = (peer1, peer2) if peer1.tx_getdata_count == 1 else (peer2, peer1)
+            assert_equal(peer_fallback.tx_getdata_count, 0)
+        self.bump_mocktime(GETDATA_TX_INTERVAL + 1)  # Wait for request to peer_expiry to expire
+        peer_fallback.wait_until(lambda: peer_fallback.tx_getdata_count >= 1, timeout=1)
 
-        WAIT_TIME = TX_EXPIRY_INTERVAL // 2 + TX_EXPIRY_INTERVAL
-        self.log.info("if we wait about {} minutes, we should eventually get more requests".format(WAIT_TIME / 60))
-        self.bump_mocktime(WAIT_TIME)
-        p.wait_until(lambda: wait_for_tx_getdata(MAX_GETDATA_IN_FLIGHT + 2))
+    def test_disconnect_fallback(self):
+        self.log.info('Check that disconnect will select another peer for download')
+        TXID = 0xffbb
+        peer1 = self.nodes[0].add_p2p_connection(TestP2PConn())
+        peer2 = self.nodes[0].add_p2p_connection(TestP2PConn())
+        for p in [peer1, peer2]:
+            p.send_and_ping(msg_inv([CInv(t=MSG_TX, h=TXID)]))
+        self.bump_mocktime(NONPREF_PEER_TX_DELAY)
+        # One of the peers is asked for the tx
+        peer2.wait_until(lambda: sum(p.tx_getdata_count for p in [peer1, peer2]) == 1)
+        with p2p_lock:
+            peer_disconnect, peer_fallback = (peer1, peer2) if peer1.tx_getdata_count == 1 else (peer2, peer1)
+            assert_equal(peer_fallback.tx_getdata_count, 0)
+        peer_disconnect.peer_disconnect()
+        peer_disconnect.wait_for_disconnect()
+        peer_fallback.wait_until(lambda: peer_fallback.tx_getdata_count >= 1, timeout=1)
+
+    def test_notfound_fallback(self):
+        self.log.info('Check that notfounds will select another peer for download immediately')
+        TXID = 0xffdd
+        peer1 = self.nodes[0].add_p2p_connection(TestP2PConn())
+        peer2 = self.nodes[0].add_p2p_connection(TestP2PConn())
+        for p in [peer1, peer2]:
+            p.send_and_ping(msg_inv([CInv(t=MSG_TX, h=TXID)]))
+        self.bump_mocktime(NONPREF_PEER_TX_DELAY)
+        # One of the peers is asked for the tx
+        peer2.wait_until(lambda: sum(p.tx_getdata_count for p in [peer1, peer2]) == 1)
+        with p2p_lock:
+            peer_notfound, peer_fallback = (peer1, peer2) if peer1.tx_getdata_count == 1 else (peer2, peer1)
+            assert_equal(peer_fallback.tx_getdata_count, 0)
+        peer_notfound.send_and_ping(msg_notfound(vec=[CInv(MSG_TX, TXID)]))  # Send notfound, so that fallback peer is selected
+        peer_fallback.wait_until(lambda: peer_fallback.tx_getdata_count >= 1, timeout=1)
+
+    def test_preferred_inv(self):
+        self.log.info('Check that invs from preferred peers are downloaded immediately')
+        self.restart_node(0, extra_args=['-whitelist=noban@127.0.0.1'])
+        peer = self.nodes[0].add_p2p_connection(TestP2PConn())
+        peer.send_message(msg_inv([CInv(t=MSG_TX, h=0xff00ff00)]))
+        peer.wait_until(lambda: peer.tx_getdata_count >= 1, timeout=1)
 
     def test_spurious_notfound(self):
         self.log.info('Check that spurious notfound is ignored')
-        self.nodes[0].p2ps[0].send_message(msg_notfound(vec=[CInv(1, 1)]))
-
-    def test_oversized_notfound(self):
-        self.log.info('Check that oversized notfound increases misbehavior score')
-        oversized_notfound_count = MAX_NOTFOUND_SIZE + 1
-        invs = [CInv(t=1, h=i) for i in range(oversized_notfound_count)]
-        with self.nodes[0].assert_debug_log(["Misbehaving", f"notfound message size = {oversized_notfound_count}"]):
-            self.nodes[0].p2ps[0].send_message(msg_notfound(vec=invs))
-            self.nodes[0].p2ps[0].sync_with_ping()
+        self.restart_node(0)
+        peer = self.nodes[0].add_p2p_connection(TestP2PConn())
+        peer.send_and_ping(msg_notfound(vec=[CInv(MSG_TX, 1)]))
 
     def run_test(self):
         self.wallet = MiniWallet(self.nodes[0])
         self.wallet.rescan_utxos()
 
-        # Run each test against new bitcoind instances, as setting mocktimes has long-term effects on when
+        # Run tests that only need one peer-connection first, to avoid restarting the nodes
+        self.test_expiry_fallback()
+        self.test_disconnect_fallback()
+        self.test_notfound_fallback()
+        self.test_preferred_inv()
+        self.test_spurious_notfound()
+
+        # Run each test against new dashd instances, as setting mocktimes has long-term effects on when
         # the next trickle relay event happens.
-        for test in [self.test_spurious_notfound, self.test_oversized_notfound, self.test_in_flight_max, self.test_inv_block, self.test_tx_requests]:
+        for test in [self.test_in_flight_max, self.test_inv_block, self.test_tx_requests]:
             self.stop_nodes()
             self.start_nodes()
             self.connect_nodes(1, 0)

@@ -12,7 +12,6 @@
 
 #include <base58.h>
 #include <chainparams.h>
-#include <fs.h>
 #include <interfaces/node.h>
 #include <key_io.h>
 #include <policy/policy.h>
@@ -20,6 +19,8 @@
 #include <protocol.h>
 #include <script/script.h>
 #include <script/standard.h>
+#include <util/fs.h>
+#include <util/fs_helpers.h>
 #include <util/system.h>
 #include <util/time.h>
 
@@ -591,7 +592,7 @@ void openDebugLogfile()
 
 void openConfigfile()
 {
-    fs::path pathConfig = GetConfigFile(gArgs.GetPathArg("-conf", BITCOIN_CONF_FILENAME));
+    fs::path pathConfig = gArgs.GetConfigFilePath();
 
     /* Open dash.conf with the associated application */
     if (fs::exists(pathConfig)) {

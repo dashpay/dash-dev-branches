@@ -19,7 +19,6 @@
 #include <consensus/consensus.h>
 #include <crypto/sha256.h>
 #include <node/eviction.h>
-#include <fs.h>
 #include <i2p.h>
 #include <key.h>
 #include <memusage.h>
@@ -30,6 +29,7 @@
 #include <protocol.h>
 #include <random.h>
 #include <scheduler.h>
+#include <util/fs.h>
 #include <util/sock.h>
 #include <util/strencodings.h>
 #include <util/system.h>

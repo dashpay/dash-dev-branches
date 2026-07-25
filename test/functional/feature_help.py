@@ -4,6 +4,8 @@
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Verify that starting dashd with -h works as expected."""
 
+from pathlib import Path
+
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import assert_equal
 
@@ -48,6 +50,22 @@ class HelpTest(BitcoinTestFramework):
         output, _ = self.get_node_output(ret_code_expected=0)
         assert b'version' in output
         self.log.info(f"Version text received: {output[0:60]} (...)")
+
+        missing_datadir = Path(self.options.tmpdir) / "missing_crashinfo_datadir"
+        assert not missing_datadir.exists()
+
+        self.log.info("Start dashd with -printcrashinfo and a nonexistent datadir")
+        self.nodes[0].start(extra_args=["-printcrashinfo=invalid", f"-datadir={missing_datadir}"])
+        output, error = self.get_node_output(ret_code_expected=0)
+        assert b'Error while deserializing crash info' in output
+        assert_equal(error, b'')
+        assert not missing_datadir.exists()
+
+        self.log.info("Start dashd with a nonexistent datadir and no -printcrashinfo")
+        self.nodes[0].start(extra_args=[f"-datadir={missing_datadir}"])
+        _, error = self.get_node_output(ret_code_expected=1)
+        assert b'Specified data directory' in error
+        assert not missing_datadir.exists()
 
         # Test that arguments not in the help results in an error
         self.log.info("Start dashdd with -fakearg to make sure it does not start")

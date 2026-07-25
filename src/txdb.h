@@ -10,7 +10,7 @@
 #include <coins.h>
 #include <dbwrapper.h>
 #include <sync.h>
-#include <fs.h>
+#include <util/fs.h>
 
 #include <memory>
 #include <optional>

@@ -51,7 +51,7 @@ struct MessageProcessingResult
     //! @m_transactions will relay transactions to peers which is ready to accept it (some peers does not accept transactions)
     std::vector<uint256> m_transactions;
 
-    //! @m_to_erase triggers EraseObjectRequest from PeerManager for this inventory if not nullopt
+    //! @m_to_erase completes the sending peer's pending request for this inventory if not nullopt
     std::optional<CInv> m_to_erase;
 
     MessageProcessingResult() = default;

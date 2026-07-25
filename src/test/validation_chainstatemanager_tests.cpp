@@ -397,7 +397,6 @@ struct SnapshotTestSetup : TestChain100Setup {
             BOOST_CHECK_EQUAL(chainman.GetAll().size(), 0);
             const ChainstateManager::Options chainman_opts{
                 .chainparams = ::Params(),
-                .adjusted_time_callback = GetAdjustedTime,
             };
             // For robustness, ensure the old manager is destroyed before creating a
             // new one.

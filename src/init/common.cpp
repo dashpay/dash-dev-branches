@@ -8,13 +8,14 @@
 
 #include <bls/bls.h>
 #include <clientversion.h>
-#include <fs.h>
 #include <logging.h>
 #include <node/interface_ui.h>
 #include <tinyformat.h>
-#include <util/time.h>
+#include <util/fs.h>
+#include <util/fs_helpers.h>
 #include <util/string.h>
 #include <util/system.h>
+#include <util/time.h>
 #include <util/translation.h>
 
 #include <algorithm>
@@ -43,7 +44,7 @@ void AddLoggingArgs(ArgsManager& argsman)
 void SetLoggingOptions(const ArgsManager& args)
 {
     LogInstance().m_print_to_file = !args.IsArgNegated("-debuglogfile");
-    LogInstance().m_file_path = AbsPathForConfigVal(args.GetPathArg("-debuglogfile", DEFAULT_DEBUGLOGFILE));
+    LogInstance().m_file_path = AbsPathForConfigVal(args, args.GetPathArg("-debuglogfile", DEFAULT_DEBUGLOGFILE));
     LogInstance().m_print_to_console = args.GetBoolArg("-printtoconsole", !args.GetBoolArg("-daemon", false));
     LogInstance().m_log_timestamps = args.GetBoolArg("-logtimestamps", DEFAULT_LOGTIMESTAMPS);
     LogInstance().m_log_time_micros = args.GetBoolArg("-logtimemicros", DEFAULT_LOGTIMEMICROS);
@@ -118,7 +119,7 @@ bool StartLogging(const ArgsManager& args)
     LogPrintf("Using data directory %s\n", fs::PathToString(gArgs.GetDataDirNet()));
 
     // Only log conf file usage message if conf file actually exists.
-    fs::path config_file_path = GetConfigFile(args.GetPathArg("-conf", BITCOIN_CONF_FILENAME));
+    fs::path config_file_path = args.GetConfigFilePath();
     if (fs::exists(config_file_path)) {
         LogPrintf("Config file: %s\n", fs::PathToString(config_file_path));
     } else if (args.IsArgSet("-conf")) {

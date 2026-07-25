@@ -17,7 +17,6 @@
 #include <deploymentinfo.h>
 #include <deploymentstatus.h>
 #include <evo/chainhelper.h>
-#include <fs.h>
 #include <index/blockfilterindex.h>
 #include <index/coinstatsindex.h>
 #include <index/timestampindex.h>
@@ -41,6 +40,7 @@
 #include <undo.h>
 #include <univalue.h>
 #include <util/check.h>
+#include <util/fs.h>
 #include <util/strencodings.h>
 #include <util/system.h>
 #include <util/translation.h>

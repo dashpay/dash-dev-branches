@@ -536,6 +536,7 @@ public:
     SERIALIZE_METHODS(CInv, obj) { READWRITE(obj.type, obj.hash); }
 
     friend bool operator<(const CInv& a, const CInv& b);
+    friend bool operator==(const CInv& a, const CInv& b) { return a.type == b.type && a.hash == b.hash; }
 
     bool IsKnownType() const;
     std::string GetCommand() const;

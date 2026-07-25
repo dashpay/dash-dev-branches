@@ -83,6 +83,7 @@ echo "=========================="
 
 cd "${BASE_ROOT_DIR}/build-ci/dashcore-${BUILD_TARGET}"
 iwyu_tool.py \
+  "src/common/init.cpp" \
   "src/common/url.cpp" \
   "src/compat" \
   "src/dbwrapper.cpp" \

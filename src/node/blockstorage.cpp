@@ -9,12 +9,12 @@
 #include <clientversion.h>
 #include <consensus/validation.h>
 #include <flatfile.h>
-#include <fs.h>
 #include <hash.h>
 #include <pow.h>
 #include <shutdown.h>
 #include <streams.h>
 #include <undo.h>
+#include <util/fs.h>
 #include <util/system.h>
 #include <validation.h>
 #include <walletinitinterface.h>
@@ -926,8 +926,7 @@ void ThreadImport(ChainstateManager& chainman, std::vector<fs::path> vImportFile
         for (Chainstate* chainstate : WITH_LOCK(::cs_main, return chainman.GetAll())) {
             BlockValidationState state;
             if (!chainstate->ActivateBestChain(state, nullptr)) {
-                LogPrintf("Failed to connect best block (%s)\n", state.ToString());
-                StartShutdown();
+                AbortNode(strprintf("Failed to connect best block (%s)", state.ToString()));
                 return;
             }
         }
