@@ -102,11 +102,10 @@ using interfaces::WalletLoader;
 
 namespace node {
 namespace {
-std::vector<CScript> GetOwnerPayoutScripts(const CDeterministicMN& dmn)
+std::vector<CScript> GetOwnerPayoutScripts(const CDeterministicMNState& state)
 {
     std::vector<CScript> ret;
-    for (const auto& payout : GetOwnerPayouts(dmn.pdmnState->nVersion, dmn.pdmnState->scriptPayout,
-                                              dmn.pdmnState->payouts)) {
+    for (const auto& payout : GetOwnerPayouts(state)) {
         ret.emplace_back(payout.scriptPayout);
     }
     return ret;
@@ -123,8 +122,8 @@ public:
     MnEntryImpl(const CDeterministicMNCPtr& dmn) :
         MnEntry{dmn},
         m_dmn{Assert(dmn)},
-        m_script_payouts{GetOwnerPayoutScripts(*m_dmn)},
-        m_script_payout{m_script_payouts.front()}
+        m_script_payouts{GetOwnerPayoutScripts(*m_dmn->pdmnState)},
+        m_script_payout{m_script_payouts.empty() ? CScript() : m_script_payouts.front()}
     {
     }
     ~MnEntryImpl() = default;

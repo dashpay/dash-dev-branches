@@ -39,6 +39,7 @@ static const CRPCConvertParam vRPCConvertParams[] =
     { "generatetodescriptor", 0, "num_blocks" },
     { "generatetodescriptor", 2, "maxtries" },
     { "generateblock", 1, "transactions" },
+    { "generateblock", 2, "submit" },
 #endif // ENABLE_MINER
     { "getnetworkhashps", 0, "nblocks" },
     { "getnetworkhashps", 1, "height" },
@@ -104,6 +105,9 @@ static const CRPCConvertParam vRPCConvertParams[] =
     { "sendmany", 10, "fee_rate" },
     { "sendmany", 11, "verbose" },
     { "deriveaddresses", 1, "range" },
+    { "scanblocks", 1, "scanobjects" },
+    { "scanblocks", 2, "start_height" },
+    { "scanblocks", 3, "stop_height" },
     { "scantxoutset", 1, "scanobjects" },
     { "addmultisigaddress", 0, "nrequired" },
     { "addmultisigaddress", 1, "keys" },
@@ -469,10 +473,10 @@ UniValue RPCConvertNamedValues(std::string strMethod, const std::vector<std::str
     }
 
     if (!positional_args.empty()) {
-        // Use __pushKV instead of pushKV to avoid overwriting an explicit
+        // Use pushKVEnd instead of pushKV to avoid overwriting an explicit
         // "args" value with an implicit one. Let the RPC server handle the
         // request as given.
-        params.__pushKV("args", positional_args);
+        params.pushKVEnd("args", positional_args);
     }
 
     return params;

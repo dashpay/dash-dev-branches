@@ -2,24 +2,41 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
+#include <test/util/llmq_tests.h>
 #include <test/util/setup_common.h>
 
 #include <bls/bls.h>
 #include <chain.h>
 #include <chainlock/chainlock.h>
 #include <chainparams.h>
+#include <compat/endian.h>
+#include <consensus/merkle.h>
 #include <consensus/validation.h>
 #include <evo/cbtx.h>
+#include <evo/evodb.h>
+#include <evo/specialtx.h>
 #include <evo/specialtxman.h>
+#include <hash.h>
+#include <llmq/blockprocessor.h>
+#include <llmq/commitment.h>
 #include <llmq/context.h>
-#include <llmq/quorumsman.h>
+#include <llmq/params.h>
+#include <primitives/block.h>
+#include <primitives/transaction.h>
 #include <uint256.h>
 #include <validation.h>
 
 #include <cstdint>
 #include <limits>
+#include <string>
+#include <tuple>
+#include <utility>
+#include <vector>
 
 #include <boost/test/unit_test.hpp>
+
+using namespace llmq;
+using namespace llmq::testutils;
 
 BOOST_AUTO_TEST_SUITE(evo_cbtx_tests)
 
@@ -65,6 +82,140 @@ BOOST_FIXTURE_TEST_CASE(check_cbtx_best_chainlock_rejects_excessive_height_diff,
     BlockValidationState state_big;
     BOOST_CHECK(!CheckCbTxBestChainlock(cbTx, &pindex, consensus_params, chain, qman, chainlocks, state_big));
     BOOST_CHECK_EQUAL(state_big.GetRejectReason(), "bad-cbtx-cldiff");
+}
+
+namespace {
+// Mirrors private DB keys in llmq/blockprocessor.cpp so tests can install
+// mined-commitment state without a full DKG/mining path.
+static const std::string DB_MINED_COMMITMENT = "q_mc";
+static const std::string DB_MINED_COMMITMENT_BY_INVERSED_HEIGHT = "q_mcih";
+
+std::tuple<std::string, Consensus::LLMQType, uint32_t> BuildInversedHeightKey(Consensus::LLMQType llmqType, int nMinedHeight)
+{
+    return std::make_tuple(DB_MINED_COMMITMENT_BY_INVERSED_HEIGHT, llmqType,
+                           htobe32_internal(std::numeric_limits<uint32_t>::max() - nMinedHeight));
+}
+
+// Store a mined commitment as if it was mined at `mined_height` for the genesis
+// quorum base (quorumHeight 0). GetMinedCommitmentsUntilBlock iterates inverted-
+// height keys in [pindex->nHeight, 0), so scan height must be >= mined_height
+// and mined_height must be > 0 for the entry to be returned.
+void WriteMinedCommitment(CEvoDB& evoDb, const CFinalCommitment& qc, const uint256& mined_block_hash, int mined_height)
+{
+    assert(mined_height > 0);
+    evoDb.Write(std::make_pair(DB_MINED_COMMITMENT, std::make_pair(qc.llmqType, qc.quorumHash)),
+                std::make_pair(qc, mined_block_hash));
+    evoDb.Write(BuildInversedHeightKey(qc.llmqType, mined_height), /*quorumHeight=*/0);
+}
+
+CTransactionRef MakeCommitmentTx(const CFinalCommitment& qc, int height)
+{
+    CFinalCommitmentTxPayload payload;
+    payload.nHeight = height;
+    payload.commitment = qc;
+
+    CMutableTransaction tx;
+    tx.nVersion = 3;
+    tx.nType = TRANSACTION_QUORUM_COMMITMENT;
+    SetTxPayload(tx, payload);
+    return MakeTransactionRef(std::move(tx));
+}
+
+uint256 CalcQuorumMerkleRootForCommitment(const CFinalCommitment& qc)
+{
+    std::vector<uint256> hashes{::SerializeHash(qc)};
+    bool mutated{false};
+    return ComputeMerkleRoot(hashes, &mutated);
+}
+
+CFinalCommitment MakeDistinctCommitment(const Consensus::LLMQParams& params, const uint256& quorum_hash, uint8_t salt)
+{
+    CFinalCommitment qc = CreateValidCommitment(params, quorum_hash);
+    // Force a deterministic difference even if random BLS material collides.
+    qc.quorumVvecHash = uint256{std::vector<unsigned char>(32, salt)};
+    return qc;
+}
+
+CBlock MakeEmptyBlock()
+{
+    CBlock block;
+    block.vtx.emplace_back(MakeTransactionRef(CMutableTransaction{}));
+    return block;
+}
+
+void ExpectQuorumMerkleRoot(const CBlock& block, const CBlockIndex* pindex, const CQuorumBlockProcessor& qblockman,
+                            const CFinalCommitment& qc)
+{
+    uint256 merkle_root;
+    BlockValidationState state;
+    BOOST_REQUIRE(CalcCbTxMerkleRootQuorums(block, pindex, qblockman, merkle_root, state));
+    BOOST_CHECK_EQUAL(merkle_root.ToString(), CalcQuorumMerkleRootForCommitment(qc).ToString());
+}
+
+const CBlockIndex* GenesisIndex(const node::NodeContext& node)
+{
+    LOCK(cs_main);
+    return node.chainman->ActiveChain()[0];
+}
+} // anonymous namespace
+
+// Activate DIP0003 immediately so GetCommitmentsFromBlock accepts the payload
+// at a low height without a long fake chain.
+struct Dip3ActiveSetup : public RegTestingSetup {
+    Dip3ActiveSetup() :
+        RegTestingSetup({"-dip3params=1:1"})
+    {
+    }
+};
+
+// End to end: disconnecting the block that mined a commitment must make a replacement
+// commitment for the same quorum base visible, even though the active base-block list
+// that keys the caches is unchanged across the swap.
+BOOST_FIXTURE_TEST_CASE(qc_hash_cache_invalidated_by_undoblock, Dip3ActiveSetup)
+{
+    auto& evoDb = *Assert(m_node.evodb);
+    auto& qblockman = *Assert(m_node.llmq_ctx)->quorum_block_processor;
+    const auto& params = GetLLMQParams(Consensus::LLMQType::LLMQ_TEST);
+
+    const CBlockIndex* pindex_genesis = GenesisIndex(m_node);
+    BOOST_REQUIRE(pindex_genesis != nullptr);
+    const uint256 quorum_hash = pindex_genesis->GetBlockHash();
+
+    const CFinalCommitment qc_a = MakeDistinctCommitment(params, quorum_hash, /*salt=*/0x33);
+    const CFinalCommitment qc_b = MakeDistinctCommitment(params, quorum_hash, /*salt=*/0x44);
+    BOOST_REQUIRE(::SerializeHash(qc_a) != ::SerializeHash(qc_b));
+
+    const uint256 mined_hash_a = GetTestBlockHash(11);
+    const uint256 mined_hash_b = GetTestBlockHash(12);
+    constexpr int mined_height = 1;
+
+    {
+        auto dbTx = evoDb.BeginTransaction();
+        WriteMinedCommitment(evoDb, qc_a, mined_hash_a, mined_height);
+        dbTx->Commit();
+    }
+
+    CBlockIndex pindex_mined;
+    pindex_mined.nHeight = mined_height;
+    pindex_mined.pprev = const_cast<CBlockIndex*>(pindex_genesis);
+    pindex_mined.phashBlock = &mined_hash_a;
+
+    CBlock block_with_qc = MakeEmptyBlock();
+    block_with_qc.vtx.emplace_back(MakeCommitmentTx(qc_a, mined_height));
+    const CBlock empty_block = MakeEmptyBlock();
+
+    ExpectQuorumMerkleRoot(empty_block, &pindex_mined, qblockman, qc_a);
+
+    {
+        LOCK(cs_main);
+        auto dbTx = evoDb.BeginTransaction();
+        BOOST_REQUIRE(qblockman.UndoBlock(block_with_qc, &pindex_mined));
+        // Install the replacement while the disconnect transaction is still open.
+        WriteMinedCommitment(evoDb, qc_b, mined_hash_b, mined_height);
+        dbTx->Commit();
+    }
+
+    ExpectQuorumMerkleRoot(empty_block, &pindex_mined, qblockman, qc_b);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

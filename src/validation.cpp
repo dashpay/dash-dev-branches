@@ -3096,6 +3096,7 @@ CBlockIndex* Chainstate::FindMostWorkChain()
                     } else if (fConflictingChain) {
                         // We don't need data for conflciting blocks
                         pindexFailed->nStatus |= BLOCK_CONFLICT_CHAINLOCK;
+                        m_blockman.m_dirty_blockindex.insert(pindexFailed);
                     } else if (fMissingData) {
                         // If we're missing data, then add back to m_blocks_unlinked,
                         // so that if the block arrives in the future we can try adding
@@ -5826,6 +5827,15 @@ bool IsBIP30Unspendable(const CBlockIndex& block_index)
 {
     // Dash blockchain does not have any BIP30 violations
     return false;
+}
+
+[[nodiscard]] uint16_t DeploymentToProtxVersion(gsl::not_null<const CBlockIndex*> pindexPrev,
+                                                const ChainstateManager& chainman, std::optional<bool> is_basic_override)
+{
+    return ProTxVersion::GetMax(
+        is_basic_override ? *is_basic_override
+                          : DeploymentActiveAfter(pindexPrev, chainman.GetConsensus(), Consensus::DEPLOYMENT_V19),
+        DeploymentActiveAfter(pindexPrev, chainman, Consensus::DEPLOYMENT_V24));
 }
 
 bool ChainstateManager::DetectSnapshotChainstate(CTxMemPool* mempool)

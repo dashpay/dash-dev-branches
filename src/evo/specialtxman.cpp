@@ -45,6 +45,12 @@ static bool SetStateVersion(CDeterministicMNState& state_mn, uint16_t nVersion, 
                             BlockValidationState& state)
 {
     const bool needs_extended = nVersion >= ProTxVersion::ExtAddr;
+    // Before the early-return: ProUpServ pre-sets nVersion, so migrate scriptPayout into the ExtAddr
+    // payout list here or it would be skipped.
+    if (needs_extended && state_mn.payouts.empty() && !state_mn.scriptPayout.empty()) {
+        state_mn.payouts = LegacyPayoutAsList(state_mn.scriptPayout);
+        state_mn.scriptPayout.clear();
+    }
     if (state_mn.nVersion == nVersion && state_mn.netInfo->CanStorePlatform() == needs_extended) {
         return true;
     }
@@ -488,8 +494,8 @@ bool CSpecialTxProcessor::RebuildListFromBlock(const CBlock& block, gsl::not_nul
             if (operator_changed) {
                 newState->pubKeyOperator.SetLegacy(target_version == ProTxVersion::LegacyBLS);
             }
-            if (target_version >= ProTxVersion::MultiPayout) {
-                newState->payouts = opt_proTx->nVersion >= ProTxVersion::MultiPayout
+            if (target_version >= ProTxVersion::ExtAddr) {
+                newState->payouts = opt_proTx->nVersion >= ProTxVersion::ExtAddr
                     ? opt_proTx->payouts
                     : LegacyPayoutAsList(opt_proTx->scriptPayout);
                 newState->scriptPayout.clear();
@@ -516,8 +522,15 @@ bool CSpecialTxProcessor::RebuildListFromBlock(const CBlock& block, gsl::not_nul
             }
             auto newState = std::make_shared<CDeterministicMNState>(*dmn->pdmnState);
             const uint16_t old_version{static_cast<uint16_t>(newState->nVersion)};
+            // ResetOperatorFields() drops nVersion back to LegacyBLS. Post-v24 the state version must be
+            // preserved (never silently downgraded), so pick the target the same max-based way the registrar
+            // path does and restore it below. Pre-v24 keep the historical reset-to-legacy behaviour.
+            uint16_t target_version{ProTxVersion::LegacyBLS};
+            if (is_v24_deployed) {
+                target_version = std::max<uint16_t>(old_version, opt_proTx->nVersion);
+            }
             newState->ResetOperatorFields();
-            if (old_version >= ProTxVersion::MultiPayout && !SetStateVersion(*newState, old_version, dmn->nType, state)) {
+            if (target_version >= ProTxVersion::BasicBLS && !SetStateVersion(*newState, target_version, dmn->nType, state)) {
                 return false;
             }
             newState->BanIfNotBanned(nHeight);
@@ -965,8 +978,8 @@ static bool CheckHashSig(const ProTx& proTx, const CBLSPublicKey& pubKey, TxVali
 }
 
 template <typename ProTx>
-static std::optional<ProTx> GetValidatedPayload(const CTransaction& tx, gsl::not_null<const CBlockIndex*> pindexPrev,
-                                                const ChainstateManager& chainman, TxValidationState& state)
+std::optional<ProTx> GetValidatedPayload(const CTransaction& tx, gsl::not_null<const CBlockIndex*> pindexPrev,
+                                         const ChainstateManager& chainman, TxValidationState& state)
 {
     if (tx.nType != ProTx::SPECIALTX_TYPE) {
         state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-protx-type");
@@ -978,7 +991,11 @@ static std::optional<ProTx> GetValidatedPayload(const CTransaction& tx, gsl::not
         state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-protx-payload");
         return std::nullopt;
     }
-    if (!opt_ptx->IsTriviallyValid(pindexPrev, chainman, state)) {
+    if (opt_ptx->nVersion > DeploymentToProtxVersion(pindexPrev, chainman)) {
+        state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-protx-version");
+        return std::nullopt;
+    }
+    if (!opt_ptx->IsTriviallyValid(state)) {
         // pass the state returned by the function above
         return std::nullopt;
     }
@@ -988,15 +1005,13 @@ static std::optional<ProTx> GetValidatedPayload(const CTransaction& tx, gsl::not
 /**
  * Validates potential changes to masternode state version by ProTx transaction version
  * @param[in]  pindexPrev    Previous block index to validate DEPLOYMENT_V24 activation
- * @param[in]  tx_type       Special transaction type
  * @param[in]  state_version Current masternode state version
  * @param[in]  tx_version    Proposed transaction version
  * @param[out] state         This may be set to an Error state if any error occurred processing them
  * @returns                  true if version change is valid or DEPLOYMENT_V24 is not active
  */
-static bool IsVersionChangeValid(gsl::not_null<const CBlockIndex*> pindexPrev, const uint16_t tx_type,
-                                 const uint16_t state_version, const uint16_t tx_version,
-                                 const ChainstateManager& chainman, TxValidationState& state)
+static bool IsVersionChangeValid(gsl::not_null<const CBlockIndex*> pindexPrev, const uint16_t state_version,
+                                 const uint16_t tx_version, const ChainstateManager& chainman, TxValidationState& state)
 {
     if (!DeploymentActiveAfter(pindexPrev, chainman, Consensus::DEPLOYMENT_V24)) {
         // New restrictions only apply after v24 deployment
@@ -1006,19 +1021,6 @@ static bool IsVersionChangeValid(gsl::not_null<const CBlockIndex*> pindexPrev, c
     if (state_version >= ProTxVersion::BasicBLS && tx_version == ProTxVersion::LegacyBLS) {
         // Don't allow legacy scheme versioned transactions after upgrading to basic scheme
         return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-protx-version-downgrade");
-    }
-
-    if (state_version == ProTxVersion::LegacyBLS && tx_version > ProTxVersion::BasicBLS) {
-        // Nodes using the legacy scheme must first upgrade to the basic scheme before upgrading further
-        return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-protx-version-upgrade");
-    }
-
-    if (tx_type != TRANSACTION_PROVIDER_UPDATE_SERVICE && tx_version == ProTxVersion::ExtAddr) {
-        // Only new entries (ProRegTx) and service updates (ProUpServTx) can use ExtAddr versioning
-        return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-protx-version-tx-type");
-    }
-    if (tx_type != TRANSACTION_PROVIDER_UPDATE_REGISTRAR && tx_version == ProTxVersion::MultiPayout) {
-        return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-protx-version-tx-type");
     }
 
     return true;
@@ -1095,9 +1097,9 @@ bool CheckProRegTx(const CTransaction& tx, gsl::not_null<const CBlockIndex*> pin
 
     // don't allow reuse of collateral key for other keys (don't allow people to put the collateral key onto an online server)
     // this check applies to internal and external collateral, but internal collaterals are not necessarily a P2PKH
-    if (!IsPayoutListKeySafe(GetOwnerPayouts(opt_ptx->nVersion, opt_ptx->scriptPayout, opt_ptx->payouts),
+    if (!IsPayoutListKeySafe(GetOwnerPayouts(*opt_ptx),
                              collateralTxDest, opt_ptx->keyIDOwner, opt_ptx->keyIDVoting,
-                             opt_ptx->nVersion >= ProTxVersion::MultiPayout, state)) return false;
+                             opt_ptx->nVersion >= ProTxVersion::ExtAddr, state)) return false;
 
     if (pindexPrev) {
         auto mnList = dmnman.GetListForBlock(pindexPrev);
@@ -1185,7 +1187,7 @@ bool CheckProUpServTx(const CTransaction& tx, gsl::not_null<const CBlockIndex*> 
         return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-protx-hash");
     }
 
-    if (!IsVersionChangeValid(pindexPrev, tx.nType, dmn->pdmnState->nVersion, opt_ptx->nVersion, chainman, state)) {
+    if (!IsVersionChangeValid(pindexPrev, dmn->pdmnState->nVersion, opt_ptx->nVersion, chainman, state)) {
         // pass the state returned by the function above
         return false;
     }
@@ -1254,12 +1256,12 @@ bool CheckProUpRegTx(const CTransaction& tx, gsl::not_null<const CBlockIndex*> p
         return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-protx-hash");
     }
 
-    if (!IsVersionChangeValid(pindexPrev, tx.nType, dmn->pdmnState->nVersion, opt_ptx->nVersion, chainman, state)) {
+    if (!IsVersionChangeValid(pindexPrev, dmn->pdmnState->nVersion, opt_ptx->nVersion, chainman, state)) {
         // pass the state returned by the function above
         return false;
     }
 
-    const auto owner_payouts = GetOwnerPayouts(opt_ptx->nVersion, opt_ptx->scriptPayout, opt_ptx->payouts);
+    const auto owner_payouts = GetOwnerPayouts(*opt_ptx);
     if (!IsPayoutListTriviallyValid(owner_payouts, dmn->pdmnState->keyIDOwner, opt_ptx->keyIDVoting, state)) return false;
 
     Coin coin;
@@ -1274,7 +1276,7 @@ bool CheckProUpRegTx(const CTransaction& tx, gsl::not_null<const CBlockIndex*> p
         return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-protx-collateral-dest");
     }
     const bool check_payout_collateral_reuse{
-        std::max<uint16_t>(dmn->pdmnState->nVersion, opt_ptx->nVersion) >= ProTxVersion::MultiPayout};
+        std::max<uint16_t>(dmn->pdmnState->nVersion, opt_ptx->nVersion) >= ProTxVersion::ExtAddr};
     if (!IsPayoutListKeySafe(owner_payouts, collateralTxDest, dmn->pdmnState->keyIDOwner, opt_ptx->keyIDVoting,
                              check_payout_collateral_reuse, state)) return false;
 
@@ -1318,7 +1320,7 @@ bool CheckProUpRevTx(const CTransaction& tx, gsl::not_null<const CBlockIndex*> p
         return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-protx-hash");
     }
 
-    if (!IsVersionChangeValid(pindexPrev, tx.nType, dmn->pdmnState->nVersion, opt_ptx->nVersion, chainman, state)) {
+    if (!IsVersionChangeValid(pindexPrev, dmn->pdmnState->nVersion, opt_ptx->nVersion, chainman, state)) {
         // pass the state returned by the function above
         return false;
     }

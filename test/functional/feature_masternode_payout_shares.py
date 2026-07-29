@@ -133,11 +133,11 @@ class MasternodePayoutSharesTest(DashTestFramework):
         mn.set_params(proTxHash=protx_hash)
 
         raw = node.getrawtransaction(protx_hash, 1)
-        assert_equal(raw["proRegTx"]["version"], 4)
+        assert_equal(raw["proRegTx"]["version"], 3)
         assert_equal(payout_address_rewards(raw["proRegTx"]["payouts"]), payouts)
 
         info = node.protx("info", protx_hash)
-        assert_equal(info["state"]["version"], 4)
+        assert_equal(info["state"]["version"], 3)
         assert_equal(payout_address_rewards(info["state"]["payouts"]), payouts)
         assert "payoutAddress" not in info["state"]
         assert_equal(node.masternodelist("payee")[f"{mn.collateral_txid}-{mn.collateral_vout}"], f"{payout1}, {payout2}")
@@ -201,7 +201,7 @@ class MasternodePayoutSharesTest(DashTestFramework):
         self.generate(node, 1, sync_fun=self.no_op)
 
         update_raw = node.getrawtransaction(update_hash, 1)
-        assert_equal(update_raw["proUpRegTx"]["version"], 4)
+        assert_equal(update_raw["proUpRegTx"]["version"], 3)
         assert_equal(payout_address_rewards(update_raw["proUpRegTx"]["payouts"]), updated_payouts)
         assert_equal(payout_address_rewards(node.protx("info", protx_hash)["state"]["payouts"]), updated_payouts)
 
@@ -221,7 +221,7 @@ class MasternodePayoutSharesTest(DashTestFramework):
         self.generate(node, 1, sync_fun=self.no_op)
 
         info = node.protx("info", protx_hash)
-        assert_equal(info["state"]["version"], 4)
+        assert_equal(info["state"]["version"], 3)
         assert_equal(payout_address_rewards(info["state"]["payouts"]), updated_payouts)
 
         gbt_payees = [p for p in node.getblocktemplate()["masternode"] if p["script"] != "6a"]
@@ -262,7 +262,7 @@ class MasternodePayoutSharesTest(DashTestFramework):
         self.generate(node, 1, sync_fun=self.no_op)
 
         info = node.protx("info", protx_hash)
-        assert_equal(info["state"]["version"], 4)
+        assert_equal(info["state"]["version"], 3)
         assert_equal(payout_address_rewards(info["state"]["payouts"]), updated_payouts)
 
 

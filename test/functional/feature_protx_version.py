@@ -4,9 +4,10 @@
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 '''
-feature_dip3_v19.py
+feature_protx_version.py
 
-Checks DIP3 for v19
+Checks ProTx versioning across the v19 (basic BLS) and v24 (extended
+addresses) forks.
 
 '''
 from io import BytesIO
@@ -19,7 +20,8 @@ from test_framework.test_framework import (
     MasternodeInfo,
 )
 from test_framework.util import (
-    assert_equal
+    assert_equal,
+    softfork_active,
 )
 
 
@@ -44,7 +46,7 @@ class TestP2PConn(P2PInterface):
         return self.last_mnlistdiff
 
 
-class DIP3V19Test(DashTestFramework):
+class ProTxVersionTest(DashTestFramework):
     def add_options(self, parser):
         self.add_wallet_options(parser)
 
@@ -52,6 +54,7 @@ class DIP3V19Test(DashTestFramework):
         self.extra_args = [[
             '-deprecatedrpc=legacy_mn',
             '-testactivationheight=v19@200',
+            f'-vbparams=v24:{self.mocktime}:999999999999:450:10:8:6:5:0',
         ]] * 6
         self.set_dash_test_params(6, 5, evo_count=2, extra_args=self.extra_args)
 
@@ -73,6 +76,11 @@ class DIP3V19Test(DashTestFramework):
 
         extra_legacy_mn: MasternodeInfo = self.dynamically_add_masternode()
         assert extra_legacy_mn is not None
+
+        # A second legacy-scheme masternode kept alive (never revoked) until v24 activates, so that
+        # the update_registrar migration path (legacy state -> basic scheme) can be exercised below.
+        migrate_legacy_mn: MasternodeInfo = self.dynamically_add_masternode()
+        assert migrate_legacy_mn is not None
 
         mn_list_before = self.nodes[0].masternodelist()
         pubkeyoperator_list_before = set([mn_list_before[e]["pubkeyoperator"] for e in mn_list_before])
@@ -121,6 +129,12 @@ class DIP3V19Test(DashTestFramework):
         for i in range(6):
             new_mn: MasternodeInfo = self.dynamically_add_masternode(evo=False, rnd=(10 + i))
             assert new_mn is not None
+            if i == 0:
+                # Kept at its basic (v2) state and revoked after v24 to check the version is preserved
+                basic_mn = new_mn
+            if i == 1:
+                # Kept at its basic (v2) state and update_service'd after v24 to check the payout is preserved
+                payout_mn = new_mn
 
         # mine more quorums and make sure everything still works
         prev_quorum = None
@@ -129,6 +143,87 @@ class DIP3V19Test(DashTestFramework):
             assert prev_quorum != quorum
 
         self.wait_for_chainlocked_block_all_nodes(self.nodes[0].getbestblockhash())
+
+        self.test_protx_v24_versioning(new_mn, migrate_legacy_mn, basic_mn, payout_mn)
+
+    def test_protx_v24_versioning(self, mn: MasternodeInfo, legacy_mn: MasternodeInfo, basic_mn: MasternodeInfo, payout_mn: MasternodeInfo):
+        assert not softfork_active(self.nodes[0], 'v24')
+        self.activate_by_name('v24', slow_mode=False)
+        self.log.info("Activated v24 at height:" + str(self.nodes[0].getblockcount()))
+
+        node = self.nodes[0]
+
+        self.log.info("update_service bumping a basic (v2) masternode to v3 preserves its owner payout")
+        state = node.protx('info', payout_mn.proTxHash)['state']
+        assert_equal(state['version'], 2)
+        payout_before = state['payoutAddress']
+        node.sendtoaddress(payout_mn.fundsAddr, 1)
+        self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
+        self.generate(node, 1)
+        payout_mn.update_service(node, submit=True, addrs_core_p2p=[f'127.0.0.1:{payout_mn.nodePort}'])
+        self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
+        self.generate(node, 1)
+        state = node.protx('info', payout_mn.proTxHash)['state']
+        assert_equal(state['version'], 3)
+        assert_equal([p['address'] for p in state['payouts']], [payout_before])
+        node.sendtoaddress(mn.fundsAddr, 1)
+        self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
+        self.generate(node, 1)
+
+        self.log.info("A basic-scheme masternode reports version 2 before any post-v24 update")
+        assert_equal(node.protx('info', mn.proTxHash)['state']['version'], 2)
+
+        self.log.info("A v3 ProUpRegTx reusing the basic operator key is accepted, but leaves the "
+                      "stored masternode version at 3 even no operator key change took place")
+        protx_result = mn.update_registrar(node, submit=True, fundsAddr=mn.fundsAddr)
+        self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
+        tip = self.generate(node, 1)[0]
+        assert_equal(node.getrawtransaction(protx_result, 1, tip)['proUpRegTx']['version'], 3)
+        assert_equal(node.protx('info', mn.proTxHash)['state']['version'], 3)
+
+        self.log.info("Migration v1 [legacy] protx masternode to v3 by update-registar")
+        assert_equal(node.protx('info', legacy_mn.proTxHash)['state']['version'], 1)
+        node.sendtoaddress(legacy_mn.fundsAddr, 1)
+        self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
+        self.generate(node, 1)
+        # Switch to a fresh basic-scheme operator key and the non-legacy update_registrar RPC
+        legacy_mn.legacy = False
+        new_operator = node.bls('generate') # basic (non-legacy) scheme
+        legacy_mn.pubKeyOperator = new_operator['public']
+        legacy_mn.keyOperator = new_operator['secret']
+        migrate_result = legacy_mn.update_registrar(node, submit=True, fundsAddr=legacy_mn.fundsAddr)
+        self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
+        tip = self.generate(node, 1, sync_fun=self.no_op)[0]
+        assert_equal(node.getrawtransaction(migrate_result, 1, tip)['proUpRegTx']['version'], 3)
+        assert_equal(node.protx('info', legacy_mn.proTxHash)['state']['version'], 3)
+        # Changing the operator key PoSe-bans the masternode, which results in disconnects. Wait for
+        # them to happen and then reconnect its node back to let sync_all finish correctly.
+        assert legacy_mn.nodeIdx is not None
+        self.wait_until(lambda: self.nodes[legacy_mn.nodeIdx].getconnectioncount() == 0)
+        self.connect_nodes(legacy_mn.nodeIdx, 0)
+        self.sync_all()
+
+        self.test_revoke_protx(mn.nodeIdx, mn)
+
+        self.log.info("Masternode list reloads from disk identically after the v3 updates")
+        list_before = self.nodes[1].masternodelist()
+        self.restart_node(1, extra_args=self.extra_args[1])
+        self.connect_nodes(0, 1)
+        self.connect_nodes(1, 2)
+        assert_equal(self.nodes[1].masternodelist(), list_before)
+
+        self.log.info("Revoking a still-v2 (BasicBLS) masternode after v24 preserves its state version "
+                      "instead of silently downgrading it to LegacyBLS via the operator-field reset")
+        assert_equal(node.protx('info', basic_mn.proTxHash)['state']['version'], 2)
+        self.test_revoke_protx(basic_mn.nodeIdx, basic_mn)
+        # The v3 ProUpRevTx is applied against a v2 state, so max(old, tx) keeps the version at 3, not 1
+        assert_equal(node.protx('info', basic_mn.proTxHash)['state']['version'], 3)
+
+        list_before = self.nodes[1].masternodelist()
+        self.restart_node(1, extra_args=self.extra_args[1])
+        self.connect_nodes(0, 1)
+        self.connect_nodes(1, 2)
+        assert_equal(self.nodes[1].masternodelist(), list_before)
 
     def test_revoke_protx(self, node_idx, revoke_mn: MasternodeInfo):
         funds_address = self.nodes[0].getnewaddress()
@@ -224,4 +319,4 @@ class DIP3V19Test(DashTestFramework):
 
 
 if __name__ == '__main__':
-    DIP3V19Test().main()
+    ProTxVersionTest().main()

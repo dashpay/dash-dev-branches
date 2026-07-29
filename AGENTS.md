@@ -19,6 +19,10 @@ changes, update the other in the same commit.
   the tree during merge.
 - Do not edit generated release artifacts, Guix/release files, vendored code, or
   translations unless the task is specifically about those files.
+- Code should be readable on its own. Needing a significant comment usually
+  means the code itself should be clearer. Avoid comments that restate the
+  code; reserve them for things that genuinely need explaining (non-obvious
+  invariants, workaround rationale, non-local side effects).
 
 ## Repository Map
 
@@ -172,9 +176,13 @@ For these areas, prefer small tests that prove the invariant being changed.
 
 ## PR Hygiene
 
-- Use atomic commits. Each commit should build and make sense on its own.
+- Use atomic commits. Each commit should make sense on its own and generally
+  build and pass tests. An intentionally non-building commit (e.g. a
+  regression test landing before its fix) is fine if called out explicitly so
+  it isn't mistaken for an oversight.
 - PR titles follow Conventional Commits, including `backport:` for Bitcoin Core
-  backports.
+  backports. Valid types/scopes are enforced by CI; see
+  `.github/workflows/semantic-pull-request.yml`.
 - PR descriptions must follow `.github/PULL_REQUEST_TEMPLATE.md`: remove the
   italicized helper prompts, fill in the required sections, and keep the
   checklist accurate for the change.
