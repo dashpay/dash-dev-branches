@@ -18,6 +18,7 @@
 
 #include <gsl/pointers.h>
 
+#include <functional>
 #include <optional>
 
 class BlockValidationState;
@@ -79,7 +80,21 @@ public:
                                    CQuorumSnapshotManager& qsnapman, int8_t bls_threads);
     ~CQuorumBlockProcessor();
 
-    [[nodiscard]] MessageProcessingResult ProcessMessage(const CNode& peer, std::string_view msg_type, CDataStream& vRecv)
+    //! Predicate answering "do we have any record of asking this peer for the inv?", consuming that
+    //! record as a side effect. An answer that is merely late or was superseded still returns true;
+    //! false means we have nothing to show we asked, which is either because we did not or because
+    //! the answer came too long after we did (see GetDataResponse). Passed in rather than reached
+    //! through PeerManagerInternal because net_processing already depends on this header; see
+    //! ProcessMessage for how it is used.
+    //!
+    //! Must be invoked without ::cs_main held -- the implementation takes it. Thread-safety
+    //! analysis cannot check this through the type-erased std::function, so keep any call site
+    //! outside ProcessMessage's own LOCK(::cs_main) block.
+    using ConsumeRequestFn = std::function<bool(const CInv&)>;
+
+    [[nodiscard]] MessageProcessingResult ProcessMessage(const CNode& peer, std::string_view msg_type,
+                                                         CDataStream& vRecv,
+                                                         const ConsumeRequestFn& consume_request)
         EXCLUSIVE_LOCKS_REQUIRED(!minableCommitmentsCs);
 
     bool ProcessBlock(const CBlock& block, gsl::not_null<const CBlockIndex*> pindex, BlockValidationState& state,

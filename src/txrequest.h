@@ -189,6 +189,18 @@ public:
      */
     bool ReceivedResponse(NodeId peer, const CInv& txhash);
 
+    /** Like ReceivedResponse, but only succeeds for an announcement we actually sent a GETDATA for.
+     *
+     * ReceivedResponse also accepts a CANDIDATE, which exists from the moment a peer's INV is processed.
+     * For object types that are only ever sent in reply to a GETDATA that is too weak to authorise an
+     * incoming object: a peer could announce a hash and immediately push the payload, before
+     * SendMessages had any chance to turn the announcement into a request.
+     *
+     * Returns false without altering the announcement unless it is in the REQUESTED state, so a
+     * premature payload leaves the candidate intact and the normal GETDATA still goes out.
+     */
+    bool ReceivedRequestedResponse(NodeId peer, const CInv& txhash);
+
     // The operations below inspect the data structure.
 
     /** Count how many REQUESTED announcements a peer has. */

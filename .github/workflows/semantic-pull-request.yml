@@ -1,4 +1,4 @@
-name: "Check PR title format"
+name: "Check PR title and description"
 
 on:
   pull_request_target:
@@ -50,3 +50,19 @@ jobs:
             utils
             wallet
             zmq
+
+      # Checkout the base branch (pull_request_target default). Safe: no untrusted
+      # PR code is executed. The helper script and this workflow land together on
+      # merge, so enforcement starts after merge — same as the workflow YAML itself.
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      # Reject @username mentions in the PR description. Mentions are copied
+      # into merge commits and re-notify people on merge/rebase/backport.
+      # Body is passed via env (not shell interpolation) to avoid injection.
+      - name: Check PR description for @mentions
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: python3 .github/workflows/check_pr_description_mentions.py

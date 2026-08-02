@@ -7,15 +7,19 @@
 #include <test/util/json.h>
 #include <test/util/setup_common.h>
 
+#include <bls/bls.h>
 #include <chain.h>
 #include <chainparams.h>
 #include <deploymentstatus.h>
+#include <evo/dmn_types.h>
+#include <evo/netinfo.h>
 #include <evo/providertx.h>
 #include <evo/specialtxman.h>
 #include <key.h>
 #include <primitives/transaction.h>
 #include <script/script.h>
 #include <script/standard.h>
+#include <util/std23.h>
 #include <validation.h>
 
 #include <boost/test/unit_test.hpp>
@@ -197,6 +201,61 @@ BOOST_AUTO_TEST_CASE(multipayout_list_validation)
     BOOST_CHECK(!IsPayoutListKeySafe({{p2sh_collateral, 10000}}, p2sh_dest, owner_id, voting_id,
                                      /*check_payout_collateral_reuse=*/true, state));
     BOOST_CHECK_EQUAL(state.GetRejectReason(), "bad-protx-payee-reuse");
+}
+
+// Regression: CProUpServTx::IsTriviallyValid must reject out-of-range nType,
+// matching CProRegTx::IsTriviallyValid and the block-connect check in BuildNewListFromBlock.
+// Without this, a ProUpServTx with nType >= MnType::COUNT is mempool-valid but block-invalid,
+// which makes CreateNewBlock/getblocktemplate throw once the tx is relayed.
+BOOST_AUTO_TEST_CASE(proupserv_rejects_invalid_ntype)
+{
+    auto make_proupserv = [](MnType nType) {
+        CProUpServTx proTx;
+        proTx.nVersion = ProTxVersion::BasicBLS;
+        proTx.nType = nType;
+        proTx.netInfo = NetInfoInterface::MakeNetInfo(proTx.nVersion);
+        // Avoid the mainnet default port (9999); regtest rejects it for CORE_P2P.
+        BOOST_REQUIRE_EQUAL(proTx.netInfo->AddEntry(NetInfoPurpose::CORE_P2P, "1.1.1.1:1000"),
+                            NetInfoStatus::Success);
+        return proTx;
+    };
+
+    // Valid types must still pass trivial validation.
+    {
+        TxValidationState state;
+        BOOST_CHECK(make_proupserv(MnType::Regular).IsTriviallyValid(state));
+        state = {};
+        BOOST_CHECK(make_proupserv(MnType::Evo).IsTriviallyValid(state));
+    }
+
+    // Out-of-range nType (raw uint16 deserialised into the enum) must be rejected.
+    for (const MnType bad_type : {static_cast<MnType>(2), static_cast<MnType>(42), static_cast<MnType>(0xFFFF)}) {
+        TxValidationState state;
+        BOOST_CHECK_MESSAGE(!make_proupserv(bad_type).IsTriviallyValid(state),
+                            "nType=" << std23::to_underlying(bad_type) << " should be rejected");
+        BOOST_CHECK_EQUAL(state.GetRejectReason(), "bad-protx-type");
+    }
+
+    // ProRegTx already has the same guard; keep the two special-tx types aligned.
+    {
+        CProRegTx proReg;
+        proReg.nVersion = ProTxVersion::BasicBLS;
+        proReg.nType = static_cast<MnType>(42);
+        proReg.netInfo = NetInfoInterface::MakeNetInfo(proReg.nVersion);
+        CKey owner_key, voting_key, payout_key;
+        owner_key.MakeNewKey(true);
+        voting_key.MakeNewKey(true);
+        proReg.keyIDOwner = owner_key.GetPubKey().GetID();
+        proReg.keyIDVoting = voting_key.GetPubKey().GetID();
+        proReg.scriptPayout = NewP2PKHScript(payout_key);
+        CBLSSecretKey operator_key;
+        operator_key.MakeNewKey();
+        proReg.pubKeyOperator.Set(operator_key.GetPublicKey(), /*legacy=*/false);
+
+        TxValidationState state;
+        BOOST_CHECK(!proReg.IsTriviallyValid(state));
+        BOOST_CHECK_EQUAL(state.GetRejectReason(), "bad-protx-type");
+    }
 }
 
 BOOST_AUTO_TEST_SUITE_END()

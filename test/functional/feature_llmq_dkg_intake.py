@@ -12,6 +12,8 @@ Adversarial P2P tests for DKG message-intake hardening:
     from a verified peer.
   - structural pre-validation: malformed DKG payloads (valid quorum prefix, garbage
     body) are rejected before retention even from a verified peer.
+  - a well-formed DKG message that the peer never announced and was never asked for
+    is dropped before retention, even from a verified peer.
 
 The node must not crash; the sending peer must be scored (Misbehaving).
 """
@@ -119,6 +121,7 @@ class DkgIntakeTest(DashTestFramework):
         self.test_oversized_rejected(mn_node)
         self.test_malformed_rejected(mn_node)
         self.test_under_min_contribution_blobs_rejected(mn_node)
+        self.test_unrequested_rejected(mn_node)
 
     def test_unverified_sender_rejected(self, node):
         self.log.info("Pushed DKG messages from a non-verified peer are rejected (Misbehaving 10 each)")
@@ -168,6 +171,20 @@ class DkgIntakeTest(DashTestFramework):
             peer.send_message(msg_dkg_raw(b"qcontrib", self.qcontrib_payload(blob_count=1)))
             peer.sync_with_ping()
         wait_for_banscore(node, peer_id, 100)
+        node.disconnect_p2ps()
+
+    def test_unrequested_rejected(self, node):
+        self.log.info("A well-formed but unrequested DKG message is dropped (Misbehaving 10)")
+        peer, peer_id = self.add_verified_peer(node)
+        wait_for_banscore(node, peer_id, 0)
+        # Passes every earlier check (verified sender, known quorum, size, structure) and is
+        # rejected purely because the peer neither announced it nor was asked for it. DKG
+        # messages only ever travel inv -> getdata, so a pushed one is unsolicited by
+        # definition and must not reach the pending queues.
+        with node.assert_debug_log(["unrequested DKG message"]):
+            peer.send_message(msg_dkg_raw(b"qcontrib", self.qcontrib_payload(blob_count=2)))
+            peer.sync_with_ping()
+        wait_for_banscore(node, peer_id, 10)
         node.disconnect_p2ps()
 
 

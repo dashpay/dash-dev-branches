@@ -12,9 +12,14 @@
 #include <util/translation.h>
 
 #include <deque>
+#include <map>
 #include <memory>
 #include <ranges>
 #include <utility>
+
+namespace wallet {
+class WalletBatch;
+} // namespace wallet
 
 class CCoinJoinClientManager;
 class CConnman;
@@ -174,6 +179,24 @@ private:
     // how many blocks to wait for after one successful mixing tx in non-multisession mode
     static constexpr int nMinBlocksToWait{1};
 
+    mutable Mutex cs_pending_obs;
+    //! Inputs of successfully completed mixing sessions which must stay locked until
+    //! the wallet observes the finalized mixing transaction spending them. Without this
+    //! a client which processes DSCOMPLETE(MSG_SUCCESS) before the (trickle-relayed)
+    //! finalized DSTX arrives could select the very same inputs for another session
+    //! (esp. with -coinjoinmultisession) and double-spend them.
+    //! Maps outpoint to the time it was added. Mirrored to the wallet database so that
+    //! both the locks and their grace period survive a restart, and so that these are
+    //! never confused with locks the user set themselves via `lockunspent`.
+    std::map<COutPoint, int64_t> m_pending_obs GUARDED_BY(cs_pending_obs);
+    bool m_pending_obs_loaded GUARDED_BY(cs_pending_obs){false};
+    //! Whether the failure to read the record has been reported already, the read is
+    //! retried for as long as this node runs and a corrupt record never becomes readable
+    bool m_pending_obs_load_failed GUARDED_BY(cs_pending_obs){false};
+
+    /// Populate m_pending_obs from the wallet database, once per run
+    void LoadPendingObservations(wallet::WalletBatch& batch) EXCLUSIVE_LOCKS_REQUIRED(cs_pending_obs);
+
     // Keep track of current block height
     int nCachedBlockHeight{0};
 
@@ -211,6 +234,14 @@ public:
 
     void UpdatedSuccessBlock();
 
+    /// Keep the given successfully mixed inputs locked (persistently) until the wallet
+    /// observes a transaction spending them
+    void AddPendingObservation(const std::vector<COutPoint>& outpoints) EXCLUSIVE_LOCKS_REQUIRED(!cs_pending_obs);
+    /// Release pending inputs whose spend has been observed by the wallet
+    void CheckPendingObservations(const CTxMemPool& mempool) EXCLUSIVE_LOCKS_REQUIRED(!cs_pending_obs);
+    bool IsPendingObservation(const COutPoint& outpoint) const EXCLUSIVE_LOCKS_REQUIRED(!cs_pending_obs);
+    size_t GetPendingObservationCount() const EXCLUSIVE_LOCKS_REQUIRED(!cs_pending_obs);
+
     void UpdatedBlockTip(const CBlockIndex* pindex);
 
     void DoMaintenance(ChainstateManager& chainman, CConnman& connman, const CTxMemPool& mempool)
@@ -219,7 +250,7 @@ public:
     // interfaces::CoinJoin::Client overrides
     void disableAutobackups() override { fCreateAutoBackups = false; }
     void resetPool() override EXCLUSIVE_LOCKS_REQUIRED(!cs_deqsessions);
-    UniValue getJsonInfo() const override EXCLUSIVE_LOCKS_REQUIRED(!cs_deqsessions);
+    UniValue getJsonInfo() const override EXCLUSIVE_LOCKS_REQUIRED(!cs_deqsessions, !cs_pending_obs);
     std::vector<std::string> getSessionStatuses() const override EXCLUSIVE_LOCKS_REQUIRED(!cs_deqsessions);
     std::string getSessionDenoms() const override EXCLUSIVE_LOCKS_REQUIRED(!cs_deqsessions);
     bool isMixing() const override;

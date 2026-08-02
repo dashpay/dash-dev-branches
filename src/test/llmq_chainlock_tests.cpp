@@ -3,10 +3,19 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <test/util/llmq_tests.h>
+#include <test/util/net.h>
 #include <test/util/setup_common.h>
 
+#include <hash.h>
+#include <masternode/meta.h>
+#include <net.h>
+#include <net_processing.h>
+#include <netaddress.h>
+#include <spork.h>
 #include <streams.h>
 #include <util/strencodings.h>
+#include <validation.h>
+#include <version.h>
 
 #include <chainlock/chainlock.h>
 #include <chainlock/handler.h>
@@ -15,6 +24,8 @@
 #include <protocol.h>
 
 #include <boost/test/unit_test.hpp>
+
+#include <memory>
 
 using chainlock::ChainLockSig;
 using namespace llmq;
@@ -196,18 +207,35 @@ BOOST_FIXTURE_TEST_CASE(seen_chainlock_cache_is_bounded, TestingSetup)
 {
     m_node.clhandler->CheckActiveState();
 
-    const size_t max_size = m_node.clhandler->SeenChainLockCacheMaxSizeForTesting();
-    BOOST_REQUIRE_GT(max_size, 0U);
+    const size_t retained_size = m_node.clhandler->SeenChainLockCacheRetainedSizeForTesting();
+    const size_t prune_after_size = m_node.clhandler->SeenChainLockCachePruneAfterSizeForTesting();
+    BOOST_REQUIRE_GT(retained_size, 0U);
+    // The cache prunes with hysteresis: it is allowed to grow past the retained size and is only
+    // pruned back down once it exceeds the (larger) prune-after size. Pruning sorts every entry,
+    // so pruning on each insertion past the retained size would be a peer-triggered CPU
+    // amplification path.
+    BOOST_REQUIRE_GT(prune_after_size, retained_size);
 
-    for (size_t i = 0; i < max_size + 1; ++i) {
+    const auto process = [&](size_t i) {
         auto clsig = CreateChainLock(static_cast<int32_t>(i), GetTestBlockHash(static_cast<uint32_t>(2000 + i)));
         [[maybe_unused]] const auto result =
             m_node.clhandler->ProcessNewChainLock(/*from=*/-1, clsig, *m_node.llmq_ctx->qman, ::SerializeHash(clsig));
-        BOOST_CHECK_LE(m_node.clhandler->SeenChainLockCacheSizeForTesting(), max_size);
-        if (i == 0) {
-            BOOST_CHECK_GT(m_node.clhandler->SeenChainLockCacheSizeForTesting(), 0U);
-        }
+    };
+
+    // Growing up to the prune-after size must not evict anything, so no prune (and no sort) has
+    // run yet -- in particular there is no strict cap at the retained size.
+    for (size_t i = 0; i < prune_after_size; ++i) {
+        process(i);
+        BOOST_CHECK_EQUAL(m_node.clhandler->SeenChainLockCacheSizeForTesting(), i + 1U);
     }
+    BOOST_CHECK_GT(m_node.clhandler->SeenChainLockCacheSizeForTesting(), retained_size);
+
+    // Crossing the prune-after size prunes back down to the retained size in a single batch.
+    process(prune_after_size);
+    BOOST_CHECK_EQUAL(m_node.clhandler->SeenChainLockCacheSizeForTesting(), retained_size);
+
+    // Repeated prune cycles are covered generically by limitedmap_prune_after_size_test; this
+    // case only pins down how ChainlockHandler wires the cache up.
 }
 
 BOOST_FIXTURE_TEST_CASE(best_chainlock_is_already_have_after_seen_cache_eviction, TestingSetup)
@@ -219,17 +247,121 @@ BOOST_FIXTURE_TEST_CASE(best_chainlock_is_already_have_after_seen_cache_eviction
     BOOST_REQUIRE(m_node.chainlocks->UpdateBestChainlock(best_hash, best_clsig, /*pindex=*/nullptr));
     BOOST_CHECK(m_node.clhandler->AlreadyHave(CInv{MSG_CLSIG, best_hash}));
 
-    const size_t max_size = m_node.clhandler->SeenChainLockCacheMaxSizeForTesting();
-    BOOST_REQUIRE_GT(max_size, 0U);
+    const size_t prune_after_size = m_node.clhandler->SeenChainLockCachePruneAfterSizeForTesting();
+    BOOST_REQUIRE_GT(prune_after_size, 0U);
 
-    for (size_t i = 0; i < max_size + 1; ++i) {
+    // Insert enough unique CLSIGs to force at least one prune of the seen cache.
+    for (size_t i = 0; i < prune_after_size + 1; ++i) {
         auto clsig = CreateChainLock(static_cast<int32_t>(101 + i), GetTestBlockHash(static_cast<uint32_t>(3000 + i)));
         [[maybe_unused]] const auto result =
             m_node.clhandler->ProcessNewChainLock(/*from=*/-1, clsig, *m_node.llmq_ctx->qman, ::SerializeHash(clsig));
-        BOOST_CHECK_LE(m_node.clhandler->SeenChainLockCacheSizeForTesting(), max_size);
+        BOOST_CHECK_LE(m_node.clhandler->SeenChainLockCacheSizeForTesting(), prune_after_size);
     }
+    BOOST_CHECK_EQUAL(m_node.clhandler->SeenChainLockCacheSizeForTesting(),
+                      m_node.clhandler->SeenChainLockCacheRetainedSizeForTesting());
 
     BOOST_CHECK(m_node.clhandler->AlreadyHave(CInv{MSG_CLSIG, best_hash}));
+}
+
+namespace {
+//! Regtest spork key matching Params().SporkAddress(), as used by the functional tests.
+constexpr const char* REGTEST_SPORK_PRIVKEY{"cP4EKFyJsHT39LDqgdcB43Y3YXjNyjb5Fuas1GQSeAtjnZWmZEQK"};
+} // namespace
+
+// A CLSIG is only ever sent in reply to a GETDATA, so one that the peer neither announced nor was
+// asked for must be dropped before ProcessNewChainLock -- which would otherwise remember its hash
+// and do that work again for every distinct signature blob, at no cost to the sender.
+BOOST_FIXTURE_TEST_CASE(unrequested_clsig_is_dropped_and_scored, TestChain100Setup)
+{
+    LOCK(NetEventsInterface::g_msgproc_mutex);
+
+    // INV announcements for non-spork objects are only tracked outside IBD; the 100 mined blocks
+    // of this fixture already take us out of it.
+    BOOST_REQUIRE(!m_node.chainman->ActiveChainstate().IsInitialBlockDownload());
+
+    // Every Dash-specific message is offered to CMNAuth first, which asserts a loaded metadata
+    // manager. The fixture leaves it unloaded, so initialise an empty cache here.
+    BOOST_REQUIRE(m_node.mn_metaman->LoadCache(/*load_cache=*/false));
+
+    // The CLSIG branch in net_processing is gated on spork 19. The test fixture builds a bare
+    // CSporkManager, so wire up the regtest signer before setting the spork.
+    BOOST_REQUIRE(m_node.sporkman->SetSporkAddress(Params().SporkAddress()));
+    BOOST_REQUIRE(m_node.sporkman->SetPrivKey(REGTEST_SPORK_PRIVKEY));
+    BOOST_REQUIRE(m_node.sporkman->UpdateSpork(SPORK_19_CHAINLOCKS_ENABLED, 0).has_value());
+    BOOST_REQUIRE(m_node.chainlocks->IsEnabled());
+
+    auto unsolicited_peer{MakeTestPeer(/*id=*/41)};
+    auto announcing_peer{MakeTestPeer(/*id=*/42)};
+    m_node.peerman->InitializeNode(*unsolicited_peer, NODE_NETWORK);
+    m_node.peerman->InitializeNode(*announcing_peer, NODE_NETWORK);
+
+    const auto unsolicited_clsig = CreateChainLock(200, GetTestBlockHash(41));
+    const CInv unsolicited_inv{MSG_CLSIG, ::SerializeHash(unsolicited_clsig)};
+
+    // Sent twice on purpose. Without the gate the first copy would still be scored (this chain is
+    // too short to resolve a signing quorum for height 200) but the second would hit the seen-cache
+    // dedup and cost the peer nothing -- so only charging for both proves the gate is what rejected
+    // them, and that an unsolicited peer cannot keep repeating the work for free.
+    for (int i = 0; i < 2; ++i) {
+        CDataStream unsolicited_payload{SER_NETWORK, PROTOCOL_VERSION};
+        unsolicited_payload << unsolicited_clsig;
+        SendMessage(*m_node.peerman, *unsolicited_peer, NetMsgType::CLSIG, std::move(unsolicited_payload));
+    }
+
+    // Never reached ProcessNewChainLock: the hash was not recorded in the seen cache, so the peer
+    // could not have displaced a genuine entry, and it was scored for each attempt.
+    BOOST_CHECK(!m_node.clhandler->AlreadyHave(unsolicited_inv));
+    BOOST_CHECK_EQUAL(MisbehaviorScore(*m_node.peerman, *unsolicited_peer),
+                      2 * UNREQUESTED_OBJECT_MISBEHAVIOR_SCORE);
+
+    // Announcing the CLSIG is NOT enough to authorise it. An INV creates a candidate immediately,
+    // but the GETDATA only goes out later from SendMessages, so accepting on the announcement alone
+    // would let a peer authorise its own payload by racing INV and payload back to back -- which
+    // costs it nothing and defeats the gate entirely.
+    const auto announced_clsig = CreateChainLock(201, GetTestBlockHash(42));
+    const CInv announced_inv{MSG_CLSIG, ::SerializeHash(announced_clsig)};
+
+    AnnounceInv(*m_node.peerman, *announcing_peer, announced_inv);
+    {
+        const int score_before_race = MisbehaviorScore(*m_node.peerman, *announcing_peer);
+        CDataStream raced_payload{SER_NETWORK, PROTOCOL_VERSION};
+        raced_payload << announced_clsig;
+        SendMessage(*m_node.peerman, *announcing_peer, NetMsgType::CLSIG, std::move(raced_payload));
+
+        BOOST_CHECK(!m_node.clhandler->AlreadyHave(announced_inv));
+        BOOST_CHECK_EQUAL(MisbehaviorScore(*m_node.peerman, *announcing_peer),
+                          score_before_race + UNREQUESTED_OBJECT_MISBEHAVIOR_SCORE);
+    }
+
+    // Once SendMessages has actually issued the GETDATA the same payload is authorised. The
+    // rejection above must not have consumed the candidate, or no GETDATA would go out at all.
+    SetMockTime(GetTime<std::chrono::seconds>() + 61s);
+    m_node.peerman->SendMessages(announcing_peer.get());
+    const int score_before = MisbehaviorScore(*m_node.peerman, *announcing_peer);
+
+    CDataStream announced_payload{SER_NETWORK, PROTOCOL_VERSION};
+    announced_payload << announced_clsig;
+    SendMessage(*m_node.peerman, *announcing_peer, NetMsgType::CLSIG, std::move(announced_payload));
+
+    BOOST_CHECK(m_node.clhandler->AlreadyHave(announced_inv));
+    // Exactly the pre-existing invalid-CLSIG penalty and nothing else. This fixture's chain is 100
+    // blocks, so a CLSIG at height 201 resolves to no signing quorum and ProcessNewChainLock scores
+    // 10 -- which is what proves the message got past the gate. Asserting the total exactly is what
+    // would catch the gate also charging an authorised peer.
+    BOOST_CHECK_EQUAL(MisbehaviorScore(*m_node.peerman, *announcing_peer), score_before + 10);
+    // One GETDATA authorises exactly one answer. Both the in-flight request and the late-answer
+    // grace are spent, so a replay of the very payload we asked for is unsolicited again -- a peer
+    // must not be able to induce one request and then repeat the payload for free.
+    const int score_before_replay = MisbehaviorScore(*m_node.peerman, *announcing_peer);
+    CDataStream replayed_payload{SER_NETWORK, PROTOCOL_VERSION};
+    replayed_payload << announced_clsig;
+    SendMessage(*m_node.peerman, *announcing_peer, NetMsgType::CLSIG, std::move(replayed_payload));
+    BOOST_CHECK_EQUAL(MisbehaviorScore(*m_node.peerman, *announcing_peer),
+                      score_before_replay + UNREQUESTED_OBJECT_MISBEHAVIOR_SCORE);
+
+    m_node.peerman->FinalizeNode(*unsolicited_peer);
+    m_node.peerman->FinalizeNode(*announcing_peer);
+    SetMockTime(0s);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

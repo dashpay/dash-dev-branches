@@ -47,6 +47,10 @@ static constexpr int COINJOIN_AUTO_TIMEOUT_MIN = 5;
 static constexpr int COINJOIN_AUTO_TIMEOUT_MAX = 15;
 static constexpr int COINJOIN_QUEUE_TIMEOUT = 30;
 static constexpr int COINJOIN_SIGNING_TIMEOUT = 15;
+//! How long a successfully mixed input is kept locked while waiting for the finalized
+//! mixing transaction before chain/mempool spentness is double-checked and the input is
+//! potentially released, in seconds
+static constexpr int64_t COINJOIN_PENDING_OBSERVATION_TIMEOUT = 60 * 60;
 
 static constexpr size_t COINJOIN_ENTRY_MAX_SIZE = 9;
 

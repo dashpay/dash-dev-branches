@@ -429,6 +429,7 @@ static RPCHelpMan getcoinjoininfo()
                             {RPCResult::Type::NUM, "denoms_hardcap", "Maximum limit of how many inputs of each denominated amount to create"},
                             {RPCResult::Type::NUM, "queue_size", "How many queues there are currently on the network"},
                             {RPCResult::Type::BOOL, "running", "Whether mixing is currently running"},
+                            {RPCResult::Type::NUM, "pending_inputs", "The number of successfully mixed inputs kept locked until the transaction spending them is observed"},
                             {RPCResult::Type::ARR, "sessions", "",
                             {
                                 {RPCResult::Type::OBJ, "", "",

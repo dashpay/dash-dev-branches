@@ -29,6 +29,8 @@ public:
     {
         // either specify maxSize through template arguments or the constructor and fail otherwise
         assert(_maxSize != 0);
+        // truncate_if_needed() only runs past truncateThreshold, so this is what keeps maxSize inside the vector
+        assert(truncateThreshold >= maxSize);
     }
 
     size_t max_size() const { return maxSize; }
@@ -101,8 +103,8 @@ private:
         for (auto it = cacheMap.begin(); it != cacheMap.end(); ++it) {
             vec.emplace_back(it);
         }
-        // sort by last access time (descending order)
-        std::sort(vec.begin(), vec.end(), [](const Iterator& it1, const Iterator& it2) {
+        // partition by last access time (descending order), the entries to keep end up in the first maxSize slots
+        std::nth_element(vec.begin(), vec.begin() + maxSize, vec.end(), [](const Iterator& it1, const Iterator& it2) {
             return it1->second.second > it2->second.second;
         });
 

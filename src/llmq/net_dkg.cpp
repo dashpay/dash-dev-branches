@@ -18,6 +18,7 @@
 #include <llmq/quorumsman.h>
 #include <llmq/utils.h>
 #include <masternode/meta.h>
+#include <msg_result.h>
 #include <net.h>
 #include <netmessagemaker.h>
 #include <protocol.h>
@@ -482,6 +483,24 @@ void NetDKG::ProcessMessage(CNode& pfrom, const std::string& msg_type, CDataStre
     const uint256 hash = hw.GetHash();
 
     const NodeId from = pfrom.GetId();
+
+    // DKG messages are only ever sent in reply to a GETDATA (see NetDKG::ProcessGetData), so one we
+    // never asked this peer for was pushed at us and must not reach the pending queues, where it
+    // would be retained until a worker gets around to verifying its signature. A bare announcement
+    // deliberately does not qualify: it would let the peer authorise its own payload by sending INV
+    // first.
+    //
+    // This check runs last so that every pre-existing rejection above -- and the heavier penalty it
+    // carries -- is unchanged. It therefore bounds retention and signature verification, not the
+    // parsing and structural validation above, which an unsolicited sender still gets to trigger.
+    const CInv inv{static_cast<uint32_t>(inv_type), hash};
+    if (WITH_LOCK(::cs_main, return m_peer_manager->PeerConsumeGetDataResponse(from, inv)) ==
+        GetDataResponse::UNREQUESTED) {
+        LogPrint(BCLog::LLMQ_DKG, "NetDKG -- received unrequested %s %s, peer=%d\n", msg_type, hash.ToString(), from);
+        m_peer_manager->PeerMisbehaving(from, UNREQUESTED_OBJECT_MISBEHAVIOR_SCORE, "unrequested DKG message");
+        return;
+    }
+
     const bool dispatched = m_qdkgsman.DoForHandler({llmqType, quorumIndex}, [&](CDKGSessionHandler& handler) {
         CDKGPendingMessages* pending = nullptr;
         switch (inv_type) {
@@ -499,7 +518,6 @@ void NetDKG::ProcessMessage(CNode& pfrom, const std::string& msg_type, CDataStre
             break;
         }
         Assume(pending != nullptr);
-        WITH_LOCK(::cs_main, m_peer_manager->PeerEraseObjectRequest(from, CInv{static_cast<uint32_t>(inv_type), hash}));
         pending->PushPendingMessage(from, std::move(pm), hash);
     });
     if (!dispatched) {

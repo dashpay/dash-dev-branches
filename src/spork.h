@@ -138,15 +138,6 @@ public:
      * key hash.
      */
     bool CheckSignature(const CKeyID& pubKeyId) const;
-
-    /**
-     * GetSignerKeyID is used to recover the spork address of the key used to
-     * sign this spork message.
-     *
-     * This method was introduced along with the multi-signer sporks feature,
-     * in order to identify which spork key signed this message.
-     */
-    std::optional<CKeyID> GetSignerKeyID() const;
 };
 
 class SporkStore
@@ -157,7 +148,7 @@ protected:
     mutable Mutex cs;
 
     Uint256HashMap<CSporkMessage> mapSporksByHash GUARDED_BY(cs);
-    std::unordered_map<SporkId, std::map<CKeyID, CSporkMessage> > mapSporksActive GUARDED_BY(cs);
+    std::unordered_map<SporkId, CSporkMessage> mapSporksActive GUARDED_BY(cs);
 
 public:
     template<typename Stream>
@@ -211,21 +202,14 @@ private:
     const std::unique_ptr<db_type> m_db;
     bool is_valid{false};
 
-    // TODO: drop mutex cs_cache completely so far as sporks are used on testnet only
-    // and simplify IsSporkActive to avoid any mutex for better mainnet performance
-    mutable Mutex cs_cache;
-    mutable std::unordered_map<SporkId, bool> mapSporksCachedActive GUARDED_BY(cs_cache);
-    mutable std::unordered_map<SporkId, SporkValue> mapSporksCachedValues GUARDED_BY(cs_cache);
-
-    std::set<CKeyID> setSporkPubKeyIDs GUARDED_BY(cs);
-    int nMinSporkKeys GUARDED_BY(cs) {std::numeric_limits<int>::max()};
+    CKeyID sporkPubKeyID GUARDED_BY(cs);
     CKey sporkPrivKey GUARDED_BY(cs);
 
     /**
-     * SporkValueIfActive is used to get the value agreed upon by the majority
-     * of signed spork messages for a given Spork ID.
+     * SporkValueIfActive returns the value of the active spork message for a
+     * given Spork ID, if any.
      */
-    std::optional<SporkValue> SporkValueIfActive(SporkId nSporkID) const EXCLUSIVE_LOCKS_REQUIRED(cs, !cs_cache);
+    std::optional<SporkValue> SporkValueIfActive(SporkId nSporkID) const EXCLUSIVE_LOCKS_REQUIRED(cs);
 
 public:
     CSporkManager(const CSporkManager&) = delete;
@@ -248,34 +232,32 @@ public:
     void CheckAndRemove() EXCLUSIVE_LOCKS_REQUIRED(!cs);
 
     /**
-     * GetValidSporkSigner validates signed time and recovers the signer pubkey.
-     * Returns the signer's CKeyID on success, or std::nullopt if the spork is invalid
-     * (peer should be punished in that case).
+     * IsValidSpork validates the signed time and the spork signature against the
+     * spork key. Returns false if the spork is invalid (peer should be punished
+     * in that case).
      */
-    [[nodiscard]] std::optional<CKeyID> GetValidSporkSigner(const CSporkMessage& spork) const
-        EXCLUSIVE_LOCKS_REQUIRED(!cs);
+    [[nodiscard]] bool IsValidSpork(const CSporkMessage& spork) const EXCLUSIVE_LOCKS_REQUIRED(!cs);
     /**
      * ProcessSpork adds the spork to local state. Returns true if the spork was new or
-     * updated and should be relayed. `keyIDSigner` must be the signer key previously
-     * recovered via GetValidSporkSigner. `peer_log_suffix` is appended to log lines for
+     * updated and should be relayed. The spork must have been validated previously
+     * via IsValidSpork. `peer_log_suffix` is appended to log lines for
      * cross-referencing with the source peer (e.g. " peer=42").
      */
-    [[nodiscard]] bool ProcessSpork(const CSporkMessage& spork, const CKeyID& keyIDSigner,
-                                    std::string_view peer_log_suffix = {})
-        EXCLUSIVE_LOCKS_REQUIRED(!cs, !cs_cache);
+    [[nodiscard]] bool ProcessSpork(const CSporkMessage& spork, std::string_view peer_log_suffix = {})
+        EXCLUSIVE_LOCKS_REQUIRED(!cs);
 
     /**
-     * ActiveSporks returns a snapshot of currently active sporks indexed by SporkId then
-     * signer CKeyID. Used by net_processing to answer the 'getsporks' p2p message.
+     * ActiveSporks returns a snapshot of currently active spork messages.
+     * Used by net_processing to answer the 'getsporks' p2p message.
      */
-    std::unordered_map<SporkId, std::map<CKeyID, CSporkMessage>> ActiveSporks() const EXCLUSIVE_LOCKS_REQUIRED(!cs);
+    std::vector<CSporkMessage> ActiveSporks() const EXCLUSIVE_LOCKS_REQUIRED(!cs);
 
     /**
      * UpdateSpork is used by the spork RPC command to set a new spork value, sign
      * and return the spork message, ready for network relay.
      * It returns nullopt if nothing to relay
      */
-    std::optional<CInv> UpdateSpork(SporkId nSporkID, SporkValue nValue) EXCLUSIVE_LOCKS_REQUIRED(!cs, !cs_cache);
+    std::optional<CInv> UpdateSpork(SporkId nSporkID, SporkValue nValue) EXCLUSIVE_LOCKS_REQUIRED(!cs);
 
     /**
      * IsSporkActive returns a bool for time-based sporks, and should be used
@@ -285,13 +267,13 @@ public:
      * instead, and therefore this method doesn't make sense and should not be
      * used.
      */
-    bool IsSporkActive(SporkId nSporkID) const EXCLUSIVE_LOCKS_REQUIRED(!cs_cache);
+    bool IsSporkActive(SporkId nSporkID) const EXCLUSIVE_LOCKS_REQUIRED(!cs);
 
     /**
      * GetSporkValue returns the spork value given a Spork ID. If no active spork
      * message has yet been received by the node, it returns the default value.
      */
-    SporkValue GetSporkValue(SporkId nSporkID) const EXCLUSIVE_LOCKS_REQUIRED(!cs, !cs_cache);
+    SporkValue GetSporkValue(SporkId nSporkID) const EXCLUSIVE_LOCKS_REQUIRED(!cs);
 
     /**
      * GetSporkIDByName returns the internal Spork ID given the spork name.
@@ -309,29 +291,17 @@ public:
     std::optional<CSporkMessage> GetSporkByHash(const uint256& hash) const EXCLUSIVE_LOCKS_REQUIRED(!cs);
 
     /**
-     * SetSporkAddress is used to set a public key ID which will be used to
+     * SetSporkAddress is used to set the public key ID which will be used to
      * verify spork signatures.
-     *
-     * This can be called multiple times to add multiple keys to the set of
-     * valid spork signers.
      */
     bool SetSporkAddress(const std::string& strAddress) EXCLUSIVE_LOCKS_REQUIRED(!cs);
 
     /**
-     * SetMinSporkKeys is used to set the required spork signer threshold, for
-     * a spork to be considered active.
-     *
-     * This value must be at least a majority of the total number of spork
-     * keys, and for obvious reasons cannot be larger than that number.
-     */
-    bool SetMinSporkKeys(int minSporkKeys) EXCLUSIVE_LOCKS_REQUIRED(!cs);
-
-    /**
-     * SetPrivKey is used to set a spork key to enable setting / signing of
+     * SetPrivKey is used to set the spork key to enable setting / signing of
      * spork values.
      *
-     * This will return false if the private key does not match any spork
-     * address in the set of valid spork signers (see SetSporkAddress).
+     * This will return false if the private key does not match the spork
+     * address (see SetSporkAddress).
      */
     bool SetPrivKey(const std::string& strPrivKey) EXCLUSIVE_LOCKS_REQUIRED(!cs);
 };

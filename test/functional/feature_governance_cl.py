@@ -50,7 +50,9 @@ class DashGovernanceTest (DashTestFramework):
 
         self.nodes[0].sporkupdate("SPORK_17_QUORUM_DKG_ENABLED", 0)
         self.wait_for_sporks_same()
-        self.mine_cycle_quorum()
+        # ChainLocks use llmq_test on regtest, and the 10-minute mocktime bump below keeps
+        # proposal collateral transactions safe with this shorter quorum setup.
+        self.mine_quorum()
 
         self.sync_blocks()
         self.wait_for_chainlocked_block_all_nodes(self.nodes[0].getbestblockhash())

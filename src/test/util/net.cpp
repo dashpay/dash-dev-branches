@@ -14,7 +14,14 @@
 #include <random.h>
 #include <serialize.h>
 #include <span.h>
+#include <streams.h>
+#include <util/check.h>
+#include <util/time.h>
 
+#include <atomic>
+#include <chrono>
+#include <memory>
+#include <string>
 #include <vector>
 
 void ConnmanTestMsg::Handshake(CNode& node,
@@ -136,4 +143,43 @@ std::vector<NodeEvictionCandidate> GetRandomNodeEvictionCandidates(int n_candida
         });
     }
     return candidates;
+}
+
+std::unique_ptr<CNode> MakeTestPeer(NodeId id)
+{
+    in_addr peer_in_addr{};
+    peer_in_addr.s_addr = htonl(0x01020304 + id);
+    auto peer{std::make_unique<CNode>(id,
+                                      /*sock=*/nullptr,
+                                      /*addrIn=*/CAddress{CService{peer_in_addr, 8333}, NODE_NETWORK},
+                                      /*nKeyedNetGroupIn=*/0,
+                                      /*nLocalHostNonceIn=*/0,
+                                      /*addrBindIn=*/CAddress{},
+                                      /*addrNameIn=*/std::string{},
+                                      /*conn_type_in=*/ConnectionType::OUTBOUND_FULL_RELAY,
+                                      /*inbound_onion=*/false)};
+    peer->nVersion = PROTOCOL_VERSION;
+    peer->SetCommonVersion(PROTOCOL_VERSION);
+    peer->fSuccessfullyConnected = true;
+    return peer;
+}
+
+void SendMessage(PeerManager& peerman, CNode& peer, const std::string& msg_type, CDataStream&& payload)
+{
+    std::atomic<bool> interrupt_dummy{false};
+    peerman.ProcessMessage(peer, msg_type, payload, GetTime<std::chrono::microseconds>(), interrupt_dummy);
+}
+
+void AnnounceInv(PeerManager& peerman, CNode& peer, const CInv& inv)
+{
+    CDataStream inv_stream{SER_NETWORK, PROTOCOL_VERSION};
+    inv_stream << std::vector<CInv>{inv};
+    SendMessage(peerman, peer, NetMsgType::INV, std::move(inv_stream));
+}
+
+int MisbehaviorScore(PeerManager& peerman, const CNode& peer)
+{
+    CNodeStateStats stats;
+    Assert(peerman.GetNodeStateStats(peer.GetId(), stats));
+    return stats.m_misbehavior_score;
 }

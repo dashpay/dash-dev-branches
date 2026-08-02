@@ -14,6 +14,12 @@
 #include <variant>
 #include <vector>
 
+/** Misbehaviour score for an object message the peer was never asked for. Moderate rather than
+ *  fatal: it takes a run of these to discourage a peer, which leaves room for the honest cases the
+ *  in-flight check cannot see on its own (see GetDataResponse) to be misjudged without cutting off
+ *  a useful peer. */
+static constexpr int UNREQUESTED_OBJECT_MISBEHAVIOR_SCORE{10};
+
 struct MisbehavingError
 {
     int score;

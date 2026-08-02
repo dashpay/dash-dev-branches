@@ -38,6 +38,7 @@ const std::string BESTBLOCK_NOMERKLE{"bestblock_nomerkle"};
 const std::string BESTBLOCK{"bestblock"};
 const std::string CRYPTED_KEY{"ckey"};
 const std::string CRYPTED_HDCHAIN{"chdchain"};
+const std::string COINJOIN_PENDING_OBS{"cj_pending_obs"};
 const std::string COINJOIN_SALT{"cj_salt"};
 const std::string CSCRIPT{"cscript"};
 const std::string DEFAULTKEY{"defaultkey"};
@@ -224,6 +225,21 @@ bool WalletBatch::ReadCoinJoinSalt(uint256& salt, bool fLegacy)
 bool WalletBatch::WriteCoinJoinSalt(const uint256& salt)
 {
     return WriteIC(DBKeys::COINJOIN_SALT, salt);
+}
+
+bool WalletBatch::HasCoinJoinPendingObs()
+{
+    return m_batch->Exists(std::string(DBKeys::COINJOIN_PENDING_OBS));
+}
+
+bool WalletBatch::ReadCoinJoinPendingObs(std::map<COutPoint, int64_t>& pending_obs)
+{
+    return m_batch->Read(std::string(DBKeys::COINJOIN_PENDING_OBS), pending_obs);
+}
+
+bool WalletBatch::WriteCoinJoinPendingObs(const std::map<COutPoint, int64_t>& pending_obs)
+{
+    return WriteIC(DBKeys::COINJOIN_PENDING_OBS, pending_obs);
 }
 
 bool WalletBatch::WriteGovernanceObject(const Governance::Object& obj)
@@ -585,7 +601,10 @@ ReadKeyValue(CWallet* pwallet, CDataStream& ssKey, CDataStream& ssValue,
         } else if (strType == DBKeys::HDCHAIN || strType == DBKeys::CRYPTED_HDCHAIN) {
             CHDChain chain;
             ssValue >> chain;
-            assert ((strType == DBKeys::CRYPTED_HDCHAIN) == chain.IsCrypted());
+            if ((strType == DBKeys::CRYPTED_HDCHAIN) != chain.IsCrypted()) {
+                strErr = "Error reading wallet database: HD chain type mismatch";
+                return false;
+            }
             // Skip encryption check during loading as MASTER_KEY records may not be loaded yet.
             // Consistency will be validated after all records are loaded.
             if (!pwallet->GetOrCreateLegacyScriptPubKeyMan()->LoadHDChain(chain, /*skip_encryption_check=*/true)) {
@@ -778,7 +797,7 @@ ReadKeyValue(CWallet* pwallet, CDataStream& ssKey, CDataStream& ssValue,
                    strType != DBKeys::MINVERSION && strType != DBKeys::ACENTRY &&
                    strType != DBKeys::VERSION && strType != DBKeys::SETTINGS &&
                    strType != DBKeys::PRIVATESEND_SALT && strType != DBKeys::COINJOIN_SALT &&
-                   strType != DBKeys::FLAGS) {
+                   strType != DBKeys::COINJOIN_PENDING_OBS && strType != DBKeys::FLAGS) {
             wss.m_unknown_records++;
         }
     } catch (const std::exception& e) {

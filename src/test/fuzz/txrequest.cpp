@@ -247,6 +247,22 @@ public:
         assert(completed == expected_completed);
     }
 
+    void ReceivedRequestedResponse(int peer, int inv)
+    {
+        // Apply to naive structure: unlike ReceivedResponse, only a REQUESTED announcement is
+        // completed. Anything else -- including a CANDIDATE, which exists from the moment an inv is
+        // processed -- is left exactly as it was.
+        const bool expected_completed = m_announcements[inv][peer].m_state == State::REQUESTED;
+        if (expected_completed) {
+            m_announcements[inv][peer].m_state = State::COMPLETED;
+            Cleanup(inv);
+        }
+
+        // Call TxRequestTracker's implementation, and compare its return value with the naive expectation.
+        const bool completed = m_tracker.ReceivedRequestedResponse(peer, INVS[inv]);
+        assert(completed == expected_completed);
+    }
+
     void GetRequestable(int peer)
     {
         // Implement using naive structure:
@@ -324,7 +340,7 @@ FUZZ_TARGET(txrequest)
     // Decode the input as a sequence of instructions with parameters
     auto it = buffer.begin();
     while (it != buffer.end()) {
-        int cmd = *(it++) % 11;
+        int cmd = *(it++) % 12;
         int peer, invnum, delaynum;
         switch (cmd) {
         case 0: // Make time jump to the next event (m_time of CANDIDATE or REQUESTED)
@@ -371,6 +387,11 @@ FUZZ_TARGET(txrequest)
             peer = it == buffer.end() ? 0 : *(it++) % MAX_PEERS;
             invnum = it == buffer.end() ? 0 : *(it++);
             tester.ReceivedResponse(peer, invnum % MAX_INVS);
+            break;
+        case 11: // Received response to a GETDATA we actually sent
+            peer = it == buffer.end() ? 0 : *(it++) % MAX_PEERS;
+            invnum = it == buffer.end() ? 0 : *(it++);
+            tester.ReceivedRequestedResponse(peer, invnum % MAX_INVS);
             break;
         default:
             assert(false);

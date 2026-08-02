@@ -109,19 +109,16 @@ BASE_SCRIPTS = [
     'mempool_persist.py --descriptors',
     'p2p_quorum_data.py',
     'p2p_instantsend.py',
-    'feature_multikeysporks.py',
     'feature_protx_version.py',
     'feature_asset_locks.py', # NOTE: needs dash_hash to pass
     'feature_llmq_connections.py', # NOTE: needs dash_hash to pass
     'feature_llmq_is_retroactive.py', # NOTE: needs dash_hash to pass
     'feature_llmq_chainlocks.py', # NOTE: needs dash_hash to pass
     'feature_llmq_simplepose.py', # NOTE: needs dash_hash to pass
-    'feature_llmq_simplepose.py --disable-spork23', # NOTE: needs dash_hash to pass
-    'feature_dip3_deterministicmns.py --legacy-wallet', # NOTE: needs dash_hash to pass
     'feature_dip3_deterministicmns.py --descriptors', # NOTE: needs dash_hash to pass
     'feature_masternode_payout_shares.py',
     'feature_llmq_signing.py', # NOTE: needs dash_hash to pass
-    'feature_llmq_signing.py --spork21', # NOTE: needs dash_hash to pass
+    'feature_llmq_simplepose.py --disable-spork23', # NOTE: needs dash_hash to pass
     'feature_llmq_rotation.py', # NOTE: needs dash_hash to pass
     'feature_llmq_evo.py', # NOTE: needs dash_hash to pass
     'feature_llmq_is_cl_conflicts.py', # NOTE: needs dash_hash to pass
@@ -131,9 +128,7 @@ BASE_SCRIPTS = [
     'feature_dip4_coinbasemerkleroots.py', # NOTE: needs dash_hash to pass
     'feature_mnehf.py', # NOTE: needs dash_hash to pass
     'feature_masternode_params.py', # NOTE: needs dash_hash to pass
-    'feature_governance.py --legacy-wallet',
     'feature_governance.py --descriptors',
-    'feature_governance_cl.py --legacy-wallet',
     'feature_governance_cl.py --descriptors',
     'rpc_verifyislock.py',
     'feature_notifications.py',
@@ -146,6 +141,8 @@ BASE_SCRIPTS = [
     'wallet_import_rescan.py --legacy-wallet',
     'wallet_backup.py --legacy-wallet',
     'wallet_backup.py --descriptors',
+    'wallet_dash_rpcs.py --legacy-wallet',
+    'wallet_dash_rpcs.py --descriptors',
     'p2p_tx_download.py',
     'wallet_avoidreuse.py --legacy-wallet',
     'wallet_avoidreuse.py --descriptors',

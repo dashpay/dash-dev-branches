@@ -84,6 +84,8 @@ class CoinJoinTest(BitcoinTestFramework):
         cj_info = node.getcoinjoininfo()
         assert_equal(cj_info['enabled'], True)
         assert_equal(cj_info['running'], True)
+        # No session has completed, so nothing is waiting to be observed
+        assert_equal(cj_info['pending_inputs'], 0)
         # Repeated start should yield error
         assert_raises_rpc_error(-32603, 'Mixing has been started already.', node.coinjoin, 'start')
         # Requesting status shouldn't complain

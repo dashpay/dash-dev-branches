@@ -10,7 +10,6 @@ from test_framework.test_framework import (
     DashTestFramework,
     MasternodeInfo,
 )
-from test_framework.util import force_finish_mnsync
 
 '''
 feature_llmq_data_recovery.py
@@ -35,40 +34,25 @@ class QuorumDataRecoveryTest(DashTestFramework):
         self.set_dash_test_params(7, 6, extra_args=extra_args)
         self.set_dash_llmq_test_params(4, 3)
 
-    def restart_mn(self, mn: MasternodeInfo, reindex=False, qvvec_sync=None, qdata_recovery_enabled=True):
-        args = self.extra_args[mn.nodeIdx] + ['-masternodeblsprivkey=%s' % mn.keyOperator,
-                                              '-llmq-data-recovery=%d' % qdata_recovery_enabled]
-        if qvvec_sync is None:
-            qvvec_sync = []
-        for llmq_sync in qvvec_sync:
-            args.append('-llmq-qvvec-sync=%s:%d' % (llmq_type_strings[llmq_sync[0]], llmq_sync[1]))
-        if reindex:
-            args.append('-reindex')
-            self.restart_node(mn.nodeIdx, args)
-        else:
-            self.restart_node(mn.nodeIdx, args)
-
-    def wait_restarted_mn(self, mn: MasternodeInfo, reindex=False, block_count=None):
-        if reindex:
-            self.wait_until(lambda: mn.get_node(self).getblockcount() >= block_count)
-
-        force_finish_mnsync(mn.get_node(self))
-        self.connect_nodes(mn.nodeIdx, 0)
-
     def restart_mns(self, mns=None, exclude=None, reindex=False, qvvec_sync=None, qdata_recovery_enabled=True):
-        if exclude is None:
-            exclude = []
         if qvvec_sync is None:
             qvvec_sync = []
 
-        block_count = self.nodes[0].getblockcount()
-        for mn in self.mninfo if mns is None else mns: # type: MasternodeInfo
-            if mn not in exclude:
-                self.restart_mn(mn, reindex, qvvec_sync, qdata_recovery_enabled)
+        # Sample the target height before the restarts stop any node
+        wait_block_count = self.nodes[0].getblockcount() if reindex else None
 
-        for mn in self.mninfo if mns is None else mns: # type: MasternodeInfo
-            if mn not in exclude:
-                self.wait_restarted_mn(mn, reindex, block_count)
+        extra_args = ['-llmq-data-recovery=%d' % qdata_recovery_enabled]
+        for llmq_sync in qvvec_sync:
+            extra_args.append('-llmq-qvvec-sync=%s:%d' % (llmq_type_strings[llmq_sync[0]], llmq_sync[1]))
+        if reindex:
+            extra_args.append('-reindex')
+
+        self.restart_masternodes(
+            mns=mns,
+            exclude=exclude,
+            extra_args=extra_args,
+            wait_block_count=wait_block_count,
+        )
 
         if qdata_recovery_enabled:
             # trigger recovery threads and wait for them to start

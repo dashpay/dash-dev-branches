@@ -12,6 +12,8 @@
 #include <netaddress.h>
 #include <node/connection_types.h>
 #include <node/eviction.h>
+#include <protocol.h>
+#include <streams.h>
 #include <sync.h>
 #include <util/sock.h>
 
@@ -231,5 +233,22 @@ private:
 };
 
 std::vector<NodeEvictionCandidate> GetRandomNodeEvictionCandidates(int n_candidates, FastRandomContext& random_context);
+
+/** Build a fully connected outbound peer with no socket, suitable for driving PeerManager message
+ *  handling directly. Each id gets a distinct address so that per-peer state stays separate. */
+std::unique_ptr<CNode> MakeTestPeer(NodeId id);
+
+/** Hand one message to PeerManager as if it had arrived from `peer`, taking the real dispatch path
+ *  rather than calling a subsystem handler directly. */
+void SendMessage(PeerManager& peerman, CNode& peer, const std::string& msg_type, CDataStream&& payload)
+    EXCLUSIVE_LOCKS_REQUIRED(NetEventsInterface::g_msgproc_mutex);
+
+/** Announce a single inv from `peer`. Note that this only creates a request candidate: the GETDATA
+ *  goes out later, from SendMessages. */
+void AnnounceInv(PeerManager& peerman, CNode& peer, const CInv& inv)
+    EXCLUSIVE_LOCKS_REQUIRED(NetEventsInterface::g_msgproc_mutex);
+
+/** Misbehavior score PeerManager currently holds against `peer`. */
+int MisbehaviorScore(PeerManager& peerman, const CNode& peer);
 
 #endif // BITCOIN_TEST_UTIL_NET_H

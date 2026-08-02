@@ -135,6 +135,7 @@ BITCOIN_TESTS =\
   test/key_tests.cpp \
   test/lcg.h \
   test/limitedmap_tests.cpp \
+  test/llmq_blockprocessor_tests.cpp \
   test/llmq_dkg_tests.cpp \
   test/llmq_chainlock_tests.cpp \
   test/llmq_commitment_tests.cpp \
@@ -203,6 +204,7 @@ BITCOIN_TESTS =\
   test/txvalidation_tests.cpp \
   test/txvalidationcache_tests.cpp \
   test/uint256_tests.cpp \
+  test/unordered_lru_cache_tests.cpp \
   test/util_tests.cpp \
   test/validation_block_tests.cpp \
   test/validation_chainstate_tests.cpp \

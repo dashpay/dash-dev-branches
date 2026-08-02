@@ -63,7 +63,8 @@ CQuorumBlockProcessor::~CQuorumBlockProcessor()
 }
 
 MessageProcessingResult CQuorumBlockProcessor::ProcessMessage(const CNode& peer, std::string_view msg_type,
-                                                              CDataStream& vRecv)
+                                                              CDataStream& vRecv,
+                                                              const ConsumeRequestFn& consume_request)
 {
     if (msg_type != NetMsgType::QFCOMMITMENT) {
         return {};
@@ -72,8 +73,20 @@ MessageProcessingResult CQuorumBlockProcessor::ProcessMessage(const CNode& peer,
     CFinalCommitment qc;
     vRecv >> qc;
 
+    // A QFCOMMITMENT is only ever sent in reply to a GETDATA (see ProcessGetData), so one we never
+    // asked this peer for was pushed at us. Drop it up front: most of the checks below reject
+    // without scoring the peer -- deliberately, since we may just be lagging behind -- so an
+    // unsolicited peer could otherwise repeat the block lookups and map probes indefinitely. A bare
+    // announcement deliberately does not qualify: it would let the peer authorise its own payload by
+    // sending INV first.
+    if (!consume_request(CInv{MSG_QUORUM_FINAL_COMMITMENT, ::SerializeHash(qc)})) {
+        LogPrint(BCLog::LLMQ, "CQuorumBlockProcessor::%s -- unrequested commitment from peer=%d\n", __func__,
+                 peer.GetId());
+        return MisbehavingError{UNREQUESTED_OBJECT_MISBEHAVIOR_SCORE, "unrequested quorum commitment"};
+    }
+
+    // Note: no m_to_erase, the request was already consumed by the solicitation check above.
     MessageProcessingResult ret;
-    ret.m_to_erase = CInv{MSG_QUORUM_FINAL_COMMITMENT, ::SerializeHash(qc)};
 
     if (qc.IsNull()) {
         LogPrint(BCLog::LLMQ, "CQuorumBlockProcessor::%s -- null commitment from peer=%d\n", __func__, peer.GetId());

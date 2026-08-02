@@ -27,21 +27,18 @@ class LLMQSigningTest(DashTestFramework):
 
     def add_options(self, parser):
         self.add_wallet_options(parser)
-        parser.add_argument("--spork21", dest="spork21", default=False, action="store_true",
-                            help="Test with spork21 enabled")
 
     def run_test(self):
 
+        # The first part of this test runs with spork21 off, the second part
+        # enables it mid-test and exercises the spork21-only paths on quorums
+        # mined after that. spork21 being active from the very first DKG is
+        # covered by feature_llmq_data_recovery.py, which enables it at the top
+        # of run_test on a fresh chain, before any DKG has run.
         self.nodes[0].sporkupdate("SPORK_17_QUORUM_DKG_ENABLED", 0)
-        if self.options.spork21:
-            self.nodes[0].sporkupdate("SPORK_21_QUORUM_ALL_CONNECTED", 0)
         self.wait_for_sporks_same()
 
         self.mine_quorum()
-
-        if self.options.spork21:
-            assert self.mninfo[0].get_node(self).getconnectioncount() == self.llmq_size
-            self.assert_qsendrecsigs_symmetric()
 
         id = "0000000000000000000000000000000000000000000000000000000000000001"
         msgHash = "0000000000000000000000000000000000000000000000000000000000000002"
@@ -77,42 +74,11 @@ class LLMQSigningTest(DashTestFramework):
         quorumHash = self.mninfo[1].get_node(self).quorum("selectquorum", q_type, id)["quorumHash"]
         assert self.mninfo[1].get_node(self).quorum("sign", q_type, id, msgHash, quorumHash)
         assert_sigs_nochange(False, False, False, 3)
-        # Sign third share and test optional submit parameter if spork21 is enabled, should result in recovered sig
-        # and conflict for msgHashConflict
-        if self.options.spork21:
-            # 1. Providing an invalid quorum hash and set submit=false, should throw an error
-            assert_raises_rpc_error(-8, 'quorum not found', self.mninfo[2].get_node(self).quorum, "sign", q_type, id, msgHash, id, False)
-            # 2. Providing a valid quorum hash and set submit=false, should return a valid sigShare object
-            sig_share_rpc_1 = self.mninfo[2].get_node(self).quorum("sign", q_type, id, msgHash, quorumHash, False)
-            sig_share_rpc_2 = self.mninfo[2].get_node(self).quorum("sign", q_type, id, msgHash, "", False)
-            assert_equal(sig_share_rpc_1, sig_share_rpc_2)
-            assert_sigs_nochange(False, False, False, 3)
-            # 3. Sending the sig share received from RPC to the recovery member through P2P interface, should result
-            # in a recovered sig
-            sig_share = CSigShare()
-            sig_share.llmqType = int(sig_share_rpc_1["llmqType"])
-            sig_share.quorumHash = int(sig_share_rpc_1["quorumHash"], 16)
-            sig_share.quorumMember = int(sig_share_rpc_1["quorumMember"])
-            sig_share.id = int(sig_share_rpc_1["id"], 16)
-            sig_share.msgHash = int(sig_share_rpc_1["msgHash"], 16)
-            sig_share.sigShare = bytes.fromhex(sig_share_rpc_1["signature"])
-            for mn in self.mninfo: # type: MasternodeInfo
-                assert mn.get_node(self).getconnectioncount() == self.llmq_size
-            # Get the current recovery member of the quorum
-            q = self.nodes[0].quorum('selectquorum', q_type, id)
-            mn: MasternodeInfo = self.get_mninfo(q['recoveryMembers'][0])
-            # Open a P2P connection to it
-            p2p_interface = mn.get_node(self).add_p2p_connection(P2PInterface())
-            # Send the last required QSIGSHARE message to the recovery member
-            p2p_interface.send_message(msg_qsigshare([sig_share]))
-        else:
-            # If spork21 is not enabled just sign regularly
-            self.mninfo[2].get_node(self).quorum("sign", q_type, id, msgHash)
+        # Sign third share regularly, should result in recovered sig and conflict for msgHashConflict.
+        # The optional submit parameter is spork21-only and is exercised after spork21 is enabled below.
+        self.mninfo[2].get_node(self).quorum("sign", q_type, id, msgHash)
 
         wait_for_sigs(True, False, True, 15)
-
-        if self.options.spork21:
-            mn.get_node(self).disconnect_p2ps()
 
         # Test `quorum verify` rpc
         node = self.mninfo[0].get_node(self)
@@ -177,29 +143,80 @@ class LLMQSigningTest(DashTestFramework):
             self.mninfo[i].get_node(self).quorum("sign", q_type, id, msgHash)
         wait_for_sigs(True, False, True, 15)
 
-        if self.options.spork21:
-            id = uint256_to_string(request_id + 1)
+        self.log.info("Enable SPORK_21_QUORUM_ALL_CONNECTED and mine one more quorum")
+        self.nodes[0].sporkupdate("SPORK_21_QUORUM_ALL_CONNECTED", 0)
+        self.wait_for_sporks_same()
+        self.mine_quorum()
 
-            # Isolate the node that is responsible for the recovery of a signature and assert that recovery fails
-            q = self.nodes[0].quorum('selectquorum', q_type, id)
-            mn: MasternodeInfo = self.get_mninfo(q['recoveryMembers'][0])
-            mn.get_node(self).setnetworkactive(False)
-            self.wait_until(lambda: mn.get_node(self).getconnectioncount() == 0)
-            for i in range(4):
-                self.mninfo[i].get_node(self).quorum("sign", q_type, id, msgHash)
-            assert_sigs_nochange(False, False, False, 3)
-            # Need to re-connect so that it later gets the recovered sig
-            mn.get_node(self).setnetworkactive(True)
-            self.connect_nodes(mn.nodeIdx, 0)
-            force_finish_mnsync(mn.get_node(self))
-            # Make sure intra-quorum connections were also restored
-            self.bump_mocktime(1)  # need this to bypass quorum connection retry timeout
-            self.wait_until(lambda: mn.get_node(self).getconnectioncount() == self.llmq_size, timeout=10)
-            mn.get_node(self).ping()
-            self.wait_until(lambda: all('pingwait' not in peer for peer in mn.get_node(self).getpeerinfo()))
-            # Let 2 seconds pass so that the next node is used for recovery, which should succeed
-            self.bump_mocktime(2)
-            wait_for_sigs(True, False, True, 2)
+        # Unlike a chain that runs with spork21 from the very first DKG, the intra-quorum
+        # connections here predate the spork, so bump mocktime while waiting to bypass the
+        # quorum connection retry timeout and let the all-connected topology settle.
+        def all_mns_fully_connected():
+            self.bump_mocktime(1)
+            return all(mn.get_node(self).getconnectioncount() == self.llmq_size for mn in self.mninfo)
+
+        self.wait_until(all_mns_fully_connected, timeout=30, sleep=1)
+        self.assert_qsendrecsigs_symmetric()
+
+        self.log.info("Test the optional submit parameter and QSIGSHARE P2P submission")
+        id = uint256_to_string(request_id + 1)
+        # Sign first two shares regularly, using the optional quorumHash parameter for the second one
+        self.mninfo[0].get_node(self).quorum("sign", q_type, id, msgHash)
+        quorumHash = self.mninfo[1].get_node(self).quorum("selectquorum", q_type, id)["quorumHash"]
+        assert self.mninfo[1].get_node(self).quorum("sign", q_type, id, msgHash, quorumHash)
+        assert_sigs_nochange(False, False, False, 3)
+        # Sign third share and test the optional submit parameter, should result in recovered sig
+        # and conflict for msgHashConflict
+        # 1. Providing an invalid quorum hash and set submit=false, should throw an error
+        assert_raises_rpc_error(-8, 'quorum not found', self.mninfo[2].get_node(self).quorum, "sign", q_type, id, msgHash, id, False)
+        # 2. Providing a valid quorum hash and set submit=false, should return a valid sigShare object
+        sig_share_rpc_1 = self.mninfo[2].get_node(self).quorum("sign", q_type, id, msgHash, quorumHash, False)
+        sig_share_rpc_2 = self.mninfo[2].get_node(self).quorum("sign", q_type, id, msgHash, "", False)
+        assert_equal(sig_share_rpc_1, sig_share_rpc_2)
+        assert_sigs_nochange(False, False, False, 3)
+        # 3. Sending the sig share received from RPC to the recovery member through P2P interface, should result
+        # in a recovered sig
+        sig_share = CSigShare()
+        sig_share.llmqType = int(sig_share_rpc_1["llmqType"])
+        sig_share.quorumHash = int(sig_share_rpc_1["quorumHash"], 16)
+        sig_share.quorumMember = int(sig_share_rpc_1["quorumMember"])
+        sig_share.id = int(sig_share_rpc_1["id"], 16)
+        sig_share.msgHash = int(sig_share_rpc_1["msgHash"], 16)
+        sig_share.sigShare = bytes.fromhex(sig_share_rpc_1["signature"])
+        # Get the current recovery member of the quorum
+        q = self.nodes[0].quorum('selectquorum', q_type, id)
+        mn: MasternodeInfo = self.get_mninfo(q['recoveryMembers'][0])
+        # Open a P2P connection to it
+        p2p_interface = mn.get_node(self).add_p2p_connection(P2PInterface())
+        # Send the last required QSIGSHARE message to the recovery member
+        p2p_interface.send_message(msg_qsigshare([sig_share]))
+
+        wait_for_sigs(True, False, True, 15)
+
+        mn.get_node(self).disconnect_p2ps()
+
+        id = uint256_to_string(request_id + 2)
+
+        # Isolate the node that is responsible for the recovery of a signature and assert that recovery fails
+        q = self.nodes[0].quorum('selectquorum', q_type, id)
+        mn = self.get_mninfo(q['recoveryMembers'][0])
+        mn.get_node(self).setnetworkactive(False)
+        self.wait_until(lambda: mn.get_node(self).getconnectioncount() == 0)
+        for i in range(4):
+            self.mninfo[i].get_node(self).quorum("sign", q_type, id, msgHash)
+        assert_sigs_nochange(False, False, False, 3)
+        # Need to re-connect so that it later gets the recovered sig
+        mn.get_node(self).setnetworkactive(True)
+        self.connect_nodes(mn.nodeIdx, 0)
+        force_finish_mnsync(mn.get_node(self))
+        # Make sure intra-quorum connections were also restored
+        self.bump_mocktime(1)  # need this to bypass quorum connection retry timeout
+        self.wait_until(lambda: mn.get_node(self).getconnectioncount() == self.llmq_size, timeout=10)
+        mn.get_node(self).ping()
+        self.wait_until(lambda: all('pingwait' not in peer for peer in mn.get_node(self).getpeerinfo()))
+        # Let 2 seconds pass so that the next node is used for recovery, which should succeed
+        self.bump_mocktime(2)
+        wait_for_sigs(True, False, True, 2)
 
     def assert_qsendrecsigs_symmetric(self):
         # If only one direction's QSENDRECSIGS arrives, the receiving side keeps

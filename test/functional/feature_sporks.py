@@ -128,6 +128,12 @@ class SporkTest(BitcoinTestFramework):
         bad_peer.send_message(bad_spork)
         bad_peer.wait_for_disconnect()
 
+        # Restarting with a spork address the cached sporks were not signed by must
+        # drop them (CheckAndRemove) and fall back to the default value.
+        assert self.get_test_spork_state(self.nodes[0]) == spork_new_state
+        self.restart_node(0, ["-sporkaddr=yNsMZhEhYqv14TgdYb1NS2UmNZjE8FSJxa", "-connect=0"])
+        assert self.get_test_spork_state(self.nodes[0]) == spork_default_state
+
 
 if __name__ == '__main__':
     SporkTest().main()

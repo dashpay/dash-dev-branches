@@ -45,6 +45,24 @@ static const int DISCOURAGEMENT_THRESHOLD{100};
 /** Maximum number of outstanding CMPCTBLOCK requests for the same block. */
 static const unsigned int MAX_CMPCTBLOCKS_INFLIGHT_PER_BLOCK = 3;
 
+/** Outcome of authorising an incoming object against what we asked a peer for.
+ *
+ * Used by object types that only ever travel inv -> getdata -> object, to tell an unsolicited push
+ * apart from an honest answer to a GETDATA of ours that no longer has a tracker entry. The latter
+ * is routine: a request expires after GetObjectInterval() and is re-pointed at another peer, and
+ * accepting the object from any source erases every announcement for it (see ForgetTxHash). */
+enum class GetDataResponse {
+    //! We had an in-flight GETDATA for this object; it has now been consumed.
+    REQUESTED,
+    //! No in-flight request, but we did send this peer a GETDATA for this object recently, so the
+    //! answer is merely late or was superseded. Process it, but do not treat it as unsolicited.
+    LATE,
+    //! We have no record of asking this peer for this object. Usually that is because we never did,
+    //! which is what makes it worth scoring -- but a record we did keep is also gone once it ages
+    //! out or is evicted, so an answer late enough is treated the same as one never asked for.
+    UNREQUESTED,
+};
+
 struct CNodeStateStats {
     int m_misbehavior_score = 0;
     int nSyncHeight = -1;
@@ -74,6 +92,14 @@ public:
      *  announcement, so a second call without a re-announcement in between returns false.
      *  Requires ::cs_main (see the PeerManagerImpl override). */
     virtual bool PeerConsumeObjectRequest(NodeId nodeid, const CInv& inv) = 0;
+    /** Consume this peer's in-flight GETDATA for the inv and report how the object was authorised.
+     *  Stricter than PeerConsumeObjectRequest: a bare announcement does not qualify, only a request
+     *  we actually sent. Use for object types that are only ever sent in reply to a GETDATA, so a
+     *  peer cannot authorise its own payload by announcing it first. Only UNREQUESTED leaves us with
+     *  nothing to show we asked; see GetDataResponse for why LATE is a normal outcome for an honest
+     *  peer, and for what else can produce UNREQUESTED besides never having asked.
+     *  Requires ::cs_main (see the PeerManagerImpl override). */
+    virtual GetDataResponse PeerConsumeGetDataResponse(NodeId nodeid, const CInv& inv) = 0;
     /** Delete all peers' announcements of the inv. Call once the object is accepted (AlreadyHave
      *  turns true), so it is not requested from anyone anymore.
      *  Requires ::cs_main (see the PeerManagerImpl override). */

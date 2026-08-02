@@ -31,6 +31,11 @@ protected:
     size_type nPruneAfterSize;
 
 public:
+    //! nMaxSizeIn is the number of elements retained after a prune. nPruneAfterSizeIn is the size
+    //! the map may grow to before the next insertion prunes it; it defaults to nMaxSizeIn, which
+    //! means prune() -- and therefore a partition of every element -- runs on *every* insertion
+    //! past nMaxSizeIn. Callers whose keys are attacker-supplied should pass a larger value (e.g.
+    //! 2 * nMaxSizeIn) so that partitioning is amortised over a batch of evictions instead.
     explicit unordered_limitedmap(size_type nMaxSizeIn, size_type nPruneAfterSizeIn = 0)
     {
         assert(nMaxSizeIn > 0);
@@ -68,7 +73,11 @@ public:
             return;
         itTarget->second = v;
     }
+    //! Number of elements retained after a prune.
     size_type max_size() const { return nMaxSize; }
+    //! Size the map is allowed to grow to before a prune is triggered. Always >= max_size();
+    //! when larger, the map temporarily holds more than max_size() elements between prunes.
+    size_type prune_after_size() const { return nPruneAfterSize; }
     size_type max_size(size_type nMaxSizeIn, size_type nPruneAfterSizeIn = 0)
     {
         assert(nMaxSizeIn > 0);
@@ -88,20 +97,20 @@ public:
             return;
         }
 
-        std::vector<iterator> sortedIterators;
-        sortedIterators.reserve(map.size());
+        std::vector<iterator> iterators;
+        iterators.reserve(map.size());
         for (auto it = map.begin(); it != map.end(); ++it) {
-            sortedIterators.emplace_back(it);
+            iterators.emplace_back(it);
         }
-        std::sort(sortedIterators.begin(), sortedIterators.end(), [](const iterator& it1, const iterator& it2) {
-            return it1->second < it2->second;
-        });
-
         size_type tooMuch = map.size() - nMaxSize;
-        assert(tooMuch > 0);
-        sortedIterators.resize(tooMuch);
+        // nPruneAfterSize >= nMaxSize > 0 keeps tooMuch inside the vector, which nth_element relies on
+        assert(tooMuch > 0 && tooMuch < iterators.size());
+        // Only the entries below the eviction boundary have to be identified, their relative order does not matter
+        std::nth_element(iterators.begin(), iterators.begin() + tooMuch, iterators.end(),
+                         [](const iterator& it1, const iterator& it2) { return it1->second < it2->second; });
+        iterators.resize(tooMuch);
 
-        for (auto& it : sortedIterators) {
+        for (auto& it : iterators) {
             map.erase(it);
         }
     }

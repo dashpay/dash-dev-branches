@@ -669,6 +669,16 @@ public:
         return true;
     }
 
+    bool ReceivedRequestedResponse(NodeId peer, const CInv& txhash)
+    {
+        // A REQUESTED announcement is never the CANDIDATE_BEST for its txhash, so only the
+        // (peer, false, txhash) half of the ByPeer index can hold it.
+        auto it = m_index.get<ByPeer>().find(ByPeerView{peer, false, txhash});
+        if (it == m_index.get<ByPeer>().end() || it->GetState() != State::REQUESTED) return false;
+        MakeCompleted(m_index.project<ByTxHash>(it));
+        return true;
+    }
+
     size_t CountInFlight(NodeId peer) const
     {
         auto it = m_peerinfo.find(peer);
@@ -733,6 +743,11 @@ void TxRequestTracker::RequestedTx(NodeId peer, const CInv& txhash, std::chrono:
 bool TxRequestTracker::ReceivedResponse(NodeId peer, const CInv& txhash)
 {
     return m_impl->ReceivedResponse(peer, txhash);
+}
+
+bool TxRequestTracker::ReceivedRequestedResponse(NodeId peer, const CInv& txhash)
+{
+    return m_impl->ReceivedRequestedResponse(peer, txhash);
 }
 
 std::vector<CInv> TxRequestTracker::GetRequestable(NodeId peer, std::chrono::microseconds now,

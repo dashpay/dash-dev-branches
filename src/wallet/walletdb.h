@@ -13,6 +13,7 @@
 #include <key.h>
 
 #include <stdint.h>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -68,6 +69,7 @@ extern const std::string BESTBLOCK;
 extern const std::string BESTBLOCK_NOMERKLE;
 extern const std::string CRYPTED_HDCHAIN;
 extern const std::string CRYPTED_KEY;
+extern const std::string COINJOIN_PENDING_OBS;
 extern const std::string COINJOIN_SALT;
 extern const std::string CSCRIPT;
 extern const std::string DEFAULTKEY;
@@ -215,6 +217,14 @@ public:
 
     bool ReadCoinJoinSalt(uint256& salt, bool fLegacy = false);
     bool WriteCoinJoinSalt(const uint256& salt);
+
+    /** Outpoints of successfully mixed inputs which are locked until the transaction
+     *  spending them is observed, mapped to the time each was recorded. Stored as one
+     *  record because the set is small and always rewritten as a whole. Has() tells a
+     *  missing record apart from one Read() could not read or deserialize. */
+    bool HasCoinJoinPendingObs();
+    bool ReadCoinJoinPendingObs(std::map<COutPoint, int64_t>& pending_obs);
+    bool WriteCoinJoinPendingObs(const std::map<COutPoint, int64_t>& pending_obs);
 
     /** Write a CGovernanceObject to the database */
     bool WriteGovernanceObject(const Governance::Object& obj);

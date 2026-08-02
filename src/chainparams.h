@@ -150,8 +150,7 @@ public:
     int PoolMinParticipants() const { return nPoolMinParticipants; }
     int PoolMaxParticipants() const { return nPoolMaxParticipants; }
     int FulfilledRequestExpireTime() const { return nFulfilledRequestExpireTime; }
-    const std::vector<std::string>& SporkAddresses() const { return vSporkAddresses; }
-    int MinSporkKeys() const { return nMinSporkKeys; }
+    const std::string& SporkAddress() const { return strSporkAddress; }
     int CreditPoolPeriodBlocks() const { return nCreditPoolPeriodBlocks; }
     [[nodiscard]] std::optional<Consensus::LLMQParams> GetLLMQ(Consensus::LLMQType llmqType) const;
 
@@ -185,8 +184,7 @@ protected:
     int nPoolMinParticipants;
     int nPoolMaxParticipants;
     int nFulfilledRequestExpireTime;
-    std::vector<std::string> vSporkAddresses;
-    int nMinSporkKeys;
+    std::string strSporkAddress;
     uint16_t nDefaultPlatformP2PPort;
     uint16_t nDefaultPlatformHTTPPort;
     /// The number of blocks the credit pool tracks; 576 (one day) on mainnet, reduced on regtest
