@@ -42,6 +42,11 @@ class NodeNetworkLimitedTest(BitcoinTestFramework):
         self.setup_clean_chain = True
         self.num_nodes = 3
         self.extra_args = [['-prune=550'], [], []]
+        # This test needs node 2 to actually be in IBD, so that it does not ask
+        # the NODE_NETWORK_LIMITED peer for historical blocks and get dropped for
+        # it. The framework's default genesis mocktime would leave node 2's tip
+        # permanently "fresh" and IsInitialBlockDownload() would latch to false.
+        self.disable_mocktime = True
 
     def disconnect_all(self):
         self.disconnect_nodes(0, 1)

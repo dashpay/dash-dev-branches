@@ -191,8 +191,8 @@ bool BuildQuorumRotationInfo(CDeterministicMNManager& dmnman, CQuorumSnapshotMan
     }
 
     if (!use_legacy_construction) {
-        for (size_t idx = target_cycles.size(); idx-- > 0;) {
-            auto* cycle{target_cycles[idx]};
+        for (size_t n = target_cycles.size(); n > 0; --n) {
+            auto* cycle{target_cycles[n - 1]};
             if (!BuildSimplifiedMNListDiff(dmnman, chainman, qblockman, qman,
                                            GetLastBaseBlockHash(baseBlockIndexes, cycle->m_work_index,
                                                                 use_legacy_construction),

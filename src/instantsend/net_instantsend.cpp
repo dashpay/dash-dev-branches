@@ -73,12 +73,12 @@ bool NetInstantSend::ValidateIncomingISLock(const instantsend::InstantSendLock& 
 
 std::optional<int> NetInstantSend::ResolveCycleHeight(const uint256& cycle_hash)
 {
-    auto cycle_height = GetBlockHeight(m_is_manager, m_chainstate, cycle_hash);
+    auto cycle_height = GetBlockHeight(m_is_manager, m_chainman.ActiveChainstate(), cycle_hash);
     if (cycle_height) {
         return cycle_height;
     }
 
-    const auto block_index = WITH_LOCK(::cs_main, return m_chainstate.m_blockman.LookupBlockIndex(cycle_hash));
+    const auto block_index = WITH_LOCK(::cs_main, return m_chainman.m_blockman.LookupBlockIndex(cycle_hash));
     if (block_index == nullptr) {
         return std::nullopt;
     }
@@ -108,6 +108,8 @@ std::unique_ptr<NetInstantSend::BatchVerificationData> NetInstantSend::BuildVeri
 {
     auto data = std::make_unique<BatchVerificationData>();
 
+    const CChain& active_chain = *WITH_LOCK(::cs_main, return &m_chainman.ActiveChain());
+
     for (const auto& pending : pend) {
         const auto& hash = pending.islock_hash;
         auto nodeId = pending.node_id;
@@ -131,7 +133,7 @@ std::unique_ptr<NetInstantSend::BatchVerificationData> NetInstantSend::BuildVeri
             continue;
         }
 
-        auto cycleHeightOpt = GetBlockHeight(m_is_manager, m_chainstate, islock->cycleHash);
+        auto cycleHeightOpt = GetBlockHeight(m_is_manager, m_chainman.ActiveChainstate(), islock->cycleHash);
         if (!cycleHeightOpt) {
             data->batchVerifier.badSources.emplace(nodeId);
             continue;
@@ -145,7 +147,7 @@ std::unique_ptr<NetInstantSend::BatchVerificationData> NetInstantSend::BuildVeri
             nSignHeight = cycleHeight + dkgInterval - 1;
         }
         // For RegTest non-rotating quorum cycleHash has directly quorum hash
-        auto quorum = llmq_params.useRotation ? llmq::SelectQuorumForSigning(llmq_params, m_chainstate.m_chain, m_qman,
+        auto quorum = llmq_params.useRotation ? llmq::SelectQuorumForSigning(llmq_params, active_chain, m_qman,
                                                                              id, nSignHeight, signOffset)
                                               : m_qman.GetQuorum(llmq_params.type, islock->cycleHash);
 
@@ -375,7 +377,7 @@ void NetInstantSend::ProcessInstantSendLock(NodeId from, const uint256& hash, co
     auto tx = GetTransaction(nullptr, &m_mempool, islock->txid, Params().GetConsensus(), hashBlock);
     const bool found_transaction{tx != nullptr};
     // we ignore failure here as we must be able to propagate the lock even if we don't have the TX locally
-    const auto minedHeight = GetBlockHeight(m_is_manager, m_chainstate, hashBlock);
+    const auto minedHeight = GetBlockHeight(m_is_manager, m_chainman.ActiveChainstate(), hashBlock);
     if (found_transaction) {
         // Let's see if the TX that was locked by this islock is already mined in a ChainLocked block. If yes,
         // we can simply ignore the islock, as the ChainLock implies locking of all TXs in that chain
@@ -601,8 +603,8 @@ void NetInstantSend::ResolveBlockConflicts(const uint256& islockHash, const inst
 
         BlockValidationState state;
         // need non-const pointer
-        auto pindex2 = WITH_LOCK(::cs_main, return m_chainstate.m_blockman.LookupBlockIndex(pindex->GetBlockHash()));
-        if (!m_chainstate.InvalidateBlock(state, pindex2)) {
+        auto pindex2 = WITH_LOCK(::cs_main, return m_chainman.ActiveChainstate().m_blockman.LookupBlockIndex(pindex->GetBlockHash()));
+        if (!m_chainman.ActiveChainstate().InvalidateBlock(state, pindex2)) {
             LogPrintf("NetInstantSend::%s -- InvalidateBlock failed: %s\n", __func__, state.ToString());
             // This should not have happened and we are in a state were it's not safe to continue anymore
             assert(false);
@@ -612,13 +614,13 @@ void NetInstantSend::ResolveBlockConflicts(const uint256& islockHash, const inst
         } else {
             LogPrintf("NetInstantSend::%s -- resetting block %s\n", __func__, pindex2->GetBlockHash().ToString());
             LOCK(::cs_main);
-            m_chainstate.ResetBlockFailureFlags(pindex2);
+            m_chainman.ActiveChainstate().ResetBlockFailureFlags(pindex2);
         }
     }
 
     if (activateBestChain) {
         BlockValidationState state;
-        if (!m_chainstate.ActivateBestChain(state)) {
+        if (!m_chainman.ActiveChainstate().ActivateBestChain(state)) {
             LogPrintf("NetInstantSend::%s -- ActivateBestChain failed: %s\n", __func__, state.ToString());
             // This should not have happened and we are in a state were it's not safe to continue anymore
             assert(false);

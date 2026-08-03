@@ -147,7 +147,7 @@ public:
     {
         m_address_type = static_cast<AddressType>(ser_readdata8(s));
         m_address_bytes.Unserialize(s);
-        m_block_height = ser_readdata32be(s);
+        m_block_height = static_cast<int32_t>(ser_readdata32be(s));
         m_block_tx_pos = ser_readdata32be(s);
         m_tx_hash.Unserialize(s);
         m_tx_index = ser_readdata32(s);
@@ -228,7 +228,7 @@ public:
     {
         m_address_type = static_cast<AddressType>(ser_readdata8(s));
         m_address_bytes.Unserialize(s);
-        m_block_height = ser_readdata32be(s);
+        m_block_height = static_cast<int32_t>(ser_readdata32be(s));
     }
 };
 

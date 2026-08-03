@@ -20,11 +20,11 @@
 using node::ReadBlockFromDisk;
 
 namespace chainlock {
-ChainLockSigner::ChainLockSigner(Chainstate& chainstate, const chainlock::Chainlocks& chainlocks,
+ChainLockSigner::ChainLockSigner(const ChainstateManager& chainman, const chainlock::Chainlocks& chainlocks,
                                  ChainlockHandler& clhandler, const llmq::CInstantSendManager& isman,
                                  const llmq::CQuorumManager& qman, llmq::CSigningManager& sigman,
                                  llmq::CSigSharesManager& shareman, const CMasternodeSync& mn_sync) :
-    m_chainstate{chainstate},
+    m_chainman{chainman},
     m_chainlocks{chainlocks},
     m_clhandler{clhandler},
     m_isman{isman},
@@ -88,7 +88,7 @@ void ChainLockSigner::TrySignChainTip()
         return;
     }
 
-    const CBlockIndex* pindex = WITH_LOCK(::cs_main, return m_chainstate.m_chain.Tip());
+    const CBlockIndex* pindex = WITH_LOCK(::cs_main, return m_chainman.ActiveChain().Tip());
 
     if (!pindex || !pindex->pprev) {
         return;
@@ -232,7 +232,7 @@ ChainLockSigner::BlockTxs::mapped_type ChainLockSigner::GetBlockTxs(const uint25
         uint32_t blockTime;
         {
             LOCK(::cs_main);
-            const auto* pindex = m_chainstate.m_blockman.LookupBlockIndex(blockHash);
+            const auto* pindex = m_chainman.m_blockman.LookupBlockIndex(blockHash);
             if (!pindex) {
                 return nullptr;
             }
@@ -305,7 +305,7 @@ void ChainLockSigner::Cleanup()
     std::vector<std::shared_ptr<Uint256HashSet>> removed;
     LOCK2(::cs_main, cs_signer);
     for (auto it = blockTxs.begin(); it != blockTxs.end();) {
-        const auto* pindex = m_chainstate.m_blockman.LookupBlockIndex(it->first);
+        const auto* pindex = m_chainman.m_blockman.LookupBlockIndex(it->first);
         if (!pindex) {
             it = blockTxs.erase(it);
         } else if (m_chainlocks.HasChainLock(pindex->nHeight, pindex->GetBlockHash())) {

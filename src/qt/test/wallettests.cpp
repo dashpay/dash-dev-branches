@@ -19,6 +19,7 @@
 #include <qt/walletmodel.h>
 #include <key_io.h>
 #include <test/util/setup_common.h>
+#include <util/system.h>
 #include <validation.h>
 #include <wallet/wallet.h>
 #include <qt/overviewpage.h>
@@ -192,6 +193,30 @@ void TestGUI(interfaces::Node& node)
     CAmount balance = walletModel.wallet().getBalance();
     QString balanceComparison = BitcoinUnits::floorHtmlWithPrivacy(unit, balance, BitcoinUnits::SeparatorStyle::ALWAYS, false);
     QCOMPARE(balanceText, balanceComparison);
+
+    // Check that each autobackup failure state selects its specific tooltip on the CoinJoin status label
+    {
+        QLabel* coinJoinLabel = overviewPage.findChild<QLabel*>("labelCoinJoinEnabled");
+        QVERIFY(coinJoinLabel != nullptr);
+        const int nWalletBackupsOld = nWalletBackups;
+
+        nWalletBackups = 0;
+        overviewPage.coinJoinStatus(/*fForce=*/true);
+        QCOMPARE(coinJoinLabel->toolTip(), QString("Automatic backups are disabled, no mixing available!"));
+
+        nWalletBackups = -1;
+        overviewPage.coinJoinStatus(/*fForce=*/true);
+        QCOMPARE(coinJoinLabel->toolTip(),
+                 QString("ERROR! Failed to create automatic backup, see debug.log for details.<br><br>Mixing is "
+                         "disabled, please close your wallet and fix the issue!"));
+
+        nWalletBackups = -2;
+        overviewPage.coinJoinStatus(/*fForce=*/true);
+        QCOMPARE(coinJoinLabel->toolTip(),
+                 QString("WARNING! Failed to replenish keypool, please unlock your wallet to do so."));
+
+        nWalletBackups = nWalletBackupsOld;
+    }
 
     // Check Request Payment button
     ReceiveCoinsDialog receiveCoinsDialog;

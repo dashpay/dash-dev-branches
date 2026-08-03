@@ -30,11 +30,11 @@ using node::fReindex;
 using node::GetTransaction;
 
 namespace instantsend {
-InstantSendSigner::InstantSendSigner(Chainstate& chainstate, const chainlock::Chainlocks& chainlocks,
+InstantSendSigner::InstantSendSigner(const ChainstateManager& chainman, const chainlock::Chainlocks& chainlocks,
                                      llmq::CInstantSendManager& isman, llmq::CSigningManager& sigman,
                                      llmq::CSigSharesManager& shareman, llmq::CQuorumManager& qman,
                                      CSporkManager& sporkman, CTxMemPool& mempool, const CMasternodeSync& mn_sync) :
-    m_chainstate{chainstate},
+    m_chainman{chainman},
     m_chainlocks{chainlocks},
     m_isman{isman},
     m_sigman{sigman},
@@ -211,7 +211,7 @@ bool InstantSendSigner::CheckCanLock(const COutPoint& outpoint, bool printDebug,
     if (auto ret = m_isman.GetCachedHeight(hashBlock)) {
         blockHeight = *ret;
     } else {
-        const CBlockIndex* pindex = WITH_LOCK(::cs_main, return m_chainstate.m_blockman.LookupBlockIndex(hashBlock));
+        const CBlockIndex* pindex = WITH_LOCK(::cs_main, return m_chainman.m_blockman.LookupBlockIndex(hashBlock));
         if (pindex == nullptr) {
             if (printDebug) {
                 LogPrint(BCLog::INSTANTSEND, "%s -- txid=%s: failed to determine mined height for parent TX %s\n",
@@ -390,7 +390,8 @@ void InstantSendSigner::TrySignInstantSendLock(const CTransaction& tx)
 
     const auto& llmq_params_opt = Params().GetLLMQ(llmqType);
     assert(llmq_params_opt);
-    const auto quorum = llmq::SelectQuorumForSigning(llmq_params_opt.value(), m_chainstate.m_chain, m_qman, id);
+    const CChain& active_chain = *WITH_LOCK(::cs_main, return &m_chainman.ActiveChain());
+    const auto quorum = llmq::SelectQuorumForSigning(llmq_params_opt.value(), active_chain, m_qman, id);
 
     if (!quorum) {
         LogPrint(BCLog::INSTANTSEND, "%s -- failed to select quorum. islock id=%s, txid=%s\n", __func__, id.ToString(),

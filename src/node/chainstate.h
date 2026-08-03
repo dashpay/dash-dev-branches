@@ -5,13 +5,16 @@
 #ifndef BITCOIN_NODE_CHAINSTATE_H
 #define BITCOIN_NODE_CHAINSTATE_H
 
+#include <llmq/options.h>
+#include <util/fs.h>
+#include <validation.h>
+
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <string>
 #include <tuple>
-#include <validation.h>
 
 class CChainstateHelper;
 class CDeterministicMNManager;
@@ -24,29 +27,32 @@ class CTxMemPool;
 struct LLMQContext;
 
 namespace chainlock { class Chainlocks; }
-namespace fs {
-class path;
-} // namespace fs
 
 namespace node {
+
 struct CacheSizes;
 
 struct ChainstateLoadOptions {
     CTxMemPool* mempool{nullptr};
+    CMasternodeMetaMan* mn_metaman{nullptr};
+    CSporkManager* sporkman{nullptr};
+    chainlock::Chainlocks* chainlocks{nullptr};
+    const CMasternodeSync* mn_sync{nullptr};
+    fs::path data_dir;
+
     bool block_tree_db_in_memory{false};
     bool coins_db_in_memory{false};
     bool dash_dbs_in_memory{false};
     bool reindex{false};
     bool reindex_chainstate{false};
     bool prune{false};
-    int8_t bls_threads{0};
-    int16_t worker_count{0};
-    int64_t max_recsigs_age{0};
+    int8_t bls_threads{llmq::DEFAULT_BLSCHECK_THREADS};
+    int16_t worker_count{llmq::DEFAULT_WORKER_COUNT};
+    int64_t max_recsigs_age{llmq::DEFAULT_MAX_RECOVERED_SIGS_AGE};
     int64_t check_blocks{DEFAULT_CHECKBLOCKS};
     int64_t check_level{DEFAULT_CHECKLEVEL};
     std::function<bool()> check_interrupt;
     std::function<void()> coins_error_cb;
-    std::function<void(bool)> notify_bls_state;
 };
 
 //! Chainstate load status. Simple applications can just check for the success
@@ -70,45 +76,16 @@ using ChainstateLoadResult = std::tuple<ChainstateLoadStatus, bilingual_str>;
  *    - a failure that definitively cannot be recovered from with a reindex
  *
  *  LoadChainstate returns a (status code, error string) tuple.
+ *
+ *  The evodb, dmnman, llmq_ctx and chain_helper arguments are outputs: any
+ *  instance they hold is destroyed and replaced with a freshly constructed one.
  */
-ChainstateLoadResult LoadChainstate(ChainstateManager& chainman,
-                                                     CMasternodeMetaMan& mn_metaman,
-                                                     CSporkManager& sporkman,
-                                                     chainlock::Chainlocks& chainlocks,
-                                                     const CMasternodeSync& mn_sync,
-                                                     std::unique_ptr<CChainstateHelper>& chain_helper,
-                                                     std::unique_ptr<CDeterministicMNManager>& dmnman,
-                                                     std::unique_ptr<CEvoDB>& evodb,
-                                                     std::unique_ptr<LLMQContext>& llmq_ctx,
-                                                     const fs::path& data_dir,
-                                                     const CacheSizes& cache_sizes,
-                                                     const ChainstateLoadOptions& options);
-
-/** Initialize Dash-specific components during chainstate initialization */
-void DashChainstateSetup(ChainstateManager& chainman,
-                         CMasternodeMetaMan& mn_metaman,
-                         CSporkManager& sporkman,
-                         chainlock::Chainlocks& chainlocks,
-                         const CMasternodeSync& mn_sync,
-                         std::unique_ptr<CChainstateHelper>& chain_helper,
-                         std::unique_ptr<CDeterministicMNManager>& dmnman,
-                         CEvoDB& evodb,
-                         std::unique_ptr<LLMQContext>& llmq_ctx,
-                         CTxMemPool* mempool,
-                         const fs::path& data_dir,
-                         bool llmq_dbs_in_memory,
-                         bool llmq_dbs_wipe,
-                         int8_t bls_threads,
-                         int16_t worker_count,
-                         int64_t max_recsigs_age);
-
-void DashChainstateSetupClose(std::unique_ptr<CChainstateHelper>& chain_helper,
-                              std::unique_ptr<CDeterministicMNManager>& dmnman,
-                              std::unique_ptr<LLMQContext>& llmq_ctx,
-                              CTxMemPool* mempool);
-
-ChainstateLoadResult VerifyLoadedChainstate(ChainstateManager& chainman, CEvoDB& evodb,
-                                            const ChainstateLoadOptions& options);
+ChainstateLoadResult LoadChainstate(ChainstateManager& chainman, const CacheSizes& cache_sizes,
+                                    const ChainstateLoadOptions& options, std::unique_ptr<CEvoDB>& evodb,
+                                    std::unique_ptr<CDeterministicMNManager>& dmnman, std::unique_ptr<LLMQContext>& llmq_ctx,
+                                    std::unique_ptr<CChainstateHelper>& chain_helper);
+ChainstateLoadResult VerifyLoadedChainstate(ChainstateManager& chainman, const ChainstateLoadOptions& options, CEvoDB& evodb,
+                                            std::function<void(bool)> notify_bls_state = nullptr);
 } // namespace node
 
 #endif // BITCOIN_NODE_CHAINSTATE_H

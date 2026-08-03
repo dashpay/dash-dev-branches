@@ -26,7 +26,7 @@ class CBlock;
 class CBlockIndex;
 class CBLSSignature;
 class CChain;
-class Chainstate;
+class ChainstateManager;
 class CDataStream;
 class CDeterministicMNManager;
 class CEvoDB;
@@ -47,7 +47,7 @@ using QcIndexedHashMap = std::map<Consensus::LLMQType, std::map<int16_t, uint256
 class CQuorumBlockProcessor
 {
 private:
-    Chainstate& m_chainstate;
+    const ChainstateManager& m_chainman;
     CDeterministicMNManager& m_dmnman;
     CEvoDB& m_evoDb;
     CQuorumSnapshotManager& m_qsnapman;
@@ -76,7 +76,7 @@ public:
     CQuorumBlockProcessor() = delete;
     CQuorumBlockProcessor(const CQuorumBlockProcessor&) = delete;
     CQuorumBlockProcessor& operator=(const CQuorumBlockProcessor&) = delete;
-    explicit CQuorumBlockProcessor(Chainstate& chainstate, CDeterministicMNManager& dmnman, CEvoDB& evoDb,
+    explicit CQuorumBlockProcessor(const ChainstateManager& chainman, CDeterministicMNManager& dmnman, CEvoDB& evoDb,
                                    CQuorumSnapshotManager& qsnapman, int8_t bls_threads);
     ~CQuorumBlockProcessor();
 

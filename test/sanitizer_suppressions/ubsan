@@ -45,6 +45,7 @@ unsigned-integer-overflow:coins.cpp
 unsigned-integer-overflow:compressor.cpp
 unsigned-integer-overflow:crypto/
 unsigned-integer-overflow:hash.cpp
+unsigned-integer-overflow:lcg.h
 unsigned-integer-overflow:policy/fees.cpp
 unsigned-integer-overflow:prevector.h
 unsigned-integer-overflow:EvalScript

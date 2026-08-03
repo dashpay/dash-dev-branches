@@ -4,6 +4,10 @@
 //
 #include <chainparams.h>
 #include <consensus/validation.h>
+#include <evo/chainhelper.h>
+#include <evo/deterministicmns.h>
+#include <llmq/context.h>
+#include <llmq/options.h>
 #include <node/chainstate.h>
 #include <node/utxo_snapshot.h>
 #include <random.h>
@@ -18,7 +22,6 @@
 #include <validation.h>
 #include <validationinterface.h>
 
-#include <chainlock/handler.h>
 #include <evo/evodb.h>
 #include <llmq/blockprocessor.h>
 #include <llmq/signing.h>
@@ -33,6 +36,35 @@ using node::SnapshotMetadata;
 
 BOOST_FIXTURE_TEST_SUITE(validation_chainstatemanager_tests, ChainTestingSetup)
 
+static void DashChainstateSetup(ChainstateManager& chainman,
+                         node::NodeContext& node,
+                         bool llmq_dbs_in_memory,
+                         bool llmq_dbs_wipe)
+{
+    node.llmq_ctx.reset();
+    node.llmq_ctx = std::make_unique<LLMQContext>(*node.dmnman, *node.evodb, *Assert(node.sporkman.get()), chainman,
+                                                  util::DbWrapperParams{.path = node.args->GetDataDirNet(), .memory = llmq_dbs_in_memory, .wipe = llmq_dbs_wipe},
+                                                  llmq::DEFAULT_BLSCHECK_THREADS, llmq::DEFAULT_WORKER_COUNT, llmq::DEFAULT_MAX_RECOVERED_SIGS_AGE);
+    if (node.mempool) {
+        node.mempool->ConnectManagers(node.dmnman.get(), node.llmq_ctx->isman.get());
+    }
+
+    // Initialize chain_helper
+    node.chain_helper.reset();
+    node.chain_helper = std::make_unique<CChainstateHelper>(*node.evodb, *node.dmnman, *Assert(node.mn_sync), *(node.llmq_ctx->isman), *(node.llmq_ctx->quorum_block_processor),
+                                                            *(node.llmq_ctx->qsnapman), chainman, chainman.GetConsensus(), *Assert(node.chainlocks),
+                                                            *(node.llmq_ctx->qman));
+}
+
+static void DashChainstateSetupClose(node::NodeContext& node)
+{
+    if (node.mempool) {
+        node.mempool->DisconnectManagers();
+    }
+    node.chain_helper.reset();
+    node.llmq_ctx.reset();
+}
+
 //! Basic tests for ChainstateManager.
 //!
 //! First create a legacy (IBD) chainstate, then create a snapshot chainstate.
@@ -41,6 +73,7 @@ BOOST_AUTO_TEST_CASE(chainstatemanager)
     ChainstateManager& manager = *m_node.chainman;
     CTxMemPool& mempool = *m_node.mempool;
     CEvoDB& evodb = *m_node.evodb;
+    m_node.dmnman = std::make_unique<CDeterministicMNManager>(evodb, *Assert(m_node.mn_metaman.get()));
     std::vector<Chainstate*> chainstates;
 
     BOOST_CHECK(!manager.SnapshotBlockhash().has_value());
@@ -71,9 +104,6 @@ BOOST_AUTO_TEST_CASE(chainstatemanager)
 
     BOOST_CHECK(!manager.SnapshotBlockhash().has_value());
 
-    if (m_node.clhandler) {
-        m_node.clhandler->Stop();
-    }
     DashChainstateSetupClose(m_node);
 
     // Create a snapshot-based chainstate.
@@ -118,10 +148,9 @@ BOOST_AUTO_TEST_CASE(chainstatemanager)
     // Let scheduler events finish running to avoid accessing memory that is going to be unloaded
     SyncWithValidationInterfaceQueue();
 
-    if (m_node.clhandler) {
-        m_node.clhandler->Stop();
-    }
     DashChainstateSetupClose(m_node);
+    // dmnman holds a reference to m_node.evodb, it mustn't outlive it
+    m_node.dmnman.reset();
 }
 
 //! Test rebalancing the caches associated with each chainstate.

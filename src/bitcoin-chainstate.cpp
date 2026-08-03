@@ -101,32 +101,25 @@ int main(int argc, char* argv[])
 
     std::unique_ptr<LLMQContext> llmq_ctx;
     std::unique_ptr<CChainstateHelper> chain_helper;
+
     node::CacheSizes cache_sizes;
     cache_sizes.block_tree_db = 2 << 20;
     cache_sizes.coins_db = 2 << 22;
     cache_sizes.coins = (450 << 20) - (2 << 20) - (2 << 22);
     node::ChainstateLoadOptions options;
-    options.bls_threads = 1;
-    options.worker_count = 1;
-    options.max_recsigs_age = 1;
+    options.mn_metaman = &metaman;
+    options.sporkman = &sporkman;
+    options.chainlocks = &chainlocks;
+    options.mn_sync = &mn_sync;
+    options.data_dir = gArgs.GetDataDirNet();
     options.check_interrupt = [] { return false; };
-    auto [status, error] = node::LoadChainstate(chainman,
-                                   metaman,
-                                   sporkman,
-                                   chainlocks,
-                                   mn_sync,
-                                   chain_helper,
-                                   dmnman,
-                                   evodb,
-                                   llmq_ctx,
-                                   gArgs.GetDataDirNet(),
-                                   cache_sizes,
-                                   options);
+    options.coins_error_cb = [] {};
+    auto [status, error] = node::LoadChainstate(chainman, cache_sizes, options, evodb, dmnman, llmq_ctx, chain_helper);
     if (status != node::ChainstateLoadStatus::SUCCESS) {
         std::cerr << "Failed to load Chain state from your datadir." << std::endl;
         goto epilogue;
     } else {
-        std::tie(status, error) = node::VerifyLoadedChainstate(chainman, *evodb, options);
+        std::tie(status, error) = node::VerifyLoadedChainstate(chainman, options, *evodb);
         if (status != node::ChainstateLoadStatus::SUCCESS) {
             std::cerr << "Failed to verify loaded Chain state from your datadir." << std::endl;
             goto epilogue;
@@ -283,6 +276,8 @@ epilogue:
     }
     GetMainSignals().UnregisterBackgroundSignalScheduler();
     // Tear down Dash kernel objects before kernel::~Context().
-    node::DashChainstateSetupClose(chain_helper, dmnman, llmq_ctx, /*mempool=*/nullptr);
+    chain_helper.reset();
+    llmq_ctx.reset();
+    dmnman.reset();
     evodb.reset();
 }

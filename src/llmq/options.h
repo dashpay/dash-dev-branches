@@ -27,6 +27,9 @@ enum class QvvecSyncMode : int8_t {
     OnlyIfTypeMember = 1,
 };
 
+// Keep recovered signatures for a week. This is a "-maxrecsigsage" option default.
+static constexpr int64_t DEFAULT_MAX_RECOVERED_SIGS_AGE{60 * 60 * 24 * 7};
+
 /** -llmq-data-recovery default */
 static constexpr bool DEFAULT_ENABLE_QUORUM_DATA_RECOVERY{true};
 /** -watchquorums default, if true, we will connect to all new quorums and watch their communication */

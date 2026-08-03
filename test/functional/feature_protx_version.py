@@ -58,6 +58,18 @@ class ProTxVersionTest(DashTestFramework):
         ]] * 6
         self.set_dash_test_params(6, 5, evo_count=2, extra_args=self.extra_args)
 
+    def get_peer_ids(self, node_idx):
+        return {peer['id'] for peer in self.nodes[node_idx].getpeerinfo()}
+
+    def wait_for_peers_disconnected(self, node_idx, peer_ids):
+        """Wait until none of `peer_ids` is connected to node `node_idx` anymore.
+
+        Don't wait for getconnectioncount() to hit zero instead: intra-quorum connections are
+        re-established concurrently, as the masternode remains a member of previously formed
+        quorums, so zero might never be observable.
+        """
+        assert peer_ids, "no peers to wait for, the disconnect assertion would pass trivially"
+        self.wait_until(lambda: peer_ids.isdisjoint(self.get_peer_ids(node_idx)))
 
     def run_test(self):
         # Connect all nodes to node1 so that we always have the whole network connected
@@ -193,13 +205,15 @@ class ProTxVersionTest(DashTestFramework):
         legacy_mn.keyOperator = new_operator['secret']
         migrate_result = legacy_mn.update_registrar(node, submit=True, fundsAddr=legacy_mn.fundsAddr)
         self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
+        assert legacy_mn.nodeIdx is not None
+        old_peer_ids = self.get_peer_ids(legacy_mn.nodeIdx)
         tip = self.generate(node, 1, sync_fun=self.no_op)[0]
         assert_equal(node.getrawtransaction(migrate_result, 1, tip)['proUpRegTx']['version'], 3)
         assert_equal(node.protx('info', legacy_mn.proTxHash)['state']['version'], 3)
-        # Changing the operator key PoSe-bans the masternode, which results in disconnects. Wait for
-        # them to happen and then reconnect its node back to let sync_all finish correctly.
-        assert legacy_mn.nodeIdx is not None
-        self.wait_until(lambda: self.nodes[legacy_mn.nodeIdx].getconnectioncount() == 0)
+        # Changing the operator key makes every peer drop its existing connections to this
+        # masternode. Wait for that to happen and then reconnect its node back to let sync_all
+        # finish correctly.
+        self.wait_for_peers_disconnected(legacy_mn.nodeIdx, old_peer_ids)
         self.connect_nodes(legacy_mn.nodeIdx, 0)
         self.sync_all()
 
@@ -234,11 +248,13 @@ class ProTxVersionTest(DashTestFramework):
 
         protx_result = revoke_mn.revoke(self.nodes[0], submit=True, reason=1, fundsAddr=funds_address)
         self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
+        old_peer_ids = self.get_peer_ids(node_idx)
         tip = self.generate(self.nodes[0], 1, sync_fun=self.no_op)[0]
         assert_equal(self.nodes[0].getrawtransaction(protx_result, 1, tip)['confirmations'], 1)
-        # Revoking a MN results in disconnects. Wait for disconnects to actually happen
-        # and then reconnect the corresponding node back to let sync_blocks finish correctly.
-        self.wait_until(lambda: self.nodes[node_idx].getconnectioncount() == 0)
+        # Revoking a MN makes every peer drop its existing connections to it. Wait for that to
+        # happen and then reconnect the corresponding node back to let sync_blocks finish
+        # correctly.
+        self.wait_for_peers_disconnected(node_idx, old_peer_ids)
         self.connect_nodes(node_idx, 0)
         self.sync_all()
         self.log.info(f"Successfully revoked={revoke_mn.proTxHash}")

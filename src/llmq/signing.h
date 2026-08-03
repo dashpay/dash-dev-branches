@@ -42,9 +42,6 @@ class CQuorumManager;
 class CSigSharesManager;
 class SignHash;
 
-// Keep recovered signatures for a week. This is a "-maxrecsigsage" option default.
-static constexpr int64_t DEFAULT_MAX_RECOVERED_SIGS_AGE{60 * 60 * 24 * 7};
-
 class CSigBase
 {
 protected:

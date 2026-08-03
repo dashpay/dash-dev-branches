@@ -12,6 +12,7 @@
 
 class CScheduler;
 class CMasternodeSync;
+class ChainstateManager;
 namespace llmq {
 class CInstantSendManager;
 class CRecoveredSig;
@@ -25,7 +26,7 @@ class ChainlockHandler;
 class ChainLockSigner final : public llmq::CRecoveredSigsListener, public CValidationInterface
 {
 private:
-    Chainstate& m_chainstate;
+    const ChainstateManager& m_chainman;
     const chainlock::Chainlocks& m_chainlocks;
     ChainlockHandler& m_clhandler;
     const llmq::CInstantSendManager& m_isman;
@@ -58,7 +59,7 @@ public:
     ChainLockSigner() = delete;
     ChainLockSigner(const ChainLockSigner&) = delete;
     ChainLockSigner& operator=(const ChainLockSigner&) = delete;
-    explicit ChainLockSigner(Chainstate& chainstate, const chainlock::Chainlocks& chainlocks,
+    explicit ChainLockSigner(const ChainstateManager& chainman, const chainlock::Chainlocks& chainlocks,
                              ChainlockHandler& clhandler, const llmq::CInstantSendManager& isman,
                              const llmq::CQuorumManager& qman, llmq::CSigningManager& sigman,
                              llmq::CSigSharesManager& shareman, const CMasternodeSync& mn_sync);

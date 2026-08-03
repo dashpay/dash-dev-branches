@@ -516,8 +516,9 @@ std::vector<QuorumMembers> ComputeQuorumMembersByQuarterRotation(const Consensus
     if (LogAcceptDebug(BCLog::LLMQ)) {
         for (const size_t i : util::irange(nQuorums)) {
             std::stringstream ss;
-            for (size_t idx = prev_cycles.size(); idx-- > 0;) {
-                ss << strprintf(" %dCmns[%s]", idx, ToString(prev_cycles[idx]->m_members[i]));
+            for (size_t idx = prev_cycles.size(); idx > 0; --idx) {
+                const size_t cycle = idx - 1;
+                ss << strprintf(" %dCmns[%s]", cycle, ToString(prev_cycles[cycle]->m_members[i]));
             }
             ss << strprintf(" new[%s]", ToString(newQuarterMembers[i]));
             LogPrint(BCLog::LLMQ, "QuarterComposition h[%d] i[%d]:%s\n", cycleBaseHeight, i, ss.str());

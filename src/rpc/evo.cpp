@@ -529,7 +529,7 @@ static RPCHelpMan protx_register_fund_wrapper(const bool legacy)
         RPCExamples{
             HelpExampleCli("protx",  rpc_example)
         },
-        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+        [legacy](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
     if (legacy && !IsDeprecatedRPCEnabled("legacy_mn")) {
         throw std::runtime_error("DEPRECATED: Pass config option -deprecatedrpc=legacy_mn to enable this RPC");
@@ -580,7 +580,7 @@ static RPCHelpMan protx_register_wrapper(bool legacy)
         RPCExamples{
             HelpExampleCli("protx", rpc_example),
         },
-        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+        [legacy](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
     if (legacy && !IsDeprecatedRPCEnabled("legacy_mn")) {
         throw std::runtime_error("DEPRECATED: Pass config option -deprecatedrpc=legacy_mn to enable this RPC");
@@ -632,7 +632,7 @@ static RPCHelpMan protx_register_prepare_wrapper(const bool legacy)
         RPCExamples{
             HelpExampleCli("protx", rpc_example)
         },
-        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+        [legacy](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
     if (legacy && !IsDeprecatedRPCEnabled("legacy_mn")) {
         throw std::runtime_error("DEPRECATED: Pass config option -deprecatedrpc=legacy_mn to enable this RPC");

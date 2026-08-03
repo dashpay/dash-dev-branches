@@ -306,9 +306,9 @@ bool AddressIndex::CustomRewind(const interfaces::BlockKey& current_tip, const i
                          pindex->GetBlockHash().ToString(), block.vtx.size() - 1, blockundo.vtxundo.size());
         }
 
-        for (size_t i = blockundo.vtxundo.size(); i-- > 0;) {
-            const CTransactionRef& tx = block.vtx[i + 1];
-            const CTxUndo& txundo = blockundo.vtxundo[i];
+        for (size_t i = blockundo.vtxundo.size(); i > 0; --i) {
+            const CTransactionRef& tx = block.vtx[i];
+            const CTxUndo& txundo = blockundo.vtxundo[i-1];
             const uint256 txhash = tx->GetHash();
 
             // Undo outputs (remove from unspent index and transaction history)
@@ -324,7 +324,7 @@ bool AddressIndex::CustomRewind(const interfaces::BlockKey& current_tip, const i
 
                 // Remove receiving activity from history
                 addressIndex.push_back(std::make_pair(CAddressIndexKey(address_type, address_bytes, pindex->nHeight,
-                                                                       i + 1, txhash, k, false),
+                                                                       i, txhash, k, false),
                                                       out.nValue));
 
                 // Remove from unspent index (mark for deletion)
@@ -352,7 +352,7 @@ bool AddressIndex::CustomRewind(const interfaces::BlockKey& current_tip, const i
 
                 // Remove spending activity from history
                 addressIndex.push_back(
-                    std::make_pair(CAddressIndexKey(address_type, address_bytes, pindex->nHeight, i + 1, txhash, j, true),
+                    std::make_pair(CAddressIndexKey(address_type, address_bytes, pindex->nHeight, i, txhash, j, true),
                                    prevout.nValue * -1));
 
                 // Restore to unspent index

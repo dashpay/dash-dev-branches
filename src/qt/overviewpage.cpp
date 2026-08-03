@@ -526,8 +526,14 @@ void OverviewPage::coinJoinStatus(bool fForce)
     // Disable any PS UI for masternode or when autobackup is disabled or failed for whatever reason
     if (clientModel->node().isMasternode() || nWalletBackups <= 0) {
         DisableCoinJoinCompletely();
-        if (nWalletBackups <= 0) {
+        if (nWalletBackups == 0) {
             ui->labelCoinJoinEnabled->setToolTip(tr("Automatic backups are disabled, no mixing available!"));
+        } else if (nWalletBackups == -1) {
+            ui->labelCoinJoinEnabled->setToolTip(tr("ERROR! Failed to create automatic backup") + ", " +
+                                                 tr("see debug.log for details.") + "<br><br>" +
+                                                 tr("Mixing is disabled, please close your wallet and fix the issue!"));
+        } else if (nWalletBackups == -2) {
+            ui->labelCoinJoinEnabled->setToolTip(tr("WARNING! Failed to replenish keypool, please unlock your wallet to do so."));
         }
         return;
     }
@@ -666,22 +672,11 @@ void OverviewPage::coinJoinStatus(bool fForce)
     if(fShowAdvancedCJUI && !strKeysLeftText.isEmpty()) strEnabled += ", " + strKeysLeftText;
     ui->labelCoinJoinEnabled->setText(strEnabled);
 
-    if (walletModel->wallet().isLegacy()) {
-        if(nWalletBackups == -1) {
-            // Automatic backup failed, nothing else we can do until user fixes the issue manually
-            DisableCoinJoinCompletely();
-
-            QString strError =  tr("ERROR! Failed to create automatic backup") + ", " +
-                                tr("see debug.log for details.") + "<br><br>" +
-                                tr("Mixing is disabled, please close your wallet and fix the issue!");
-            ui->labelCoinJoinEnabled->setToolTip(strError);
-
-            return;
-        } else if(nWalletBackups == -2) {
-            // We were able to create automatic backup but keypool was not replenished because wallet is locked.
-            QString strWarning = tr("WARNING! Failed to replenish keypool, please unlock your wallet to do so.");
-            ui->labelCoinJoinEnabled->setToolTip(strWarning);
-        }
+    if (walletModel->wallet().isLegacy() && nWalletBackups == -1) {
+        // Automatic backup failed, nothing else we can do until user fixes the issue manually.
+        // Stop mixing right away; the guard above sets the matching tooltip on the next timer tick.
+        DisableCoinJoinCompletely();
+        return;
     }
 
     // check coinjoin status and unlock if needed

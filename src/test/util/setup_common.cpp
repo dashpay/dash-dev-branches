@@ -88,13 +88,6 @@
 
 using node::BlockAssembler;
 using node::CalculateCacheSizes;
-using node::DashChainstateSetup;
-using node::DashChainstateSetupClose;
-using node::LoadChainstate;
-using node::NodeContext;
-using node::VerifyLoadedChainstate;
-using node::fPruneMode;
-using node::fReindex;
 using node::LoadChainstate;
 using node::NodeContext;
 using node::VerifyLoadedChainstate;
@@ -139,23 +132,6 @@ std::unique_ptr<PeerManager> MakePeerManager(CConnman& connman,
     return PeerManager::make(connman, *node.addrman, banman, *node.dstxman, *node.chainman, *node.mempool, *node.mn_metaman,
                              *node.mn_sync, *node.sporkman, *node.chainlocks, *node.clhandler, /*nodeman=*/nullptr, node.dmnman, node.cj_walletman,
                              node.llmq_ctx, ignore_incoming_txs);
-}
-
-void DashChainstateSetup(ChainstateManager& chainman,
-                         NodeContext& node,
-                         bool llmq_dbs_in_memory,
-                         bool llmq_dbs_wipe)
-{
-    DashChainstateSetup(chainman, *Assert(node.mn_metaman.get()),
-                        *Assert(node.sporkman.get()), *Assert(node.chainlocks), *Assert(node.mn_sync), node.chain_helper, node.dmnman, *node.evodb,
-                        node.llmq_ctx, Assert(node.mempool.get()), node.args->GetDataDirNet(), llmq_dbs_in_memory, llmq_dbs_wipe,
-                        llmq::DEFAULT_BLSCHECK_THREADS, llmq::DEFAULT_WORKER_COUNT, llmq::DEFAULT_MAX_RECOVERED_SIGS_AGE);
-}
-
-void DashChainstateSetupClose(NodeContext& node)
-{
-    DashChainstateSetupClose(node.chain_helper, node.dmnman, node.llmq_ctx,
-                             Assert(node.mempool.get()));
 }
 
 struct NetworkSetup
@@ -320,40 +296,32 @@ ChainTestingSetup::~ChainTestingSetup()
 void ChainTestingSetup::LoadVerifyActivateChainstate()
 {
     auto& chainman{*Assert(m_node.chainman)};
+
     node::ChainstateLoadOptions options;
     options.mempool = Assert(m_node.mempool.get());
+    options.mn_metaman = Assert(m_node.mn_metaman.get());
+    options.sporkman = Assert(m_node.sporkman.get());
+    options.chainlocks = Assert(m_node.chainlocks.get());
+    options.mn_sync = Assert(m_node.mn_sync.get());
+    options.data_dir = Assert(m_node.args)->GetDataDirNet();
     options.block_tree_db_in_memory = m_block_tree_db_in_memory;
     options.coins_db_in_memory = m_coins_db_in_memory;
     options.dash_dbs_in_memory = true;
     options.reindex = node::fReindex;
     options.reindex_chainstate = m_args.GetBoolArg("-reindex-chainstate", false);
     options.prune = node::fPruneMode;
-    options.bls_threads = llmq::DEFAULT_BLSCHECK_THREADS;
-    options.worker_count = llmq::DEFAULT_WORKER_COUNT;
-    options.max_recsigs_age = llmq::DEFAULT_MAX_RECOVERED_SIGS_AGE;
     options.check_blocks = m_args.GetIntArg("-checkblocks", DEFAULT_CHECKBLOCKS);
     options.check_level = m_args.GetIntArg("-checklevel", DEFAULT_CHECKLEVEL);
-    options.notify_bls_state = [](bool bls_state) {
-        LogPrintf("%s: bls_legacy_scheme=%d\n", __func__, bls_state);
-    };
-    auto [status, error] = LoadChainstate(chainman,
-                                           *Assert(m_node.mn_metaman.get()),
-                                           *Assert(m_node.sporkman.get()),
-                                           *Assert(m_node.chainlocks.get()),
-                                           *Assert(m_node.mn_sync.get()),
-                                           m_node.chain_helper,
-                                           m_node.dmnman,
-                                           m_node.evodb,
-                                           m_node.llmq_ctx,
-                                           Assert(m_node.args)->GetDataDirNet(),
-                                           m_cache_sizes,
-                                           options);
+    options.check_interrupt = [] { return false; };
+    options.coins_error_cb = [] {};
+
+    auto [status, error] = LoadChainstate(chainman, m_cache_sizes, options, m_node.evodb, m_node.dmnman, m_node.llmq_ctx,
+                                          m_node.chain_helper);
     assert(status == node::ChainstateLoadStatus::SUCCESS);
 
-    std::tie(status, error) = VerifyLoadedChainstate(
-        chainman,
-        *Assert(m_node.evodb.get()),
-        options);
+    std::tie(status, error) = VerifyLoadedChainstate(chainman, options, *Assert(m_node.evodb), [](bool bls_state) {
+            LogPrintf("LoadVerifyActivateChainstate: bls_legacy_scheme=%d\n", bls_state);
+        });
     assert(status == node::ChainstateLoadStatus::SUCCESS);
 
     BlockValidationState state;
@@ -427,9 +395,12 @@ TestingSetup::~TestingSetup()
         m_node.connman->Stop();
     }
 
-    // DashChainstateSetup() is called by LoadChainstate() internally but
-    // winding them down is our responsibility
-    DashChainstateSetupClose(m_node);
+    if (m_node.mempool) {
+        m_node.mempool->DisconnectManagers();
+    }
+    m_node.chain_helper.reset();
+    m_node.llmq_ctx.reset();
+    m_node.dmnman.reset();
 }
 
 TestChain100Setup::TestChain100Setup(

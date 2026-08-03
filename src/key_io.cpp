@@ -39,12 +39,16 @@ public:
     std::string operator()(const CNoDestination& no) const { return {}; }
 };
 
-CTxDestination DecodeDestination(const std::string& str, const CChainParams& params, std::string& error_str)
+CTxDestination DecodeDestination(const std::string& str, const CChainParams& params, std::string& error_str, std::vector<int>* error_locations)
 {
     std::vector<unsigned char> data;
     uint160 hash;
     error_str = "";
-    if (DecodeBase58Check(str, data, 21)) {
+
+    // Note this will be false if it is a valid Bech32 address for a different network
+    bool is_bech32 = (ToLower(str.substr(0, params.Bech32PlatformHRP().size())) == params.Bech32PlatformHRP());
+
+    if (!is_bech32 && DecodeBase58Check(str, data, 21)) {
         // base58-encoded Dash addresses.
         // Public-key-hash-addresses have version 76 (or 140 testnet).
         // The data vector contains RIPEMD160(SHA256(pubkey)), where pubkey is the serialized public key.
@@ -61,12 +65,39 @@ CTxDestination DecodeDestination(const std::string& str, const CChainParams& par
             return ScriptHash(hash);
         }
 
-        // Set potential error message.
-        error_str = "Invalid prefix for Base58-encoded address";
+        // If the prefix of data matches either the script or pubkey prefix, the length must have been wrong
+        if ((data.size() >= script_prefix.size() &&
+                std::equal(script_prefix.begin(), script_prefix.end(), data.begin())) ||
+            (data.size() >= pubkey_prefix.size() &&
+                std::equal(pubkey_prefix.begin(), pubkey_prefix.end(), data.begin()))) {
+            error_str = "Invalid length for Base58 address";
+        } else {
+            error_str = "Invalid prefix for Base58-encoded address";
+        }
+        return CNoDestination();
+    } else if (!is_bech32) {
+        // Try Base58 decoding without the checksum, using a much larger max length
+        if (!DecodeBase58(str, data, 100)) {
+            error_str = "Not a valid Bech32m or Base58 encoding";
+        } else {
+            error_str = "Invalid checksum or length of Base58 address";
+        }
+        return CNoDestination();
     }
-    // Set error message if address can't be interpreted as Base58.
-    if (error_str.empty()) error_str = "Invalid address format";
 
+    // Dash has no Bech32m encoding for L1 destinations: a string using the Platform
+    // HRP can only be a DIP-18 Platform address, which never encodes an L1 destination.
+    // Decode it anyway to tell the user why exactly it got rejected.
+    std::string platform_error_str;
+    const bool is_platform = IsValidPlatformDestination(DecodePlatformDestination(str, params, platform_error_str));
+
+    // Perform Bech32 error location
+    auto res = bech32::LocateErrors(str);
+    error_str = res.first;
+    if (error_locations) *error_locations = std::move(res.second);
+    if (error_str.empty()) {
+        error_str = is_platform ? "This is a Dash Platform address, not a Dash Core address" : platform_error_str;
+    }
     return CNoDestination();
 }
 } // namespace
@@ -156,9 +187,9 @@ std::string EncodeDestination(const CTxDestination& dest)
     return std::visit(DestinationEncoder(Params()), dest);
 }
 
-CTxDestination DecodeDestination(const std::string& str, std::string& error_msg)
+CTxDestination DecodeDestination(const std::string& str, std::string& error_msg, std::vector<int>* error_locations)
 {
-    return DecodeDestination(str, Params(), error_msg);
+    return DecodeDestination(str, Params(), error_msg, error_locations);
 }
 
 CTxDestination DecodeDestination(const std::string& str)
@@ -170,7 +201,7 @@ CTxDestination DecodeDestination(const std::string& str)
 bool IsValidDestinationString(const std::string& str, const CChainParams& params)
 {
     std::string error_msg;
-    return IsValidDestination(DecodeDestination(str, params, error_msg));
+    return IsValidDestination(DecodeDestination(str, params, error_msg, nullptr));
 }
 
 bool IsValidDestinationString(const std::string& str)
