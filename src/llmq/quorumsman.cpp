@@ -355,8 +355,16 @@ CQuorumCPtr CQuorumManager::GetQuorum(Consensus::LLMQType llmqType, gsl::not_nul
     }
 
     CQuorumPtr pQuorum;
-    if (LOCK(m_cs_maps); mapQuorumsCache[llmqType].get(quorumHash, pQuorum)) {
-        return pQuorum;
+    {
+        // Defence-in-depth: mapQuorumsCache only holds the LLMQ types InitQuorumsCache() seeded
+        // from the chain's consensus params. operator[] on any other type would insert a
+        // default-constructed, zero-capacity cache and abort in its constructor, so look up
+        // without inserting and fall through for unknown types.
+        LOCK(m_cs_maps);
+        auto it = mapQuorumsCache.find(llmqType);
+        if (it != mapQuorumsCache.end() && it->second.get(quorumHash, pQuorum)) {
+            return pQuorum;
+        }
     }
 
     return BuildQuorumFromCommitment(llmqType, pQuorumBaseBlockIndex, populate_cache);
@@ -398,8 +406,11 @@ CQuorumManager::DataResponseValidation CQuorumManager::ValidateDataResponse(
 CQuorumPtr CQuorumManager::GetCachedMutableQuorum(Consensus::LLMQType llmqType, const uint256& quorumHash) const
 {
     CQuorumPtr pQuorum;
+    // See GetQuorum(): never operator[] this map with a wire-supplied LLMQ type.
     LOCK(m_cs_maps);
-    mapQuorumsCache[llmqType].get(quorumHash, pQuorum);
+    if (auto it = mapQuorumsCache.find(llmqType); it != mapQuorumsCache.end()) {
+        it->second.get(quorumHash, pQuorum);
+    }
     return pQuorum;
 }
 

@@ -69,8 +69,6 @@ protected:
 
     BaseIndex::DB& GetDB() const override;
 
-    const char* GetName() const override { return "addressindex"; }
-
 public:
     /// Constructs the index, which becomes available to be queried
     explicit AddressIndex(std::unique_ptr<interfaces::Chain> chain, size_t n_cache_size, bool f_memory = false, bool f_wipe = false);

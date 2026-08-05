@@ -46,7 +46,6 @@ protected:
     bool CustomRewind(const interfaces::BlockKey& current_tip, const interfaces::BlockKey& new_tip) override;
 
     BaseIndex::DB& GetDB() const override;
-    const char* GetName() const override { return "timestampindex"; }
 
     /// TimestampIndex works with pruned nodes since it only stores block metadata
     bool AllowPrune() const override { return true; }

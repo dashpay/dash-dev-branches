@@ -326,10 +326,14 @@ class QuorumDataMessagesTest(DashTestFramework):
             qgetdata_invalid_block = msg_qgetdata(protx_hash_int, 100, 0x01, protx_hash_int)
             qgetdata_invalid_quorum = msg_qgetdata(int(mn2.get_node(self).getblockhash(0), 16), 100, 0x01, protx_hash_int)
             qgetdata_invalid_no_member = msg_qgetdata(quorum_hash_int, 100, 0x02, quorum_hash_int)
-            p2p_mn2.test_qgetdata(qgetdata_invalid_type, QUORUM_TYPE_INVALID)
             p2p_mn2.test_qgetdata(qgetdata_invalid_block, QUORUM_BLOCK_NOT_FOUND)
             p2p_mn2.test_qgetdata(qgetdata_invalid_quorum, QUORUM_NOT_FOUND)
             p2p_mn2.test_qgetdata(qgetdata_invalid_no_member, MASTERNODE_IS_NO_MEMBER)
+            # An unregistered LLMQ type is answered like the misses above, but unlike them it
+            # cannot be explained by the peer being ahead of us, so it is scored in full too.
+            # Kept last: the peer is dropped once it is.
+            p2p_mn2.test_qgetdata(qgetdata_invalid_type, QUORUM_TYPE_INVALID)
+            self.wait_until(lambda: not p2p_mn2.is_connected, timeout=10)
             # The last two error case require the node to miss its DKG data so we just reindex the node.
             mn2.get_node(self).disconnect_p2ps()
             self.restart_mn(mn1, reindex=True)

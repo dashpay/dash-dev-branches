@@ -15,6 +15,7 @@ TEST_UTIL_H = \
   test/util/index.h \
   test/util/llmq_tests.h \
   test/util/logging.h \
+  test/util/masternode.h \
   test/util/mining.h \
   test/util/net.h \
   test/util/poolresourcetester.h \
@@ -36,6 +37,7 @@ libtest_util_a_SOURCES = \
   test/util/coins.cpp \
   test/util/json.cpp \
   test/util/logging.cpp \
+  test/util/masternode.cpp \
   test/util/mining.cpp \
   test/util/net.cpp \
   test/util/script.cpp \

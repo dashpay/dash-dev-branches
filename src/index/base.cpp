@@ -17,6 +17,9 @@
 #include <validation.h>
 #include <warnings.h>
 
+#include <string>
+#include <utility>
+
 using node::PruneLockInfo;
 using node::ReadBlockFromDisk;
 using node::fPruneMode;
@@ -58,8 +61,8 @@ void BaseIndex::DB::WriteBestBlock(CDBBatch& batch, const CBlockLocator& locator
     batch.Write(DB_BEST_BLOCK, locator);
 }
 
-BaseIndex::BaseIndex(std::unique_ptr<interfaces::Chain> chain)
-    : m_chain{std::move(chain)} {}
+BaseIndex::BaseIndex(std::unique_ptr<interfaces::Chain> chain, std::string name)
+    : m_chain{std::move(chain)}, m_name{std::move(name)} {}
 
 BaseIndex::~BaseIndex()
 {

@@ -222,7 +222,13 @@ HOST_CFLAGS+=$(find /gnu/store -maxdepth 1 -mindepth 1 -type d -exec echo -n " -
 case "$HOST" in
     *linux*)  HOST_CFLAGS+=" -ffile-prefix-map=${PWD}=." ;;
     *mingw*)  HOST_CFLAGS+=" -fno-ident" ;;
-    *darwin*) unset HOST_CFLAGS ;;
+    *darwin*)
+        # Optimization and target flags come from depends' config.site; only
+        # the debug level is requested here. The shipped dSYM debug artifacts
+        # previously carried full -g2 DWARF via the since-removed -gdwarf-4
+        # backtrace flag escalating configure's -g1 floor, so keep requesting
+        # it explicitly.
+        HOST_CFLAGS="-g" ;;
 esac
 
 # CXXFLAGS

@@ -57,15 +57,25 @@ darwin_STRIP=$(shell $(SHELL) $(.SHELLFLAGS) "command -v llvm-strip")
 #         in the SDK, where __has_feature(modules) is used to define USE_CLANG_TYPES,
 #         which is in turn used as an include guard.
 
-# TODO: remove C_INCLUDE_PATH when it is indeed useless
-# https://github.com/bitcoin/bitcoin/pull/30451 has been partiall reverted in #7184 and should be re-applied
-darwin_CC=env -u C_INCLUDE_PATH -u CPLUS_INCLUDE_PATH $(clang_prog) --target=$(host) \
+# TODO: remove C_INCLUDE_PATH/darwin_env_unset when bitcoin#30451 is fully backported.
+# C_INCLUDE_PATH/CPLUS_INCLUDE_PATH leak native-toolchain headers into the
+# darwin cross-build and conflict with the SDK headers. Guix exports them
+# (contrib/guix/libexec/build.sh), so strip them there with an `env -u`
+# prefix. The prefix must not be emitted when the variables aren't set:
+# ccache cannot parse a compiler command starting with `env` (it treats
+# `env` as the compiler and the absolute clang path as a second source
+# file), so an unconditional prefix silently disables ccache for every
+# darwin compile. Unlike upstream (bitcoin#30451, which dropped the prefix
+# entirely), our Guix environment still sets these variables.
+ifneq ($(origin C_INCLUDE_PATH) $(origin CPLUS_INCLUDE_PATH),undefined undefined)
+darwin_env_unset=env -u C_INCLUDE_PATH -u CPLUS_INCLUDE_PATH
+endif
+
+darwin_CC=$(darwin_env_unset) $(clang_prog) --target=$(host) \
               -isysroot$(OSX_SDK) -nostdlibinc \
               -iwithsysroot/usr/include -iframeworkwithsysroot/System/Library/Frameworks
 
-# TODO: remove C_INCLUDE_PATH when it is indeed useless
-# https://github.com/bitcoin/bitcoin/pull/30451 has been partiall reverted in #7184 and should be re-applied
-darwin_CXX=env -u C_INCLUDE_PATH -u CPLUS_INCLUDE_PATH $(clangxx_prog) --target=$(host) \
+darwin_CXX=$(darwin_env_unset) $(clangxx_prog) --target=$(host) \
                -isysroot$(OSX_SDK) -nostdlibinc \
                -iwithsysroot/usr/include/c++/v1 \
                -iwithsysroot/usr/include -iframeworkwithsysroot/System/Library/Frameworks

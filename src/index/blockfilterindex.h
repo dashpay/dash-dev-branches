@@ -31,7 +31,6 @@ private:
     static constexpr int CURRENT_VERSION = 2;
 
     BlockFilterType m_filter_type;
-    std::string m_name;
     std::unique_ptr<BaseIndex::DB> m_db;
 
     FlatFilePos m_next_filter_pos;
@@ -56,8 +55,6 @@ protected:
     bool CustomRewind(const interfaces::BlockKey& current_tip, const interfaces::BlockKey& new_tip) override;
 
     BaseIndex::DB& GetDB() const LIFETIMEBOUND override { return *m_db; }
-
-    const char* GetName() const LIFETIMEBOUND override { return m_name.c_str(); }
 
 public:
     /** Constructs the index, which becomes available to be queried. */

@@ -98,7 +98,12 @@ CI/lint list changes.
 ## Test Commands
 
 Choose tests based on the files touched. Do not claim broad validation if only a
-targeted test was run.
+targeted test was run. Prefer adding test cases to existing files over creating a
+new unit or functional test file. Only create a new test file when the additions
+would make an existing file overly complicated, when a separate file yields
+clearly improved performance (e.g. parallel execution or isolation), or when the
+subject being tested is distinctly separate and does not logically belong in an
+existing file. Fewer files reduce test setup overhead and compilation time.
 
 ```bash
 # All unit tests
@@ -176,16 +181,12 @@ For these areas, prefer small tests that prove the invariant being changed.
 
 ## PR Hygiene
 
+- When creating pull requests, follow `.github/PULL_REQUEST_TEMPLATE.md` for the description and ensure the PR title satisfies the active linter in `.github/workflows/semantic-pull-request.yml` (using Conventional Commits, including `backport:` for Bitcoin Core backports).
 - Use atomic commits. Each commit should make sense on its own and generally
   build and pass tests. An intentionally non-building commit (e.g. a
   regression test landing before its fix) is fine if called out explicitly so
   it isn't mistaken for an oversight.
-- PR titles follow Conventional Commits, including `backport:` for Bitcoin Core
-  backports. Valid types/scopes are enforced by CI; see
-  `.github/workflows/semantic-pull-request.yml`.
-- PR descriptions must follow `.github/PULL_REQUEST_TEMPLATE.md`: remove the
-  italicized helper prompts, fill in the required sections, and keep the
-  checklist accurate for the change.
+- Remove the italicized helper prompts from `.github/PULL_REQUEST_TEMPLATE.md`, fill in the required sections, and keep the checklist accurate for the change.
 - Do not put `@` mentions in PR descriptions; they are copied into merge
   commits and notify users repeatedly.
 - Explain what changed and why. For bug fixes, include the failure mode and why

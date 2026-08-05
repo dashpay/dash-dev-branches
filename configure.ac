@@ -2,7 +2,7 @@ AC_PREREQ([2.69])
 dnl Don't forget to push a corresponding tag when updating any of _CLIENT_VERSION_* numbers
 define(_CLIENT_VERSION_MAJOR, 23)
 define(_CLIENT_VERSION_MINOR, 1)
-define(_CLIENT_VERSION_BUILD, 7)
+define(_CLIENT_VERSION_BUILD, 8)
 define(_CLIENT_VERSION_IS_RELEASE, false)
 define(_COPYRIGHT_YEAR, 2026)
 define(_COPYRIGHT_HOLDERS,[The %s developers])
@@ -1228,16 +1228,10 @@ if test "$enable_stacktraces" != "no"; then
       ])
     fi
     BACKTRACE_LIBS="$BACKTRACE_LIBS -lbacktrace"
-    dnl More modern compilers may emit DWARF 5 binaries by default, use DWARF 4 out of precaution
-    if test "$TARGET_OS" != "windows"; then
-      AX_CHECK_COMPILE_FLAG([-gdwarf-4], [BACKTRACE_FLAGS="$BACKTRACE_FLAGS -gdwarf-4"], [
-        if test "$enable_stacktraces" = "yes"; then
-          AC_MSG_ERROR([--enable-stacktraces was specified but cannot set -gdwarf-4])
-        fi
-        AC_MSG_WARN([cannot set -gdwarf-4, stacktraces will be disabled])
-        enable_stacktraces=no
-      ], [$CXXFLAG_WERROR])
-    fi
+    dnl The libbacktrace pinned in depends understands DWARF 5, so the
+    dnl compiler's default debug format is used as-is. A -gdwarf-4 pin
+    dnl previously lived here and, being a -g-family flag, also forced
+    dnl debug level 2 onto every build.
     if test "$TARGET_OS" = "darwin"; then
       AX_CHECK_COMPILE_FLAG([-fno-standalone-debug], [BACKTRACE_FLAGS="$BACKTRACE_FLAGS -fno-standalone-debug"], [
         if test "$enable_stacktraces" = "yes"; then
@@ -2139,10 +2133,10 @@ echo "  target os       = $host_os"
 echo "  build os        = $build_os"
 echo
 echo "  CC              = $CC"
-echo "  CFLAGS          = $DEBUG_CFLAGS $PTHREAD_CFLAGS $BACKTRACE_FLAGS $CFLAGS"
+echo "  CFLAGS          = $BACKTRACE_FLAGS $DEBUG_CFLAGS $PTHREAD_CFLAGS $CFLAGS"
 echo "  CPPFLAGS        = $DEBUG_CPPFLAGS $HARDENED_CPPFLAGS $CORE_CPPFLAGS $CPPFLAGS"
 echo "  CXX             = $CXX"
-echo "  CXXFLAGS        = $DEBUG_CXXFLAGS $HARDENED_CXXFLAGS $WARN_CXXFLAGS $NOWARN_CXXFLAGS $ERROR_CXXFLAGS $CORE_CXXFLAGS $BACKTRACE_FLAGS $CXXFLAGS"
+echo "  CXXFLAGS        = $BACKTRACE_FLAGS $DEBUG_CXXFLAGS $HARDENED_CXXFLAGS $WARN_CXXFLAGS $NOWARN_CXXFLAGS $ERROR_CXXFLAGS $CORE_CXXFLAGS $CXXFLAGS"
 echo "  LDFLAGS         = $PTHREAD_LIBS $HARDENED_LDFLAGS $CORE_LDFLAGS $BACKTRACE_LDFLAGS $LDFLAGS"
 echo "  AR              = $AR"
 echo "  ARFLAGS         = $ARFLAGS"

@@ -55,7 +55,7 @@ bool SpentIndex::DB::EraseSpentIndex(const std::vector<CSpentIndexKey>& keys)
 }
 
 SpentIndex::SpentIndex(std::unique_ptr<interfaces::Chain> chain, size_t n_cache_size, bool f_memory, bool f_wipe) :
-    BaseIndex(std::move(chain)),
+    BaseIndex(std::move(chain), "spentindex"),
     m_db(std::make_unique<SpentIndex::DB>(n_cache_size, f_memory, f_wipe))
 {
 }

@@ -10,8 +10,12 @@ print-%: FORCE
 DIST_SUBDIRS = secp256k1
 
 AM_LDFLAGS = $(LIBTOOL_LDFLAGS) $(HARDENED_LDFLAGS) $(SANITIZER_LDFLAGS) $(CORE_LDFLAGS) $(BACKTRACE_LDFLAGS)
-AM_CFLAGS = $(DEBUG_CFLAGS) $(BACKTRACE_FLAGS)
-AM_CXXFLAGS = $(DEBUG_CXXFLAGS) $(HARDENED_CXXFLAGS) $(WARN_CXXFLAGS) $(NOWARN_CXXFLAGS) $(ERROR_CXXFLAGS) $(SANITIZER_CXXFLAGS) $(CORE_CXXFLAGS) $(BACKTRACE_FLAGS)
+# BACKTRACE_FLAGS must precede the debug-level flags: -g-family members placed
+# there (e.g. a -gdwarf-N version pin) imply -g2, so the intended level
+# (DEBUG_*FLAGS' -g1 floor, --enable-debug's -g3, or the user's CXXFLAGS) must
+# come later to take effect.
+AM_CFLAGS = $(BACKTRACE_FLAGS) $(DEBUG_CFLAGS)
+AM_CXXFLAGS = $(BACKTRACE_FLAGS) $(DEBUG_CXXFLAGS) $(HARDENED_CXXFLAGS) $(WARN_CXXFLAGS) $(NOWARN_CXXFLAGS) $(ERROR_CXXFLAGS) $(SANITIZER_CXXFLAGS) $(CORE_CXXFLAGS)
 AM_OBJCXXFLAGS = $(AM_CXXFLAGS)
 AM_CPPFLAGS = $(DEBUG_CPPFLAGS) $(HARDENED_CPPFLAGS) $(CORE_CPPFLAGS)
 AM_LIBTOOLFLAGS = --preserve-dup-deps
@@ -320,7 +324,6 @@ BITCOIN_CORE_H = \
   masternode/payments.h \
   masternode/sync.h \
   masternode/utils.h \
-  mempool_args.h \
   memusage.h \
   merkleblock.h \
   messagesigner.h \
@@ -342,6 +345,7 @@ BITCOIN_CORE_H = \
   node/context.h \
   node/eviction.h \
   node/interface_ui.h \
+  node/mempool_args.h \
   node/mempool_persist_args.h \
   node/miner.h \
   node/minisketchwrapper.h \
@@ -596,7 +600,6 @@ libbitcoin_node_a_SOURCES = \
   masternode/payments.cpp \
   masternode/sync.cpp \
   masternode/utils.cpp \
-  mempool_args.cpp \
   net.cpp \
   net_processing.cpp \
   netfulfilledman.cpp \
@@ -610,6 +613,7 @@ libbitcoin_node_a_SOURCES = \
   node/eviction.cpp \
   node/interface_ui.cpp \
   node/interfaces.cpp \
+  node/mempool_args.cpp \
   node/mempool_persist_args.cpp \
   node/miner.cpp \
   node/minisketchwrapper.cpp \

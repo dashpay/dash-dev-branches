@@ -108,9 +108,11 @@ void NetQuorum::ProcessMessage(CNode& pfrom, const std::string& msg_type, CDataS
         const bool request_limit_exceeded = !m_qman.RegisterDataRequest(key, request, /*add_expiry_bias=*/false);
 
         if (!Params().GetLLMQ(request.GetLLMQType()).has_value()) {
-            if (sendQDATA(CQuorumDataRequest::Errors::QUORUM_TYPE_INVALID, request_limit_exceeded)) {
-                m_peer_manager->PeerMisbehaving(pfrom.GetId(), 25, "request limit exceeded");
-            }
+            // Unlike the misses below, this one cannot be explained by the peer being ahead of
+            // us: no quorum of an unregistered type can exist on this chain, so there is
+            // nothing to ask about. Answer with the error anyway, then score in full.
+            sendQDATA(CQuorumDataRequest::Errors::QUORUM_TYPE_INVALID, request_limit_exceeded);
+            m_peer_manager->PeerMisbehaving(pfrom.GetId(), 100, "invalid llmqType in QGETDATA");
             return;
         }
 

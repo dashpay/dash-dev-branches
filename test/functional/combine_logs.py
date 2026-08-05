@@ -80,10 +80,12 @@ def read_logs(tmp_dir):
     for each of the input log files."""
 
     # Find out what the folder is called that holds the debug.log file
-    glob = pathlib.Path(tmp_dir).glob('node0/**/debug.log')
+    # Match exactly one level: a mainnet node logs into the datadir itself and has no
+    # chain name, and feature_config_args.py runs nodes from datadirs nested in node0's.
+    glob = pathlib.Path(tmp_dir).glob('node0/*/debug.log')
     path = next(glob, None)
     if path:
-        assert next(glob, None) is None or '/feature_config_args_' in tmp_dir #  more than one debug.log, should never happen
+        assert next(glob, None) is None #  more than one debug.log, should never happen
         chain = re.search(r'node0/(.+?)/debug\.log$', path.as_posix()).group(1)  # extract the chain name
     else:
         chain = 'regtest'  # fallback to regtest (should only happen when none exists)

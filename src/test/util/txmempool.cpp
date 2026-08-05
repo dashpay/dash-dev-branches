@@ -6,7 +6,7 @@
 
 #include <chainparams.h>
 #include <node/context.h>
-#include <mempool_args.h>
+#include <node/mempool_args.h>
 #include <txmempool.h>
 #include <util/check.h>
 #include <util/time.h>
@@ -22,7 +22,8 @@ CTxMemPool::Options MemPoolOptionsForTest(const NodeContext& node)
         // chainparams.DefaultConsistencyChecks for tests
         .check_ratio = 1,
     };
-    ApplyArgsManOptions(*node.args, mempool_opts);
+    const auto err{ApplyArgsManOptions(*node.args, ::Params(), mempool_opts)};
+    Assert(!err);
     return mempool_opts;
 }
 

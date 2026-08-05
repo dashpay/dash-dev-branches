@@ -366,20 +366,25 @@ bool CSigningManager::GetRecoveredSigForGetData(const uint256& hash, CRecoveredS
 void CSigningManager::VerifyAndProcessRecoveredSig(NodeId from, std::shared_ptr<CRecoveredSig> recoveredSig)
 {
     auto llmq_type = recoveredSig->getLlmqType();
-    auto quorum = qman.GetQuorum(llmq_type, recoveredSig->getQuorumHash());
+    const uint256& quorum_hash = recoveredSig->getQuorumHash();
 
-    if (!quorum) {
-        LogPrint(BCLog::LLMQ, "CSigningManager::%s -- quorum %s not found\n", __func__,
-                 recoveredSig->getQuorumHash().ToString());
-        return;
-    }
-    if (!IsQuorumActive(llmq_type, qman, quorum->qc->quorumHash)) {
+    // Cheap gate first: GetQuorum can rebuild an arbitrary historical quorum on a cache miss,
+    // so don't let an unsolicited QSIGREC force that work for an inactive hash.
+    if (!IsQuorumActive(llmq_type, qman, quorum_hash)) {
         return;
     }
 
     // It's important to only skip seen *valid* sig shares here. See comment for CBatchedSigShare
     // We don't receive recovered sigs in batches, but we do batched verification per node on these
     if (db.HasRecoveredSigForHash(recoveredSig->GetHash())) {
+        return;
+    }
+
+    auto quorum = qman.GetQuorum(llmq_type, quorum_hash);
+    if (!quorum) {
+        // Active per ScanQuorums but no longer materializable (e.g. reorg); not peer-controlled, so no score.
+        LogPrint(BCLog::LLMQ, "CSigningManager::%s -- quorum %s not found\n", __func__,
+                 quorum_hash.ToString());
         return;
     }
 

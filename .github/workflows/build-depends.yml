@@ -57,9 +57,7 @@ jobs:
           sparse-checkout: |
             ci/dash
             ci/test
-            depends/Makefile
-            depends/packages
-            depends/hosts
+            depends
             contrib/containers/ci/ci.Dockerfile
             contrib/containers/ci/ci-slim.Dockerfile
             contrib/containers/guix/scripts/setup-sdk
@@ -75,9 +73,9 @@ jobs:
           DEP_HASH="$(echo -n "${BUILD_TARGET}" "${DEP_OPTS}" "${HOST}" | sha256sum | head -c 64)"
           echo "DEP_HASH=${DEP_HASH}" >> "${GITHUB_OUTPUT}"
           DOCKERFILE_HASH="${{ hashFiles('contrib/containers/ci/ci.Dockerfile', 'contrib/containers/ci/ci-slim.Dockerfile') }}"
-          PACKAGES_HASH="${{ hashFiles('depends/packages/*', 'depends/Makefile') }}"
+          DEPENDS_INPUTS_HASH="${{ hashFiles('depends/Makefile', 'depends/funcs.mk', 'depends/gen_id', 'depends/config.guess', 'depends/config.sub', 'depends/config.site.in', 'depends/builders/**', 'depends/hosts/**', 'depends/packages/**', 'depends/patches/**') }}"
           CACHE_KEY_PREFIX="depends-${DOCKERFILE_HASH}-${{ inputs.base-image-digest }}-${{ inputs.runs-on }}-${{ inputs.build-target }}"
-          CACHE_KEY="${CACHE_KEY_PREFIX}-${DEP_HASH}-${PACKAGES_HASH}"
+          CACHE_KEY="${CACHE_KEY_PREFIX}-${DEP_HASH}-${DEPENDS_INPUTS_HASH}"
           echo "cache-key-prefix=${CACHE_KEY_PREFIX}" >> "${GITHUB_OUTPUT}"
           echo "cache-key=${CACHE_KEY}" >> "${GITHUB_OUTPUT}"
           echo "Cache key: ${CACHE_KEY}"

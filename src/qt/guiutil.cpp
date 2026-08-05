@@ -1349,7 +1349,7 @@ void PrintSlotException(
     std::string description = sender->metaObject()->className();
     description += "->";
     description += receiver->metaObject()->className();
-    PrintExceptionContinue(std::make_exception_ptr(exception), description.c_str());
+    PrintExceptionContinue(std::make_exception_ptr(exception), description);
 }
 
 void ShowModalDialogAsynchronously(QDialog* dialog)

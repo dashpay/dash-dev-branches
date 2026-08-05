@@ -136,7 +136,7 @@ public:
     virtual bool AlreadyHave(const CInv& inv) { return false; }
 
     // It should return true, if there's data has been pushed
-    virtual bool ProcessGetData(CNode& pfrom, const CInv& inv, CConnman& connman, const CNetMsgMaker& msgMaker) { return false; }
+    virtual bool ProcessGetData(CNode& pfrom, const CInv& inv, const CNetMsgMaker& msgMaker) { return false; }
 protected:
     PeerManagerInternal* m_peer_manager;
 };

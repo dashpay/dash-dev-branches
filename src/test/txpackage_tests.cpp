@@ -24,7 +24,8 @@ struct TestChain100NoDIP0001Setup : public TestChain100Setup {
 BOOST_AUTO_TEST_SUITE(txpackage_tests)
 // A fee amount that is above 1sat/vB but below 5sat/vB for most transactions created within these
 // unit tests. Dash transactions are larger than Bitcoin's (no SegWit discount), so this needs to
-// be higher than Bitcoin's 200 sat to ensure it exceeds minRelayTxFee for ~160-byte P2PKH txns.
+// be higher than Bitcoin's 200 sat to ensure it exceeds the minimum relay feerate for ~160-byte
+// P2PKH txns.
 static const CAmount low_fee_amt{500};
 
 // Create placeholder transactions that have no meaning.
@@ -375,16 +376,6 @@ BOOST_FIXTURE_TEST_CASE(package_cpfp_tests, TestChain100Setup)
     CTransactionRef tx_child = MakeTransactionRef(mtx_child);
     package_cpfp.push_back(tx_child);
 
-    // Verify that the low-fee parent individually meets the min relay fee requirement.
-    // This is important because Dash transactions are larger than Bitcoin's (no SegWit),
-    // so we need a higher low_fee_amt to ensure the parent's fee exceeds minRelayTxFee.
-    BOOST_CHECK_MESSAGE(::minRelayTxFee.GetFee(GetVirtualTransactionSize(*tx_parent)) <= low_fee_amt,
-                        strprintf("low_fee_amt %d is below minRelayTxFee %d for parent vsize %d",
-                                  low_fee_amt, ::minRelayTxFee.GetFee(GetVirtualTransactionSize(*tx_parent)),
-                                  GetVirtualTransactionSize(*tx_parent)));
-    // But the parent's fee should be below the mempool minimum feerate.
-    BOOST_CHECK(m_node.mempool->GetMinFee().GetFee(GetVirtualTransactionSize(*tx_parent)) > low_fee_amt);
-
     // Package feerate is calculated using modified fees, and prioritisetransaction accepts negative
     // fee deltas. This should be taken into account. De-prioritise the parent transaction
     // to bring the package feerate to 0.
@@ -442,7 +433,7 @@ BOOST_FIXTURE_TEST_CASE(package_cpfp_tests, TestChain100Setup)
     // The mempool minimum feerate is 5sat/vB, but this package just pays 1700 satoshis total.
     // The child fees would be able to pay for itself, but isn't enough for the entire package.
     // Note: Dash transactions are larger than Bitcoin's (no SegWit discount, ~225 bytes for P2PKH),
-    // so fees are higher than Bitcoin's test values to ensure they exceed minRelayTxFee.
+    // so fees are higher than Bitcoin's test values to ensure they exceed minimum feerate.
     Package package_still_too_low;
     const CAmount parent_fee{500};
     const CAmount child_fee{1200};
@@ -453,7 +444,7 @@ BOOST_FIXTURE_TEST_CASE(package_cpfp_tests, TestChain100Setup)
     CTransactionRef tx_parent_cheap = MakeTransactionRef(mtx_parent_cheap);
     package_still_too_low.push_back(tx_parent_cheap);
     BOOST_CHECK(m_node.mempool->GetMinFee().GetFee(GetVirtualTransactionSize(*tx_parent_cheap)) > parent_fee);
-    BOOST_CHECK(::minRelayTxFee.GetFee(GetVirtualTransactionSize(*tx_parent_cheap)) <= parent_fee);
+    BOOST_CHECK(m_node.mempool->m_min_relay_feerate.GetFee(GetVirtualTransactionSize(*tx_parent_cheap)) <= parent_fee);
 
     auto mtx_child_cheap = CreateValidMempoolTransaction(/*input_transaction=*/tx_parent_cheap, /*input_vout=*/0,
                                                          /*input_height=*/101, /*input_signing_key=*/child_key,

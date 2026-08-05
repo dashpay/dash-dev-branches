@@ -16,7 +16,6 @@
 #include <node/context.h>
 #include <util/system.h>
 #include <util/translation.h>
-#include <policy/settings.h>
 #include <util/time.h>
 #include <validation.h>
 #include <txmempool.h>
@@ -145,12 +144,6 @@ public:
     CTransactionBuilderTestSetup() :
         wallet{std::make_unique<CWallet>(m_node.chain.get(), m_node.coinjoin_loader.get(), "", m_args, CreateMockWalletDatabase())}
     {
-        // NOTE: minRelayTxFee is a global other suites mutate without restoring the
-        // default (transaction_tests leaves it at DUST_RELAY_TX_FEE), which makes the
-        // feerate GetTallyItem() asks for lower than the minimum and fails every
-        // CreateTransaction() call below. Boost shuffles test order in CI, so pin it
-        // here for every test using this fixture instead of per test.
-        minRelayTxFee = CFeeRate(DEFAULT_MIN_RELAY_TX_FEE);
         context.args = &m_args;
         context.chain = m_node.chain.get();
         context.coinjoin_loader = m_node.coinjoin_loader.get();
@@ -509,7 +502,6 @@ BOOST_FIXTURE_TEST_CASE(CTransactionBuilderTest, CTransactionBuilderTestSetup)
     // Therefore base size (i.e. for a tx with 1 input, 0 outputs) is expected to be
     // 4(n32bitVersion) + 1(vin size) + 179(vin[0]) + 1(vout size) + 4(nLockTime) = 189 bytes.
 
-    minRelayTxFee = CFeeRate(DEFAULT_MIN_RELAY_TX_FEE);
     // Tests with single outpoint tallyItem
     {
         CompactTallyItem tallyItem = GetTallyItem({4999});

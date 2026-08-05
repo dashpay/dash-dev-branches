@@ -174,7 +174,7 @@ void ChainLockSigner::TrySignChainTip()
         lastSignedMsgHash = msgHash;
     }
 
-    m_shareman.AsyncSignIfMember(Params().GetConsensus().llmqTypeChainLocks, m_sigman, requestId, msgHash);
+    m_shareman.AsyncSignIfMember(Params().GetConsensus().llmqTypeChainLocks, requestId, msgHash);
 }
 
 void ChainLockSigner::BlockDisconnected(const std::shared_ptr<const CBlock>& block, const CBlockIndex* pindex)

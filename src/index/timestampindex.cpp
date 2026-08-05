@@ -51,7 +51,7 @@ bool TimestampIndex::DB::EraseTimestampIndex(const CTimestampIndexKey& key)
 }
 
 TimestampIndex::TimestampIndex(std::unique_ptr<interfaces::Chain> chain, size_t n_cache_size, bool f_memory, bool f_wipe) :
-    BaseIndex(std::move(chain)),
+    BaseIndex(std::move(chain), "timestampindex"),
     m_db(std::make_unique<TimestampIndex::DB>(n_cache_size, f_memory, f_wipe))
 {
 }

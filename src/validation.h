@@ -117,7 +117,6 @@ extern uint256 g_best_block;
  * False indicates all script checking is done on the main threadMessageHandler thread.
  */
 extern bool g_parallel_script_checks;
-extern bool fRequireStandard;
 extern bool fCheckBlockIndex;
 extern bool fCheckpointsEnabled;
 /** If the tip is older than this (in seconds), the node is considered to be in initial block download. */
@@ -901,8 +900,6 @@ private:
 
     CBlockIndex* m_best_invalid GUARDED_BY(::cs_main){nullptr};
 
-    const CChainParams m_chainparams;
-
     //! Internal helper for ActivateSnapshot().
     [[nodiscard]] bool PopulateAndValidateSnapshot(
         Chainstate& snapshot_chainstate,
@@ -925,12 +922,12 @@ private:
 public:
     using Options = kernel::ChainstateManagerOpts;
 
-    explicit ChainstateManager(const Options& opts)
-        : m_chainparams{opts.chainparams},
-          m_blockman{{opts.chainparams}} {};
+    explicit ChainstateManager(Options options)
+        : m_options{std::move(options)},
+          m_blockman{{m_options.chainparams}} {}
 
-    const CChainParams& GetParams() const { return m_chainparams; }
-    const Consensus::Params& GetConsensus() const { return m_chainparams.GetConsensus(); }
+    const CChainParams& GetParams() const { return m_options.chainparams; }
+    const Consensus::Params& GetConsensus() const { return m_options.chainparams.GetConsensus(); }
 
     /**
      * Alias for ::cs_main.
@@ -945,6 +942,7 @@ public:
      */
     RecursiveMutex& GetMutex() const LOCK_RETURNED(::cs_main) { return ::cs_main; }
 
+    const Options m_options;
     std::thread m_load_block;
     //! A single BlockManager instance is shared across each constructed
     //! chainstate to avoid duplicating block metadata.
@@ -1091,7 +1089,12 @@ public:
     //! ResizeCoinsCaches() as needed.
     void MaybeRebalanceCaches() EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 
-    bool IsQuorumTypeEnabled(const Consensus::LLMQType llmqType, gsl::not_null<const CBlockIndex*> pindexPrev,
+    //! pindexPrev may be nullptr -- genesis has no parent, and a block index with no parent can
+    //! never be a valid quorum base -- in which case no LLMQ type is enabled and this returns
+    //! false. Do not tighten this to gsl::not_null: attacker-supplied quorum hashes reach it as
+    //! `pindex->pprev`, and a not_null precondition turns that into a process abort rather than a
+    //! rejection.
+    bool IsQuorumTypeEnabled(const Consensus::LLMQType llmqType, const CBlockIndex* pindexPrev,
                              std::optional<bool> optDIP0024IsActive = std::nullopt,
                              std::optional<bool> optHaveDIP0024Quorums = std::nullopt) const;
 

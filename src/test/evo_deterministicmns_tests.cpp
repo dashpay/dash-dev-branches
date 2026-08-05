@@ -2,6 +2,7 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
+#include <test/util/masternode.h>
 #include <test/util/setup_common.h>
 
 #include <chainparams.h>
@@ -16,7 +17,7 @@
 #include <evo/specialtx.h>
 #include <evo/specialtxman.h>
 #include <llmq/context.h>
-#include <mempool_args.h>
+#include <node/mempool_args.h>
 #include <messagesigner.h>
 #include <netbase.h>
 #include <policy/policy.h>
@@ -33,108 +34,15 @@
 
 #include <boost/test/unit_test.hpp>
 
+#include <map>
 #include <optional>
 #include <vector>
-
-using SimpleUTXOMap = std::map<COutPoint, Coin>;
-
-static SimpleUTXOMap BuildSimpleUtxoMap(const std::vector<CTransactionRef>& txs)
-{
-    SimpleUTXOMap utxos;
-    for (size_t i = 0; i < txs.size(); i++) {
-        auto& tx = txs[i];
-        for (size_t j = 0; j < tx->vout.size(); j++) {
-            utxos.emplace(COutPoint(tx->GetHash(), j), Coin(tx->vout[j], static_cast<int>(i) + 1, /*fCoinBaseIn=*/false));
-        }
-    }
-    return utxos;
-}
-
-static SimpleUTXOMap SelectUTXOs(const CChain& active_chain, SimpleUTXOMap& utoxs, CAmount amount, CAmount& changeRet)
-{
-    changeRet = 0;
-
-    SimpleUTXOMap selectedUtxos;
-    CAmount selectedAmount = 0;
-    while (!utoxs.empty()) {
-        bool found = false;
-        for (auto it = utoxs.begin(); it != utoxs.end(); ++it) {
-            if (active_chain.Height() - it->second.nHeight < 101) {
-                continue;
-            }
-
-            found = true;
-            selectedAmount += it->second.out.nValue;
-            selectedUtxos.emplace(it->first, it->second);
-            utoxs.erase(it);
-            break;
-        }
-        BOOST_REQUIRE(found);
-        if (selectedAmount >= amount) {
-            changeRet = selectedAmount - amount;
-            break;
-        }
-    }
-
-    return selectedUtxos;
-}
-
-// Returns the coins being spent so the caller can sign without a chain/mempool lookup.
-static SimpleUTXOMap FundTransaction(const ChainstateManager& chainman, CMutableTransaction& tx, SimpleUTXOMap& utoxs, const CScript& scriptPayout, CAmount amount)
-{
-    CAmount change;
-    auto inputs = WITH_LOCK(::cs_main, return SelectUTXOs(chainman.ActiveChain(), utoxs, amount, change));
-    for (const auto& input : inputs) {
-        tx.vin.emplace_back(CTxIn(input.first));
-    }
-    tx.vout.emplace_back(CTxOut(amount, scriptPayout));
-    if (change != 0) {
-        tx.vout.emplace_back(CTxOut(change, scriptPayout));
-    }
-    return inputs;
-}
-
-static void SignTransaction(CMutableTransaction& tx, const SimpleUTXOMap& coins, const CKey& coinbaseKey)
-{
-    FillableSigningProvider tempKeystore;
-    tempKeystore.AddKeyPubKey(coinbaseKey, coinbaseKey.GetPubKey());
-
-    std::map<int, bilingual_str> input_errors;
-    BOOST_REQUIRE(::SignTransaction(tx, &tempKeystore, coins, SIGHASH_ALL, input_errors));
-}
 
 static CMutableTransaction CreateSpendTx(const ChainstateManager& chainman, SimpleUTXOMap& utxos, const CScript& scriptPayout, CAmount amount, const CKey& coinbaseKey)
 {
     CMutableTransaction tx;
     const auto spent = FundTransaction(chainman, tx, utxos, scriptPayout, amount);
     SignTransaction(tx, spent, coinbaseKey);
-    return tx;
-}
-
-static CMutableTransaction CreateProRegTx(const ChainstateManager& chainman, SimpleUTXOMap& utxos, int port, const CScript& scriptPayout, const CKey& coinbaseKey, CKey& ownerKeyRet, CBLSSecretKey& operatorKeyRet)
-{
-    ownerKeyRet.MakeNewKey(true);
-    operatorKeyRet.MakeNewKey();
-
-    CProRegTx proTx;
-    proTx.nVersion = ProTxVersion::GetMax(!bls::bls_legacy_scheme, /*is_extended_addr=*/false);
-    proTx.netInfo = NetInfoInterface::MakeNetInfo(proTx.nVersion);
-    proTx.collateralOutpoint.n = 0;
-    BOOST_CHECK_EQUAL(proTx.netInfo->AddEntry(NetInfoPurpose::CORE_P2P, strprintf("1.1.1.1:%d", port)),
-                      NetInfoStatus::Success);
-    proTx.keyIDOwner = ownerKeyRet.GetPubKey().GetID();
-    proTx.pubKeyOperator.Set(operatorKeyRet.GetPublicKey(), bls::bls_legacy_scheme.load());
-    proTx.keyIDVoting = ownerKeyRet.GetPubKey().GetID();
-    proTx.scriptPayout = scriptPayout;
-
-    CMutableTransaction tx;
-    tx.nVersion = 3;
-    tx.nType = TRANSACTION_PROVIDER_REGISTER;
-    const auto spent = FundTransaction(chainman, tx, utxos, scriptPayout, dmn_types::Regular.collat_amount);
-    proTx.inputsHash = CalcTxInputsHash(CTransaction(tx));
-    SetTxPayload(tx, proTx);
-    SignTransaction(tx, spent, coinbaseKey);
-
     return tx;
 }
 
@@ -251,13 +159,6 @@ static CMutableTransaction MalleateProTxPayout(const CMutableTransaction& tx)
     SetTxPayload(tx2, protx);
 
     return tx2;
-}
-
-static CScript GenerateRandomAddress()
-{
-    CKey key;
-    key.MakeNewKey(false);
-    return GetScriptForDestination(PKHash(key.GetPubKey()));
 }
 
 static CDeterministicMNCPtr FindPayoutDmn(CDeterministicMNManager& dmnman, const CBlock& block)
@@ -1402,6 +1303,82 @@ void FuncTestMempoolReorg(TestChainSetup& setup)
     BOOST_CHECK_EQUAL(testPool.size(), 0U);
 }
 
+// Regression test: a ProUpRev/ProUpReg invalidates every pending ProTx of the same masternode, and
+// removeProTxKeyChangedConflicts() collects those into a std::set<uint256> before removing any of
+// them. When one conflicting TX is an in-mempool descendant of another, removeRecursive() on the
+// ancestor also erases the descendant, so the descendant's txid in the snapshot no longer resolves.
+// Dereferencing that stale iterator aborted the node; it must be skipped instead.
+//
+// Reachable from CTxMemPool::removeForBlock() (any block carrying such a ProTx).
+void FuncTestMempoolProTxKeyChangedConflictChain(TestChainSetup& setup)
+{
+    auto& chainman = *Assert(setup.m_node.chainman.get());
+
+    auto utxos = BuildSimpleUtxoMap(setup.m_coinbase_txns);
+    const CScript scriptPayout = GetScriptForDestination(PKHash(setup.coinbaseKey.GetPubKey()));
+
+    CKey ownerKey;
+    CBLSSecretKey operatorKey;
+    // Only the resulting proTxHash matters here; the registration never has to be mined because
+    // none of the paths under test consult the masternode list for a ProUpServ payload.
+    auto tx_reg = CreateProRegTx(chainman, utxos, 1, scriptPayout, setup.coinbaseKey, ownerKey, operatorKey);
+    const uint256 proTxHash = tx_reg.GetHash();
+
+    // Parent ProUpServ for that masternode.
+    auto tx_parent = CreateProUpServTx(chainman, utxos, proTxHash, operatorKey, 2, CScript(), setup.coinbaseKey);
+    BOOST_REQUIRE(!tx_parent.vout.empty());
+
+    // Child ProUpServ for the same masternode, spending the parent's first output.
+    FillableSigningProvider keystore;
+    BOOST_REQUIRE(keystore.AddKeyPubKey(setup.coinbaseKey, setup.coinbaseKey.GetPubKey()));
+
+    CMutableTransaction tx_child;
+    tx_child.nVersion = 3;
+    tx_child.nType = TRANSACTION_PROVIDER_UPDATE_SERVICE;
+    tx_child.vin.emplace_back(COutPoint(tx_parent.GetHash(), 0));
+    tx_child.vout.emplace_back(0, scriptPayout); // value assigned by the grind loop below
+
+    CProUpServTx payload;
+    payload.nVersion = ProTxVersion::GetMax(!bls::bls_legacy_scheme, /*is_extended_addr=*/false);
+    payload.netInfo = NetInfoInterface::MakeNetInfo(payload.nVersion);
+    payload.proTxHash = proTxHash;
+    BOOST_REQUIRE_EQUAL(payload.netInfo->AddEntry(NetInfoPurpose::CORE_P2P, "1.1.1.1:3"), NetInfoStatus::Success);
+    payload.inputsHash = CalcTxInputsHash(CTransaction(tx_child));
+    payload.sig = operatorKey.Sign(::SerializeHash(payload), bls::bls_legacy_scheme);
+    SetTxPayload(tx_child, payload);
+
+    // Grind the child's output value until the parent's txid sorts before the child's: the
+    // snapshot is an ordered set, so this makes the parent get removed first, taking the child
+    // with it, and only then is the child's now-stale txid revisited. Only the output value has to
+    // change -- inputsHash covers the inputs alone, so the payload and its BLS signature stay put,
+    // and re-signing replaces the scriptSig outright.
+    bool parent_sorts_first{false};
+    for (CAmount fee = 1000; fee < 2000 && !parent_sorts_first; ++fee) {
+        tx_child.vout[0].nValue = tx_parent.vout[0].nValue - fee;
+        BOOST_REQUIRE(SignSignature(keystore, CTransaction(tx_parent), tx_child, 0, SIGHASH_ALL));
+        parent_sorts_first = tx_parent.GetHash() < tx_child.GetHash();
+    }
+    BOOST_REQUIRE(parent_sorts_first);
+
+    // The revocation that invalidates both pending ProUpServ transactions.
+    auto tx_revoke = CreateProUpRevTx(chainman, utxos, proTxHash, operatorKey, setup.coinbaseKey);
+
+    CTxMemPool testPool{MemPoolOptionsForTest(setup.m_node)};
+    BOOST_REQUIRE(setup.m_node.dmnman);
+    testPool.ConnectManagers(setup.m_node.dmnman.get(), setup.m_node.llmq_ctx->isman.get());
+    TestMemPoolEntryHelper entry;
+    LOCK2(cs_main, testPool.cs);
+
+    testPool.addUnchecked(entry.FromTx(tx_parent));
+    testPool.addUnchecked(entry.FromTx(tx_child));
+    BOOST_CHECK_EQUAL(testPool.size(), 2U);
+
+    // Pre-fix this aborted the process instead of returning.
+    std::vector<CTransactionRef> block_txs{std::make_shared<CTransaction>(tx_revoke)};
+    testPool.removeForBlock(block_txs, chainman.ActiveChain().Height() + 1);
+    BOOST_CHECK_EQUAL(testPool.size(), 0U);
+}
+
 void FuncTestMempoolDualProregtx(TestChainSetup& setup)
 {
     auto& chainman = *Assert(setup.m_node.chainman.get());
@@ -1731,6 +1708,18 @@ BOOST_AUTO_TEST_CASE(test_mempool_reorg_basic)
 {
     TestChainV19Setup setup;
     FuncTestMempoolReorg(setup);
+}
+
+BOOST_AUTO_TEST_CASE(test_mempool_protx_key_changed_conflict_chain_legacy)
+{
+    TestChainDIP3Setup setup;
+    FuncTestMempoolProTxKeyChangedConflictChain(setup);
+}
+
+BOOST_AUTO_TEST_CASE(test_mempool_protx_key_changed_conflict_chain_basic)
+{
+    TestChainV19Setup setup;
+    FuncTestMempoolProTxKeyChangedConflictChain(setup);
 }
 
 BOOST_AUTO_TEST_CASE(test_mempool_dual_proregtx_legacy)

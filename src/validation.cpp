@@ -132,7 +132,6 @@ GlobalMutex g_best_block_mutex;
 std::condition_variable g_best_block_cv;
 uint256 g_best_block;
 bool g_parallel_script_checks{false};
-bool fRequireStandard = true;
 bool fCheckBlockIndex = false;
 bool fCheckpointsEnabled = DEFAULT_CHECKPOINTS_ENABLED;
 int64_t nMaxTipAge = DEFAULT_MAX_TIP_AGE;
@@ -559,10 +558,8 @@ public:
         m_viewmempool(&active_chainstate.CoinsTip(), m_pool),
         m_active_chainstate(active_chainstate),
         m_chain_helper(active_chainstate.ChainHelper()),
-        m_limit_ancestors(m_pool.m_limits.ancestor_count),
-        m_limit_ancestor_size(m_pool.m_limits.ancestor_size_vbytes),
-        m_limit_descendants(m_pool.m_limits.descendant_count),
-        m_limit_descendant_size(m_pool.m_limits.descendant_size_vbytes) {
+        m_limits{m_pool.m_limits}
+    {
     }
 
     // We put the arguments we're handed into a struct, so we can pass them
@@ -751,8 +748,9 @@ private:
             return state.Invalid(TxValidationResult::TX_MEMPOOL_POLICY, "mempool min fee not met", strprintf("%d < %d", package_fee, mempoolRejectFee));
         }
 
-        if (package_fee < ::minRelayTxFee.GetFee(package_size)) {
-            return state.Invalid(TxValidationResult::TX_MEMPOOL_POLICY, "min relay fee not met", strprintf("%d < %d", package_fee, ::minRelayTxFee.GetFee(package_size)));
+        if (package_fee < m_pool.m_min_relay_feerate.GetFee(package_size)) {
+            return state.Invalid(TxValidationResult::TX_MEMPOOL_POLICY, "min relay fee not met",
+                                 strprintf("%d < %d", package_fee, m_pool.m_min_relay_feerate.GetFee(package_size)));
         }
         return true;
     }
@@ -765,13 +763,7 @@ private:
     Chainstate& m_active_chainstate;
     CChainstateHelper& m_chain_helper;
 
-    // The package limits in effect at the time of invocation.
-    const size_t m_limit_ancestors;
-    const size_t m_limit_ancestor_size;
-    // These may be modified while evaluating a transaction (eg to account for
-    // in-mempool conflicts; see below).
-    size_t m_limit_descendants;
-    size_t m_limit_descendant_size;
+    CTxMemPool::Limits m_limits;
 };
 
 bool MemPoolAccept::PreChecks(ATMPArgs& args, Workspace& ws)
@@ -810,11 +802,13 @@ bool MemPoolAccept::PreChecks(ATMPArgs& args, Workspace& ws)
 
     // Rather not work on nonstandard transactions (unless -testnet/-regtest)
     std::string reason;
-    if (fRequireStandard && !IsStandardTx(tx, reason))
+    if (m_pool.m_require_standard && !IsStandardTx(tx, m_pool.m_max_datacarrier_bytes, m_pool.m_permit_bare_multisig, m_pool.m_dust_relay_feerate, reason)) {
         return state.Invalid(TxValidationResult::TX_NOT_STANDARD, reason);
+    }
 
-    if (fRequireStandard && !IsStandardSpecialTx(tx, reason))
+    if (m_pool.m_require_standard && !IsStandardSpecialTx(tx, reason)) {
         return state.Invalid(TxValidationResult::TX_NOT_STANDARD, reason);
+    }
 
     // Do not work on transactions that are too small.
     // A transaction with 1 empty scriptSig input and 1 P2SH output has size of 83 bytes.
@@ -913,7 +907,7 @@ bool MemPoolAccept::PreChecks(ATMPArgs& args, Workspace& ws)
         return false; // state filled in by CheckTxInputs
     }
 
-    if (fRequireStandard && !AreInputsStandard(tx, m_view)) {
+    if (m_pool.m_require_standard && !AreInputsStandard(tx, m_view)) {
         return state.Invalid(TxValidationResult::TX_INPUTS_NOT_STANDARD, "bad-txns-nonstandard-inputs");
     }
 
@@ -950,9 +944,9 @@ bool MemPoolAccept::PreChecks(ATMPArgs& args, Workspace& ws)
     // Checking of fee for MNHF_SIGNAL should be skipped: mnhf does not have
     // inputs, outputs, or fee
     if (!tx.IsSpecialTxVersion() || tx.nType != TRANSACTION_MNHF_SIGNAL) {
-        if (!bypass_limits && ws.m_modified_fees < ::minRelayTxFee.GetFee(ws.m_vsize)) {
+        if (!bypass_limits && ws.m_modified_fees < m_pool.m_min_relay_feerate.GetFee(ws.m_vsize)) {
             return state.Invalid(TxValidationResult::TX_MEMPOOL_POLICY, "min relay fee not met",
-                                 strprintf("%d < %d", ws.m_modified_fees, ::minRelayTxFee.GetFee(ws.m_vsize)));
+                                 strprintf("%d < %d", ws.m_modified_fees, m_pool.m_min_relay_feerate.GetFee(ws.m_vsize)));
         }
         // No individual transactions are allowed below the mempool min feerate except from disconnected
         // blocks and transactions in a package. Package transactions will be checked using package
@@ -962,7 +956,7 @@ bool MemPoolAccept::PreChecks(ATMPArgs& args, Workspace& ws)
 
     // Calculate in-mempool ancestors, up to a limit.
     std::string errString;
-    if (!m_pool.CalculateMemPoolAncestors(*entry, ws.m_ancestors, m_limit_ancestors, m_limit_ancestor_size, m_limit_descendants, m_limit_descendant_size, errString)) {
+    if (!m_pool.CalculateMemPoolAncestors(*entry, ws.m_ancestors, m_limits, errString)) {
         ws.m_ancestors.clear();
         // If CalculateMemPoolAncestors fails second time, we want the original error string.
         std::string dummy_err_string;
@@ -976,8 +970,16 @@ bool MemPoolAccept::PreChecks(ATMPArgs& args, Workspace& ws)
         // to be secure by simply only having two immediately-spendable
         // outputs - one for each counterparty. For more info on the uses for
         // this, see https://lists.linuxfoundation.org/pipermail/bitcoin-dev/2018-November/016518.html
+        CTxMemPool::Limits cpfp_carve_out_limits{
+            .ancestor_count = 2,
+            .ancestor_size_vbytes = m_limits.ancestor_size_vbytes,
+            .descendant_count = m_limits.descendant_count + 1,
+            .descendant_size_vbytes = m_limits.descendant_size_vbytes + EXTRA_DESCENDANT_TX_SIZE_LIMIT,
+        };
         if (ws.m_vsize > EXTRA_DESCENDANT_TX_SIZE_LIMIT ||
-                !m_pool.CalculateMemPoolAncestors(*entry, ws.m_ancestors, 2, m_limit_ancestor_size, m_limit_descendants + 1, m_limit_descendant_size + EXTRA_DESCENDANT_TX_SIZE_LIMIT, dummy_err_string)) {
+                !m_pool.CalculateMemPoolAncestors(*entry, ws.m_ancestors,
+                                                  cpfp_carve_out_limits,
+                                                  dummy_err_string)) {
             return state.Invalid(TxValidationResult::TX_MEMPOOL_POLICY, "too-long-mempool-chain", errString);
         }
     }
@@ -1007,8 +1009,7 @@ bool MemPoolAccept::PackageMempoolChecks(const std::vector<CTransactionRef>& txn
                        { return !m_pool.exists(tx->GetHash());}));
 
     std::string err_string;
-    if (!m_pool.CheckPackageLimits(txns, m_limit_ancestors, m_limit_ancestor_size, m_limit_descendants,
-                                   m_limit_descendant_size, err_string)) {
+    if (!m_pool.CheckPackageLimits(txns, m_limits, err_string)) {
         // This is a package-wide error, separate from an individual transaction error.
         return package_state.Invalid(PackageValidationResult::PCKG_POLICY, "package-mempool-limits", err_string);
     }
@@ -1145,9 +1146,7 @@ bool MemPoolAccept::SubmitPackage(const ATMPArgs& args, std::vector<Workspace>& 
         // Re-calculate mempool ancestors to call addUnchecked(). They may have changed since the
         // last calculation done in PreChecks, since package ancestors have already been submitted.
         std::string unused_err_string;
-        if(!m_pool.CalculateMemPoolAncestors(*ws.m_entry, ws.m_ancestors, m_limit_ancestors,
-                                             m_limit_ancestor_size, m_limit_descendants,
-                                             m_limit_descendant_size, unused_err_string)) {
+        if(!m_pool.CalculateMemPoolAncestors(*ws.m_entry, ws.m_ancestors, m_limits, unused_err_string)) {
             results.emplace(ws.m_ptx->GetHash(), MempoolAcceptResult::Failure(ws.m_state));
             // Since PreChecks() and PackageMempoolChecks() both enforce limits, this should never fail.
             Assume(false);
@@ -5723,10 +5722,17 @@ bool ChainstateManager::IsSnapshotActive() const
 }
 
 bool ChainstateManager::IsQuorumTypeEnabled(const Consensus::LLMQType llmqType,
-                                            gsl::not_null<const CBlockIndex*> pindexPrev,
+                                            const CBlockIndex* pindexPrev,
                                             std::optional<bool> optDIP0024IsActive,
                                             std::optional<bool> optHaveDIP0024Quorums) const
 {
+    // A parentless block index (i.e. genesis) has no prior height at which any LLMQ type could
+    // have activated, so nothing is enabled. This matches the behaviour before pindexPrev was
+    // hardened to gsl::not_null, when DeploymentActiveAfter(nullptr, ...) simply returned false.
+    if (pindexPrev == nullptr) {
+        return false;
+    }
+
     constexpr int TESTNET_LLMQ_25_67_ACTIVATION_HEIGHT = 847000;
 
     const bool fDIP0024IsActive{optDIP0024IsActive.value_or(
@@ -5737,11 +5743,11 @@ bool ChainstateManager::IsQuorumTypeEnabled(const Consensus::LLMQType llmqType,
     case Consensus::LLMQType::LLMQ_DEVNET:
         return true;
     case Consensus::LLMQType::LLMQ_50_60:
-        return !fDIP0024IsActive || !fHaveDIP0024Quorums || m_chainparams.NetworkIDString() == CBaseChainParams::TESTNET ||
-               m_chainparams.NetworkIDString() == CBaseChainParams::DEVNET;
+        return !fDIP0024IsActive || !fHaveDIP0024Quorums || GetParams().NetworkIDString() == CBaseChainParams::TESTNET ||
+               GetParams().NetworkIDString() == CBaseChainParams::DEVNET;
     case Consensus::LLMQType::LLMQ_TEST_INSTANTSEND:
         return !fDIP0024IsActive || !fHaveDIP0024Quorums ||
-               m_chainparams.GetConsensus().llmqTypeDIP0024InstantSend == Consensus::LLMQType::LLMQ_TEST_INSTANTSEND;
+               GetConsensus().llmqTypeDIP0024InstantSend == Consensus::LLMQType::LLMQ_TEST_INSTANTSEND;
     case Consensus::LLMQType::LLMQ_TEST:
     case Consensus::LLMQType::LLMQ_TEST_PLATFORM:
     case Consensus::LLMQType::LLMQ_400_60:

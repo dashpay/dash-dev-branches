@@ -57,7 +57,7 @@ bool error(const char* fmt, const Args&... args)
     return false;
 }
 
-void PrintExceptionContinue(const std::exception_ptr pex, const char* pszExceptionOrigin);
+void PrintExceptionContinue(const std::exception_ptr pex, std::string_view thread_name);
 
 // Return true if -datadir option points to a valid directory or is not specified.
 bool CheckDataDirOption(const ArgsManager& args);

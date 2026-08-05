@@ -60,6 +60,8 @@ using interfaces::WalletValueMap;
 using node::NodeContext;
 
 namespace wallet {
+// All members of the classes in this namespace are intentionally public, as the
+// classes themselves are private.
 namespace {
 //! Construct wallet tx struct.
 WalletTx MakeWalletTx(CWallet& wallet, const CWalletTx& wtx)

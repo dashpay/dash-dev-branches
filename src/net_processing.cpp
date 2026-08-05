@@ -2979,7 +2979,7 @@ void PeerManagerImpl::ProcessGetData(CNode& pfrom, Peer& peer, const std::atomic
         }
         for (auto& handler : m_handlers) {
             if (!push) {
-                push = handler->ProcessGetData(pfrom, inv, m_connman, msgMaker);
+                push = handler->ProcessGetData(pfrom, inv, msgMaker);
             }
         }
 

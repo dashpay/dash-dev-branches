@@ -283,6 +283,7 @@ void CCoinJoinServer::SetNull()
     AssertLockHeld(cs_coinjoin);
     // MN side
     vecSessionCollaterals.clear();
+    setSessionCollateralPrevouts.clear();
 
     CCoinJoinBaseSession::SetNull();
     m_queueman.SetNull();
@@ -743,6 +744,15 @@ bool CCoinJoinServer::IsAcceptableDSA(const CCoinJoinAccept& dsa, PoolMessage& n
     return true;
 }
 
+void CCoinJoinServer::CommitSessionCollateral(const CMutableTransaction& txCollateral)
+{
+    AssertLockHeld(cs_coinjoin);
+    vecSessionCollaterals.push_back(MakeTransactionRef(txCollateral));
+    for (const auto& txin : txCollateral.vin) {
+        setSessionCollateralPrevouts.insert(txin.prevout);
+    }
+}
+
 bool CCoinJoinServer::CreateNewSession(const CCoinJoinAccept& dsa, PoolMessage& nMessageIDRet)
 {
     if (nSessionID != 0) return false;
@@ -758,12 +768,26 @@ bool CCoinJoinServer::CreateNewSession(const CCoinJoinAccept& dsa, PoolMessage& 
         return false;
     }
 
-    // start new session
-    nMessageIDRet = MSG_NOERR;
-    nSessionID = GetRand<int>(/*nMax=*/999999) + 1;
-    nSessionDenom = dsa.nDenom;
+    {
+        LOCK(cs_coinjoin);
 
-    SetState(POOL_STATE_QUEUE);
+        // A scheduler-thread timeout can reset the session via SetNull() between the checks
+        // above and taking cs_coinjoin, so revalidate: the session state and the collateral
+        // that opened it have to be committed as one unit.
+        if (nSessionID != 0 || nState != POOL_STATE_IDLE) {
+            nMessageIDRet = ERR_MODE;
+            return false;
+        }
+
+        // start new session
+        nMessageIDRet = MSG_NOERR;
+        nSessionID = GetRand<int>(/*nMax=*/999999) + 1;
+        nSessionDenom = dsa.nDenom;
+
+        SetState(POOL_STATE_QUEUE);
+
+        CommitSessionCollateral(dsa.txCollateral);
+    }
 
     if (!fUnitTest) {
         //broadcast that I'm accepting entries, only if it's the first entry through
@@ -775,7 +799,6 @@ bool CCoinJoinServer::CreateNewSession(const CCoinJoinAccept& dsa, PoolMessage& 
         m_queueman.AddQueue(std::move(dsq));
     }
 
-    vecSessionCollaterals.push_back(MakeTransactionRef(dsa.txCollateral));
     LogPrint(BCLog::COINJOIN, "CCoinJoinServer::CreateNewSession -- new session created, nSessionID: %d  nSessionDenom: %d (%s)  vecSessionCollaterals.size(): %d  CoinJoin::GetMaxPoolParticipants(): %d\n",
         nSessionID, nSessionDenom, CoinJoin::DenominationToString(nSessionDenom), vecSessionCollaterals.size(), CoinJoin::GetMaxPoolParticipants());
 
@@ -804,10 +827,32 @@ bool CCoinJoinServer::AddUserToExistingSession(const CCoinJoinAccept& dsa, PoolM
         return false;
     }
 
+    LOCK(cs_coinjoin);
+
+    // A scheduler-thread timeout can reset the session via SetNull() between the checks above
+    // and taking cs_coinjoin, so revalidate: a collateral must never be committed to a session
+    // that no longer exists.
+    if (nSessionID == 0 || nState != POOL_STATE_QUEUE) {
+        nMessageIDRet = ERR_MODE;
+        return false;
+    }
+
+    // Session collaterals are only ever test-accepted, never added to the mempool, so nothing
+    // pins their identity: the same UTXO can be re-signed into arbitrarily many distinct txids.
+    // Match on input prevouts so a resent or replayed dsa cannot be counted as a new participant.
+    for (const auto& txin : dsa.txCollateral.vin) {
+        if (setSessionCollateralPrevouts.contains(txin.prevout)) {
+            LogPrint(BCLog::COINJOIN, "CCoinJoinServer::AddUserToExistingSession -- collateral %s spends prevout %s already committed to this session\n",
+                dsa.txCollateral.GetHash().ToString(), txin.prevout.ToStringShort());
+            nMessageIDRet = ERR_ALREADY_HAVE;
+            return false;
+        }
+    }
+
     // count new user as accepted to an existing session
 
     nMessageIDRet = MSG_NOERR;
-    vecSessionCollaterals.push_back(MakeTransactionRef(dsa.txCollateral));
+    CommitSessionCollateral(dsa.txCollateral);
 
     LogPrint(BCLog::COINJOIN, "CCoinJoinServer::AddUserToExistingSession -- new user accepted, nSessionID: %d  nSessionDenom: %d (%s)  vecSessionCollaterals.size(): %d  CoinJoin::GetMaxPoolParticipants(): %d\n",
         nSessionID, nSessionDenom, CoinJoin::DenominationToString(nSessionDenom), vecSessionCollaterals.size(), CoinJoin::GetMaxPoolParticipants());
@@ -959,7 +1004,7 @@ bool CCoinJoinServer::AlreadyHave(const CInv& inv)
     return (inv.type == MSG_DSQ) ? m_queueman.HasQueue(inv.hash) : false;
 }
 
-bool CCoinJoinServer::ProcessGetData(CNode& pfrom, const CInv& inv, CConnman& connman, const CNetMsgMaker& msgMaker)
+bool CCoinJoinServer::ProcessGetData(CNode& pfrom, const CInv& inv, const CNetMsgMaker& msgMaker)
 {
     if (inv.type != MSG_DSQ) return false;
 

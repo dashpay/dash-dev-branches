@@ -10,6 +10,9 @@
 #include <net_processing.h>
 #include <net_types.h>
 #include <protocol.h>
+#include <util/hasher.h>
+
+#include <unordered_set>
 
 class CActiveMasternodeManager;
 class CConnman;
@@ -43,6 +46,9 @@ private:
     // Mixing uses collateral transactions to trust parties entering the pool
     // to behave honestly. If they don't it takes their money.
     std::vector<CTransactionRef> vecSessionCollaterals;
+    // Input prevouts of every transaction in vecSessionCollaterals, so a dsa whose collateral
+    // reuses one of them can be rejected without rescanning them all.
+    std::unordered_set<COutPoint, SaltedOutpointHasher> setSessionCollateralPrevouts GUARDED_BY(cs_coinjoin);
 
     bool fUnitTest;
 
@@ -66,8 +72,10 @@ private:
 
     /// Is this nDenom and txCollateral acceptable?
     bool IsAcceptableDSA(const CCoinJoinAccept& dsa, PoolMessage& nMessageIDRet) const;
-    bool CreateNewSession(const CCoinJoinAccept& dsa, PoolMessage& nMessageIDRet);
-    bool AddUserToExistingSession(const CCoinJoinAccept& dsa, PoolMessage& nMessageIDRet);
+    /// Record an accepted collateral and index its input prevouts
+    void CommitSessionCollateral(const CMutableTransaction& txCollateral) EXCLUSIVE_LOCKS_REQUIRED(cs_coinjoin);
+    bool CreateNewSession(const CCoinJoinAccept& dsa, PoolMessage& nMessageIDRet) EXCLUSIVE_LOCKS_REQUIRED(!cs_coinjoin);
+    bool AddUserToExistingSession(const CCoinJoinAccept& dsa, PoolMessage& nMessageIDRet) EXCLUSIVE_LOCKS_REQUIRED(!cs_coinjoin);
     /// Do we have enough users to take entries?
     bool IsSessionReady() const;
 
@@ -85,7 +93,7 @@ private:
     void RelayStatus(PoolStatusUpdate nStatusUpdate, PoolMessage nMessageID = MSG_NOERR) EXCLUSIVE_LOCKS_REQUIRED(cs_coinjoin);
     void RelayCompletedTransaction(PoolMessage nMessageID) EXCLUSIVE_LOCKS_REQUIRED(!cs_coinjoin);
 
-    void ProcessDSACCEPT(CNode& peer, CDataStream& vRecv);
+    void ProcessDSACCEPT(CNode& peer, CDataStream& vRecv) EXCLUSIVE_LOCKS_REQUIRED(!cs_coinjoin);
     void ProcessDSQUEUE(NodeId from, CDataStream& vRecv);
     void ProcessDSVIN(CNode& peer, CDataStream& vRecv) EXCLUSIVE_LOCKS_REQUIRED(!cs_coinjoin);
     void ProcessDSSIGNFINALTX(CNode& peer, CDataStream& vRecv) EXCLUSIVE_LOCKS_REQUIRED(!cs_coinjoin);
@@ -103,7 +111,7 @@ public:
     ~CCoinJoinServer();
 
     void ProcessMessage(CNode& pfrom, const std::string& msg_type, CDataStream& vRecv) override;
-    bool ProcessGetData(CNode& pfrom, const CInv& inv, CConnman& connman, const CNetMsgMaker& msgMaker) override;
+    bool ProcessGetData(CNode& pfrom, const CInv& inv, const CNetMsgMaker& msgMaker) override;
     bool AlreadyHave(const CInv& inv) override;
     void Schedule(CScheduler& scheduler) override;
 

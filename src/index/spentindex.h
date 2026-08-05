@@ -50,7 +50,6 @@ protected:
     bool CustomRewind(const interfaces::BlockKey& current_tip, const interfaces::BlockKey& new_tip) override;
 
     BaseIndex::DB& GetDB() const override;
-    const char* GetName() const override { return "spentindex"; }
 
     /// SpentIndex cannot work with pruned nodes as it requires UTXO data
     bool AllowPrune() const override { return false; }

@@ -101,6 +101,8 @@ using interfaces::Node;
 using interfaces::WalletLoader;
 
 namespace node {
+// All members of the classes in this namespace are intentionally public, as the
+// classes themselves are private.
 namespace {
 std::vector<CScript> GetOwnerPayoutScripts(const CDeterministicMNState& state)
 {
@@ -681,15 +683,12 @@ class ExternalSignerImpl : public interfaces::ExternalSigner
 public:
     ExternalSignerImpl(::ExternalSigner signer) : m_signer(std::move(signer)) {}
     std::string getName() override { return m_signer.m_name; }
-private:
     ::ExternalSigner m_signer;
 };
 #endif
 
 class NodeImpl : public Node
 {
-private:
-    ChainstateManager& chainman() { return *Assert(m_context->chainman); }
 public:
     EVOImpl m_evo;
     GOVImpl m_gov;
@@ -929,12 +928,7 @@ public:
     }
     double getVerificationProgress() override
     {
-        const CBlockIndex* tip;
-        {
-            LOCK(::cs_main);
-            tip = chainman().ActiveChain().Tip();
-        }
-        return GuessVerificationProgress(chainman().GetParams().TxData(), tip);
+        return GuessVerificationProgress(chainman().GetParams().TxData(), WITH_LOCK(::cs_main, return chainman().ActiveChain().Tip()));
     }
     bool isInitialBlockDownload() override {
         return chainman().ActiveChainstate().IsInitialBlockDownload();
@@ -951,7 +945,11 @@ public:
         }
     }
     bool getNetworkActive() override { return m_context->connman && m_context->connman->GetNetworkActive(); }
-    CFeeRate getDustRelayFee() override { return ::dustRelayFee; }
+    CFeeRate getDustRelayFee() override
+    {
+        if (!m_context->mempool) return CFeeRate{DUST_RELAY_TX_FEE};
+        return m_context->mempool->m_dust_relay_feerate;
+    }
     UniValue executeRpc(const std::string& command, const UniValue& params, const std::string& uri) override
     {
         JSONRPCRequest req;
@@ -1073,6 +1071,7 @@ public:
         m_llmq.setContext(context);
         m_masternodeSync.setContext(context);
     }
+    ChainstateManager& chainman() { return *Assert(m_context->chainman); }
     NodeContext* m_context{nullptr};
 };
 
@@ -1193,33 +1192,22 @@ public:
 
 class ChainImpl : public Chain
 {
-private:
-    ChainstateManager& chainman() { return *Assert(m_node.chainman); }
 public:
     explicit ChainImpl(NodeContext& node) : m_node(node) {}
     std::optional<int> getHeight() override
     {
-        LOCK(::cs_main);
-        const CChain& active = chainman().ActiveChain();
-        int height = active.Height();
-        if (height >= 0) {
-            return height;
-        }
-        return std::nullopt;
+        const int height{WITH_LOCK(::cs_main, return chainman().ActiveChain().Height())};
+        return height >= 0 ? std::optional{height} : std::nullopt;
     }
     uint256 getBlockHash(int height) override
     {
         LOCK(::cs_main);
-        const CChain& active = chainman().ActiveChain();
-        CBlockIndex* block = active[height];
-        assert(block != nullptr);
-        return block->GetBlockHash();
+        return Assert(chainman().ActiveChain()[height])->GetBlockHash();
     }
     bool haveBlockOnDisk(int height) override
     {
         LOCK(::cs_main);
-        const CChain& active = chainman().ActiveChain();
-        CBlockIndex* block = active[height];
+        const CBlockIndex* block{chainman().ActiveChain()[height]};
         return block && ((block->nStatus & BLOCK_HAVE_DATA) != 0) && block->nTx > 0;
     }
     std::optional<int> findFork(const uint256& hash, std::optional<int>* height) override
@@ -1255,8 +1243,7 @@ public:
     std::optional<int> findLocatorFork(const CBlockLocator& locator) override
     {
         LOCK(::cs_main);
-        const Chainstate& active = chainman().ActiveChainstate();
-        if (const CBlockIndex* fork = active.FindForkInGlobalIndex(locator)) {
+        if (const CBlockIndex* fork = chainman().ActiveChainstate().FindForkInGlobalIndex(locator)) {
             return fork->nHeight;
         }
         return std::nullopt;
@@ -1304,8 +1291,7 @@ public:
     bool findBlock(const uint256& hash, const FoundBlock& block) override
     {
         WAIT_LOCK(cs_main, lock);
-        const CChain& active = chainman().ActiveChain();
-        return FillBlock(chainman().m_blockman.LookupBlockIndex(hash), block, lock, active);
+        return FillBlock(chainman().m_blockman.LookupBlockIndex(hash), block, lock, chainman().ActiveChain());
     }
     bool findFirstBlockWithTimeAndHeight(int64_t min_time, int min_height, const FoundBlock& block) override
     {
@@ -1327,11 +1313,10 @@ public:
     bool findAncestorByHash(const uint256& block_hash, const uint256& ancestor_hash, const FoundBlock& ancestor_out) override
     {
         WAIT_LOCK(cs_main, lock);
-        const CChain& active = chainman().ActiveChain();
         const CBlockIndex* block = chainman().m_blockman.LookupBlockIndex(block_hash);
         const CBlockIndex* ancestor = chainman().m_blockman.LookupBlockIndex(ancestor_hash);
         if (block && ancestor && block->GetAncestor(ancestor->nHeight) != ancestor) ancestor = nullptr;
-        return FillBlock(ancestor, ancestor_out, lock, active);
+        return FillBlock(ancestor, ancestor_out, lock, chainman().ActiveChain());
     }
     bool findCommonAncestor(const uint256& block_hash1, const uint256& block_hash2, const FoundBlock& ancestor_out, const FoundBlock& block1_out, const FoundBlock& block2_out) override
     {
@@ -1418,8 +1403,7 @@ public:
         std::string unused_error_string;
         LOCK(m_node.mempool->cs);
         return m_node.mempool->CalculateMemPoolAncestors(
-            entry, ancestors, limits.ancestor_count, limits.ancestor_size_vbytes,
-            limits.descendant_count, limits.descendant_size_vbytes, unused_error_string);
+            entry, ancestors, limits, unused_error_string);
     }
     CFeeRate estimateSmartFee(int num_blocks, bool conservative, FeeCalculation* calc) override
     {
@@ -1436,9 +1420,21 @@ public:
         if (!m_node.mempool) return {};
         return m_node.mempool->GetMinFee();
     }
-    CFeeRate relayMinFee() override { return ::minRelayTxFee; }
-    CFeeRate relayIncrementalFee() override { return ::incrementalRelayFee; }
-    CFeeRate relayDustFee() override { return ::dustRelayFee; }
+    CFeeRate relayMinFee() override
+    {
+        if (!m_node.mempool) return CFeeRate{DEFAULT_MIN_RELAY_TX_FEE};
+        return m_node.mempool->m_min_relay_feerate;
+    }
+    CFeeRate relayIncrementalFee() override
+    {
+        if (!m_node.mempool) return CFeeRate{DEFAULT_INCREMENTAL_RELAY_FEE};
+        return m_node.mempool->m_incremental_relay_feerate;
+    }
+    CFeeRate relayDustFee() override
+    {
+        if (!m_node.mempool) return CFeeRate{DUST_RELAY_TX_FEE};
+        return m_node.mempool->m_dust_relay_feerate;
+    }
     bool havePruned() override
     {
         LOCK(::cs_main);
@@ -1462,11 +1458,7 @@ public:
     }
     void waitForNotificationsIfTipChanged(const uint256& old_tip) override
     {
-        if (!old_tip.IsNull()) {
-            LOCK(::cs_main);
-            const CChain& active = chainman().ActiveChain();
-            if (old_tip == active.Tip()->GetBlockHash()) return;
-        }
+        if (!old_tip.IsNull() && old_tip == WITH_LOCK(::cs_main, return chainman().ActiveChain().Tip()->GetBlockHash())) return;
         SyncWithValidationInterfaceQueue();
     }
     std::unique_ptr<Handler> handleRpc(const CRPCCommand& command) override
@@ -1521,6 +1513,7 @@ public:
     }
 
     NodeContext* context() override { return &m_node; }
+    ChainstateManager& chainman() { return *Assert(m_node.chainman); }
     NodeContext& m_node;
 };
 } // namespace
