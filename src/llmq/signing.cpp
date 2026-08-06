@@ -654,7 +654,9 @@ bool IsQuorumActive(Consensus::LLMQType llmqType, const CQuorumManager& qman, co
     // we allow one more active quorum as specified in consensus, as otherwise there is a small window where things could
     // fail while we are on the brink of a new quorum
     const auto& llmq_params_opt = Params().GetLLMQ(llmqType);
-    assert(llmq_params_opt.has_value());
+    if (!llmq_params_opt.has_value()) {
+        return false;
+    }
     auto quorums = qman.ScanQuorums(llmqType, llmq_params_opt->keepOldConnections);
     return std::ranges::any_of(quorums, [&quorumHash](const auto& q) { return q->qc->quorumHash == quorumHash; });
 }
