@@ -16,12 +16,16 @@
 #include <scheduler.h>
 #include <txmempool.h>
 #include <validation.h>
+#include <index/addressindex.h>
+#include <index/spentindex.h>
+#include <index/timestampindex.h>
 
 #include <active/context.h>
 #include <chainlock/chainlock.h>
 #include <chainlock/handler.h>
 #include <coinjoin/coinjoin.h>
 #include <coinjoin/walletman.h>
+#include <dsnotificationinterface.h>
 #include <evo/chainhelper.h>
 #include <evo/creditpool.h>
 #include <evo/deterministicmns.h>

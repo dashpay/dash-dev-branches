@@ -12,25 +12,27 @@ unsigned-integer-overflow:*/include/c++/
 unsigned-integer-overflow:FuzzedDataProvider::ConsumeIntegralInRange
 unsigned-integer-overflow:leveldb/
 unsigned-integer-overflow:minisketch/
-unsigned-integer-overflow:secp256k1/
+unsigned-integer-overflow:secp256k1*
 unsigned-integer-overflow:test/fuzz/crypto_diff_fuzz_chacha20.cpp
 implicit-integer-sign-change:*/include/boost/
 implicit-integer-sign-change:*/include/c++/
 implicit-integer-sign-change:*/new_allocator.h
 implicit-integer-sign-change:crc32c/
 implicit-integer-sign-change:minisketch/
-implicit-integer-sign-change:secp256k1/
+implicit-integer-sign-change:secp256k1*
 implicit-signed-integer-truncation:*/include/c++/
 implicit-signed-integer-truncation:leveldb/
-implicit-signed-integer-truncation:secp256k1/
+implicit-signed-integer-truncation:secp256k1*
+implicit-signed-integer-truncation,implicit-integer-sign-change:secp256k1_modinv64_posdivsteps_62_var
 implicit-unsigned-integer-truncation:*/include/c++/
 implicit-unsigned-integer-truncation:leveldb/
-implicit-unsigned-integer-truncation:secp256k1/
+implicit-unsigned-integer-truncation:secp256k1*
+implicit-signed-integer-truncation,implicit-integer-sign-change:secp256k1*
 implicit-unsigned-integer-truncation:test/fuzz/crypto_diff_fuzz_chacha20.cpp
 shift-base:*/include/c++/
 shift-base:leveldb/
 shift-base:minisketch/
-shift-base:secp256k1/
+shift-base:secp256k1*
 shift-base:test/fuzz/crypto_diff_fuzz_chacha20.cpp
 # Unsigned integer overflow occurs when the result of an unsigned integer
 # computation cannot be represented in its type. Unlike signed integer overflow,
@@ -46,6 +48,13 @@ unsigned-integer-overflow:compressor.cpp
 unsigned-integer-overflow:crypto/
 unsigned-integer-overflow:hash.cpp
 unsigned-integer-overflow:lcg.h
+# The quorum snapshot skip list stores offsets relative to the first skipped
+# index, and the index wraps around the sorted MN list, so an offset can be
+# negative. Encoding wraps size_t and narrows into vector<int>, decoding wraps
+# it back; the two cancel and the absolute index is recovered exactly. Per
+# symbol rather than per file so the rest of llmq/utils.cpp stays covered.
+unsigned-integer-overflow:BuildNewQuorumQuarterMembers
+unsigned-integer-overflow:GetQuorumQuarterMembersBySnapshot
 unsigned-integer-overflow:policy/fees.cpp
 unsigned-integer-overflow:prevector.h
 unsigned-integer-overflow:EvalScript
@@ -54,6 +63,7 @@ unsigned-integer-overflow:xoroshiro128plusplus.h
 implicit-integer-sign-change:addrman.h
 implicit-integer-sign-change:compat/stdin.cpp
 implicit-integer-sign-change:CBlockPolicyEstimator::processBlockTx
+implicit-integer-sign-change:GetQuorumQuarterMembersBySnapshot
 implicit-integer-sign-change:compressor.h
 implicit-integer-sign-change:crypto/
 implicit-integer-sign-change:policy/fees.cpp
@@ -66,6 +76,7 @@ implicit-integer-sign-change:util/strencodings.cpp
 implicit-integer-sign-change:util/strencodings.h
 implicit-integer-sign-change:validation.cpp
 implicit-signed-integer-truncation,implicit-integer-sign-change:test/skiplist_tests.cpp
+implicit-signed-integer-truncation,implicit-integer-sign-change:BuildNewQuorumQuarterMembers
 implicit-signed-integer-truncation:addrman.h
 implicit-signed-integer-truncation:crypto/
 implicit-unsigned-integer-truncation:crypto/

@@ -36,7 +36,7 @@ public:
     explicit CEHFSignalsHandler(ChainstateManager& chainman, CSigningManager& sigman, CSigSharesManager& shareman,
                                 const CQuorumManager& qman);
 
-    ~CEHFSignalsHandler();
+    ~CEHFSignalsHandler() override;
 
     /**
      * Since Tip is updated it could be a time to generate EHF Signal

@@ -77,7 +77,7 @@ public:
                             const CActiveMasternodeManager& mn_activeman, const ChainstateManager& chainman,
                             const CSporkManager& sporkman, const Consensus::LLMQParams& llmq_params, bool quorums_watch,
                             int quorums_idx);
-    ~ActiveDKGSessionHandler();
+    ~ActiveDKGSessionHandler() override;
 
 public:
     //! CDKGSessionHandler

@@ -182,9 +182,30 @@ bool BuildSimplifiedMNListDiff(CDeterministicMNManager& dmnman, const Chainstate
         errorRet = strprintf("base block %s is higher then block %s", baseBlockHash.ToString(), blockHash.ToString());
         return false;
     }
+    // No availability check for baseBlockIndex: the base is only used for
+    // EvoDB-backed masternode/quorum state, which pruned nodes retain, and
+    // GetListForBlock below fails with the same sentinel when a snapshot
+    // node has not validated the base yet. Only the target block is read
+    // from disk (for cbTx and its merkle tree).
+    if (!(blockIndex->nStatus & BLOCK_HAVE_DATA)) {
+        errorRet = strprintf("block data for block %s is not available (pruned or below an unvalidated snapshot base)",
+                             blockIndex->GetBlockHash().ToString());
+        return false;
+    }
 
-    auto baseDmnList = dmnman.GetListForBlock(baseBlockIndex);
-    auto dmnList = dmnman.GetListForBlock(blockIndex);
+    CDeterministicMNList baseDmnList;
+    CDeterministicMNList dmnList;
+    try {
+        baseDmnList = dmnman.GetListForBlock(baseBlockIndex);
+        dmnList = dmnman.GetListForBlock(blockIndex);
+    } catch (const BlockDataUnavailableError& e) {
+        // e.g. a list diff pending in another chainstate's unflushed overlay;
+        // the message carries the IsBlockDataUnavailableError sentinel so the
+        // requesting peer is not penalized. Local list corruption throws a plain
+        // runtime_error and deliberately stays unhandled, as before this change.
+        errorRet = e.what();
+        return false;
+    }
     mnListDiffRet = BuildSimplifiedDiff(baseDmnList, dmnList, extended);
 
     // We need to return the value that was provided by the other peer as it otherwise won't be able to recognize the
@@ -222,4 +243,9 @@ bool BuildSimplifiedMNListDiff(CDeterministicMNManager& dmnman, const Chainstate
     mnListDiffRet.cbTxMerkleTree = CPartialMerkleTree(vHashes, vMatch);
 
     return true;
+}
+
+bool IsBlockDataUnavailableError(const std::string& error)
+{
+    return error.find("is not available (pruned or below an unvalidated snapshot base)") != std::string::npos;
 }

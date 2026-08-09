@@ -59,7 +59,7 @@ public:
     CTransactionBuilderOutput(CTransactionBuilderOutput&&) = delete;
     CTransactionBuilderOutput& operator=(CTransactionBuilderOutput&&) = delete;
     /// Get the scriptPubKey of this output
-    [[nodiscard]] CScript GetScript() const { return script; }
+    [[nodiscard]] const CScript& GetScript() const { return script; }
     /// Get the amount of this output
     [[nodiscard]] CAmount GetAmount() const { return nAmount; }
     /// Try update the amount of this output. Returns true if it was successful and false if not (e.g. insufficient amount left).

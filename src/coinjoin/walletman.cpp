@@ -321,7 +321,7 @@ MessageProcessingResult CJWalletManagerImpl::ProcessDSQueue(NodeId from, CConnma
                      dmn->proTxHash.ToString(), dsq.ToString());
 
             ForAnyCJClientMan(
-                [&dsq](CCoinJoinClientManager& clientman) { return clientman.MarkAlreadyJoinedQueueAsTried(dsq); });
+                [&dsq](const CCoinJoinClientManager& clientman) { return clientman.MarkAlreadyJoinedQueueAsTried(dsq); });
 
             m_queueman->AddQueue(dsq);
         }

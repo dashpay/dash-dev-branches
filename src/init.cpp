@@ -270,14 +270,14 @@ void Interrupt(NodeContext& node)
     if (g_txindex) {
         g_txindex->Interrupt();
     }
-    if (g_addressindex) {
-        g_addressindex->Interrupt();
+    if (node.address_index) {
+        node.address_index->Interrupt();
     }
-    if (g_timestampindex) {
-        g_timestampindex->Interrupt();
+    if (node.timestamp_index) {
+        node.timestamp_index->Interrupt();
     }
-    if (g_spentindex) {
-        g_spentindex->Interrupt();
+    if (node.spent_index) {
+        node.spent_index->Interrupt();
     }
     ForEachBlockFilterIndex([](BlockFilterIndex& index) { index.Interrupt(); });
     if (g_coin_stats_index) {
@@ -376,9 +376,9 @@ void PrepareShutdown(NodeContext& node)
         UnregisterValidationInterface(node.cj_walletman.get());
     }
 
-    if (g_ds_notification_interface) {
-        UnregisterValidationInterface(g_ds_notification_interface.get());
-        g_ds_notification_interface.reset();
+    if (node.ds_notification_interface) {
+        UnregisterValidationInterface(node.ds_notification_interface.get());
+        node.ds_notification_interface.reset();
     }
 
     // After all scheduled tasks have been flushed, destroy pointers
@@ -396,17 +396,17 @@ void PrepareShutdown(NodeContext& node)
         g_txindex->Stop();
         g_txindex.reset();
     }
-    if (g_addressindex) {
-        g_addressindex->Stop();
-        g_addressindex.reset();
+    if (node.address_index) {
+        node.address_index->Stop();
+        node.address_index.reset();
     }
-    if (g_timestampindex) {
-        g_timestampindex->Stop();
-        g_timestampindex.reset();
+    if (node.timestamp_index) {
+        node.timestamp_index->Stop();
+        node.timestamp_index.reset();
     }
-    if (g_spentindex) {
-        g_spentindex->Stop();
-        g_spentindex.reset();
+    if (node.spent_index) {
+        node.spent_index->Stop();
+        node.spent_index.reset();
     }
     if (g_coin_stats_index) {
         g_coin_stats_index->Stop();
@@ -2101,10 +2101,10 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
                                      node.dmnman, node.cj_walletman, node.llmq_ctx, ignores_incoming_txs);
     RegisterValidationInterface(node.peerman.get());
 
-    g_ds_notification_interface = std::make_unique<CDSNotificationInterface>(
-        *node.connman, *node.dstxman, *node.mn_sync, *node.govman, chainman, node.dmnman // todo: replace unique_ptr for dmnman to reference
+    node.ds_notification_interface = std::make_unique<CDSNotificationInterface>(
+        *node.connman, *node.dstxman, *node.mn_sync, *node.govman, chainman, *node.dmnman
     );
-    RegisterValidationInterface(g_ds_notification_interface.get());
+    RegisterValidationInterface(node.ds_notification_interface.get());
 
     // ********************************************************* Step 7d: Setup other Dash services
 
@@ -2199,22 +2199,22 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     }
 
     if (args.GetBoolArg("-addressindex", DEFAULT_ADDRESSINDEX)) {
-        g_addressindex = std::make_unique<AddressIndex>(interfaces::MakeChain(node), cache_sizes.address_index, false, fReindex);
-        if (!g_addressindex->Start()) {
+        node.address_index = std::make_unique<AddressIndex>(interfaces::MakeChain(node), cache_sizes.address_index, false, fReindex);
+        if (!node.address_index->Start()) {
             return false;
         }
     }
 
     if (args.GetBoolArg("-timestampindex", DEFAULT_TIMESTAMPINDEX)) {
-        g_timestampindex = std::make_unique<TimestampIndex>(interfaces::MakeChain(node), cache_sizes.timestamp_index, false, fReindex);
-        if (!g_timestampindex->Start()) {
+        node.timestamp_index = std::make_unique<TimestampIndex>(interfaces::MakeChain(node), cache_sizes.timestamp_index, false, fReindex);
+        if (!node.timestamp_index->Start()) {
             return false;
         }
     }
 
     if (args.GetBoolArg("-spentindex", DEFAULT_SPENTINDEX)) {
-        g_spentindex = std::make_unique<SpentIndex>(interfaces::MakeChain(node), cache_sizes.spent_index, false, fReindex);
-        if (!g_spentindex->Start()) {
+        node.spent_index = std::make_unique<SpentIndex>(interfaces::MakeChain(node), cache_sizes.spent_index, false, fReindex);
+        if (!node.spent_index->Start()) {
             return false;
         }
     }
@@ -2375,7 +2375,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
                 // for quorum connection setup and skShare derivation.
                 // Only kick CDSNotificationInterface here (cached block
                 // height for DS/MN payments/budgets).
-                g_ds_notification_interface->InitializeCurrentBlockTip(tip, ibd);
+                node.ds_notification_interface->InitializeCurrentBlockTip(tip, ibd);
             } else {
                 // Non-masternode nodes (including observer-only): broadcast
                 // to all subscribers now; no proTxHash dependency.
@@ -2427,7 +2427,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
                                                        CDeterministicMNList& mnListRet) -> bool {
                     return node.chain_helper->special_tx->RebuildListFromBlock(block, pindexPrev, prevList, view, debugLogs, state, mnListRet);
                 };
-                auto result = node.dmnman->RecalculateAndRepairDiffs(start_index, stop_index, chainman, build_list_func, true);
+                auto result = node.dmnman->RecalculateAndRepairDiffs(start_index, stop_index, build_list_func, true);
 
                 if (!result.verification_errors.empty()) {
                     LogPrintf("WARNING: Verification errors:\n%s\n", Join(result.verification_errors, "\n"));

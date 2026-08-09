@@ -19,12 +19,26 @@
 namespace {
 constexpr std::string_view DB_QUORUM_SNAPSHOT{"llmq_S"};
 
+bool CheckBlockDataAvailable(gsl::not_null<const CBlockIndex*> pindex, std::string& error)
+    EXCLUSIVE_LOCKS_REQUIRED(::cs_main)
+{
+    if (pindex->nStatus & BLOCK_HAVE_DATA) return true;
+    error = strprintf("block data for block %s is not available (pruned or below an unvalidated snapshot base)",
+                      pindex->GetBlockHash().ToString());
+    return false;
+}
+
 //! Constructs a llmq::CycleData and populate it with metadata
 std::optional<llmq::CycleData> ConstructCycle(llmq::CQuorumSnapshotManager& qsnapman,
-                                              const Consensus::LLMQType& llmq_type, bool skip_snap, int32_t height,
+                                              const Consensus::LLMQType& llmq_type, bool skip_snap,
+                                              bool need_block_data, int32_t height,
                                               gsl::not_null<const CBlockIndex*> index_tip, std::string& error)
+    EXCLUSIVE_LOCKS_REQUIRED(::cs_main)
 {
     llmq::CycleData ret;
+    // The cycle block itself only keys EvoDB-backed snapshot metadata, so it
+    // needs no block data. The work block becomes the target of an inner
+    // mnlistdiff (read from disk) only on the legacy construction path.
     ret.m_cycle_index = index_tip->GetAncestor(height);
     if (!ret.m_cycle_index) {
         error = "Cannot find block";
@@ -35,6 +49,7 @@ std::optional<llmq::CycleData> ConstructCycle(llmq::CQuorumSnapshotManager& qsna
         error = "Cannot find work block";
         return std::nullopt;
     }
+    if (need_block_data && !CheckBlockDataAvailable(ret.m_work_index, error)) return std::nullopt;
     if (!skip_snap) {
         if (auto opt_snap = qsnapman.GetSnapshotForBlock(llmq_type, ret.m_cycle_index); opt_snap.has_value()) {
             ret.m_snap = opt_snap.value();
@@ -74,6 +89,10 @@ bool BuildQuorumRotationInfo(CDeterministicMNManager& dmnman, CQuorumSnapshotMan
                 errorRet = strprintf("block %s is not in the active chain", blockHash.ToString());
                 return false;
             }
+            // No availability check: these are only diff bases, which need
+            // EvoDB-backed state rather than block data; the inner
+            // BuildSimplifiedMNListDiff calls surface the sentinel error if
+            // a snapshot node cannot construct a base list yet.
             baseBlockIndexes.push_back(blockIndex);
         }
         // Sort in all cases: the legacy path (served to peers < EFFICIENT_QRINFO_VERSION)
@@ -93,6 +112,7 @@ bool BuildQuorumRotationInfo(CDeterministicMNManager& dmnman, CQuorumSnapshotMan
         errorRet = strprintf("tip block not found");
         return false;
     }
+    if (!CheckBlockDataAvailable(tipBlockIndex, errorRet)) return false;
     if (use_legacy_construction) {
         // Build MN list Diff always with highest baseblock
         if (!BuildSimplifiedMNListDiff(dmnman, chainman, qblockman, qman, baseBlockIndexes.back()->GetBlockHash(),
@@ -106,6 +126,7 @@ bool BuildQuorumRotationInfo(CDeterministicMNManager& dmnman, CQuorumSnapshotMan
         errorRet = strprintf("block not found");
         return false;
     }
+    if (!CheckBlockDataAvailable(blockIndex, errorRet)) return false;
 
     // Quorum rotation is enabled only for InstantSend atm.
     Consensus::LLMQType llmqType = Params().GetConsensus().llmqTypeDIP0024InstantSend;
@@ -117,6 +138,7 @@ bool BuildQuorumRotationInfo(CDeterministicMNManager& dmnman, CQuorumSnapshotMan
     const int cycleLength = llmq_params_opt->dkgInterval;
 
     auto cycle_base_opt = ConstructCycle(qsnapman, llmqType, /*skip_snap=*/true,
+                                         /*need_block_data=*/use_legacy_construction,
                                          /*height=*/blockIndex->nHeight - (blockIndex->nHeight % cycleLength),
                                          blockIndex, errorRet);
     if (!cycle_base_opt.has_value()) {
@@ -137,6 +159,7 @@ bool BuildQuorumRotationInfo(CDeterministicMNManager& dmnman, CQuorumSnapshotMan
     auto target_cycles{response.GetCycles()};
     for (size_t idx{0}; idx < target_cycles.size(); idx++) {
         auto cycle_opt = ConstructCycle(qsnapman, llmqType, /*skip_snap=*/false,
+                                        /*need_block_data=*/use_legacy_construction,
                                         /*height=*/cycle_base_opt->m_cycle_index->nHeight - (cycleLength * (idx + 1)),
                                         tipBlockIndex, errorRet);
         if (!cycle_opt.has_value()) {
@@ -172,7 +195,9 @@ bool BuildQuorumRotationInfo(CDeterministicMNManager& dmnman, CQuorumSnapshotMan
     }
 
     for (const auto& h : snapshotHeightsNeeded) {
-        auto cycle_opt = ConstructCycle(qsnapman, llmqType, /*skip_snap=*/false, /*height=*/h, tipBlockIndex, errorRet);
+        auto cycle_opt = ConstructCycle(qsnapman, llmqType, /*skip_snap=*/false,
+                                        /*need_block_data=*/use_legacy_construction, /*height=*/h, tipBlockIndex,
+                                        errorRet);
         if (!cycle_opt.has_value()) {
             return false;
         }

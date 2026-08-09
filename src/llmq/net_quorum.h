@@ -95,8 +95,8 @@ private:
     bool ProcessContribQGETDATA(CDataStream& ssResponseData, const CQuorum& quorum,
                                 CQuorumDataRequest& request,
                                 gsl::not_null<const CBlockIndex*> block_index) const;
-    bool ProcessContribQDATA(CNode& pfrom, CDataStream& vRecv,
-                             CQuorum& quorum, CQuorumDataRequest& request);
+    bool ProcessContribQDATA(const CNode& pfrom, CDataStream& vRecv,
+                             CQuorum& quorum, const CQuorumDataRequest& request);
 
 private:
     CBLSWorker& m_bls_worker;

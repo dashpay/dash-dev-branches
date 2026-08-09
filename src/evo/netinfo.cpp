@@ -20,8 +20,6 @@ static std::once_flag g_main_params_flag;
 
 /** Maximum length of a label in a domain per RFC 1035 */
 static constexpr uint8_t DOMAIN_LABEL_MAX_LEN{63};
-/** Maximum possible length of a ASCII FQDN */
-static constexpr uint8_t DOMAIN_MAX_LEN{253};
 /** Minimum length of a FQDN */
 static constexpr uint8_t DOMAIN_MIN_LEN{3};
 
@@ -400,7 +398,7 @@ bool ExtNetInfo::IsAddrPortDuplicate(const NetInfoEntry& candidate) const
                        [&candidate](const auto& entry) { return candidate == entry; });
 }
 
-bool ExtNetInfo::HasAddrDuplicates(const NetInfoList& entries) const
+bool ExtNetInfo::HasAddrDuplicates(const NetInfoList& entries)
 {
     std::unordered_set<std::string> known{};
     for (const auto& entry : entries) {
@@ -412,7 +410,7 @@ bool ExtNetInfo::HasAddrDuplicates(const NetInfoList& entries) const
     return false;
 }
 
-bool ExtNetInfo::IsAddrDuplicate(const NetInfoEntry& candidate, const NetInfoList& entries) const
+bool ExtNetInfo::IsAddrDuplicate(const NetInfoEntry& candidate, const NetInfoList& entries)
 {
     const std::string& candidate_str{candidate.ToStringAddr()};
     return std::any_of(entries.begin(), entries.end(),

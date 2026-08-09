@@ -454,7 +454,7 @@ void NetSigning::ProcessPendingSigShares(
         }
 
         auto rec_sigs = m_shares_manager->ProcessPendingSigShares(v, quorums);
-        for (auto& rs : rec_sigs) {
+        for (const auto& rs : rec_sigs) {
             ProcessRecoveredSig(rs, true);
         }
     }

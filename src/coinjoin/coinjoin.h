@@ -429,7 +429,7 @@ class CDSTXManager
 public:
     CDSTXManager(const CDSTXManager&) = delete;
     CDSTXManager& operator=(const CDSTXManager&) = delete;
-    CDSTXManager(const chainlock::Chainlocks& chainlocks);
+    explicit CDSTXManager(const chainlock::Chainlocks& chainlocks);
     ~CDSTXManager();
 
     void AddDSTX(const CCoinJoinBroadcastTx& dstx) EXCLUSIVE_LOCKS_REQUIRED(!cs_mapdstx);

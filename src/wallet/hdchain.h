@@ -95,7 +95,7 @@ public:
     void SetCrypted(bool fCryptedIn);
     bool IsCrypted() const;
 
-    bool SetMnemonic(const SecureVector& vchMnemonic, const SecureVector& vchMnemonicPassphrase, bool fUpdateID);
+    bool SetMnemonic(const SecureVector& mnemonic, const SecureVector& mnemonic_passphrase, bool fUpdateID);
     bool SetMnemonic(const SecureString& ssMnemonic, const SecureString& ssMnemonicPassphrase, bool fUpdateID);
     bool GetMnemonic(SecureVector& vchMnemonicRet, SecureVector& vchMnemonicPassphraseRet) const;
     bool GetMnemonic(SecureString& ssMnemonicRet, SecureString& ssMnemonicPassphraseRet) const;

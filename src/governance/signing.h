@@ -16,7 +16,6 @@
 
 class CActiveMasternodeManager;
 class CBlockIndex;
-class CConnman;
 class CDeterministicMNManager;
 class CGovernanceManager;
 class ChainstateManager;
@@ -29,7 +28,6 @@ class SuperblockManager;
 class GovernanceSigner
 {
 private:
-    CConnman& m_connman;
     CDeterministicMNManager& m_dmnman;
     CGovernanceManager& m_govman;
     governance::SuperblockManager& m_superblocks;
@@ -44,7 +42,7 @@ public:
     GovernanceSigner() = delete;
     GovernanceSigner(const GovernanceSigner&) = delete;
     GovernanceSigner& operator=(const GovernanceSigner&) = delete;
-    explicit GovernanceSigner(CConnman& connman, CDeterministicMNManager& dmnman, CGovernanceManager& govman,
+    explicit GovernanceSigner(CDeterministicMNManager& dmnman, CGovernanceManager& govman,
                               governance::SuperblockManager& superblocks, const CActiveMasternodeManager& mn_activeman,
                               const ChainstateManager& chainman, const CMasternodeSync& mn_sync);
     ~GovernanceSigner();

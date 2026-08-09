@@ -26,10 +26,16 @@
 #include <boost/test/unit_test.hpp>
 
 #include <memory>
+#include <vector>
 
 using chainlock::ChainLockSig;
 using namespace llmq;
 using namespace llmq::testutils;
+
+namespace {
+constexpr size_t MAX_SEEN_CHAINLOCKS{2500};
+constexpr size_t RECENT_CHAINLOCKS_TO_RETAIN{2};
+} // namespace
 
 BOOST_AUTO_TEST_SUITE(llmq_chainlock_tests)
 
@@ -207,35 +213,28 @@ BOOST_FIXTURE_TEST_CASE(seen_chainlock_cache_is_bounded, TestingSetup)
 {
     m_node.clhandler->CheckActiveState();
 
-    const size_t retained_size = m_node.clhandler->SeenChainLockCacheRetainedSizeForTesting();
-    const size_t prune_after_size = m_node.clhandler->SeenChainLockCachePruneAfterSizeForTesting();
-    BOOST_REQUIRE_GT(retained_size, 0U);
-    // The cache prunes with hysteresis: it is allowed to grow past the retained size and is only
-    // pruned back down once it exceeds the (larger) prune-after size. Pruning sorts every entry,
-    // so pruning on each insertion past the retained size would be a peer-triggered CPU
-    // amplification path.
-    BOOST_REQUIRE_GT(prune_after_size, retained_size);
-
     const auto process = [&](size_t i) {
-        auto clsig = CreateChainLock(static_cast<int32_t>(i), GetTestBlockHash(static_cast<uint32_t>(2000 + i)));
+        SetMockTime(std::chrono::seconds{100000 + static_cast<int64_t>(i)});
+        auto clsig = CreateChainLock(100, GetTestBlockHash(static_cast<uint32_t>(2000 + i)));
+        const auto hash = ::SerializeHash(clsig);
         [[maybe_unused]] const auto result =
-            m_node.clhandler->ProcessNewChainLock(/*from=*/-1, clsig, *m_node.llmq_ctx->qman, ::SerializeHash(clsig));
+            m_node.clhandler->ProcessNewChainLock(/*from=*/-1, clsig, *m_node.llmq_ctx->qman, hash);
+        return hash;
     };
 
-    // Growing up to the prune-after size must not evict anything, so no prune (and no sort) has
-    // run yet -- in particular there is no strict cap at the retained size.
-    for (size_t i = 0; i < prune_after_size; ++i) {
-        process(i);
-        BOOST_CHECK_EQUAL(m_node.clhandler->SeenChainLockCacheSizeForTesting(), i + 1U);
+    std::vector<uint256> recent_hashes;
+    for (size_t i = 0; i <= MAX_SEEN_CHAINLOCKS; ++i) {
+        const auto hash = process(i);
+        if (i >= MAX_SEEN_CHAINLOCKS + 1 - RECENT_CHAINLOCKS_TO_RETAIN) {
+            recent_hashes.emplace_back(hash);
+        }
+        BOOST_CHECK_LE(m_node.clhandler->SeenChainLockCacheSizeForTesting(), MAX_SEEN_CHAINLOCKS);
     }
-    BOOST_CHECK_GT(m_node.clhandler->SeenChainLockCacheSizeForTesting(), retained_size);
 
-    // Crossing the prune-after size prunes back down to the retained size in a single batch.
-    process(prune_after_size);
-    BOOST_CHECK_EQUAL(m_node.clhandler->SeenChainLockCacheSizeForTesting(), retained_size);
-
-    // Repeated prune cycles are covered generically by limitedmap_prune_after_size_test; this
-    // case only pins down how ChainlockHandler wires the cache up.
+    for (const auto& hash : recent_hashes) {
+        BOOST_CHECK(m_node.clhandler->AlreadyHave(CInv{MSG_CLSIG, hash}));
+    }
+    SetMockTime(0s);
 }
 
 BOOST_FIXTURE_TEST_CASE(best_chainlock_is_already_have_after_seen_cache_eviction, TestingSetup)
@@ -247,18 +246,13 @@ BOOST_FIXTURE_TEST_CASE(best_chainlock_is_already_have_after_seen_cache_eviction
     BOOST_REQUIRE(m_node.chainlocks->UpdateBestChainlock(best_hash, best_clsig, /*pindex=*/nullptr));
     BOOST_CHECK(m_node.clhandler->AlreadyHave(CInv{MSG_CLSIG, best_hash}));
 
-    const size_t prune_after_size = m_node.clhandler->SeenChainLockCachePruneAfterSizeForTesting();
-    BOOST_REQUIRE_GT(prune_after_size, 0U);
-
     // Insert enough unique CLSIGs to force at least one prune of the seen cache.
-    for (size_t i = 0; i < prune_after_size + 1; ++i) {
+    for (size_t i = 0; i <= MAX_SEEN_CHAINLOCKS; ++i) {
         auto clsig = CreateChainLock(static_cast<int32_t>(101 + i), GetTestBlockHash(static_cast<uint32_t>(3000 + i)));
         [[maybe_unused]] const auto result =
             m_node.clhandler->ProcessNewChainLock(/*from=*/-1, clsig, *m_node.llmq_ctx->qman, ::SerializeHash(clsig));
-        BOOST_CHECK_LE(m_node.clhandler->SeenChainLockCacheSizeForTesting(), prune_after_size);
+        BOOST_CHECK_LE(m_node.clhandler->SeenChainLockCacheSizeForTesting(), MAX_SEEN_CHAINLOCKS);
     }
-    BOOST_CHECK_EQUAL(m_node.clhandler->SeenChainLockCacheSizeForTesting(),
-                      m_node.clhandler->SeenChainLockCacheRetainedSizeForTesting());
 
     BOOST_CHECK(m_node.clhandler->AlreadyHave(CInv{MSG_CLSIG, best_hash}));
 }

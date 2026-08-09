@@ -38,6 +38,11 @@ deadlock:src/qt/test/*
 deadlock:libdb
 race:libzmq
 
+# Data race in mimalloc metadata allocator during concurrent BLS worker thread execution
+# https://github.com/dashpay/dash/issues/7558
+race:_mi_meta_zalloc
+race:_mi_heap_init
+
 # Race in headers only Boost Test
 race:std::__1::ios_base::flags
 

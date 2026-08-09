@@ -99,41 +99,41 @@ BOOST_AUTO_TEST_CASE(limitedmap_test)
     BOOST_CHECK(map.empty());
 }
 
-// A map constructed with a prune-after size larger than its retained size must not prune on
-// every insertion past the retained size. Instead it is allowed to grow up to the prune-after
-// size and is then pruned back down to the retained size in a single batch. This amortises the
+// A map constructed with a max size larger than its cutoff size must not prune on
+// every insertion past the cutoff size. Instead it is allowed to grow up to the max
+// size and is then pruned back down to the cutoff size in a single batch. This amortises the
 // cost of prune() -- which partitions every element -- over many insertions.
-BOOST_AUTO_TEST_CASE(limitedmap_prune_after_size_test)
+BOOST_AUTO_TEST_CASE(limitedmap_max_size_test)
 {
-    constexpr int RETAINED_SIZE{10};
-    constexpr int PRUNE_AFTER_SIZE{2 * RETAINED_SIZE};
+    constexpr int CUTOFF_SIZE{10};
+    constexpr int MAX_SIZE{2 * CUTOFF_SIZE};
 
-    unordered_limitedmap<int, int> map(RETAINED_SIZE, PRUNE_AFTER_SIZE);
+    unordered_limitedmap<int, int> map(CUTOFF_SIZE, MAX_SIZE);
 
-    // max_size() reports the retained size, not the temporary prune threshold
-    BOOST_CHECK_EQUAL(map.max_size(), static_cast<size_t>(RETAINED_SIZE));
+    BOOST_CHECK_EQUAL(map.cutoff_size(), static_cast<size_t>(CUTOFF_SIZE));
+    BOOST_CHECK_EQUAL(map.max_size(), static_cast<size_t>(MAX_SIZE));
 
-    // fill the map up to (and including) the prune-after size. No prune may happen along the
-    // way, so every insertion is retained -- in particular size() exceeds the retained size
+    // fill the map up to (and including) the max size. No prune may happen along the
+    // way, so every insertion is retained -- in particular size() exceeds the cutoff size
     // without anything being evicted.
-    for (int i = 0; i < PRUNE_AFTER_SIZE; i++) {
+    for (int i = 0; i < MAX_SIZE; i++) {
         map.insert(std::pair<int, int>(i, i));
         BOOST_CHECK_EQUAL(map.size(), static_cast<size_t>(i) + 1U);
     }
 
-    // nothing has been evicted yet, even though we are well past the retained size
-    BOOST_CHECK_EQUAL(map.size(), static_cast<size_t>(PRUNE_AFTER_SIZE));
-    for (int i = 0; i < PRUNE_AFTER_SIZE; i++) {
+    // nothing has been evicted yet, even though we are well past the cutoff size
+    BOOST_CHECK_EQUAL(map.size(), static_cast<size_t>(MAX_SIZE));
+    for (int i = 0; i < MAX_SIZE; i++) {
         BOOST_CHECK(map.count(i) == 1);
     }
 
-    // crossing the prune-after size prunes back down to the retained size in one batch
-    map.insert(std::pair<int, int>(PRUNE_AFTER_SIZE, PRUNE_AFTER_SIZE));
-    BOOST_CHECK_EQUAL(map.size(), static_cast<size_t>(RETAINED_SIZE));
+    // crossing the max size prunes back down to the cutoff size in one batch
+    map.insert(std::pair<int, int>(MAX_SIZE, MAX_SIZE));
+    BOOST_CHECK_EQUAL(map.size(), static_cast<size_t>(CUTOFF_SIZE));
 
-    // the retained entries are the ones with the highest values
-    for (int i = 0; i <= PRUNE_AFTER_SIZE; i++) {
-        if (i <= PRUNE_AFTER_SIZE - RETAINED_SIZE) {
+    // the entries retained after pruning are the ones with the highest values
+    for (int i = 0; i <= MAX_SIZE; i++) {
+        if (i <= MAX_SIZE - CUTOFF_SIZE) {
             BOOST_CHECK(map.count(i) == 0);
         } else {
             BOOST_CHECK(map.count(i) == 1);
@@ -141,32 +141,33 @@ BOOST_AUTO_TEST_CASE(limitedmap_prune_after_size_test)
     }
 
     // the cycle repeats: after a prune the map grows again without evicting anything until it
-    // once more exceeds the prune-after size, at which point it drops back to the retained size
-    int next_key{PRUNE_AFTER_SIZE + 1};
-    for (int i = 0; i < PRUNE_AFTER_SIZE - RETAINED_SIZE; i++, next_key++) {
+    // once more exceeds the max size, at which point it drops back to the cutoff size
+    int next_key{MAX_SIZE + 1};
+    for (int i = 0; i < MAX_SIZE - CUTOFF_SIZE; i++, next_key++) {
         map.insert(std::pair<int, int>(next_key, next_key));
-        BOOST_CHECK_EQUAL(map.size(), static_cast<size_t>(RETAINED_SIZE + i) + 1U);
+        BOOST_CHECK_EQUAL(map.size(), static_cast<size_t>(CUTOFF_SIZE + i) + 1U);
     }
-    BOOST_CHECK_EQUAL(map.size(), static_cast<size_t>(PRUNE_AFTER_SIZE));
+    BOOST_CHECK_EQUAL(map.size(), static_cast<size_t>(MAX_SIZE));
 
     map.insert(std::pair<int, int>(next_key, next_key));
-    BOOST_CHECK_EQUAL(map.size(), static_cast<size_t>(RETAINED_SIZE));
+    BOOST_CHECK_EQUAL(map.size(), static_cast<size_t>(CUTOFF_SIZE));
 }
 
-// Without an explicit prune-after size the map prunes as soon as it exceeds the retained size,
+// Without an explicit max size the map prunes as soon as it exceeds the cutoff size,
 // so it never holds more than that many elements.
-BOOST_AUTO_TEST_CASE(limitedmap_default_prune_after_size_test)
+BOOST_AUTO_TEST_CASE(limitedmap_default_max_size_test)
 {
-    constexpr int RETAINED_SIZE{10};
+    constexpr int CUTOFF_SIZE{10};
 
-    unordered_limitedmap<int, int> map(RETAINED_SIZE);
-    BOOST_CHECK_EQUAL(map.max_size(), static_cast<size_t>(RETAINED_SIZE));
+    unordered_limitedmap<int, int> map(CUTOFF_SIZE);
+    BOOST_CHECK_EQUAL(map.cutoff_size(), static_cast<size_t>(CUTOFF_SIZE));
+    BOOST_CHECK_EQUAL(map.max_size(), static_cast<size_t>(CUTOFF_SIZE));
 
-    for (int i = 0; i < 4 * RETAINED_SIZE; i++) {
+    for (int i = 0; i < 4 * CUTOFF_SIZE; i++) {
         map.insert(std::pair<int, int>(i, i));
-        BOOST_CHECK_LE(map.size(), static_cast<size_t>(RETAINED_SIZE));
+        BOOST_CHECK_LE(map.size(), static_cast<size_t>(CUTOFF_SIZE));
     }
-    BOOST_CHECK_EQUAL(map.size(), static_cast<size_t>(RETAINED_SIZE));
+    BOOST_CHECK_EQUAL(map.size(), static_cast<size_t>(CUTOFF_SIZE));
 }
 
 BOOST_AUTO_TEST_SUITE_END()

@@ -70,7 +70,7 @@ using node::GetTransaction;
 using node::NodeContext;
 using node::PSBTAnalysis;
 
-void TxToJSON(const CTransaction& tx, const uint256 hashBlock, const  CTxMemPool& mempool, const Chainstate& active_chainstate, const chainlock::Chainlocks& chainlocks, const llmq::CInstantSendManager& isman, UniValue& entry, TxVerbosity verbosity = TxVerbosity::SHOW_DETAILS)
+void TxToJSON(const CTransaction& tx, const uint256 hashBlock, const  CTxMemPool& mempool, const Chainstate& active_chainstate, const chainlock::Chainlocks& chainlocks, const llmq::CInstantSendManager& isman, const SpentIndex* spent_index, UniValue& entry, TxVerbosity verbosity = TxVerbosity::SHOW_DETAILS)
 {
     CHECK_NONFATAL(verbosity >= TxVerbosity::SHOW_DETAILS);
 
@@ -79,9 +79,9 @@ void TxToJSON(const CTransaction& tx, const uint256 hashBlock, const  CTxMemPool
 
     // Add spent information if spentindex is enabled
     CSpentIndexTxInfo txSpentInfo;
-    if (g_spentindex) {
+    if (spent_index) {
         // Sync once before all queries to ensure consistent snapshot
-        g_spentindex->BlockUntilSyncedToCurrentChain();
+        spent_index->BlockUntilSyncedToCurrentChain();
 
         txSpentInfo = CSpentIndexTxInfo{};
         // Collect spent info for inputs
@@ -89,7 +89,7 @@ void TxToJSON(const CTransaction& tx, const uint256 hashBlock, const  CTxMemPool
             if (!tx.IsCoinBase()) {
                 CSpentIndexValue spentInfo;
                 CSpentIndexKey spentKey(txin.prevout.hash, txin.prevout.n);
-                if (g_spentindex->GetSpentInfo(spentKey, spentInfo)) {
+                if (spent_index->GetSpentInfo(spentKey, spentInfo)) {
                     txSpentInfo.mSpentInfo.emplace(spentKey, spentInfo);
                 }
             }
@@ -98,7 +98,7 @@ void TxToJSON(const CTransaction& tx, const uint256 hashBlock, const  CTxMemPool
         for (unsigned int i = 0; i < tx.vout.size(); i++) {
             CSpentIndexValue spentInfo;
             CSpentIndexKey spentKey(txid, i);
-            if (g_spentindex->GetSpentInfo(spentKey, spentInfo)) {
+            if (spent_index->GetSpentInfo(spentKey, spentInfo)) {
                 txSpentInfo.mSpentInfo.emplace(spentKey, spentInfo);
             }
         }
@@ -433,7 +433,7 @@ static RPCHelpMan getrawtransaction()
 
     UniValue result(UniValue::VOBJ);
     if (blockindex) result.pushKV("in_active_chain", in_active_chain);
-    TxToJSON(*tx, hash_block, mempool, chainman.ActiveChainstate(), *node.chainlocks, *llmq_ctx.isman, result);
+    TxToJSON(*tx, hash_block, mempool, chainman.ActiveChainstate(), *node.chainlocks, *llmq_ctx.isman, node.spent_index.get(), result);
     return result;
 },
     };
@@ -526,7 +526,7 @@ static RPCHelpMan getrawtransactionmulti() {
                 result.pushKV(txid_str, "None");
             } else if (fVerbose) {
                 UniValue tx_data{UniValue::VOBJ};
-                TxToJSON(*tx, hash_block, mempool, chainman.ActiveChainstate(), *node.chainlocks, *llmq_ctx.isman, tx_data);
+                TxToJSON(*tx, hash_block, mempool, chainman.ActiveChainstate(), *node.chainlocks, *llmq_ctx.isman, node.spent_index.get(), tx_data);
                 result.pushKV(txid_str, tx_data);
             } else {
                 result.pushKV(txid_str, EncodeHexTx(*tx));

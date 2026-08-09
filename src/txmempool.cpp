@@ -33,12 +33,6 @@
 #include <optional>
 #include <ranges>
 
-// Forward declarations for index globals and utilities
-class AddressIndex;
-class SpentIndex;
-extern std::unique_ptr<AddressIndex> g_addressindex;
-extern std::unique_ptr<SpentIndex> g_spentindex;
-
 bool TestLockPointValidity(CChain& active_chain, const LockPoints& lp)
 {
     AssertLockHeld(cs_main);
@@ -437,6 +431,8 @@ CTxMemPool::CTxMemPool(const Options& opts)
       m_permit_bare_multisig{opts.permit_bare_multisig},
       m_max_datacarrier_bytes{opts.max_datacarrier_bytes},
       m_require_standard{opts.require_standard},
+      m_address_index_enabled{opts.address_index_enabled},
+      m_spent_index_enabled{opts.spent_index_enabled},
       m_limits{opts.limits}
 {
     _clear(); //lock free clear
@@ -534,7 +530,7 @@ void CTxMemPool::addUnchecked(const CTxMemPoolEntry &entry, setEntries &setAnces
 
 void CTxMemPool::addAddressIndex(const CTxMemPoolEntry& entry, const CCoinsViewCache& view)
 {
-    if (!g_addressindex) return;
+    if (!m_address_index_enabled) return;
 
     LOCK(cs);
     const CTransaction& tx = entry.GetTx();
@@ -604,7 +600,7 @@ void CTxMemPool::removeAddressIndex(const uint256 txhash)
 
 void CTxMemPool::addSpentIndex(const CTxMemPoolEntry& entry, const CCoinsViewCache& view)
 {
-    if (!g_spentindex) return;
+    if (!m_spent_index_enabled) return;
 
     LOCK(cs);
 
@@ -1375,6 +1371,63 @@ TxMempoolInfo CTxMemPool::info(const uint256& hash) const
     return GetInfo(i);
 }
 
+bool CTxMemPool::existsProviderTxCrossSchemeConflict(const CTransaction& tx) const
+{
+    LOCK(cs);
+
+    // Probe both encodings of `pubkey` and report a conflict if any in-flight transaction other than
+    // `self_protx`'s own already claims it. mapProTxBlsPubKeyHashes maps the scheme-sensitive key
+    // hash to a transaction hash, not to a masternode, so resolving ownership means decoding the
+    // conflicting transaction's payload.
+    auto probe = [&](const CBLSLazyPublicKey& key, const uint256& self_protx) EXCLUSIVE_LOCKS_REQUIRED(cs) {
+        AssertLockHeld(cs);
+        const CBLSPublicKey& pubkey{key.Get()};
+        if (!pubkey.IsValid()) return false;
+        for (const bool legacy_scheme : {true, false}) {
+            CBLSLazyPublicKey wrapped;
+            wrapped.Set(pubkey, legacy_scheme);
+            auto it = mapProTxBlsPubKeyHashes.find(wrapped.GetHash());
+            if (it == mapProTxBlsPubKeyHashes.end()) continue;
+            auto txit = mapTx.find(it->second);
+            if (txit == mapTx.end()) continue;
+            if (txit->GetTx().GetHash() == tx.GetHash()) continue; // ourselves
+            if (!self_protx.IsNull() && txit->GetTx().nType == TRANSACTION_PROVIDER_UPDATE_REGISTRAR) {
+                // The same masternode's own in-flight registrar update is not a conflict.
+                if (const auto other = GetTxPayload<CProUpRegTx>(txit->GetTx());
+                    other && other->proTxHash == self_protx) {
+                    continue;
+                }
+            }
+            return true;
+        }
+        return false;
+    };
+
+    if (tx.nType == TRANSACTION_PROVIDER_REGISTER) {
+        const auto opt_proTx = GetTxPayload<CProRegTx>(tx);
+        if (!opt_proTx) return true; // can't decode payload == conflict, as elsewhere here
+        return probe(opt_proTx->pubKeyOperator, uint256());
+    }
+    if (tx.nType == TRANSACTION_PROVIDER_UPDATE_REGISTRAR) {
+        const auto opt_proTx = GetTxPayload<CProUpRegTx>(tx);
+        if (!opt_proTx) return true;
+        // Skipping same-key migrations here (unlike the consensus checks, which
+        // probe them) is safe: a migration payload is basic-encoded, so any
+        // in-flight claim of the same key under the SAME encoding is caught by
+        // existsProviderTxConflict's map lookup, and an in-flight claim under the
+        // encoding the masternode already holds in the list fails CheckSpecialTx
+        // before reaching the mempool. Probing here would wrongly block updates
+        // for one member of a pre-activation cross-scheme pair.
+        auto dmnman = Assert(m_dmnman.load(std::memory_order_acquire));
+        if (auto dmn = dmnman->GetListAtChainTip().GetMN(opt_proTx->proTxHash);
+            dmn && opt_proTx->pubKeyOperator == dmn->pdmnState->pubKeyOperator) {
+            return false;
+        }
+        return probe(opt_proTx->pubKeyOperator, opt_proTx->proTxHash);
+    }
+    return false;
+}
+
 bool CTxMemPool::existsProviderTxConflict(const CTransaction &tx) const {
     auto dmnman = Assert(m_dmnman.load(std::memory_order_acquire));
 
@@ -1792,7 +1845,6 @@ void CTxMemPool::SetLoadTried(bool load_tried)
     LOCK(cs);
     m_load_tried = load_tried;
 }
-
 
 std::string RemovalReasonToString(const MemPoolRemovalReason& r) noexcept
 {

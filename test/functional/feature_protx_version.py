@@ -54,6 +54,8 @@ class ProTxVersionTest(DashTestFramework):
         self.extra_args = [[
             '-deprecatedrpc=legacy_mn',
             '-testactivationheight=v19@200',
+            # Wide enough a window that v24 does not activate on its own during the body of this
+            # test; it is activated explicitly at the end.
             f'-vbparams=v24:{self.mocktime}:999999999999:450:10:8:6:5:0',
         ]] * 6
         self.set_dash_test_params(6, 5, evo_count=2, extra_args=self.extra_args)
@@ -90,9 +92,15 @@ class ProTxVersionTest(DashTestFramework):
         assert extra_legacy_mn is not None
 
         # A second legacy-scheme masternode kept alive (never revoked) until v24 activates, so that
-        # the update_registrar migration path (legacy state -> basic scheme) can be exercised below.
+        # the update_registrar migration path with a rotated key (legacy state -> basic scheme) can
+        # be exercised below.
         migrate_legacy_mn: MasternodeInfo = self.dynamically_add_masternode()
         assert migrate_legacy_mn is not None
+
+        # A third legacy-scheme masternode, also never revoked, used to exercise the in-place
+        # same-key migration path (update_service, no key rotation) once v24 activates.
+        surviving_legacy_mn: MasternodeInfo = self.dynamically_add_masternode()
+        assert surviving_legacy_mn is not None
 
         mn_list_before = self.nodes[0].masternodelist()
         pubkeyoperator_list_before = set([mn_list_before[e]["pubkeyoperator"] for e in mn_list_before])
@@ -156,9 +164,11 @@ class ProTxVersionTest(DashTestFramework):
 
         self.wait_for_chainlocked_block_all_nodes(self.nodes[0].getbestblockhash())
 
-        self.test_protx_v24_versioning(new_mn, migrate_legacy_mn, basic_mn, payout_mn)
+        self.test_protx_v24_versioning(new_mn, migrate_legacy_mn, surviving_legacy_mn, basic_mn, payout_mn)
 
-    def test_protx_v24_versioning(self, mn: MasternodeInfo, legacy_mn: MasternodeInfo, basic_mn: MasternodeInfo, payout_mn: MasternodeInfo):
+    def test_protx_v24_versioning(self, mn: MasternodeInfo, legacy_mn: MasternodeInfo,
+                                  surviving_legacy_mn: MasternodeInfo, basic_mn: MasternodeInfo,
+                                  payout_mn: MasternodeInfo):
         assert not softfork_active(self.nodes[0], 'v24')
         self.activate_by_name('v24', slow_mode=False)
         self.log.info("Activated v24 at height:" + str(self.nodes[0].getblockcount()))
@@ -193,7 +203,7 @@ class ProTxVersionTest(DashTestFramework):
         assert_equal(node.getrawtransaction(protx_result, 1, tip)['proUpRegTx']['version'], 3)
         assert_equal(node.protx('info', mn.proTxHash)['state']['version'], 3)
 
-        self.log.info("Migration v1 [legacy] protx masternode to v3 by update-registar")
+        self.log.info("Migration v1 [legacy] protx masternode to v3 by update-registar with a rotated key")
         assert_equal(node.protx('info', legacy_mn.proTxHash)['state']['version'], 1)
         node.sendtoaddress(legacy_mn.fundsAddr, 1)
         self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
@@ -233,6 +243,35 @@ class ProTxVersionTest(DashTestFramework):
         # The v3 ProUpRevTx is applied against a v2 state, so max(old, tx) keeps the version at 3, not 1
         assert_equal(node.protx('info', basic_mn.proTxHash)['state']['version'], 3)
 
+        # A legacy masternode can instead migrate to the basic scheme in place, keeping the same
+        # operator key: a v3 service update re-encodes the stored key (SetStateVersion) and re-keys
+        # the unique-property map. No key rotation is forced, so the masternode is not PoSe-banned.
+        # Run last: the key re-encoding is a key change for masternode authentication (CMNAuth) and
+        # briefly churns the migrated node's masternode connections, so keep it after the checks above
+        # to avoid destabilising them.
+        self.log.info("post-v24: update_service migrates a legacy masternode to the basic scheme in place")
+        assert_equal(node.protx('info', surviving_legacy_mn.proTxHash)['state']['version'], 1)
+        key_before = node.protx('info', surviving_legacy_mn.proTxHash)['state']['pubKeyOperator']
+        node.sendtoaddress(surviving_legacy_mn.fundsAddr, 1)
+        self.bump_mocktime(10 * 60 + 1)  # make the funding tx safe to include in a block
+        self.generate(node, 1)
+        upserv_hash = surviving_legacy_mn.update_service(node, submit=True,
+                                                         addrs_core_p2p=[f'127.0.0.1:{surviving_legacy_mn.nodePort}'])
+        self.bump_mocktime(10 * 60 + 1)
+        tip = self.generate(node, 1)[0]
+        assert_equal(node.getrawtransaction(upserv_hash, 1, tip)['proUpServTx']['version'], 3)
+        state = node.protx('info', surviving_legacy_mn.proTxHash)['state']
+        assert_equal(state['version'], 3)  # migrated in place
+        # Same operator key, re-encoded to the basic scheme (different hex, but not a rotation: the
+        # masternode is not PoSe-banned).
+        assert state['pubKeyOperator'] != key_before
+        assert_equal(state['PoSeBanHeight'], -1)
+        # The key re-encoding churns the migrated node's masternode connections, so reconnect it (as
+        # the rotation path does) before syncing, then confirm the list still reloads from disk
+        # identically after the in-place migration.
+        assert surviving_legacy_mn.nodeIdx is not None
+        self.connect_nodes(surviving_legacy_mn.nodeIdx, 0)
+        self.sync_all()
         list_before = self.nodes[1].masternodelist()
         self.restart_node(1, extra_args=self.extra_args[1])
         self.connect_nodes(0, 1)

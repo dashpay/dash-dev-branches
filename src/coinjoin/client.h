@@ -52,7 +52,7 @@ public:
     }
 
     [[nodiscard]] uint256 GetProTxHash() const { return proTxHash; }
-    [[nodiscard]] CCoinJoinAccept GetDSA() const { return dsa; }
+    [[nodiscard]] const CCoinJoinAccept& GetDSA() const { return dsa; }
     [[nodiscard]] bool IsExpired() const { return GetTime() - nTimeCreated > TIMEOUT; }
 
     friend bool operator==(const CPendingDsaRequest& a, const CPendingDsaRequest& b)
@@ -214,7 +214,7 @@ public:
     explicit CCoinJoinClientManager(const std::shared_ptr<wallet::CWallet>& wallet, CDeterministicMNManager& dmnman,
                                     CMasternodeMetaMan& mn_metaman, const CMasternodeSync& mn_sync,
                                     const llmq::CInstantSendManager& isman, CoinJoinQueueManager* queueman);
-    ~CCoinJoinClientManager();
+    ~CCoinJoinClientManager() override;
 
     void ProcessMessage(CNode& peer, Chainstate& active_chainstate, CConnman& connman, const CTxMemPool& mempool, std::string_view msg_type, CDataStream& vRecv) EXCLUSIVE_LOCKS_REQUIRED(!cs_deqsessions);
 

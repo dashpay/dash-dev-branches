@@ -14,6 +14,7 @@
 #include <memory>
 #include <vector>
 
+class AddressIndex;
 class ArgsManager;
 class BanMan;
 class CActiveMasternodeManager;
@@ -21,6 +22,7 @@ class AddrMan;
 class CBlockPolicyEstimator;
 class CConnman;
 class CDeterministicMNManager;
+class CDSNotificationInterface;
 class CDSTXManager;
 class CChainstateHelper;
 class ChainstateManager;
@@ -35,6 +37,8 @@ class CSporkManager;
 class CTxMemPool;
 class NetGroupManager;
 class PeerManager;
+class SpentIndex;
+class TimestampIndex;
 struct ActiveContext;
 struct LLMQContext;
 
@@ -106,9 +110,14 @@ struct NodeContext {
     std::unique_ptr<chainlock::Chainlocks> chainlocks;
     std::unique_ptr<chainlock::ChainlockHandler> clhandler;
     //! Dash contexts
+    std::unique_ptr<CDSNotificationInterface> ds_notification_interface;
     std::unique_ptr<ActiveContext> active_ctx;
     std::unique_ptr<LLMQContext> llmq_ctx;
     std::unique_ptr<llmq::ObserverContext> observer_ctx;
+    //! Dash indexes
+    std::unique_ptr<AddressIndex> address_index;
+    std::unique_ptr<SpentIndex> spent_index;
+    std::unique_ptr<TimestampIndex> timestamp_index;
 
     //! Declare default constructor and destructor that are not inline, so code
     //! instantiating the NodeContext struct doesn't need to #include class

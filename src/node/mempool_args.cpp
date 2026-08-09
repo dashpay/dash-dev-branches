@@ -4,6 +4,9 @@
 
 #include <node/mempool_args.h>
 
+#include <index/addressindex.h>
+#include <index/spentindex.h>
+
 #include <kernel/mempool_limits.h>
 #include <kernel/mempool_options.h>
 
@@ -91,6 +94,9 @@ std::optional<bilingual_str> ApplyArgsManOptions(const ArgsManager& argsman, con
     }
 
     ApplyArgsManOptions(argsman, mempool_opts.limits);
+
+    mempool_opts.address_index_enabled = argsman.GetBoolArg("-addressindex", DEFAULT_ADDRESSINDEX);
+    mempool_opts.spent_index_enabled = argsman.GetBoolArg("-spentindex", DEFAULT_SPENTINDEX);
 
     return std::nullopt;
 }

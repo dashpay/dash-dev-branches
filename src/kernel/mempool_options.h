@@ -50,6 +50,8 @@ struct MemPoolOptions {
     std::optional<unsigned> max_datacarrier_bytes{DEFAULT_ACCEPT_DATACARRIER ? std::optional{MAX_OP_RETURN_RELAY} : std::nullopt};
     bool permit_bare_multisig{DEFAULT_PERMIT_BAREMULTISIG};
     bool require_standard{true};
+    bool address_index_enabled{false};
+    bool spent_index_enabled{false};
     MemPoolLimits limits{};
 };
 } // namespace kernel

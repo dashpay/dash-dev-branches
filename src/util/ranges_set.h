@@ -30,7 +30,7 @@ class CRangesSet
         uint64_t begin;
         uint64_t end;
         Range();
-        Range(uint64_t begin, uint64_t end);
+        Range(uint64_t begin_in, uint64_t end_in);
         bool operator<(const Range& other) const
         {
             if (begin != other.begin) return begin < other.begin;

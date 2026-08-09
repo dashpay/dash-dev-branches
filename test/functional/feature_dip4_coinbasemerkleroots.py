@@ -115,11 +115,15 @@ class LLMQCoinbaseCommitmentsTest(DashTestFramework):
         oldhash = self.nodes[0].getbestblockhash()
 
         # Test DIP8 activation once with a pre-existing quorum and once without (we don't know in which order it will activate on mainnet)
-        self.test_dip8_quorum_merkle_root_activation(True)
+        self.test_dip8_quorum_merkle_root_activation(True, slow_mode=False)
         for n in self.nodes:
             n.invalidateblock(oldhash)
         self.sync_all()
-        first_quorum = self.test_dip8_quorum_merkle_root_activation(False, True)
+        # The other nodes still record the invalidated (higher work) tip as node0's best known
+        # block, which leaves headers direct fetch as the only way to reach them. That gives up on
+        # forks deeper than MAX_BLOCKS_IN_TRANSIT_PER_PEER (16), so slow_mode's batch of 10 is
+        # what keeps the replacement chain reachable here.
+        first_quorum = self.test_dip8_quorum_merkle_root_activation(False, slow_mode=True)
 
         # Verify that the first quorum appears in MNLISTDIFF
         expectedDeleted = []
@@ -276,7 +280,7 @@ class LLMQCoinbaseCommitmentsTest(DashTestFramework):
         cbtx = self.nodes[0].getblock(self.nodes[0].getbestblockhash(), 2)["tx"][0]
         assert cbtx["cbTx"]["version"] == 1
 
-        self.activate_by_name('dip0008', expected_activation_height=DIP0008_HEIGHT)
+        self.activate_by_name('dip0008', expected_activation_height=DIP0008_HEIGHT, slow_mode=slow_mode)
         self.log.info("Mine one more block with new rules of dip0008")
         self.generate(self.nodes[0], 1)
 

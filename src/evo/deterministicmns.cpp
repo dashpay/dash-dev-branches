@@ -17,6 +17,7 @@
 #include <masternode/meta.h>
 #include <node/blockstorage.h>
 #include <script/standard.h>
+#include <shutdown.h>
 #include <stats/client.h>
 #include <uint256.h>
 #include <util/helpers.h>
@@ -645,7 +646,29 @@ bool CDeterministicMNManager::ProcessBlock(const CBlock& block, gsl::not_null<co
         oldList = GetListForBlockInternal(pindex->pprev);
         diff = oldList.BuildDiff(newList);
 
-        // apply platform unban for platform revive too
+        // A WriteDerived mismatch is local EvoDB corruption, not a statement
+        // about the block: abort the node with M_ERROR instead of marking the
+        // block consensus-invalid and punishing the peer that relayed it.
+        if (!m_evoDb.WriteDerived(std::make_pair(DB_LIST_DIFF, newList.GetBlockHash()), diff)) {
+            const std::string msg = strprintf("CDeterministicMNManager::%s -- EvoDB list diff mismatch for block %s",
+                                              __func__, newList.GetBlockHash().ToString());
+            AbortNode(msg);
+            return state.Error(msg);
+        }
+        if ((nHeight % DISK_SNAPSHOT_PERIOD) == 0 || pindex->pprev == m_initial_snapshot_index) {
+            if (!m_evoDb.WriteDerived(std::make_pair(DB_LIST_SNAPSHOT, newList.GetBlockHash()), newList)) {
+                const std::string msg = strprintf("CDeterministicMNManager::%s -- EvoDB list snapshot mismatch for block %s",
+                                                  __func__, newList.GetBlockHash().ToString());
+                AbortNode(msg);
+                return state.Error(msg);
+            }
+            mnListsCache.emplace(newList.GetBlockHash(), newList);
+            LogPrintf("CDeterministicMNManager::%s -- Wrote snapshot. nHeight=%d, mapCurMNs.allMNsCount=%d\n",
+                __func__, nHeight, newList.GetCounts().total());
+        }
+
+        // apply platform unban for platform revive too, after all persistent
+        // payload checks have succeeded
         for (int i = 1; i < (int)block.vtx.size(); i++) {
             const CTransaction& tx = *block.vtx[i];
             if (!tx.IsSpecialTxVersion() || tx.nType != TRANSACTION_PROVIDER_UPDATE_SERVICE) {
@@ -659,14 +682,6 @@ bool CDeterministicMNManager::ProcessBlock(const CBlock& block, gsl::not_null<co
                 LogPrint(BCLog::LLMQ, "%s -- MN %s is failed to Platform revived at height %d\n", __func__,
                          opt_proTx->proTxHash.ToString(), nHeight);
             }
-        }
-
-        m_evoDb.Write(std::make_pair(DB_LIST_DIFF, newList.GetBlockHash()), diff);
-        if ((nHeight % DISK_SNAPSHOT_PERIOD) == 0 || pindex->pprev == m_initial_snapshot_index) {
-            m_evoDb.Write(std::make_pair(DB_LIST_SNAPSHOT, newList.GetBlockHash()), newList);
-            mnListsCache.emplace(newList.GetBlockHash(), newList);
-            LogPrintf("CDeterministicMNManager::%s -- Wrote snapshot. nHeight=%d, mapCurMNs.allMNsCount=%d\n",
-                __func__, nHeight, newList.GetCounts().total());
         }
 
         diff.nHeight = pindex->nHeight;
@@ -785,6 +800,23 @@ CDeterministicMNList CDeterministicMNManager::GetListForBlockInternal(gsl::not_n
 
         CDeterministicMNListDiff diff;
         if (!m_evoDb.Read(std::make_pair(DB_LIST_DIFF, pindex->GetBlockHash()), diff)) {
+            if (DeploymentActiveAt(*pindex, Params().GetConsensus(), Consensus::DEPLOYMENT_DIP0003) &&
+                m_evoDb.HasDualChainstateMarker()) {
+                // In a dual-chainstate run a missing diff for a DIP3-active
+                // block means data pending in the other chainstate's unflushed
+                // overlay or EvoDB inconsistency; fabricating an "initial
+                // snapshot" would cache an empty masternode list and clobber
+                // m_initial_snapshot_index. Fail loudly instead; the message
+                // carries the sentinel matched by IsBlockDataUnavailableError
+                // so serving paths do not penalize peers. Single-chainstate
+                // nodes keep the legacy fallback below: an EvoDB that predates
+                // the current DIP3 activation height (e.g. the functional-test
+                // cached chain) bootstraps an empty list here and rebuilds via
+                // ProcessBlock from that point on.
+                throw BlockDataUnavailableError(strprintf(
+                    "CDeterministicMNManager::%s -- masternode list diff for block %s is not available (pruned or below an unvalidated snapshot base)",
+                    __func__, pindex->GetBlockHash().ToString()));
+            }
             // no snapshot and no diff on disk means that it's the initial snapshot
             m_initial_snapshot_index = pindex;
             snapshot = CDeterministicMNList(pindex->GetBlockHash(), pindex->nHeight, 0);
@@ -1103,8 +1135,7 @@ bool CDeterministicMNManager::MigrateLegacyDiffs(const CBlockIndex* const tip_in
 }
 
 CDeterministicMNManager::RecalcDiffsResult CDeterministicMNManager::RecalculateAndRepairDiffs(
-    const CBlockIndex* start_index, const CBlockIndex* stop_index, ChainstateManager& chainman,
-    BuildListFromBlockFunc build_list_func, bool repair)
+    const CBlockIndex* start_index, const CBlockIndex* stop_index, BuildListFromBlockFunc build_list_func, bool repair)
 {
     RecalcDiffsResult result;
     result.start_height = start_index->nHeight;
@@ -1205,7 +1236,7 @@ CDeterministicMNManager::RecalcDiffsResult CDeterministicMNManager::RecalculateA
 
     // Write repaired diffs to database
     if (repair) {
-        WriteRepairedDiffs(recalculated_diffs, result);
+        WriteRepairedDiffs(recalculated_diffs);
     }
 
     return result;
@@ -1394,7 +1425,7 @@ std::vector<std::pair<uint256, CDeterministicMNListDiff>> CDeterministicMNManage
 }
 
 void CDeterministicMNManager::WriteRepairedDiffs(
-    const std::vector<std::pair<uint256, CDeterministicMNListDiff>>& recalculated_diffs, RecalcDiffsResult& result)
+    const std::vector<std::pair<uint256, CDeterministicMNListDiff>>& recalculated_diffs)
 {
     AssertLockNotHeld(cs);
 

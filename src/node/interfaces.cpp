@@ -292,9 +292,9 @@ public:
     }
     bool processVoteAndRelay(const CGovernanceVote& vote, std::string& error) override
     {
-        if (context().govman != nullptr && context().connman != nullptr) {
+        if (context().govman != nullptr) {
             CGovernanceException exception;
-            bool result = context().govman->ProcessVoteAndRelay(vote, exception, *context().connman);
+            bool result = context().govman->ProcessVoteAndRelay(vote, exception);
             if (!result) {
                 error = exception.GetMessage();
             }
@@ -1035,9 +1035,8 @@ public:
     std::unique_ptr<Handler> handleNotifyHeaderTip(NotifyHeaderTipFn fn) override
     {
         return MakeHandler(
-            ::uiInterface.NotifyHeaderTip_connect([fn](SynchronizationState sync_state, const CBlockIndex* block) {
-                fn(sync_state, BlockTip{block->nHeight, block->GetBlockTime(), block->GetBlockHash()},
-                    /* verification progress is unused when a header was received */ 0);
+            ::uiInterface.NotifyHeaderTip_connect([fn](SynchronizationState sync_state, int64_t height, int64_t timestamp) {
+                fn(sync_state, BlockTip{(int)height, timestamp, uint256{}});
             }));
     }
     std::unique_ptr<Handler> handleNotifyInstantSendChanged(NotifyInstantSendChangedFn fn) override
@@ -1084,7 +1083,7 @@ bool FillBlock(const CBlockIndex* index, const FoundBlock& block, UniqueLock<Rec
     if (block.m_max_time) *block.m_max_time = index->GetBlockTimeMax();
     if (block.m_mtp_time) *block.m_mtp_time = index->GetMedianTimePast();
     if (block.m_in_active_chain) *block.m_in_active_chain = active[index->nHeight] == index;
-    if (block.m_locator) { *block.m_locator = active.GetLocator(index); }
+    if (block.m_locator) { *block.m_locator = GetLocator(index); }
     if (block.m_next_block) FillBlock(active[index->nHeight] == index ? active[index->nHeight + 1] : nullptr, *block.m_next_block, lock, active);
     if (block.m_data) {
         REVERSE_LOCK(lock);
@@ -1237,8 +1236,7 @@ public:
     {
         LOCK(::cs_main);
         const CBlockIndex* index = chainman().m_blockman.LookupBlockIndex(block_hash);
-        if (!index) return {};
-        return chainman().ActiveChain().GetLocator(index);
+        return GetLocator(index);
     }
     std::optional<int> findLocatorFork(const CBlockLocator& locator) override
     {

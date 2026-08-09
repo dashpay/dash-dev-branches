@@ -54,16 +54,8 @@ private:
     std::atomic<bool> tryLockChainTipScheduled{false};
     std::atomic<bool> isEnabled{false};
 
-    //! Number of recently seen CLSIG hashes retained once `seenChainLocks` is pruned.
-    static constexpr size_t SEEN_CHAINLOCKS_RETAINED_SIZE{1024};
-    //! Size `seenChainLocks` may grow to before the next insertion prunes it back down to
-    //! SEEN_CHAINLOCKS_RETAINED_SIZE. Pruning partitions every entry, and CLSIG hashes are
-    //! recorded before the signature is verified, so pruning on each insertion past the retained
-    //! size lets a peer turn a stream of unique CLSIG hashes into a stream of full-map partition
-    //! passes under `cs`. Pruning only after twice the retained size amortises that cost over the
-    //! entries dropped in a single batch, at the price of a larger transient cache. The 2x ratio
-    //! matches the default in unordered_lru_cache.
-    static constexpr size_t SEEN_CHAINLOCKS_PRUNE_AFTER_SIZE{2 * SEEN_CHAINLOCKS_RETAINED_SIZE};
+    static constexpr size_t SEEN_CHAINLOCKS_CUTOFF_SIZE{1024};
+    static constexpr size_t SEEN_CHAINLOCKS_MAX_SIZE{2 * SEEN_CHAINLOCKS_CUTOFF_SIZE};
 
     const CBlockIndex* lastNotifyChainLockBlockIndex GUARDED_BY(cs){nullptr};
     Uint256HashMap<std::chrono::seconds> txFirstSeenTime GUARDED_BY(cs);
@@ -86,10 +78,6 @@ public:
     bool AlreadyHave(const CInv& inv) const EXCLUSIVE_LOCKS_REQUIRED(!cs);
     void UpdateTxFirstSeenMap(const Uint256HashSet& tx, const int64_t& time) EXCLUSIVE_LOCKS_REQUIRED(!cs);
     size_t SeenChainLockCacheSizeForTesting() const EXCLUSIVE_LOCKS_REQUIRED(!cs);
-    //! Number of entries retained after the seen cache is pruned.
-    size_t SeenChainLockCacheRetainedSizeForTesting() const EXCLUSIVE_LOCKS_REQUIRED(!cs);
-    //! Size the seen cache may grow to before it is pruned back to the retained size.
-    size_t SeenChainLockCachePruneAfterSizeForTesting() const EXCLUSIVE_LOCKS_REQUIRED(!cs);
 
     [[nodiscard]] MessageProcessingResult ProcessNewChainLock(NodeId from, const chainlock::ChainLockSig& clsig,
                                                               const llmq::CQuorumManager& qman,

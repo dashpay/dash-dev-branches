@@ -58,7 +58,7 @@ private:
     chainlock::ChainLockSig bestChainLockWithKnownBlock GUARDED_BY(cs);
 
 public:
-    Chainlocks(const CSporkManager& sporkman);
+    explicit Chainlocks(const CSporkManager& sporkman);
 
     [[nodiscard]] bool IsEnabled() const;
     [[nodiscard]] bool IsSigningEnabled() const;

@@ -118,6 +118,7 @@ BASE_SCRIPTS = [
     'feature_dip3_deterministicmns.py --descriptors', # NOTE: needs dash_hash to pass
     'feature_masternode_payout_shares.py',
     'feature_llmq_signing.py', # NOTE: needs dash_hash to pass
+    'feature_llmq_signing.py --spork21', # NOTE: needs dash_hash to pass
     'feature_llmq_simplepose.py --disable-spork23', # NOTE: needs dash_hash to pass
     'feature_llmq_rotation.py', # NOTE: needs dash_hash to pass
     'feature_llmq_evo.py', # NOTE: needs dash_hash to pass
@@ -412,7 +413,6 @@ BASE_SCRIPTS = [
     'feature_settings.py',
     'rpc_getdescriptorinfo.py',
     'rpc_getpeerinfo_deprecation.py',
-    'rpc_mempool_entry_fee_fields_deprecation.py',
     'rpc_mempool_info.py',
     'rpc_help.py',
     'feature_dirsymlinks.py',

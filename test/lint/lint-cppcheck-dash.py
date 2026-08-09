@@ -33,27 +33,34 @@ ALWAYS_ENABLED_WARNINGS = (
     # ".*",
 )
 
+# Lines that indicate cppcheck itself failed to analyze a translation unit.
+# These must always fail the lint (regardless of which file they point at),
+# otherwise analysis silently ends up vacuous.
+FATAL_ERRORS = (
+    "preprocessorErrorDirective",
+    "cppcheckError",
+    "internalError",
+    "Internal error",
+    "syntaxError",
+)
+
 SUPPRESSED_WARNINGS = (
     "src/stacktraces.cpp:.*: .*: Parameter 'info' can be declared as pointer to const",
-    "src/stacktraces.cpp:.*: note: You might need to cast the function pointer here",
-
-    # current version of cppcheck fails with this error if exhaustive level is used
-    # TODO: remove with a newer version
-    "warning: Internal error: Child process crashed with signal 6",
-
-    # The following can be useful to ignore when the catch all is used
-    # "Consider performing initialization in initialization list.",
-    "Consider using std::transform algorithm instead of a raw loop.",
-    "Consider using std::accumulate algorithm instead of a raw loop.",
-    "Consider using std::any_of algorithm instead of a raw loop.",
-    "Consider using std::copy_if algorithm instead of a raw loop.",
-    # "Consider using std::count_if algorithm instead of a raw loop.",
-    # "Consider using std::find_if algorithm instead of a raw loop.",
-    # "Member variable '.*' is not initialized in the constructor.",
+    "Return value 'state.(Invalid|Error).*' is always false.*knownConditionTrueFalse",
+    "Local variable '_' shadows outer function.*shadowFunction",
+    "Member variable 'ActiveDKG::.*' has no initializer.*uninitMemberVarNoCtor",
+    "Member variable 'UtilParameters::.*' has no initializer.*uninitMemberVarNoCtor",
 
     "unusedFunction",
     "unknownMacro",
     "unusedStructMember",
+
+    # Checks with pre-existing violations in the tree; suppressed wholesale so
+    # the linter can be enforced. TODO: burn these down and re-enable them
+    # one at a time. Note that any message matching ALWAYS_ENABLED_WARNINGS is
+    # still reported even if its check id is listed here.
+    "duplInheritedMember",
+    "useStlAlgorithm",
 )
 
 def main():
@@ -74,6 +81,7 @@ def main():
 
     always_enabled_regexp = '|'.join(ALWAYS_ENABLED_WARNINGS)
     suppressed_regexp = '|'.join(SUPPRESSED_WARNINGS)
+    fatal_regexp = '|'.join(FATAL_ERRORS)
     files_regexp = '|'.join(re.escape(f) for f in files)
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -96,6 +104,10 @@ def main():
         '--template=gcc',
         '--check-level=exhaustive',
         '-D__cplusplus',
+        # Pretend to be GCC so that headers which require a known compiler
+        # (e.g. src/attributes.h) don't hit an #error directive, which would
+        # abort analysis of every translation unit that includes them.
+        '-D__GNUC__',
         '-DENABLE_WALLET',
         '-DCLIENT_VERSION_BUILD',
         '-DCLIENT_VERSION_IS_RELEASE',
@@ -105,6 +117,11 @@ def main():
         '-DDEBUG',
         '-DUSE_EPOLL',
         '-DCHAR_BIT=8',
+        # Function-like macros that cppcheck cannot evaluate on its own; leaving
+        # them undefined aborts analysis of Qt translation units with a fatal
+        # syntaxError ("failed to evaluate #if condition").
+        '-DQT_VERSION_CHECK(major,minor,patch)=((major<<16)|(minor<<8)|(patch))',
+        '-DQT_CONFIG(x)=0',
         '-I', 'src/',
         '-q',
     ] + files
@@ -118,10 +135,32 @@ def main():
 
     unique_sorted_lines = sorted(set(dependencies_output.stdout.splitlines()))
     for line in unique_sorted_lines:
+        if re.search(fatal_regexp, line):
+            warnings.append(line)
+            continue
+        # 'note:' and source-context lines only make sense next to their parent
+        # warning; on their own (e.g. when the parent is suppressed) they are
+        # noise, and they don't carry the check id the suppressions match on.
+        # cppcheck's gcc template currently renders every non-error severity as
+        # 'warning:', but match the raw severities too in case that changes.
+        if not re.search(r' (?:error|warning|style|performance|portability): ', line):
+            continue
         if not re.search(files_regexp, line):
             continue
         if re.search(always_enabled_regexp, line) or not re.search(suppressed_regexp, line):
             warnings.append(line)
+
+    # Without --error-exitcode, diagnostics never make cppcheck return nonzero;
+    # any nonzero status (bad arguments, unloadable config, OOM kill, crash)
+    # means analysis did not complete and must not pass.
+    rc = dependencies_output.returncode
+    if rc != 0:
+        print(f"cppcheck exited with code {rc}")
+        if dependencies_output.stdout and not warnings:
+            # Show a short tail to aid CI debugging without flooding logs.
+            tail = dependencies_output.stdout.splitlines()[-50:]
+            print('\n'.join(tail))
+        exit_code = 1
 
     if warnings:
         print('\n'.join(warnings))

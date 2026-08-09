@@ -47,7 +47,7 @@ ChainlockHandler::ChainlockHandler(chainlock::Chainlocks& chainlocks, Chainstate
     scheduler{std::make_unique<CScheduler>()},
     scheduler_thread{
         std::make_unique<std::thread>(std::thread(util::TraceThread, "cl-schdlr", [&] { scheduler->serviceQueue(); }))},
-    seenChainLocks{SEEN_CHAINLOCKS_RETAINED_SIZE, SEEN_CHAINLOCKS_PRUNE_AFTER_SIZE}
+    seenChainLocks{SEEN_CHAINLOCKS_CUTOFF_SIZE, SEEN_CHAINLOCKS_MAX_SIZE}
 {
 }
 
@@ -87,18 +87,6 @@ size_t ChainlockHandler::SeenChainLockCacheSizeForTesting() const
 {
     LOCK(cs);
     return seenChainLocks.size();
-}
-
-size_t ChainlockHandler::SeenChainLockCacheRetainedSizeForTesting() const
-{
-    LOCK(cs);
-    return seenChainLocks.max_size();
-}
-
-size_t ChainlockHandler::SeenChainLockCachePruneAfterSizeForTesting() const
-{
-    LOCK(cs);
-    return seenChainLocks.prune_after_size();
 }
 
 void ChainlockHandler::UpdateTxFirstSeenMap(const Uint256HashSet& tx, const int64_t& time)

@@ -117,6 +117,7 @@ public:
     SERIALIZE_METHODS(CQuorumDataRequest, obj)
     {
         bool fRead{false};
+        // cppcheck-suppress constParameterReference
         SER_READ(obj, fRead = true);
         READWRITE(obj.llmqType, obj.quorumHash, obj.nDataMask, obj.proTxHash);
         if (fRead) {

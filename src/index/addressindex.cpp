@@ -18,8 +18,6 @@
 constexpr uint8_t DB_ADDRESSINDEX{'a'};
 constexpr uint8_t DB_ADDRESSUNSPENTINDEX{'u'};
 
-std::unique_ptr<AddressIndex> g_addressindex;
-
 AddressIndex::DB::DB(size_t n_cache_size, bool f_memory, bool f_wipe) :
     BaseIndex::DB(gArgs.GetDataDirNet() / "indexes" / "addressindex", n_cache_size, f_memory, f_wipe)
 {
@@ -49,12 +47,13 @@ bool AddressIndex::DB::WriteBatch(const std::vector<CAddressIndexEntry>& address
 }
 
 bool AddressIndex::DB::ReadAddressIndex(const uint160& address_hash, const AddressType type,
-                                        std::vector<CAddressIndexEntry>& entries, const int32_t start, const int32_t end)
+                                        std::vector<CAddressIndexEntry>& entries, const int32_t start_height,
+                                        const int32_t end_height)
 {
     std::unique_ptr<CDBIterator> pcursor(NewIterator());
 
-    if (start > 0 && end > 0) {
-        pcursor->Seek(std::make_pair(DB_ADDRESSINDEX, CAddressIndexIteratorHeightKey(type, address_hash, start)));
+    if (start_height > 0 && end_height > 0) {
+        pcursor->Seek(std::make_pair(DB_ADDRESSINDEX, CAddressIndexIteratorHeightKey(type, address_hash, start_height)));
     } else {
         pcursor->Seek(std::make_pair(DB_ADDRESSINDEX, CAddressIndexIteratorKey(type, address_hash)));
     }
@@ -63,7 +62,7 @@ bool AddressIndex::DB::ReadAddressIndex(const uint160& address_hash, const Addre
         std::pair<uint8_t, CAddressIndexKey> key;
         if (pcursor->GetKey(key) && key.first == DB_ADDRESSINDEX && key.second.m_address_type == type &&
             key.second.m_address_bytes == address_hash) {
-            if (end > 0 && key.second.m_block_height > end) {
+            if (end_height > 0 && key.second.m_block_height > end_height) {
                 break;
             }
             CAmount value;
@@ -401,9 +400,10 @@ bool AddressIndex::CustomRewind(const interfaces::BlockKey& current_tip, const i
 BaseIndex::DB& AddressIndex::GetDB() const { return *m_db; }
 
 bool AddressIndex::GetAddressIndex(const uint160& address_hash, const AddressType type,
-                                   std::vector<CAddressIndexEntry>& entries, const int32_t start, const int32_t end) const
+                                   std::vector<CAddressIndexEntry>& entries, const int32_t start_height,
+                                   const int32_t end_height) const
 {
-    return m_db->ReadAddressIndex(address_hash, type, entries, start, end);
+    return m_db->ReadAddressIndex(address_hash, type, entries, start_height, end_height);
 }
 
 bool AddressIndex::GetAddressUnspentIndex(const uint160& address_hash, const AddressType type,

@@ -69,10 +69,9 @@ std::string CSimplifiedMNListEntry::ToString() const
                      (nVersion >= ProTxVersion::ExtAddr ? "" : strprintf(", platformHTTPPort=%d", platformHTTPPort)));
 }
 
-CSimplifiedMNList::CSimplifiedMNList(std::vector<std::unique_ptr<CSimplifiedMNListEntry>>&& smlEntries)
+CSimplifiedMNList::CSimplifiedMNList(std::vector<std::unique_ptr<CSimplifiedMNListEntry>>&& smlEntries) :
+    mnList{std::move(smlEntries)}
 {
-    mnList = std::move(smlEntries);
-
     std::sort(mnList.begin(), mnList.end(), [&](const std::unique_ptr<CSimplifiedMNListEntry>& a, const std::unique_ptr<CSimplifiedMNListEntry>& b) {
         return a->proRegTxHash.Compare(b->proRegTxHash) < 0;
     });

@@ -19,6 +19,7 @@
 #include <evo/chainhelper.h>
 #include <index/blockfilterindex.h>
 #include <index/coinstatsindex.h>
+#include <index/spentindex.h>
 #include <index/timestampindex.h>
 #include <index/txindex.h>
 #include <kernel/coinstats.h>
@@ -83,7 +84,7 @@ static GlobalMutex cs_blockchange;
 static std::condition_variable cond_blockchange;
 static CUpdatedBlock latestblock GUARDED_BY(cs_blockchange);
 
-extern void TxToJSON(const CTransaction& tx, const uint256 hashBlock, const CTxMemPool& mempool, const Chainstate& active_chainstate, const chainlock::Chainlocks& chainlocks, const llmq::CInstantSendManager& isman, UniValue& entry, TxVerbosity verbosity = TxVerbosity::SHOW_DETAILS);
+extern void TxToJSON(const CTransaction& tx, const uint256 hashBlock, const CTxMemPool& mempool, const Chainstate& active_chainstate, const chainlock::Chainlocks& chainlocks, const llmq::CInstantSendManager& isman, const SpentIndex* spent_index, UniValue& entry, TxVerbosity verbosity = TxVerbosity::SHOW_DETAILS);
 
 /* Calculate the difficulty for a given block index.
  */
@@ -553,21 +554,20 @@ static RPCHelpMan getblockhashes()
         },
     [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
-    if (!g_timestampindex) {
+    const NodeContext& node = EnsureAnyNodeContext(request.context);
+    if (!node.timestamp_index) {
         throw JSONRPCError(RPC_MISC_ERROR, "Timestamp index is not enabled. Start with -timestampindex to enable.");
     }
 
-    if (!g_timestampindex->BlockUntilSyncedToCurrentChain()) {
-        throw JSONRPCError(RPC_MISC_ERROR, strprintf("Timestamp index is syncing. Current height: %d", g_timestampindex->GetSummary().best_block_height));
+    if (!node.timestamp_index->BlockUntilSyncedToCurrentChain()) {
+        throw JSONRPCError(RPC_MISC_ERROR, strprintf("Timestamp index is syncing. Current height: %d", node.timestamp_index->GetSummary().best_block_height));
     }
 
     unsigned int high = request.params[0].getInt<int>();
     unsigned int low = request.params[1].getInt<int>();
     std::vector<uint256> blockHashes;
 
-    if (!g_timestampindex->GetBlockHashes(high, low, blockHashes)) {
-        throw JSONRPCError(RPC_MISC_ERROR, "Failed to read timestamp index.");
-    }
+    node.timestamp_index->GetBlockHashes(high, low, blockHashes);
 
     UniValue result(UniValue::VARR);
     for (const auto& hash : blockHashes) {
@@ -1455,7 +1455,7 @@ static void SoftForkDescPushBack(const CBlockIndex* blockindex, UniValue& softfo
     softforks.pushKV(DeploymentName(dep), rv);
 }
 
-static void SoftForkDescPushBack(const CBlockIndex* blockindex, const std::unordered_map<uint8_t, int>& signals, UniValue& softforks, const ChainstateManager& chainman, Consensus::DeploymentPos id)
+static void SoftForkDescPushBack(const CBlockIndex* blockindex, const AbstractEHFManager::Signals& signals, UniValue& softforks, const ChainstateManager& chainman, Consensus::DeploymentPos id)
 {
     // For BIP9 deployments.
 
@@ -2474,7 +2474,7 @@ static RPCHelpMan getspecialtxes()
             case 2 :
                 {
                     UniValue objTx(UniValue::VOBJ);
-                    TxToJSON(*tx, blockhash, mempool, chainman.ActiveChainstate(), *node.chainlocks, *llmq_ctx.isman, objTx);
+                    TxToJSON(*tx, blockhash, mempool, chainman.ActiveChainstate(), *node.chainlocks, *llmq_ctx.isman, node.spent_index.get(), objTx);
                     result.push_back(objTx);
                     break;
                 }

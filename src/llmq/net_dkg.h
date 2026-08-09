@@ -63,7 +63,7 @@ public:
            CDKGDebugManager& dkgdbgman, CQuorumBlockProcessor& qblockman, CQuorumSnapshotManager& qsnapman,
            const CActiveMasternodeManager& mn_activeman, CConnman& connman);
 
-    ~NetDKG();
+    ~NetDKG() override;
 
     // NetHandler
     void ProcessMessage(CNode& pfrom, const std::string& msg_type, CDataStream& vRecv) override

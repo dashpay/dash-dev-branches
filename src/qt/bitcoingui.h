@@ -10,6 +10,7 @@
 #endif
 
 #include <qt/bitcoinunits.h>
+#include <qt/clientmodel.h>
 #include <qt/optionsdialog.h>
 
 #include <consensus/amount.h>
@@ -30,7 +31,6 @@
 #include <qt/macos_appnap.h>
 #endif
 
-class ClientModel;
 class NetworkStyle;
 class Notificator;
 class OptionsModel;
@@ -297,7 +297,7 @@ public Q_SLOTS:
     /** Get restart command-line parameters and request restart */
     void handleRestart(QStringList args);
     /** Set number of blocks and last block date shown in the UI */
-    void setNumBlocks(int count, const QDateTime& blockDate, const QString& blockHash, double nVerificationProgress, bool headers, SynchronizationState sync_state);
+    void setNumBlocks(int count, const QDateTime& blockDate, const QString& blockHash, double nVerificationProgress, SyncType synctype, SynchronizationState sync_state);
     /** Set additional data sync status shown in the UI */
     void setAdditionalDataSyncProgress(double nSyncProgress);
 

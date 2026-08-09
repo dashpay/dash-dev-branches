@@ -127,7 +127,7 @@ public:
     }
 
 public:
-    size_t GetSerializeSize(int nType, int nVersion) const { return 66; }
+    static size_t GetSerializeSize(int, int) { return 66; }
 
     template <typename Stream>
     void Serialize(Stream& s) const
@@ -174,7 +174,7 @@ public:
     }
 
 public:
-    size_t GetSerializeSize(int nType, int nVersion) const { return 21; }
+    static size_t GetSerializeSize(int, int) { return 21; }
 
     template <typename Stream>
     void Serialize(Stream& s) const
@@ -213,7 +213,7 @@ public:
     }
 
 public:
-    size_t GetSerializeSize(int nType, int nVersion) const { return 25; }
+    static size_t GetSerializeSize(int, int) { return 25; }
 
     template <typename Stream>
     void Serialize(Stream& s) const
@@ -257,7 +257,7 @@ public:
     }
 
 public:
-    size_t GetSerializeSize(int nType, int nVersion) const { return 57; }
+    static size_t GetSerializeSize(int, int) { return 57; }
 
     template <typename Stream>
     void Serialize(Stream& s) const

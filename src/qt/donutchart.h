@@ -44,8 +44,8 @@ protected:
 
 private:
     struct Geometry {
-        int m_inner_radius;
-        int m_outer_radius;
+        int m_inner_radius{0};
+        int m_outer_radius{0};
         QPoint m_center;
     };
 

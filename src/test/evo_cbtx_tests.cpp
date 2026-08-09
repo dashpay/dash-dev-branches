@@ -209,7 +209,7 @@ BOOST_FIXTURE_TEST_CASE(qc_hash_cache_invalidated_by_undoblock, Dip3ActiveSetup)
     {
         LOCK(cs_main);
         auto dbTx = evoDb.BeginTransaction();
-        BOOST_REQUIRE(qblockman.UndoBlock(block_with_qc, &pindex_mined));
+        BOOST_REQUIRE(qblockman.UndoBlock(m_node.chainman->ActiveChainstate(), block_with_qc, &pindex_mined));
         // Install the replacement while the disconnect transaction is still open.
         WriteMinedCommitment(evoDb, qc_b, mined_hash_b, mined_height);
         dbTx->Commit();

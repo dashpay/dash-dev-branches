@@ -94,7 +94,7 @@ class CGetQuorumRotationInfo
 public:
     std::vector<uint256> baseBlockHashes;
     uint256 blockRequestHash;
-    bool extraShare;
+    bool extraShare{false};
 
     SERIALIZE_METHODS(CGetQuorumRotationInfo, obj)
     {

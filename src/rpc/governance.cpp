@@ -466,8 +466,7 @@ static UniValue VoteWithMasternodes(const JSONRPCRequest& request, const CWallet
         }
 
         CGovernanceException exception;
-        CConnman& connman = EnsureConnman(node);
-        if (node.govman->ProcessVoteAndRelay(vote, exception, connman)) {
+        if (node.govman->ProcessVoteAndRelay(vote, exception)) {
             nSuccessful++;
             statusObj.pushKV("result", "success");
         } else {
@@ -659,7 +658,8 @@ static RPCResult ListObjectsHelp()
 {
     auto ret = CGovernanceObject::GetStateJsonHelp(/*key=*/"", /*optional=*/false, /*local_valid_key=*/"fBlockchainValidity");
     auto mod_inner = ret.m_inner;
-    for (const auto& result : CGovernanceObject::GetVotesJsonHelp(/*key=*/"", /*optional=*/false).m_inner) {
+    const auto votes_help = CGovernanceObject::GetVotesJsonHelp(/*key=*/"", /*optional=*/false);
+    for (const auto& result : votes_help.m_inner) {
         mod_inner.push_back(result);
     }
     return RPCResult{ret.m_type, ret.m_key_name, ret.m_description, mod_inner};
@@ -930,10 +930,8 @@ static RPCHelpMan voteraw()
         throw JSONRPCError(RPC_INTERNAL_ERROR, "Failure to verify vote.");
     }
 
-    CConnman& connman = EnsureConnman(node);
-
     CGovernanceException exception;
-    if (node.govman->ProcessVoteAndRelay(vote, exception, connman)) {
+    if (node.govman->ProcessVoteAndRelay(vote, exception)) {
         return "Voted successfully";
     } else {
         throw JSONRPCError(RPC_INTERNAL_ERROR, "Error voting : " + exception.GetMessage());

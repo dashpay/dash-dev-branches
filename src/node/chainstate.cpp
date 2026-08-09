@@ -80,8 +80,20 @@ ChainstateLoadResult LoadChainstate(ChainstateManager& chainman, const CacheSize
     // Load the fully validated chainstate.
     chainman.InitializeChainstate(options.mempool, *evodb, chain_helper);
 
+    // Wiping the shared EvoDB above erased the SNAPSHOT best-block marker that
+    // ActivateExistingSnapshot() requires, so a persisted snapshot chainstate can
+    // no longer be revived. Discard it here rather than letting startup fail with
+    // advice ("reindex") the user has just followed, which would never recover.
+    if (to_wipe_data && !DeleteSnapshotChainstateFromDisk()) {
+        return {ChainstateLoadStatus::FAILURE,
+                _("Failed to remove the snapshot chainstate directory. Remove it manually before restarting.")};
+    }
+
     // Load a chain created from a UTXO snapshot, if any exist.
-    chainman.DetectSnapshotChainstate(options.mempool);
+    bilingual_str snapshot_error;
+    if (!chainman.DetectSnapshotChainstate(options.mempool, snapshot_error)) {
+        return {ChainstateLoadStatus::FAILURE, snapshot_error};
+    }
 
     auto& pblocktree{chainman.m_blockman.m_block_tree_db};
     // new CBlockTreeDB tries to delete the existing file, which
@@ -191,7 +203,12 @@ ChainstateLoadResult LoadChainstate(ChainstateManager& chainman, const CacheSize
         // TODO: CEvoDB instance should probably be a part of Chainstate
         // (for multiple chainstates to actually work in parallel)
         // and not a global
-        if (&chainman.ActiveChainstate() == chainstate && !evodb->CommitRootTransaction()) {
+        // Commit every chainstate's own identity: ReplayBlocks processes
+        // special transactions, and its coins repair is flushed to disk
+        // immediately, so leaving a non-active identity's EvoDB writes in the
+        // in-memory overlay would let a crash strand the coins DB ahead of
+        // that identity's best-block marker.
+        if (!evodb->CommitRootTransaction(chainstate->EvoDbIdentity())) {
             return {ChainstateLoadStatus::FAILURE, _("Failed to commit Evo database")};
         }
 

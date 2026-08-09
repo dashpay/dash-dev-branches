@@ -24,8 +24,8 @@ namespace dmn_types {
 
 struct mntype_struct
 {
-    const int32_t voting_weight;
-    const CAmount collat_amount;
+    const int32_t voting_weight{0};
+    const CAmount collat_amount{0};
     const std::string_view description;
 };
 

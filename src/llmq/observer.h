@@ -35,7 +35,7 @@ public:
     ObserverContext(CDeterministicMNManager& dmnman, llmq::CQuorumManager& qman, llmq::CQuorumSnapshotManager& qsnapman,
                     const ChainstateManager& chainman, const CSporkManager& sporkman,
                     const util::DbWrapperParams& db_params);
-    ~ObserverContext();
+    ~ObserverContext() override;
 
     // QuorumRole
     // Watch-only nodes are not masternodes

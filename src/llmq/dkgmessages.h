@@ -20,7 +20,7 @@ namespace llmq {
 class CDKGContribution
 {
 public:
-    Consensus::LLMQType llmqType;
+    Consensus::LLMQType llmqType{Consensus::LLMQType::LLMQ_NONE};
     uint256 quorumHash;
     uint256 proTxHash;
     BLSVerificationVectorPtr vvec;
@@ -107,11 +107,11 @@ public:
 class CDKGJustification
 {
 public:
-    Consensus::LLMQType llmqType;
+    Consensus::LLMQType llmqType{Consensus::LLMQType::LLMQ_NONE};
     uint256 quorumHash;
     uint256 proTxHash;
     struct Contribution {
-        uint32_t index;
+        uint32_t index{0};
         CBLSSecretKey key;
         SERIALIZE_METHODS(Contribution, obj)
         {

@@ -83,10 +83,10 @@ public:
     void fetch() override EXCLUSIVE_LOCKS_REQUIRED(!m_cs) = 0;
 
 protected:
-    void setData(std::shared_ptr<const Data> data) EXCLUSIVE_LOCKS_REQUIRED(!m_cs)
+    void setData(std::shared_ptr<const Data> feed_data) EXCLUSIVE_LOCKS_REQUIRED(!m_cs)
     {
         LOCK(m_cs);
-        m_data = std::move(data);
+        m_data = std::move(feed_data);
     }
 
 private:
@@ -105,7 +105,7 @@ class ChainLockFeed : public Feed<ChainLockData> {
 
 public:
     explicit ChainLockFeed(QObject* parent, ClientModel& client_model);
-    ~ChainLockFeed();
+    ~ChainLockFeed() override;
 
     void fetch() override;
 
@@ -123,7 +123,7 @@ class CreditPoolFeed : public Feed<CreditPoolData> {
 
 public:
     explicit CreditPoolFeed(QObject* parent, ClientModel& client_model);
-    ~CreditPoolFeed();
+    ~CreditPoolFeed() override;
 
     void fetch() override;
 
@@ -140,7 +140,7 @@ class InstantSendFeed : public Feed<InstantSendData> {
 
 public:
     explicit InstantSendFeed(QObject* parent, ClientModel& client_model);
-    ~InstantSendFeed();
+    ~InstantSendFeed() override;
 
     void fetch() override;
 
@@ -160,7 +160,7 @@ class MasternodeFeed : public Feed<MasternodeData> {
 
 public:
     explicit MasternodeFeed(QObject* parent, ClientModel& client_model);
-    ~MasternodeFeed();
+    ~MasternodeFeed() override;
 
     void fetch() override;
 
@@ -177,7 +177,7 @@ class QuorumFeed : public Feed<QuorumData> {
 
 public:
     explicit QuorumFeed(QObject* parent, ClientModel& client_model);
-    ~QuorumFeed();
+    ~QuorumFeed() override;
 
     void fetch() override;
 
@@ -202,7 +202,7 @@ class ProposalFeed : public Feed<ProposalData> {
 
 public:
     explicit ProposalFeed(QObject* parent, ClientModel& client_model, MasternodeFeed& feed_masternode);
-    ~ProposalFeed();
+    ~ProposalFeed() override;
 
     void fetch() override;
 

@@ -48,44 +48,44 @@ enum class LLMQType : uint8_t {
 // Configures a LLMQ and its DKG
 // See https://github.com/dashpay/dips/blob/master/dip-0006.md for more details
 struct LLMQParams {
-    LLMQType type;
+    LLMQType type{LLMQType::LLMQ_NONE};
 
     // not consensus critical, only used in logging, RPC and UI
     std::string_view name;
 
     // Whether this is a DIP0024 quorum or not
-    bool useRotation;
+    bool useRotation{false};
 
     // the size of the quorum, e.g. 50 or 400
-    int size;
+    int size{0};
 
     // The minimum number of valid members after the DKG. If less members are determined valid, no commitment can be
     // created. Should be higher then the threshold to allow some room for failing nodes, otherwise quorum might end up
     // not being able to ever created a recovered signature if more nodes fail after the DKG
-    int minSize;
+    int minSize{0};
 
     // The threshold required to recover a final signature. Should be at least 50%+1 of the quorum size. This value
     // also controls the size of the public key verification vector and has a large influence on the performance of
     // recovery. It also influences the amount of minimum messages that need to be exchanged for a single signing session.
     // This value has the most influence on the security of the quorum. The number of total malicious masternodes
     // required to negatively influence signing sessions highly correlates to the threshold percentage.
-    int threshold;
+    int threshold{0};
 
     // The interval in number blocks for DKGs and the creation of LLMQs. If set to 24 for example, a DKG will start
     // every 24 blocks, which is approximately once every hour.
-    int dkgInterval;
+    int dkgInterval{0};
 
     // The number of blocks per phase in a DKG session. There are 6 phases plus the mining phase that need to be processed
     // per DKG. Set this value to a number of blocks so that each phase has enough time to propagate all required
     // messages to all members before the next phase starts. If blocks are produced too fast, whole DKG sessions will
     // fail.
-    int dkgPhaseBlocks;
+    int dkgPhaseBlocks{0};
 
     // The starting block inside the DKG interval for when mining of commitments starts. The value is inclusive.
     // Starting from this block, the inclusion of (possibly null) commitments is enforced until the first non-null
     // commitment is mined. The chosen value should be at least 5 * dkgPhaseBlocks so that it starts right after the
     // finalization phase.
-    int dkgMiningWindowStart;
+    int dkgMiningWindowStart{0};
 
     // The ending block inside the DKG interval for when mining of commitments ends. The value is inclusive.
     // Choose a value so that miners have enough time to receive the commitment and mine it. Also take into consideration
@@ -93,31 +93,31 @@ struct LLMQParams {
     // be large enough so that other miners have a chance to produce a block containing a non-null commitment. The window
     // should at the same time not be too large so that not too much space is wasted with null commitments in case a DKG
     // session failed.
-    int dkgMiningWindowEnd;
+    int dkgMiningWindowEnd{0};
 
     // In the complaint phase, members will vote on other members being bad (missing valid contribution). If at least
     // dkgBadVotesThreshold have voted for another member to be bad, it will considered to be bad by all other members
     // as well. This serves as a protection against late-comers who send their contribution on the bring of
     // phase-transition, which would otherwise result in inconsistent views of the valid members set
-    int dkgBadVotesThreshold;
+    int dkgBadVotesThreshold{0};
 
     // Number of quorums to consider "active" for signing sessions
-    int signingActiveQuorumCount;
+    int signingActiveQuorumCount{0};
 
     // Used for intra-quorum communication. This is the number of quorums for which we should keep old connections.
     // For non-rotated quorums it should be at least one more than the active quorums set.
     // For rotated quorums it should be equal to 2 x active quorums set.
-    int keepOldConnections;
+    int keepOldConnections{0};
 
     // The number of quorums for which we should keep keys. Usually it's equal to signingActiveQuorumCount * 2.
     // Unlike for other quorum types we want to keep data (secret key shares and vvec)
     // for Platform quorums for much longer because Platform can be restarted and
     // it must be able to re-sign stuff.
 
-    int keepOldKeys;
+    int keepOldKeys{0};
 
     // How many members should we try to send all sigShares to before we give up.
-    int recoveryMembers;
+    int recoveryMembers{0};
 public:
     [[nodiscard]] constexpr int max_cycles(int quorums_count) const
     {

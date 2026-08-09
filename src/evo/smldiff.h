@@ -95,4 +95,7 @@ bool BuildSimplifiedMNListDiff(CDeterministicMNManager& dmnman, const Chainstate
                                const uint256& baseBlockHash, const uint256& blockHash, CSimplifiedMNListDiff& mnListDiffRet,
                                std::string& errorRet, bool extended = false) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 
+/** Whether a serving failure is caused by this node not retaining the requested block data. */
+bool IsBlockDataUnavailableError(const std::string& error);
+
 #endif // BITCOIN_EVO_SMLDIFF_H

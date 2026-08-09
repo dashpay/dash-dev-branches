@@ -544,7 +544,7 @@ bool NetDKG::AlreadyHave(const CInv& inv)
     case MSG_QUORUM_PREMATURE_COMMITMENT: {
         if (!IsQuorumDKGEnabled(m_sporkman)) return false;
         bool seen = false;
-        m_qdkgsman.ForEachHandler([&](CDKGSessionHandler& h) {
+        m_qdkgsman.ForEachHandler([&](const CDKGSessionHandler& h) {
             if (seen) return;
             if (h.pendingContributions.HasSeen(inv.hash) || h.pendingComplaints.HasSeen(inv.hash) ||
                 h.pendingJustifications.HasSeen(inv.hash) || h.pendingPrematureCommitments.HasSeen(inv.hash)) {
@@ -652,7 +652,7 @@ void NetDKG::PhaseHandlerThread(ActiveDKGSessionHandler& handler)
 }
 
 static void AddQuorumProbeConnections(const Consensus::LLMQParams& llmqParams, CConnman& connman,
-                                      CMasternodeMetaMan& mn_metaman, const CSporkManager& sporkman,
+                                      const CMasternodeMetaMan& mn_metaman, const CSporkManager& sporkman,
                                       const UtilParameters& util_params, const CDeterministicMNList& tip_mn_list,
                                       const uint256& myProTxHash)
 {

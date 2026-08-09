@@ -6,9 +6,9 @@
 
 CRangesSet::Range::Range() : CRangesSet::Range::Range(0, 0) {}
 
-CRangesSet::Range::Range(uint64_t begin, uint64_t end) :
-    begin(begin),
-    end(end)
+CRangesSet::Range::Range(uint64_t begin_in, uint64_t end_in) :
+    begin(begin_in),
+    end(end_in)
 {
 }
 
@@ -95,4 +95,3 @@ bool CRangesSet::Contains(uint64_t value) const noexcept
     --prev;
     return prev->begin <= value && prev->end > value;
 }
-

@@ -263,8 +263,8 @@ bool NetQuorum::ProcessContribQGETDATA(CDataStream& ssResponseData, const CQuoru
     return false;
 }
 
-bool NetQuorum::ProcessContribQDATA(CNode& pfrom, CDataStream& vRecv,
-                                    CQuorum& quorum, CQuorumDataRequest& request)
+bool NetQuorum::ProcessContribQDATA(const CNode& pfrom, CDataStream& vRecv,
+                                    CQuorum& quorum, const CQuorumDataRequest& request)
 {
     if (!(request.GetDataMask() & CQuorumDataRequest::ENCRYPTED_CONTRIBUTIONS)) {
         return true;

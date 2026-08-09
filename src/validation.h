@@ -56,6 +56,7 @@ class CTxMemPool;
 class TxValidationState;
 class CChainstateHelper;
 class ChainstateManager;
+enum class EvoDbIdentity;
 struct PrecomputedTransactionData;
 struct ChainTxData;
 struct DisconnectedBlockTransactions;
@@ -532,6 +533,11 @@ public:
                          CEvoDB& evoDb,
                          const std::unique_ptr<CChainstateHelper>& chain_helper,
                          std::optional<uint256> from_snapshot_blockhash = std::nullopt);
+
+    //! Return the stable EvoDB identity corresponding to this chainstate's coins DB.
+    ::EvoDbIdentity EvoDbIdentity() const;
+
+    std::string EvoDbInconsistencyMessage();
 
     /**
      * Initialize the CoinsViews UTXO set database management data structures. The in-memory
@@ -1039,6 +1045,9 @@ public:
     //! Is there a snapshot in use and has it been fully validated?
     bool IsSnapshotValidated() const EXCLUSIVE_LOCKS_REQUIRED(::cs_main) { return m_snapshot_validated; }
 
+    //! Whether active-state-dependent masternode duties must remain disabled.
+    bool IsSnapshotActiveAndUnvalidated() const;
+
     /**
      * Process an incoming block. This only returns after the best known valid
      * block is made active. Note that it does not, however, guarantee that the
@@ -1100,13 +1109,13 @@ public:
 
     //! When starting up, search the datadir for a chainstate based on a UTXO
     //! snapshot that is in the process of being validated.
-    bool DetectSnapshotChainstate(CTxMemPool* mempool) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
+    bool DetectSnapshotChainstate(CTxMemPool* mempool, bilingual_str& error) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 
     void ResetChainstates() EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 
     //! Switch the active chainstate to one based on a UTXO snapshot that was loaded
     //! previously.
-    Chainstate& ActivateExistingSnapshot(CTxMemPool* mempool, uint256 base_blockhash)
+    Chainstate* ActivateExistingSnapshot(CTxMemPool* mempool, uint256 base_blockhash)
         EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 
     ~ChainstateManager();
@@ -1150,6 +1159,16 @@ MnRewardEra GetMnRewardEraAfter(const CBlockIndex* pindexPrev, const ChainstateM
  * @returns empty if no assumeutxo configuration exists for the given height.
  */
 const AssumeutxoData* ExpectedAssumeutxo(const int height, const CChainParams& params);
+
+/**
+ * Remove a persisted snapshot chainstate's on-disk artifacts: its coins database
+ * and the base-blockhash file identifying it. Only valid while no snapshot
+ * Chainstate object exists, i.e. at startup before DetectSnapshotChainstate().
+ *
+ * @returns false only if a snapshot chainstate was found but could not be fully
+ *          removed; true when there was nothing to remove.
+ */
+bool DeleteSnapshotChainstateFromDisk() EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 
 /** Identifies blocks that overwrote an existing coinbase output in the UTXO set (see BIP30) */
 bool IsBIP30Repeat(const CBlockIndex& block_index);

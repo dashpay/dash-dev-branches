@@ -26,6 +26,7 @@ class CBlock;
 class CBlockIndex;
 class CBLSSignature;
 class CChain;
+class Chainstate;
 class ChainstateManager;
 class CDataStream;
 class CDeterministicMNManager;
@@ -44,10 +45,16 @@ using QcHashMap = std::map<Consensus::LLMQType, std::vector<uint256>>;
 //! As above, but keyed by quorumIndex, for rotation-enabled types.
 using QcIndexedHashMap = std::map<Consensus::LLMQType, std::map<int16_t, uint256>>;
 
+/** Erase a mined commitment unless another chainstate still contains its block. */
+bool EraseMinedCommitmentIfUnreferenced(CEvoDB& evo_db, const Chainstate& chainstate,
+                                        gsl::not_null<const CBlockIndex*> pindex,
+                                        Consensus::LLMQType llmq_type, const uint256& quorum_hash)
+    EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
+
 class CQuorumBlockProcessor
 {
 private:
-    const ChainstateManager& m_chainman;
+    ChainstateManager& m_chainman;
     CDeterministicMNManager& m_dmnman;
     CEvoDB& m_evoDb;
     CQuorumSnapshotManager& m_qsnapman;
@@ -58,7 +65,9 @@ private:
     std::map<std::pair<Consensus::LLMQType, uint256>, uint256> minableCommitmentsByQuorum GUARDED_BY(minableCommitmentsCs);
     std::map<uint256, CFinalCommitment> minableCommitments GUARDED_BY(minableCommitmentsCs);
 
-    mutable std::map<Consensus::LLMQType, Uint256LruHashMap<bool>> mapHasMinedCommitmentCache GUARDED_BY(minableCommitmentsCs);
+    // Cache the block in which a commitment was mined. Membership in a
+    // particular chain is checked on every call so reorgs need no cache flush.
+    mutable std::map<Consensus::LLMQType, Uint256LruHashMap<uint256>> mapMinedCommitmentBlockCache GUARDED_BY(minableCommitmentsCs);
 
     // Memoizes GetQcHashes(). The whole-result cache is keyed on the set of active
     // quorum base blocks, the LRU on those base-block hashes; neither key identifies
@@ -76,7 +85,7 @@ public:
     CQuorumBlockProcessor() = delete;
     CQuorumBlockProcessor(const CQuorumBlockProcessor&) = delete;
     CQuorumBlockProcessor& operator=(const CQuorumBlockProcessor&) = delete;
-    explicit CQuorumBlockProcessor(const ChainstateManager& chainman, CDeterministicMNManager& dmnman, CEvoDB& evoDb,
+    explicit CQuorumBlockProcessor(ChainstateManager& chainman, CDeterministicMNManager& dmnman, CEvoDB& evoDb,
                                    CQuorumSnapshotManager& qsnapman, int8_t bls_threads);
     ~CQuorumBlockProcessor();
 
@@ -97,9 +106,9 @@ public:
                                                          const ConsumeRequestFn& consume_request)
         EXCLUSIVE_LOCKS_REQUIRED(!minableCommitmentsCs);
 
-    bool ProcessBlock(const CBlock& block, gsl::not_null<const CBlockIndex*> pindex, BlockValidationState& state,
+    bool ProcessBlock(Chainstate& chainstate, const CBlock& block, gsl::not_null<const CBlockIndex*> pindex, BlockValidationState& state,
                       bool fJustCheck, bool fBLSChecks) EXCLUSIVE_LOCKS_REQUIRED(::cs_main, !minableCommitmentsCs, !m_qc_hashes_cache_mutex);
-    bool UndoBlock(const CBlock& block, gsl::not_null<const CBlockIndex*> pindex)
+    bool UndoBlock(const Chainstate& chainstate, const CBlock& block, gsl::not_null<const CBlockIndex*> pindex)
         EXCLUSIVE_LOCKS_REQUIRED(::cs_main, !minableCommitmentsCs, !m_qc_hashes_cache_mutex);
 
     //! it returns hash of commitment if it should be relay, otherwise nullopt
@@ -114,6 +123,8 @@ public:
         EXCLUSIVE_LOCKS_REQUIRED(::cs_main, !minableCommitmentsCs);
     bool HasMinedCommitment(Consensus::LLMQType llmqType, const uint256& quorumHash) const
         EXCLUSIVE_LOCKS_REQUIRED(!minableCommitmentsCs);
+    bool HasMinedCommitment(Consensus::LLMQType llmqType, const uint256& quorumHash, const CChain& chain) const
+        EXCLUSIVE_LOCKS_REQUIRED(::cs_main, !minableCommitmentsCs);
     std::pair<CFinalCommitment, uint256> GetMinedCommitment(Consensus::LLMQType llmqType, const uint256& quorumHash) const;
 
     /**
@@ -138,10 +149,14 @@ private:
     void DropQcHashesCache() EXCLUSIVE_LOCKS_REQUIRED(!m_qc_hashes_cache_mutex);
 
     static bool GetCommitmentsFromBlock(const CBlock& block, gsl::not_null<const CBlockIndex*> pindex, std::multimap<Consensus::LLMQType, CFinalCommitment>& ret, BlockValidationState& state) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
-    bool ProcessCommitment(int nHeight, const uint256& blockHash, const CFinalCommitment& qc, BlockValidationState& state,
+    bool ProcessCommitment(Chainstate& chainstate, int nHeight, const uint256& blockHash, const CFinalCommitment& qc, BlockValidationState& state,
                            bool fJustCheck) EXCLUSIVE_LOCKS_REQUIRED(::cs_main, !minableCommitmentsCs, !m_qc_hashes_cache_mutex);
-    size_t GetNumCommitmentsRequired(const Consensus::LLMQParams& llmqParams, int nHeight) const
+public:
+    // Public for multi-chainstate accounting tests and callers which validate
+    // against a chainstate other than the active one.
+    size_t GetNumCommitmentsRequired(const Consensus::LLMQParams& llmqParams, const CChain& chain, int nHeight) const
         EXCLUSIVE_LOCKS_REQUIRED(::cs_main, !minableCommitmentsCs);
+private:
     static uint256 GetQuorumBlockHash(const Consensus::LLMQParams& llmqParams, const CChain& active_chain, int nHeight, int quorumIndex) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 };
 } // namespace llmq

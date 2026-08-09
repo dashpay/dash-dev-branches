@@ -12,8 +12,6 @@
 
 constexpr uint8_t DB_TIMESTAMPINDEX{'s'};
 
-std::unique_ptr<TimestampIndex> g_timestampindex;
-
 TimestampIndex::DB::DB(size_t n_cache_size, bool f_memory, bool f_wipe) :
     BaseIndex::DB(gArgs.GetDataDirNet() / "indexes" / "timestampindex", n_cache_size, f_memory, f_wipe)
 {
@@ -24,7 +22,7 @@ bool TimestampIndex::DB::Write(const CTimestampIndexKey& key)
     return CDBWrapper::Write(std::make_pair(DB_TIMESTAMPINDEX, key), true);
 }
 
-bool TimestampIndex::DB::ReadRange(uint32_t high, uint32_t low, std::vector<uint256>& hashes)
+void TimestampIndex::DB::ReadRange(uint32_t high, uint32_t low, std::vector<uint256>& hashes)
 {
     std::unique_ptr<CDBIterator> pcursor(NewIterator());
 
@@ -41,8 +39,6 @@ bool TimestampIndex::DB::ReadRange(uint32_t high, uint32_t low, std::vector<uint
             break;
         }
     }
-
-    return true;
 }
 
 bool TimestampIndex::DB::EraseTimestampIndex(const CTimestampIndexKey& key)
@@ -93,7 +89,7 @@ bool TimestampIndex::CustomRewind(const interfaces::BlockKey& current_tip, const
 
 BaseIndex::DB& TimestampIndex::GetDB() const { return *m_db; }
 
-bool TimestampIndex::GetBlockHashes(uint32_t high, uint32_t low, std::vector<uint256>& hashes) const
+void TimestampIndex::GetBlockHashes(uint32_t high, uint32_t low, std::vector<uint256>& hashes) const
 {
-    return m_db->ReadRange(high, low, hashes);
+    m_db->ReadRange(high, low, hashes);
 }

@@ -542,7 +542,7 @@ void RegisterCoinJoinRPCCommands(CRPCTable& t)
 #endif // ENABLE_WALLET
     ) {
         for (const auto& command : commands_wallet) {
-            tableRPC.appendCommand(command.name, &command);
+            t.appendCommand(command.name, &command);
         }
     }
 }

@@ -378,6 +378,23 @@ bool BlockAssembler::TestPackageTransactions(const CTxMemPool::setEntries& packa
             return false;
         }
 
+        // A special transaction that was valid when it entered the mempool can be invalidated by
+        // intervening state, most sharply by a fork activating a rule it violates, and nothing
+        // evicts it. Selection otherwise trusts mempool validity, so the entry would be picked into
+        // every template and TestBlockValidity would then reject the whole block, leaving an honest
+        // miner unable to produce one at all. Recheck here, at package granularity: the caller adds
+        // every member of a package that passes, so dropping one member while keeping its
+        // descendants would itself yield an invalid template. check_sigs is off because signatures
+        // were verified on entry and cannot have changed; note CheckMNHFTx() verifies its quorum
+        // signature regardless, which is cheap enough here given how rare MNHF signals are.
+        if (it->GetTx().IsSpecialTxVersion()) {
+            TxValidationState tx_state;
+            if (!m_chain_helper.special_tx->CheckSpecialTx(it->GetTx(), m_chainstate.m_chain.Tip(),
+                                                           m_chainstate.CoinsTip(), /*check_sigs=*/false, tx_state)) {
+                return false;
+            }
+        }
+
         const auto& txid = it->GetTx().GetHash();
         if (!m_isman.IsInstantSendEnabled() || m_isman.IsLocked(txid)) {
             continue;
@@ -473,7 +490,7 @@ void BlockAssembler::addPackageTxs(const CTxMemPool& mempool, int& nPackagesSele
     }
 
     // This map with signals is used only to find duplicates
-    std::unordered_map<uint8_t, int> signals = m_chain_helper.ehf_manager->GetSignalsStage(pindexPrev);
+    auto signals = m_chain_helper.ehf_manager->GetSignalsStage(pindexPrev);
 
     // mapModifiedTx will store sorted packages after they are modified
     // because some of their txs are already in the block

@@ -95,7 +95,7 @@ template <typename T,
 inline constexpr auto enumerate(T && iterable)
 {
     struct iterator {
-        size_t i;
+        size_t i{0};
         TIter iter;
         bool operator!=(const iterator& other) const { return iter != other.iter; }
         void operator++()

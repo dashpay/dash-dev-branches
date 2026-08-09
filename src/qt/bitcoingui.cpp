@@ -883,7 +883,7 @@ void BitcoinGUI::setClientModel(ClientModel *_clientModel, interfaces::BlockAndH
         connect(_clientModel, &ClientModel::networkActiveChanged, this, &BitcoinGUI::setNetworkActive);
 
         modalOverlay->setKnownBestHeight(tip_info->header_height, QDateTime::fromSecsSinceEpoch(tip_info->header_time));
-        setNumBlocks(tip_info->block_height, QDateTime::fromSecsSinceEpoch(tip_info->block_time), QString::fromStdString(tip_info->block_hash.ToString()), tip_info->verification_progress, false, SynchronizationState::INIT_DOWNLOAD);
+        setNumBlocks(tip_info->block_height, QDateTime::fromSecsSinceEpoch(tip_info->block_time), QString::fromStdString(tip_info->block_hash.ToString()), tip_info->verification_progress, SyncType::BLOCK_SYNC, SynchronizationState::INIT_DOWNLOAD);
         connect(_clientModel, &ClientModel::numBlocksChanged, this, &BitcoinGUI::setNumBlocks);
 
         connect(_clientModel, &ClientModel::additionalDataSyncProgressChanged, this, &BitcoinGUI::setAdditionalDataSyncProgress);
@@ -1399,7 +1399,7 @@ void BitcoinGUI::updateNetworkState()
     }
 
     if (fNetworkBecameActive || fNetworkBecameInactive) {
-        setNumBlocks(m_node.getNumBlocks(), QDateTime::fromSecsSinceEpoch(m_node.getLastBlockTime()), QString::fromStdString(m_node.getLastBlockHash()), m_node.getVerificationProgress(), false, SynchronizationState::INIT_DOWNLOAD);
+        setNumBlocks(m_node.getNumBlocks(), QDateTime::fromSecsSinceEpoch(m_node.getLastBlockTime()), QString::fromStdString(m_node.getLastBlockHash()), m_node.getVerificationProgress(), SyncType::BLOCK_SYNC, SynchronizationState::INIT_DOWNLOAD);
     }
 
     nCountPrev = count;
@@ -1589,7 +1589,7 @@ void BitcoinGUI::updateWidth()
     resize(std::max(width(), nWidth), height());
 }
 
-void BitcoinGUI::setNumBlocks(int count, const QDateTime& blockDate, const QString& blockHash, double nVerificationProgress, bool header, SynchronizationState sync_state)
+void BitcoinGUI::setNumBlocks(int count, const QDateTime& blockDate, const QString& blockHash, double nVerificationProgress, SyncType synctype, SynchronizationState sync_state)
 {
 #ifdef Q_OS_MACOS
     // Disabling macOS App Nap on initial sync, disk, reindex operations and mixing.
@@ -1610,7 +1610,7 @@ void BitcoinGUI::setNumBlocks(int count, const QDateTime& blockDate, const QStri
 
     if (modalOverlay)
     {
-        if (header)
+        if (synctype != SyncType::BLOCK_SYNC)
             modalOverlay->setKnownBestHeight(count, blockDate);
         else
             modalOverlay->tipUpdate(count, blockDate, nVerificationProgress);
@@ -1628,7 +1628,7 @@ void BitcoinGUI::setNumBlocks(int count, const QDateTime& blockDate, const QStri
     BlockSource blockSource{clientModel->getBlockSource()};
     switch (blockSource) {
         case BlockSource::NETWORK:
-            if (header) {
+            if (synctype == SyncType::HEADER_SYNC) {
                 updateHeadersSyncProgressLabel();
                 return;
             }
@@ -1636,14 +1636,14 @@ void BitcoinGUI::setNumBlocks(int count, const QDateTime& blockDate, const QStri
             updateHeadersSyncProgressLabel();
             break;
         case BlockSource::DISK:
-            if (header) {
+            if (synctype != SyncType::BLOCK_SYNC) {
                 progressBarLabel->setText(tr("Indexing blocks on disk…"));
             } else {
                 progressBarLabel->setText(tr("Processing blocks on disk…"));
             }
             break;
         case BlockSource::NONE:
-            if (header) {
+            if (synctype != SyncType::BLOCK_SYNC) {
                 return;
             }
             progressBarLabel->setText(tr("Connecting to peers…"));
@@ -1710,7 +1710,7 @@ void BitcoinGUI::setAdditionalDataSyncProgress(double nSyncProgress)
 
     // If masternodeSync->Reset() has been called make sure status bar shows the correct information.
     if (nSyncProgress == -1) {
-        setNumBlocks(m_node.getNumBlocks(), QDateTime::fromSecsSinceEpoch(m_node.getLastBlockTime()), QString::fromStdString(m_node.getLastBlockHash()), m_node.getVerificationProgress(), false, SynchronizationState::INIT_DOWNLOAD);
+        setNumBlocks(m_node.getNumBlocks(), QDateTime::fromSecsSinceEpoch(m_node.getLastBlockTime()), QString::fromStdString(m_node.getLastBlockHash()), m_node.getVerificationProgress(), SyncType::BLOCK_SYNC, SynchronizationState::INIT_DOWNLOAD);
         if (clientModel->getNumConnections()) {
             labelBlocksIcon->show();
             startSpinner();

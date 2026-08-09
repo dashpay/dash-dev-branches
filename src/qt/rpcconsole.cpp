@@ -36,10 +36,6 @@
 #include <univalue.h>
 
 #ifdef ENABLE_WALLET
-#ifdef USE_BDB
-#include <wallet/bdb.h>
-#endif
-#include <wallet/db.h>
 #include <wallet/walletutil.h>
 #endif
 
@@ -782,7 +778,7 @@ void RPCConsole::setClientModel(ClientModel *model, int bestblock_height, int64_
 
         // Provide initial values
         ui->informationWidget->setNumBlocks(/*count=*/bestblock_height, QDateTime::fromSecsSinceEpoch(bestblock_date), QString::fromStdString(bestblock_hash.ToString()),
-                                            verification_progress, /*headers=*/false);
+                                            verification_progress, SyncType::BLOCK_SYNC);
 
         //Setup autocomplete and attach it
         QStringList wordList;

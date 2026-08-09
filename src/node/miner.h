@@ -208,7 +208,7 @@ private:
       * Increments nPackagesSelected / nDescendantsUpdated with corresponding
       * statistics from the package selection (for logging statistics). */
     void addPackageTxs(const CTxMemPool& mempool, int& nPackagesSelected, int& nDescendantsUpdated,
-                       const CBlockIndex* pindexPrev) EXCLUSIVE_LOCKS_REQUIRED(mempool.cs);
+                       const CBlockIndex* pindexPrev) EXCLUSIVE_LOCKS_REQUIRED(::cs_main, mempool.cs);
 
     // helper functions for addPackageTxs()
     /** Remove confirmed (inBlock) entries from given set */
@@ -219,7 +219,7 @@ private:
       * locktime
       * These checks should always succeed, and they're here
       * only as an extra check in case of suboptimal node configuration */
-    bool TestPackageTransactions(const CTxMemPool::setEntries& package) const;
+    bool TestPackageTransactions(const CTxMemPool::setEntries& package) const EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
     /** Sort the package in an order that is valid to appear in a block */
     void SortForBlock(const CTxMemPool::setEntries& package, std::vector<CTxMemPool::txiter>& sortedEntries);
 };

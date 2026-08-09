@@ -19,6 +19,11 @@ class UniValue;
 /** Maximum entries that can be stored in an ExtNetInfo per purpose code */
 static constexpr uint8_t MAX_ENTRIES_EXTNETINFO{4};
 
+/** Maximum possible length of an ASCII FQDN (RFC 1035). Applied at the
+ *  serialization layer so oversized CompactSize claims are rejected before
+ *  allocate-and-zero; ValidateDomain enforces the same ceiling after decode. */
+static constexpr size_t DOMAIN_MAX_LEN{253};
+
 enum class NetInfoStatus : uint8_t {
     // Managing entries
     BadInput,
@@ -170,7 +175,7 @@ public:
 
     SERIALIZE_METHODS(DomainPort, obj)
     {
-        READWRITE(obj.m_addr);
+        READWRITE(LIMITED_STRING(obj.m_addr, DOMAIN_MAX_LEN));
         READWRITE(Using<BigEndianFormatter<2>>(obj.m_port));
     }
 
@@ -246,11 +251,14 @@ public:
                 if (!service.IsValid()) { Clear(); } // Invalid CService, mark as invalid
             } catch (const std::ios_base::failure&) { Clear(); } // Deser failed, mark as invalid
         } else if (m_type == NetInfoType::Domain) {
-            try {
-                auto& domain{m_data.emplace<DomainPort>()};
-                s >> domain;
-                if (!domain.IsValid()) { Clear(); } // Invalid DomainPort, mark as invalid
-            } catch (const std::ios_base::failure&) { Clear(); } // Deser failed, mark as invalid
+            // Do not swallow deserialization failures: a short/oversized domain
+            // body would otherwise leave the stream position unmoved (or only
+            // advanced by CompactSize) while the enclosing vector loop continues,
+            // amplifying a few attacker bytes into repeated allocations.
+            // Propagate ios_base::failure so the whole ProTx payload is rejected.
+            auto& domain{m_data.emplace<DomainPort>()};
+            s >> domain;
+            if (!domain.IsValid()) { Clear(); } // Invalid DomainPort, mark as invalid
         } else { Clear(); } // Invalid type code, mark as invalid
     }
 
@@ -325,6 +333,7 @@ public:
         }
     }
 
+    // cppcheck-suppress functionStatic
     void Serialize(CSizeComputer& s) const
     {
         s.seek(::GetSerializeSize(CService{}, s.GetVersion()));
@@ -375,10 +384,10 @@ private:
     bool IsAddrPortDuplicate(const NetInfoEntry& candidate) const;
 
     /** Returns true if there are addr duplicates within a given address list */
-    bool HasAddrDuplicates(const NetInfoList& entries) const;
+    static bool HasAddrDuplicates(const NetInfoList& entries);
 
     /** Returns true if candidate is an addr duplicate within a given address list */
-    bool IsAddrDuplicate(const NetInfoEntry& candidate, const NetInfoList& entries) const;
+    static bool IsAddrDuplicate(const NetInfoEntry& candidate, const NetInfoList& entries);
 
     /** Validate uniqueness requirements and add to object if passed */
     NetInfoStatus ProcessCandidate(const NetInfoPurpose purpose, const NetInfoEntry& candidate);

@@ -236,6 +236,16 @@ public:
                     member.get(state) = member.get(b);
                     fields |= member.mask;
                 }
+            } else if constexpr (BaseType::mask == Field_pubKeyOperator) {
+                // CBLSLazyPublicKey::operator== compares the underlying key and ignores its BLS
+                // encoding, but a scheme migration re-encodes the same key (legacy->basic). That must
+                // be captured in the diff -- GetHash() is scheme-dependent -- or a diff-reconstructed
+                // list keeps the old encoding while an online-built list has the new one, and the two
+                // diverge (mnUniquePropertyMap included).
+                if (member.get(a).GetHash() != member.get(b).GetHash()) {
+                    member.get(state) = member.get(b);
+                    fields |= member.mask;
+                }
             } else {
                 if (member.get(a) != member.get(b)) {
                     member.get(state) = member.get(b);

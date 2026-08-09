@@ -255,7 +255,7 @@ bool CZMQPublishHashChainLockNotifier::NotifyChainLock(const CBlockIndex *pindex
 {
     uint256 hash = pindex->GetBlockHash();
     LogPrint(BCLog::ZMQ, "Publish hashchainlock %s to %s\n", hash.GetHex(), this->address);
-    char data[32];
+    uint8_t data[32];
     for (unsigned int i = 0; i < 32; i++)
         data[31 - i] = hash.begin()[i];
     return SendZmqMessage(MSG_HASHCHAINLOCK, data, 32);
@@ -276,7 +276,7 @@ bool CZMQPublishHashTransactionLockNotifier::NotifyTransactionLock(const CTransa
 {
     uint256 hash = transaction->GetHash();
     LogPrint(BCLog::ZMQ, "Publish hashtxlock %s to %s\n", hash.GetHex(), this->address);
-    char data[32];
+    uint8_t data[32];
     for (unsigned int i = 0; i < 32; i++)
         data[31 - i] = hash.begin()[i];
     return SendZmqMessage(MSG_HASHTXLOCK, data, 32);
@@ -286,7 +286,7 @@ bool CZMQPublishHashGovernanceVoteNotifier::NotifyGovernanceVote(const std::shar
 {
     uint256 hash = vote->GetHash();
     LogPrint(BCLog::ZMQ, "Publish hashgovernancevote %s to %s\n", hash.GetHex(), this->address);
-    char data[32];
+    uint8_t data[32];
     for (unsigned int i = 0; i < 32; i++)
         data[31 - i] = hash.begin()[i];
     return SendZmqMessage(MSG_HASHGVOTE, data, 32);
@@ -296,7 +296,7 @@ bool CZMQPublishHashGovernanceObjectNotifier::NotifyGovernanceObject(const std::
 {
     uint256 hash = object->GetHash();
     LogPrint(BCLog::ZMQ, "Publish hashgovernanceobject %s to %s\n", hash.GetHex(), this->address);
-    char data[32];
+    uint8_t data[32];
     for (unsigned int i = 0; i < 32; i++)
         data[31 - i] = hash.begin()[i];
     return SendZmqMessage(MSG_HASHGOBJ, data, 32);
@@ -306,7 +306,7 @@ bool CZMQPublishHashInstantSendDoubleSpendNotifier::NotifyInstantSendDoubleSpend
 {
     uint256 currentHash = currentTx->GetHash(), previousHash = previousTx->GetHash();
     LogPrint(BCLog::ZMQ, "Publish hashinstantsenddoublespend %s conflicts against %s to %s\n", currentHash.ToString(), previousHash.ToString(), this->address);
-    char dataCurrentHash[32], dataPreviousHash[32];
+    uint8_t dataCurrentHash[32], dataPreviousHash[32];
     for (unsigned int i = 0; i < 32; i++) {
         dataCurrentHash[31 - i] = currentHash.begin()[i];
         dataPreviousHash[31 - i] = previousHash.begin()[i];
@@ -318,7 +318,7 @@ bool CZMQPublishHashInstantSendDoubleSpendNotifier::NotifyInstantSendDoubleSpend
 bool CZMQPublishHashRecoveredSigNotifier::NotifyRecoveredSig(const std::shared_ptr<const llmq::CRecoveredSig> &sig)
 {
     LogPrint(BCLog::ZMQ, "Publish hashrecoveredsig %s to %s\n", sig->getMsgHash().ToString(), this->address);
-    char data[32];
+    uint8_t data[32];
     for (unsigned int i = 0; i < 32; i++)
         data[31 - i] = sig->getMsgHash().begin()[i];
     return SendZmqMessage(MSG_HASHRECSIG, data, 32);

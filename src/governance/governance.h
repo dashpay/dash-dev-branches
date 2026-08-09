@@ -21,7 +21,6 @@
 
 class CBloomFilter;
 class CBlockIndex;
-class CConnman;
 class CDataStream;
 class CDeterministicMNList;
 class CDeterministicMNManager;
@@ -313,7 +312,7 @@ public:
      */
     bool ConfirmInventoryRequest(const CInv& inv)
         EXCLUSIVE_LOCKS_REQUIRED(!cs_store);
-    bool ProcessVoteAndRelay(const CGovernanceVote& vote, CGovernanceException& exception, CConnman& connman)
+    bool ProcessVoteAndRelay(const CGovernanceVote& vote, CGovernanceException& exception)
         EXCLUSIVE_LOCKS_REQUIRED(!cs_store, !cs_relay);
     void RelayObject(const CGovernanceObject& obj)
         EXCLUSIVE_LOCKS_REQUIRED(!cs_relay);

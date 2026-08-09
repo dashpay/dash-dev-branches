@@ -30,7 +30,9 @@ jobs:
     runs-on: ${{ inputs.runs-on }}
     container:
       image: ${{ inputs.container-path }}
-      options: --user root
+      # SYS_PTRACE is required by LeakSanitizer's stop-the-world
+      # (https://github.com/google/sanitizers/issues/764)
+      options: --user root --cap-add SYS_PTRACE
     steps:
       - name: Checkout code
         uses: actions/checkout@v6

@@ -65,7 +65,7 @@ private:
 
     mutable Mutex contributionsCacheCs;
     struct ContributionsCacheKey {
-        Consensus::LLMQType llmqType;
+        Consensus::LLMQType llmqType{Consensus::LLMQType::LLMQ_NONE};
         uint256 quorumHash;
         uint256 proTxHash;
         bool operator<(const ContributionsCacheKey& r) const

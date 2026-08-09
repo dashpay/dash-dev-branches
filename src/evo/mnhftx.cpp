@@ -11,6 +11,7 @@
 #include <llmq/quorumsman.h>
 #include <llmq/signhash.h>
 #include <node/blockstorage.h>
+#include <shutdown.h>
 #include <util/std23.h>
 
 #include <chain.h>
@@ -103,7 +104,9 @@ bool MNHFTxPayload::IsTriviallyValid(TxValidationState& state) const
     return true;
 }
 
-bool CheckMNHFTx(const ChainstateManager& chainman, const llmq::CQuorumManager& qman, const CTransaction& tx, const CBlockIndex* pindexPrev, TxValidationState& state)
+template <typename GetQuorum>
+static bool CheckMNHFTxImpl(const ChainstateManager& chainman, GetQuorum&& get_quorum,
+                            const CTransaction& tx, const CBlockIndex* pindexPrev, TxValidationState& state)
 {
     if (!tx.IsSpecialTxVersion() || tx.nType != TRANSACTION_MNHF_SIGNAL) {
         return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-mnhf-type");
@@ -141,7 +144,7 @@ bool CheckMNHFTx(const ChainstateManager& chainman, const llmq::CQuorumManager& 
     const uint256 msgHash = tx_copy.GetHash();
 
     const Consensus::LLMQType llmqType = Params().GetConsensus().llmqTypeMnhf;
-    const auto quorum = qman.GetQuorum(llmqType, mnhfTx.signal.quorumHash);
+    const auto quorum = get_quorum(llmqType, mnhfTx.signal.quorumHash);
     if (!quorum) {
         return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-mnhf-missing-quorum");
     }
@@ -152,6 +155,23 @@ bool CheckMNHFTx(const ChainstateManager& chainman, const llmq::CQuorumManager& 
     }
 
     return true;
+}
+
+bool CheckMNHFTx(const ChainstateManager& chainman, const llmq::CQuorumManager& qman,
+                 const CTransaction& tx, const CBlockIndex* pindexPrev, TxValidationState& state)
+{
+    return CheckMNHFTxImpl(chainman, [&](Consensus::LLMQType llmq_type, const uint256& quorum_hash) {
+        return qman.GetQuorum(llmq_type, quorum_hash);
+    }, tx, pindexPrev, state);
+}
+
+bool CheckMNHFTx(const ChainstateManager& chainman, const llmq::CQuorumManager& qman, const CChain& chain,
+                 const CTransaction& tx, const CBlockIndex* pindexPrev, TxValidationState& state)
+{
+    AssertLockHeld(::cs_main);
+    return CheckMNHFTxImpl(chainman, [&](Consensus::LLMQType llmq_type, const uint256& quorum_hash) NO_THREAD_SAFETY_ANALYSIS {
+        return qman.GetQuorum(llmq_type, quorum_hash, chain);
+    }, tx, pindexPrev, state);
 }
 
 std::optional<uint8_t> extractEHFSignal(const CTransaction& tx)
@@ -230,6 +250,11 @@ std::optional<CMNHFManager::Signals> CMNHFManager::ProcessBlock(const CBlock& bl
 
         AddToCache(signals, pindex);
         return signals;
+    } catch (const EvoDbInconsistencyError& e) {
+        // Local EvoDB corruption (the node is already aborting): fail with
+        // M_ERROR so the block is not marked invalid.
+        state.Error(e.what());
+        return std::nullopt;
     } catch (const std::exception& e) {
         LogPrintf("CMNHFManager::ProcessBlock -- failed: %s\n", e.what());
         state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "failed-proc-mnhf-inblock");
@@ -283,6 +308,11 @@ CMNHFManager::Signals CMNHFManager::GetForBlock(const CBlockIndex* pindex)
         signalsTmp = ProcessBlock(block, pindex_top, false, state);
         if (!signalsTmp.has_value()) {
             LogPrintf("%s: process block failed due to %s\n", __func__, state.ToString());
+            if (state.IsError()) {
+                // Preserve the EvoDB-inconsistency classification so callers'
+                // typed catches do not misreport this as a consensus failure.
+                throw EvoDbInconsistencyError(state.ToString());
+            }
             throw std::runtime_error("failed-getehfforblock-construct");
         }
 
@@ -336,13 +366,21 @@ void CMNHFManager::AddToCache(const Signals& signals, const CBlockIndex* const p
 {
     assert(pindex != nullptr);
     const uint256& blockHash = pindex->GetBlockHash();
+    if (DeploymentActiveAt(*pindex, m_chainman.GetConsensus(), Consensus::DEPLOYMENT_V20) &&
+        !m_evoDb.WriteDerived(std::make_pair(DB_SIGNALS_v2, blockHash), signals)) {
+        // A mismatch is local EvoDB corruption, not a statement about the
+        // block. Abort here: some callers (miner, RPC) never pass through a
+        // validation-state catch, and the block-connect catches must not
+        // translate this into a consensus rejection.
+        const std::string msg = strprintf("CMNHFManager::%s -- EvoDB MNHF state mismatch for block %s",
+                                          __func__, blockHash.ToString());
+        AbortNode(msg);
+        throw EvoDbInconsistencyError(msg);
+    }
     {
         LOCK(cs_cache);
         mnhfCache.insert(blockHash, signals);
     }
-    if (!DeploymentActiveAt(*pindex, m_chainman.GetConsensus(), Consensus::DEPLOYMENT_V20)) return;
-
-    m_evoDb.Write(std::make_pair(DB_SIGNALS_v2, blockHash), signals);
 }
 
 void CMNHFManager::AddSignal(const CBlockIndex* const pindex, int bit)

@@ -67,6 +67,12 @@ SimpleUTXOMap BuildSimpleUtxoMap(const std::vector<CTransactionRef>& txs)
 SimpleUTXOMap FundTransaction(const ChainstateManager& chainman, CMutableTransaction& tx, SimpleUTXOMap& utxos,
                               const CScript& script_payout, CAmount amount)
 {
+    return FundTransaction(chainman, tx, utxos, script_payout, amount, /*script_change=*/script_payout);
+}
+
+SimpleUTXOMap FundTransaction(const ChainstateManager& chainman, CMutableTransaction& tx, SimpleUTXOMap& utxos,
+                              const CScript& script_payout, CAmount amount, const CScript& script_change)
+{
     CAmount change;
     auto inputs = WITH_LOCK(::cs_main, return SelectUTXOs(chainman.ActiveChain(), utxos, amount, change));
     for (const auto& input : inputs) {
@@ -74,7 +80,7 @@ SimpleUTXOMap FundTransaction(const ChainstateManager& chainman, CMutableTransac
     }
     tx.vout.emplace_back(amount, script_payout);
     if (change != 0) {
-        tx.vout.emplace_back(change, script_payout);
+        tx.vout.emplace_back(change, script_change);
     }
     return inputs;
 }

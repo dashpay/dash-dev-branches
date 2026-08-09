@@ -65,7 +65,4 @@ public:
     bool GetSpentInfo(const CSpentIndexKey& key, CSpentIndexValue& value) const;
 };
 
-/// Global SpentIndex instance
-extern std::unique_ptr<SpentIndex> g_spentindex;
-
 #endif // BITCOIN_INDEX_SPENTINDEX_H

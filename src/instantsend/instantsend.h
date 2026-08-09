@@ -32,7 +32,7 @@ typedef std::shared_ptr<const CTransaction> CTransactionRef;
 namespace instantsend {
 
 struct PendingISLockFromPeer {
-    NodeId node_id;
+    NodeId node_id{0};
     InstantSendLockPtr islock;
 };
 
@@ -71,7 +71,7 @@ private:
     // TXs which are neither IS locked nor ChainLocked. We use this to determine for which TXs we need to retry IS
     // locking of child TXs
     struct NonLockedTxInfo {
-        const CBlockIndex* pindexMined;
+        const CBlockIndex* pindexMined{nullptr};
         CTransactionRef tx;
         Uint256HashSet children;
     };

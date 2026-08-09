@@ -19,8 +19,6 @@
 
 constexpr uint8_t DB_SPENTINDEX{'p'};
 
-std::unique_ptr<SpentIndex> g_spentindex;
-
 SpentIndex::DB::DB(size_t n_cache_size, bool f_memory, bool f_wipe) :
     BaseIndex::DB(gArgs.GetDataDirNet() / "indexes" / "spentindex", n_cache_size, f_memory, f_wipe)
 {

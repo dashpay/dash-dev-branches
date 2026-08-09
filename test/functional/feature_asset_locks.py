@@ -45,6 +45,7 @@ from test_framework.util import (
 from test_framework.wallet_util import bytes_to_wif
 
 llmq_type_test = 106 # LLMQType::LLMQ_TEST_PLATFORM
+MNEHF_SIGNAL_TX_TYPE = 7 # TRANSACTION_MNHF_SIGNAL
 tiny_amount = int(Decimal("0.0007") * COIN)
 blocks_in_one_day = 100
 HEIGHT_DIFF_EXPIRING = 48
@@ -175,9 +176,13 @@ class AssetLocksTest(DashTestFramework):
         return expected
 
     def check_mempool_size(self):
+        # Masternodes submit the MnEHF signal transaction on their own as soon as a quorum
+        # able to sign it exists, so it is not part of what this test puts in the mempool.
         self.sync_mempools()
         for node in self.nodes:
-            assert_equal(node.getmempoolinfo()['size'], self.mempool_size)
+            own = [txid for txid in node.getrawmempool()
+                   if node.getrawtransaction(txid, 1)['type'] != MNEHF_SIGNAL_TX_TYPE]
+            assert_equal(len(own), self.mempool_size)
 
     def check_mempool_result(self, result_expected, tx):
         """Wrapper to check result of testmempoolaccept on node_0's mempool"""

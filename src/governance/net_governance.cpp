@@ -175,11 +175,6 @@ void NetGovernance::ProcessMessage(CNode& peer, const std::string& msg_type, CDa
 
         uint256 nHash = govobj.GetHash();
 
-        if (!m_node_sync.IsBlockchainSynced()) {
-            LogPrint(BCLog::GOBJECT, "MNGOVERNANCEOBJECT -- masternode list not synced\n");
-            return;
-        }
-
         std::string strHash = nHash.ToString();
 
         LogPrint(BCLog::GOBJECT, "MNGOVERNANCEOBJECT -- Received object: %s\n", strHash);

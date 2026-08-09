@@ -2151,20 +2151,13 @@ class DashTestFramework(BitcoinTestFramework):
 
         self.wait_until(check_dkg_session, timeout=timeout, sleep=sleep)
 
-    def node_has_quorum_commitment(self, node, quorum_hash, llmq_type):
+    def node_quorum_commitment_types(self, node, quorum_hash):
         s = node.quorum("dkgstatus")
-        if "minableCommitments" not in s:
-            return False
-        commits = s["minableCommitments"]
-        for c in commits:
-            if c["llmqType"] != llmq_type:
-                continue
-            if c["quorumHash"] != quorum_hash:
-                continue
-            if c["quorumPublicKey"] == '0' * 96:
-                continue
-            return True
-        return False
+        return {c["llmqType"] for c in s.get("minableCommitments", [])
+                if c["quorumHash"] == quorum_hash and c["quorumPublicKey"] != '0' * 96}
+
+    def node_has_quorum_commitment(self, node, quorum_hash, llmq_type):
+        return llmq_type in self.node_quorum_commitment_types(node, quorum_hash)
 
     def wait_for_quorum_commitment(self, quorum_hash, mninfos, llmq_type=100, timeout=15):
         def check_dkg_comitments():
@@ -2174,6 +2167,20 @@ class DashTestFramework(BitcoinTestFramework):
             return True
 
         self.wait_until(check_dkg_comitments, timeout=timeout)
+
+    def wait_for_quorum_commitments_on_miner(self, quorum_hash, mninfos, timeout=15):
+        # The final-commitment block carries a commitment for every llmq type whose mining
+        # window is open, so a commitment that has not reached the mining node in time is
+        # mined as a null one and its quorum is silently skipped for the whole cycle. Only
+        # commitments the masternodes actually produced are awaited, so a type whose DKG
+        # legitimately produced nothing does not hold this up.
+        def check_miner_commitments():
+            expected = set()
+            for mn in mninfos:
+                expected |= self.node_quorum_commitment_types(mn.get_node(self), quorum_hash)
+            return expected <= self.node_quorum_commitment_types(self.nodes[0], quorum_hash)
+
+        self.wait_until(check_miner_commitments, timeout=timeout)
 
     def wait_for_quorum_list(self, quorum_hash, nodes, timeout=15, llmq_type_name="llmq_test"):
         def wait_func():
@@ -2285,8 +2292,8 @@ class DashTestFramework(BitcoinTestFramework):
         self.log.info("Waiting final commitment")
         self.wait_for_quorum_commitment(q, mninfos_online, llmq_type=llmq_type)
 
-        self.log.info("Waiting final commitment on mining node")
-        self.wait_until(lambda: self.node_has_quorum_commitment(self.nodes[0], q, llmq_type), timeout=15)
+        self.log.info("Waiting final commitments on mining node")
+        self.wait_for_quorum_commitments_on_miner(q, mninfos_online)
 
         self.log.info("Mining final commitment")
         self.bump_mocktime(1)

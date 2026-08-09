@@ -20,6 +20,7 @@
 #include <node/mempool_args.h>
 #include <messagesigner.h>
 #include <netbase.h>
+#include <node/miner.h>
 #include <policy/policy.h>
 #include <pow.h>
 #include <script/interpreter.h>
@@ -83,10 +84,11 @@ static CMutableTransaction CreateProRegTxExternalCollateral(const ChainstateMana
     return tx;
 }
 
-static CMutableTransaction CreateProUpServTx(const ChainstateManager& chainman, SimpleUTXOMap& utxos, const uint256& proTxHash, const CBLSSecretKey& operatorKey, int port, const CScript& scriptOperatorPayout, const CKey& coinbaseKey)
+static CMutableTransaction CreateProUpServTx(const ChainstateManager& chainman, SimpleUTXOMap& utxos, const uint256& proTxHash, const CBLSSecretKey& operatorKey, int port, const CScript& scriptOperatorPayout, const CKey& coinbaseKey,
+                                             uint16_t version = ProTxVersion::GetMax(!bls::bls_legacy_scheme, /*is_extended_addr=*/false))
 {
     CProUpServTx proTx;
-    proTx.nVersion = ProTxVersion::GetMax(!bls::bls_legacy_scheme, /*is_extended_addr=*/false);
+    proTx.nVersion = version;
     proTx.netInfo = NetInfoInterface::MakeNetInfo(proTx.nVersion);
     proTx.proTxHash = proTxHash;
     BOOST_CHECK_EQUAL(proTx.netInfo->AddEntry(NetInfoPurpose::CORE_P2P, strprintf("1.1.1.1:%d", port)),
@@ -105,12 +107,13 @@ static CMutableTransaction CreateProUpServTx(const ChainstateManager& chainman, 
     return tx;
 }
 
-static CMutableTransaction CreateProUpRegTx(const ChainstateManager& chainman, SimpleUTXOMap& utxos, const uint256& proTxHash, const CKey& mnKey, const CBLSPublicKey& pubKeyOperator, const CKeyID& keyIDVoting, const CScript& scriptPayout, const CKey& coinbaseKey)
+static CMutableTransaction CreateProUpRegTx(const ChainstateManager& chainman, SimpleUTXOMap& utxos, const uint256& proTxHash, const CKey& mnKey, const CBLSPublicKey& pubKeyOperator, const CKeyID& keyIDVoting, const CScript& scriptPayout, const CKey& coinbaseKey,
+                                            uint16_t version = ProTxVersion::GetMax(!bls::bls_legacy_scheme, /*is_extended_addr=*/false), CAmount fee = 0)
 {
     CProUpRegTx proTx;
-    proTx.nVersion = ProTxVersion::GetMax(!bls::bls_legacy_scheme, /*is_extended_addr=*/false);
+    proTx.nVersion = version;
     proTx.proTxHash = proTxHash;
-    proTx.pubKeyOperator.Set(pubKeyOperator, bls::bls_legacy_scheme.load());
+    proTx.pubKeyOperator.Set(pubKeyOperator, /*specificLegacyScheme=*/version == ProTxVersion::LegacyBLS);
     proTx.keyIDVoting = keyIDVoting;
     proTx.scriptPayout = scriptPayout;
 
@@ -118,6 +121,10 @@ static CMutableTransaction CreateProUpRegTx(const ChainstateManager& chainman, S
     tx.nVersion = 3;
     tx.nType = TRANSACTION_PROVIDER_UPDATE_REGISTRAR;
     const auto spent = FundTransaction(chainman, tx, utxos, GetScriptForDestination(PKHash(coinbaseKey.GetPubKey())), 1 * COIN);
+    // FundTransaction returns every input satoshi to the outputs, so the transaction pays no fee and the
+    // mempool would refuse it for not meeting the min relay fee. Tests going through CreateAndProcessBlock
+    // never notice, because block creation does not check relay fees.
+    tx.vout.back().nValue -= fee;
     proTx.inputsHash = CalcTxInputsHash(CTransaction(tx));
     CHashSigner::SignHash(::SerializeHash(proTx), mnKey, proTx.vchSig);
     SetTxPayload(tx, proTx);
@@ -1583,6 +1590,25 @@ BOOST_AUTO_TEST_SUITE(evo_dip3_activation_tests)
 // the sixth registration.
 constexpr int DIP3_ACTIVATION_HEIGHT{109};
 
+BOOST_AUTO_TEST_CASE(deterministic_mn_list_diff_serialization_is_canonical)
+{
+    CDeterministicMNListDiff forward;
+    forward.updatedMNs.emplace(1, CDeterministicMNStateDiff{});
+    forward.updatedMNs.emplace(2, CDeterministicMNStateDiff{});
+
+    CDeterministicMNListDiff reverse;
+    reverse.updatedMNs.emplace(2, CDeterministicMNStateDiff{});
+    reverse.updatedMNs.emplace(1, CDeterministicMNStateDiff{});
+
+    CDataStream forward_stream{SER_DISK, CLIENT_VERSION};
+    CDataStream reverse_stream{SER_DISK, CLIENT_VERSION};
+    forward_stream << forward;
+    reverse_stream << reverse;
+
+    BOOST_CHECK_EQUAL_COLLECTIONS(forward_stream.begin(), forward_stream.end(),
+                                  reverse_stream.begin(), reverse_stream.end());
+}
+
 struct TestChainDIP3BeforeActivationSetup : public TestChainSetup {
     TestChainDIP3BeforeActivationSetup() :
         TestChainSetup(DIP3_ACTIVATION_HEIGHT - 2, CBaseChainParams::REGTEST, {"-dip3params=109:500"},
@@ -1599,17 +1625,67 @@ struct TestChainDIP3Setup : public TestChainDIP3BeforeActivationSetup {
     }
 };
 
-struct TestChainV24SignalBeforeV19Setup : public TestChainSetup {
-    TestChainV24SignalBeforeV19Setup() :
-        TestChainSetup(494, CBaseChainParams::REGTEST,
-                       {"-testactivationheight=v19@500", "-testactivationheight=v20@500",
-                        "-testactivationheight=mn_rr@511", "-vbparams=v24:0:9999999999:510:1:1:1:5:0"},
-                       /*coins_db_in_memory=*/true, /*block_tree_db_in_memory=*/true)
+struct TestMNChainSetup : public TestChainSetup {
+    TestMNChainSetup(int num_blocks, const std::vector<const char*>& extra_args) :
+        TestChainSetup(num_blocks, CBaseChainParams::REGTEST, extra_args,
+                       /*coins_db_in_memory=*/true, /*block_tree_db_in_memory=*/true),
+        chainman(*Assert(m_node.chainman)),
+        dmnman(*Assert(m_node.dmnman)),
+        utxos(BuildSimpleUtxoMap(m_coinbase_txns)),
+        coinbase_pk(GetScriptForRawPubKey(coinbaseKey.GetPubKey()))
     {
-        assert(WITH_LOCK(::cs_main, return !DeploymentActiveAfter(m_node.chainman->ActiveChain().Tip(), m_node.chainman->GetConsensus(),
-                                      Consensus::DEPLOYMENT_V19)));
-        assert(WITH_LOCK(::cs_main, return !DeploymentActiveAfter(m_node.chainman->ActiveChain().Tip(), *m_node.chainman,
-                                      Consensus::DEPLOYMENT_V24)));
+    }
+
+    const CBlockIndex* Tip() const
+    {
+        return WITH_LOCK(::cs_main, return chainman.ActiveChain().Tip());
+    }
+
+    bool IsV19Active() const
+    {
+        return DeploymentActiveAfter(Tip(), chainman.GetConsensus(), Consensus::DEPLOYMENT_V19);
+    }
+
+    bool IsV24Active() const
+    {
+        return DeploymentActiveAfter(Tip(), chainman, Consensus::DEPLOYMENT_V24);
+    }
+
+    void ProcessBlock(const std::vector<CMutableTransaction>& txs = {})
+    {
+        CreateAndProcessBlock(txs, coinbase_pk);
+        dmnman.UpdatedBlockTip(Tip());
+    }
+
+    void MineToV19()
+    {
+        while (!IsV19Active()) {
+            ProcessBlock();
+        }
+    }
+
+    void MineToV24()
+    {
+        for (int i = 0; i < 2000 && !IsV24Active(); ++i) {
+            ProcessBlock();
+        }
+        BOOST_REQUIRE(IsV24Active());
+    }
+
+    ChainstateManager& chainman;
+    CDeterministicMNManager& dmnman;
+    SimpleUTXOMap utxos;
+    const CScript coinbase_pk;
+};
+
+struct TestChainV24SignalBeforeV19Setup : public TestMNChainSetup {
+    TestChainV24SignalBeforeV19Setup() :
+        TestMNChainSetup(494,
+                         {"-testactivationheight=v19@500", "-testactivationheight=v20@500",
+                          "-testactivationheight=mn_rr@511", "-vbparams=v24:0:9999999999:510:1:1:1:5:0"})
+    {
+        assert(!IsV19Active());
+        assert(!IsV24Active());
     }
 };
 
@@ -1620,16 +1696,12 @@ struct TestChainV24SignalBeforeV19Setup : public TestChainSetup {
 struct TestChainV24PendingSetup : public TestChainV24SignalBeforeV19Setup {
     TestChainV24PendingSetup()
     {
-        const CScript coinbase_pk = GetScriptForRawPubKey(coinbaseKey.GetPubKey());
-        auto& chainman = *Assert(m_node.chainman);
-        auto& dmnman = *Assert(m_node.dmnman);
         // Mine just enough to activate v19/v20 (height 500) while keeping v24 and mn_rr pending.
-        for (int i = 0; i < 20 && WITH_LOCK(::cs_main, return !DeploymentActiveAfter(chainman.ActiveChain().Tip(), chainman.GetConsensus(), Consensus::DEPLOYMENT_V19)); ++i) {
-            CreateAndProcessBlock({}, coinbase_pk);
-            dmnman.UpdatedBlockTip(WITH_LOCK(::cs_main, return chainman.ActiveChain().Tip()));
+        for (int i = 0; i < 20 && !IsV19Active(); ++i) {
+            ProcessBlock();
         }
-        assert(WITH_LOCK(::cs_main, return DeploymentActiveAfter(chainman.ActiveChain().Tip(), chainman.GetConsensus(), Consensus::DEPLOYMENT_V19)));
-        assert(WITH_LOCK(::cs_main, return !DeploymentActiveAfter(chainman.ActiveChain().Tip(), chainman, Consensus::DEPLOYMENT_V24)));
+        assert(IsV19Active());
+        assert(!IsV24Active());
         assert(!bls::bls_legacy_scheme.load());
     }
 };
@@ -1646,6 +1718,1198 @@ BOOST_AUTO_TEST_CASE(v19_activation_legacy)
 {
     TestChainV19BeforeActivationSetup setup;
     FuncV19Activation(setup);
+}
+
+// The invariant this whole change rests on: a stored operator key never advertises a scheme its own
+// state version contradicts, so the live list and the same list reloaded from disk agree — including
+// mnUniquePropertyMap, which IsEqual() compares directly.
+static void CheckListRoundTrips(CDeterministicMNManager& dmnman, const std::string& what)
+{
+    const auto live = dmnman.GetListAtChainTip();
+    live.ForEachMN(false, [&](const CDeterministicMN& dmn) {
+        BOOST_CHECK_MESSAGE(dmn.pdmnState->pubKeyOperator == CBLSLazyPublicKey() ||
+                            dmn.pdmnState->pubKeyOperator.IsLegacy() ==
+                                (dmn.pdmnState->nVersion == ProTxVersion::LegacyBLS),
+                            what << ": key scheme contradicts state version for " << dmn.proTxHash.ToString());
+    });
+    CDataStream ds(SER_DISK, CLIENT_VERSION);
+    ds << live;
+    CDeterministicMNList reloaded;
+    ds >> reloaded;
+    BOOST_CHECK_MESSAGE(live.IsEqual(reloaded), what << ": live list diverges from its serialized form");
+}
+
+void FuncMigrationRejectedWhenKeySquatted(TestChainV24SignalBeforeV19Setup& setup)
+{
+    auto& chainman = setup.chainman;
+    auto& dmnman = setup.dmnman;
+
+    BOOST_REQUIRE(bls::bls_legacy_scheme.load());
+    auto& utxos = setup.utxos;
+
+    // Victim A: legacy, holding operator key K.
+    CKey owner_key_a;
+    CBLSSecretKey operator_key;
+    auto tx_reg_a = CreateProRegTx(chainman, utxos, 19999, GenerateRandomAddress(), setup.coinbaseKey, owner_key_a,
+                                   operator_key);
+    const auto proTxHashA = tx_reg_a.GetHash();
+    setup.ProcessBlock({tx_reg_a});
+
+    // Reach v19, register squatter B holding K basic-encoded (accepted pre-v24), then activate v24.
+    setup.MineToV19();
+    BOOST_REQUIRE(!DeploymentActiveAfter(setup.Tip(), chainman, Consensus::DEPLOYMENT_V24));
+
+    CKey owner_key_b;
+    owner_key_b.MakeNewKey(true);
+    CProRegTx pro_reg_b;
+    pro_reg_b.nVersion = ProTxVersion::BasicBLS;
+    pro_reg_b.netInfo = NetInfoInterface::MakeNetInfo(pro_reg_b.nVersion);
+    pro_reg_b.collateralOutpoint.n = 0;
+    BOOST_REQUIRE_EQUAL(pro_reg_b.netInfo->AddEntry(NetInfoPurpose::CORE_P2P, "1.1.1.2:20003"), NetInfoStatus::Success);
+    pro_reg_b.keyIDOwner = owner_key_b.GetPubKey().GetID();
+    pro_reg_b.pubKeyOperator.Set(operator_key.GetPublicKey(), /*specificLegacyScheme=*/false);
+    pro_reg_b.keyIDVoting = owner_key_b.GetPubKey().GetID();
+    pro_reg_b.scriptPayout = GenerateRandomAddress();
+    CMutableTransaction tx_reg_b;
+    tx_reg_b.nVersion = 3;
+    tx_reg_b.nType = TRANSACTION_PROVIDER_REGISTER;
+    {
+        const auto spent = FundTransaction(chainman, tx_reg_b, utxos, pro_reg_b.scriptPayout,
+                                           dmn_types::Regular.collat_amount);
+        pro_reg_b.inputsHash = CalcTxInputsHash(CTransaction(tx_reg_b));
+        SetTxPayload(tx_reg_b, pro_reg_b);
+        SignTransaction(tx_reg_b, spent, setup.coinbaseKey);
+    }
+    setup.ProcessBlock({tx_reg_b});
+    BOOST_REQUIRE(dmnman.GetListAtChainTip().GetMN(tx_reg_b.GetHash()));
+
+    setup.MineToV24();
+    BOOST_REQUIRE_EQUAL(dmnman.GetListAtChainTip().GetMN(proTxHashA)->pdmnState->nVersion, ProTxVersion::LegacyBLS);
+
+    // (a) A's service-update migration is rejected cleanly.
+    {
+        CProUpServTx ups;
+        ups.nVersion = ProTxVersion::BasicBLS;
+        ups.netInfo = NetInfoInterface::MakeNetInfo(ups.nVersion);
+        ups.proTxHash = proTxHashA;
+        BOOST_REQUIRE_EQUAL(ups.netInfo->AddEntry(NetInfoPurpose::CORE_P2P, "1.1.1.1:19999"), NetInfoStatus::Success);
+        CMutableTransaction tx;
+        tx.nVersion = 3;
+        tx.nType = TRANSACTION_PROVIDER_UPDATE_SERVICE;
+        const auto spent = FundTransaction(chainman, tx, utxos,
+                                           GetScriptForDestination(PKHash(setup.coinbaseKey.GetPubKey())), 1 * COIN);
+        ups.inputsHash = CalcTxInputsHash(CTransaction(tx));
+        ups.sig = operator_key.Sign(::SerializeHash(ups), bls::bls_legacy_scheme);
+        SetTxPayload(tx, ups);
+        SignTransaction(tx, spent, setup.coinbaseKey);
+        TxValidationState st;
+        LOCK(cs_main);
+        BOOST_CHECK(!CheckProUpServTx(CTransaction(tx), chainman.ActiveChain().Tip(), dmnman, chainman, st, true));
+        BOOST_CHECK_EQUAL(st.GetRejectReason(), "bad-protx-dup-key");
+    }
+
+    // (b) A's same-key registrar migration is rejected cleanly.
+    {
+        CProUpRegTx upreg;
+        upreg.nVersion = ProTxVersion::BasicBLS;
+        upreg.proTxHash = proTxHashA;
+        upreg.pubKeyOperator.Set(operator_key.GetPublicKey(), /*specificLegacyScheme=*/false);
+        upreg.keyIDVoting = owner_key_a.GetPubKey().GetID();
+        upreg.scriptPayout = GenerateRandomAddress();
+        CMutableTransaction tx;
+        tx.nVersion = 3;
+        tx.nType = TRANSACTION_PROVIDER_UPDATE_REGISTRAR;
+        const auto spent = FundTransaction(chainman, tx, utxos,
+                                           GetScriptForDestination(PKHash(setup.coinbaseKey.GetPubKey())), 1 * COIN);
+        upreg.inputsHash = CalcTxInputsHash(CTransaction(tx));
+        CHashSigner::SignHash(::SerializeHash(upreg), owner_key_a, upreg.vchSig);
+        SetTxPayload(tx, upreg);
+        SignTransaction(tx, spent, setup.coinbaseKey);
+        TxValidationState st;
+        LOCK(cs_main);
+        BOOST_CHECK(!CheckProUpRegTx(CTransaction(tx), chainman.ActiveChain().Tip(), dmnman,
+                                     chainman.ActiveChainstate().CoinsTip(), chainman, st, true));
+        BOOST_CHECK_EQUAL(st.GetRejectReason(), "bad-protx-dup-key");
+    }
+};
+
+void FuncProUpServTxMigratesLegacy(TestChainV24SignalBeforeV19Setup& setup)
+{
+    auto& chainman = setup.chainman;
+    auto& dmnman = setup.dmnman;
+
+    BOOST_REQUIRE(bls::bls_legacy_scheme.load());
+    auto& utxos = setup.utxos;
+    CKey owner_key;
+    CBLSSecretKey operator_key;
+    auto tx_reg = CreateProRegTx(chainman, utxos, 19999, GenerateRandomAddress(), setup.coinbaseKey, owner_key,
+                                 operator_key);
+    const auto proTxHash = tx_reg.GetHash();
+    setup.ProcessBlock({tx_reg});
+    BOOST_REQUIRE_EQUAL(dmnman.GetListAtChainTip().GetMN(proTxHash)->pdmnState->nVersion, ProTxVersion::LegacyBLS);
+
+    setup.MineToV24();
+
+    // A BasicBLS service update migrates a legacy masternode in place: it keeps the same operator
+    // key (re-encoded to the basic scheme), raises the version, and is NOT PoSe-banned -- no key
+    // rotation is forced.
+    auto tx = CreateProUpServTx(chainman, utxos, proTxHash, operator_key, 19998, CScript(), setup.coinbaseKey,
+                                ProTxVersion::BasicBLS);
+    {
+        TxValidationState val_state;
+        LOCK(cs_main);
+        BOOST_REQUIRE_MESSAGE(CheckProUpServTx(CTransaction(tx), chainman.ActiveChain().Tip(), dmnman, chainman,
+                                               val_state, /*check_sigs=*/true),
+                              "migration ProUpServTx rejected: " << val_state.GetRejectReason());
+    }
+    setup.ProcessBlock({tx});
+
+    const auto dmn = dmnman.GetListAtChainTip().GetMN(proTxHash);
+    BOOST_REQUIRE(dmn);
+    BOOST_CHECK_EQUAL(dmn->pdmnState->nVersion, ProTxVersion::BasicBLS);
+    BOOST_CHECK(!dmn->pdmnState->pubKeyOperator.IsLegacy());
+    BOOST_CHECK(!dmn->pdmnState->IsBanned());
+    // Same underlying key, and the list round-trips (key re-encoded, so a reloaded node decodes the
+    // same operator key an online node built).
+    BOOST_CHECK(dmn->pdmnState->pubKeyOperator.Get() == operator_key.GetPublicKey());
+    CheckListRoundTrips(dmnman, "after legacy->basic migration ProUpServTx");
+    {
+        const auto live = dmnman.GetListAtChainTip();
+        CDataStream ds(SER_DISK, CLIENT_VERSION);
+        ds << live;
+        CDeterministicMNList reloaded;
+        ds >> reloaded;
+        BOOST_CHECK(reloaded.GetMN(proTxHash)->pdmnState->pubKeyOperator.Get() == operator_key.GetPublicKey());
+    }
+};
+
+BOOST_AUTO_TEST_CASE(migration_rejected_when_key_squatted)
+{
+    TestChainV24SignalBeforeV19Setup setup;
+    FuncMigrationRejectedWhenKeySquatted(setup);
+}
+
+BOOST_AUTO_TEST_CASE(proupserv_migrates_legacy)
+{
+    TestChainV24SignalBeforeV19Setup setup;
+    FuncProUpServTxMigratesLegacy(setup);
+}
+
+// The SAME masternode, two registrar updates in one block, version-crossing. tx1 rotates a
+// legacy MN to a new key at v2 (making it BasicBLS); tx2 then rotates it to another new key at v1.
+// tx2 passes CheckProUpRegTx against pindexPrev (the MN was legacy there), but in the rebuild the MN
+// is already BasicBLS, so the round-3 guard (which keys off old_version == LegacyBLS) does not fire,
+// and the v1-payload key is placed into a v2 state. Assert the final key's scheme matches its version
+// and the list round-trips.
+void FuncSameMnSameBlockVersionCrossingKeyRotation(TestChainV24SignalBeforeV19Setup& setup)
+{
+    auto& chainman = setup.chainman;
+    auto& dmnman = setup.dmnman;
+
+    BOOST_REQUIRE(bls::bls_legacy_scheme.load());
+    auto& utxos = setup.utxos;
+    CKey owner_key;
+    CBLSSecretKey operator_key_old;
+    auto tx_reg = CreateProRegTx(chainman, utxos, 19999, GenerateRandomAddress(), setup.coinbaseKey, owner_key,
+                                 operator_key_old);
+    const auto proTxHash = tx_reg.GetHash();
+    setup.ProcessBlock({tx_reg});
+
+    setup.MineToV24();
+    BOOST_REQUIRE_EQUAL(dmnman.GetListAtChainTip().GetMN(proTxHash)->pdmnState->nVersion, ProTxVersion::LegacyBLS);
+
+    CBLSSecretKey key1, key2;
+    key1.MakeNewKey();
+    key2.MakeNewKey();
+    auto build_upreg = [&](const CBLSSecretKey& new_op, uint16_t version) {
+        return CreateProUpRegTx(chainman, utxos, proTxHash, owner_key, new_op.GetPublicKey(),
+                                owner_key.GetPubKey().GetID(), GenerateRandomAddress(), setup.coinbaseKey, version);
+    };
+    auto tx1 = build_upreg(key1, ProTxVersion::BasicBLS); // rotate to K1, bump to v2
+    auto tx2 = build_upreg(key2, ProTxVersion::LegacyBLS); // rotate to K2 at v1
+
+    // Both pass their own consensus check against pindexPrev (MN is still legacy there).
+    {
+        LOCK(cs_main);
+        TxValidationState s1, s2;
+        BOOST_REQUIRE_MESSAGE(CheckProUpRegTx(CTransaction(tx1), chainman.ActiveChain().Tip(), dmnman,
+                                              chainman.ActiveChainstate().CoinsTip(), chainman, s1, true),
+                              "tx1 rejected standalone: " << s1.GetRejectReason());
+        BOOST_REQUIRE_MESSAGE(CheckProUpRegTx(CTransaction(tx2), chainman.ActiveChain().Tip(), dmnman,
+                                              chainman.ActiveChainstate().CoinsTip(), chainman, s2, true),
+                              "tx2 rejected standalone: " << s2.GetRejectReason());
+    }
+
+    // Rebuild the list with both in one block, tx1 then tx2.
+    CBlock block;
+    block.vtx.push_back(MakeTransactionRef(CMutableTransaction{})); // vtx[0] skipped as coinbase
+    block.vtx.push_back(MakeTransactionRef(tx1));
+    block.vtx.push_back(MakeTransactionRef(tx2));
+    BlockValidationState block_state;
+    CDeterministicMNList mn_list_ret;
+    bool rebuilt{false};
+    std::string thrown;
+    {
+        LOCK(cs_main);
+        auto& chain_helper = *Assert(setup.m_node.chain_helper.get());
+        try {
+            rebuilt = chain_helper.special_tx->RebuildListFromBlock(
+                block, chainman.ActiveChain().Tip(), dmnman.GetListAtChainTip(),
+                chainman.ActiveChainstate().CoinsTip(), /*debugLogs=*/false, block_state, mn_list_ret);
+        } catch (const std::exception& e) {
+            thrown = e.what();
+        }
+    }
+    BOOST_TEST_MESSAGE("rebuilt=" << rebuilt << " reject=" << block_state.GetRejectReason() << " threw=" << thrown);
+    // A throw escaping RebuildListFromBlock is the block-assembly stall this PR must prevent, so it has
+    // to fail the test rather than silently skip the state checks below.
+    BOOST_REQUIRE_MESSAGE(thrown.empty(), "RebuildListFromBlock threw: " << thrown);
+
+    // If the block is accepted, the resulting state must be consistent (key scheme matches version,
+    // and the live list equals its serialized form). A mismatch here is the desync this PR must
+    // eliminate.
+    if (rebuilt) {
+        const auto dmn = mn_list_ret.GetMN(proTxHash);
+        BOOST_REQUIRE(dmn);
+        BOOST_CHECK_MESSAGE(dmn->pdmnState->pubKeyOperator == CBLSLazyPublicKey() ||
+                            dmn->pdmnState->pubKeyOperator.IsLegacy() ==
+                                (dmn->pdmnState->nVersion == ProTxVersion::LegacyBLS),
+                            "DESYNC: nVersion=" << dmn->pdmnState->nVersion << " but key IsLegacy()="
+                                                << dmn->pdmnState->pubKeyOperator.IsLegacy());
+        CDataStream ds(SER_DISK, CLIENT_VERSION);
+        ds << mn_list_ret;
+        CDeterministicMNList reloaded;
+        ds >> reloaded;
+        BOOST_CHECK_MESSAGE(mn_list_ret.IsEqual(reloaded), "DESYNC: live list != serialized-and-reloaded list");
+        // The stored key must still represent the point tx2 rotated to. If SetLegacy() left legacy
+        // bytes under a basic flag, Get() decodes them under the wrong scheme and yields a different
+        // point -- an operator key nobody can sign for (the MN is bricked), even if flag/version and
+        // the serialized bytes are self-consistent.
+        BOOST_CHECK_MESSAGE(dmn->pdmnState->pubKeyOperator.Get() == key2.GetPublicKey(),
+                            "CORRUPT KEY (online): stored operator key decodes to a different point than tx2 set");
+        // The decisive check: a node that reloaded this list from disk decodes the stored bytes fresh.
+        // If online (cached object) and reloaded (decoded bytes) yield different points, two honest
+        // nodes disagree on this operator key -- a reconstruction-history split, exactly the bug class
+        // this PR exists to eliminate.
+        const auto dmn_reloaded = reloaded.GetMN(proTxHash);
+        BOOST_REQUIRE(dmn_reloaded);
+        BOOST_CHECK_MESSAGE(dmn_reloaded->pdmnState->pubKeyOperator.Get() == key2.GetPublicKey(),
+                            "RECONSTRUCTION SPLIT: reloaded operator key decodes to a different point "
+                            "than the online list");
+        BOOST_CHECK_MESSAGE(dmn_reloaded->pdmnState->pubKeyOperator.Get() ==
+                                dmn->pdmnState->pubKeyOperator.Get(),
+                            "RECONSTRUCTION SPLIT: online vs reloaded operator key differ");
+    }
+};
+
+// The same masternode, twice in one block. Each transaction is checked against pindexPrev, where the
+// key is still the original, so both look like genuine rotations and pass. But the rebuild computes
+// operator_changed against the list as rebuilt so far, where the first transaction has already
+// stored the new key -- and operator== ignores the encoding, so the second looks like a no-op, skips
+// SetLegacy(), and yet still raises the version. That is bug A recreated from inside a single block.
+void FuncSameMnSameBlockMigrationConsistent(TestChainV24SignalBeforeV19Setup& setup)
+{
+    auto& chainman = setup.chainman;
+    auto& dmnman = setup.dmnman;
+
+    BOOST_REQUIRE(bls::bls_legacy_scheme.load());
+    auto& utxos = setup.utxos;
+    CKey owner_key;
+    CBLSSecretKey operator_key_old;
+    auto tx_reg = CreateProRegTx(chainman, utxos, 19999, GenerateRandomAddress(), setup.coinbaseKey, owner_key,
+                                 operator_key_old);
+    const auto proTxHash = tx_reg.GetHash();
+    setup.ProcessBlock({tx_reg});
+
+    setup.MineToV24();
+    BOOST_REQUIRE_EQUAL(dmnman.GetListAtChainTip().GetMN(proTxHash)->pdmnState->nVersion, ProTxVersion::LegacyBLS);
+
+    // Both rotate to the SAME new key, one legacy-encoded at v1, one basic-encoded at v2.
+    CBLSSecretKey operator_key_new;
+    operator_key_new.MakeNewKey();
+    auto build_upreg = [&](uint16_t version) {
+        return CreateProUpRegTx(chainman, utxos, proTxHash, owner_key, operator_key_new.GetPublicKey(),
+                                owner_key.GetPubKey().GetID(), GenerateRandomAddress(), setup.coinbaseKey, version);
+    };
+    auto tx1 = build_upreg(ProTxVersion::LegacyBLS);
+    auto tx2 = build_upreg(ProTxVersion::BasicBLS);
+
+    // Each is a genuine rotation against pindexPrev, so both pass their own consensus check.
+    {
+        LOCK(cs_main);
+        TxValidationState s1, s2;
+        BOOST_REQUIRE_MESSAGE(CheckProUpRegTx(CTransaction(tx1), chainman.ActiveChain().Tip(), dmnman,
+                                              chainman.ActiveChainstate().CoinsTip(), chainman, s1, true),
+                              "tx1 rejected standalone: " << s1.GetRejectReason());
+        BOOST_REQUIRE_MESSAGE(CheckProUpRegTx(CTransaction(tx2), chainman.ActiveChain().Tip(), dmnman,
+                                              chainman.ActiveChainstate().CoinsTip(), chainman, s2, true),
+                              "tx2 rejected standalone: " << s2.GetRejectReason());
+    }
+
+    // Both rotate to the same new key -- tx1 at v1 (legacy-encoded), tx2 migrating to v2
+    // (basic-encoded). The rebuild must accept this and leave a consistent state: SetStateVersion
+    // re-encodes the key on the migration, so the second transaction does not desync the scheme.
+    CBlock block;
+    block.vtx.push_back(MakeTransactionRef(CMutableTransaction{})); // vtx[0] is skipped as the coinbase
+    block.vtx.push_back(MakeTransactionRef(tx1));
+    block.vtx.push_back(MakeTransactionRef(tx2));
+    BlockValidationState block_state;
+    CDeterministicMNList mn_list_ret;
+    bool rebuilt{false};
+    {
+        LOCK(cs_main);
+        auto& chain_helper = *Assert(setup.m_node.chain_helper.get());
+        BOOST_CHECK_NO_THROW(
+            rebuilt = chain_helper.special_tx->RebuildListFromBlock(
+                block, chainman.ActiveChain().Tip(), dmnman.GetListAtChainTip(),
+                chainman.ActiveChainstate().CoinsTip(), /*debugLogs=*/false, block_state, mn_list_ret));
+    }
+    BOOST_REQUIRE_MESSAGE(rebuilt, "same-key migration across one block was rejected: " << block_state.GetRejectReason());
+    const auto dmn = mn_list_ret.GetMN(proTxHash);
+    BOOST_REQUIRE(dmn);
+    BOOST_CHECK_EQUAL(dmn->pdmnState->nVersion, ProTxVersion::BasicBLS);
+    BOOST_CHECK(!dmn->pdmnState->pubKeyOperator.IsLegacy());
+    // Online and reloaded decode the same operator key -- no reconstruction-history divergence.
+    BOOST_CHECK(dmn->pdmnState->pubKeyOperator.Get() == operator_key_new.GetPublicKey());
+    CDataStream ds(SER_DISK, CLIENT_VERSION);
+    ds << mn_list_ret;
+    CDeterministicMNList reloaded;
+    ds >> reloaded;
+    BOOST_CHECK(mn_list_ret.IsEqual(reloaded));
+    BOOST_CHECK(reloaded.GetMN(proTxHash)->pdmnState->pubKeyOperator.Get() == operator_key_new.GetPublicKey());
+};
+
+// The activation-boundary case, closed at the root. Nothing evicts mempool entries when v24 activates,
+// and block assembly rechecks each candidate independently against the tip rather than cumulatively,
+// so a pair admitted beforehand would still be selected together afterwards and the rebuild would
+// then reject the whole block -- an honest miner unable to build one at all. The mempool probe is
+// therefore ungated policy: the pair can never become resident in the first place. This asserts that,
+// and that a template still builds afterwards.
+void FuncPreV24CrossSchemePairCannotBecomeResident(TestChainV24SignalBeforeV19Setup& setup)
+{
+    auto& chainman = setup.chainman;
+    auto& dmnman = setup.dmnman;
+    const auto& coinbase_pk = setup.coinbase_pk;
+
+    BOOST_REQUIRE(bls::bls_legacy_scheme.load());
+    auto& utxos = setup.utxos;
+
+    CKey owner_key_a;
+    CBLSSecretKey operator_key_a;
+    auto tx_reg_a = CreateProRegTx(chainman, utxos, 19999, GenerateRandomAddress(), setup.coinbaseKey, owner_key_a,
+                                   operator_key_a);
+    const auto proTxHashA = tx_reg_a.GetHash();
+    setup.ProcessBlock({tx_reg_a});
+
+    // Reach v19 but stop short of v24: this is where the pair gets admitted.
+    setup.MineToV19();
+    BOOST_REQUIRE(!DeploymentActiveAfter(setup.Tip(), chainman, Consensus::DEPLOYMENT_V24));
+
+    CKey owner_key_b;
+    owner_key_b.MakeNewKey(true);
+    CBLSSecretKey operator_key_b;
+    operator_key_b.MakeNewKey();
+    CProRegTx pro_reg_b;
+    pro_reg_b.nVersion = ProTxVersion::BasicBLS;
+    pro_reg_b.netInfo = NetInfoInterface::MakeNetInfo(pro_reg_b.nVersion);
+    pro_reg_b.collateralOutpoint.n = 0;
+    BOOST_REQUIRE_EQUAL(pro_reg_b.netInfo->AddEntry(NetInfoPurpose::CORE_P2P, "1.1.1.2:20301"), NetInfoStatus::Success);
+    pro_reg_b.keyIDOwner = owner_key_b.GetPubKey().GetID();
+    pro_reg_b.pubKeyOperator.Set(operator_key_b.GetPublicKey(), /*specificLegacyScheme=*/false);
+    pro_reg_b.keyIDVoting = owner_key_b.GetPubKey().GetID();
+    pro_reg_b.scriptPayout = GenerateRandomAddress();
+    CMutableTransaction tx_reg_b;
+    tx_reg_b.nVersion = 3;
+    tx_reg_b.nType = TRANSACTION_PROVIDER_REGISTER;
+    {
+        const auto spent = FundTransaction(chainman, tx_reg_b, utxos, pro_reg_b.scriptPayout,
+                                           dmn_types::Regular.collat_amount);
+        pro_reg_b.inputsHash = CalcTxInputsHash(CTransaction(tx_reg_b));
+        SetTxPayload(tx_reg_b, pro_reg_b);
+        SignTransaction(tx_reg_b, spent, setup.coinbaseKey);
+    }
+    const auto proTxHashB = tx_reg_b.GetHash();
+    setup.ProcessBlock({tx_reg_b});
+    BOOST_REQUIRE(dmnman.GetListAtChainTip().GetMN(proTxHashB));
+
+    CBLSSecretKey contested;
+    contested.MakeNewKey();
+    auto build_upreg = [&](const uint256& protx_hash, const CKey& owner_key, uint16_t version) {
+        return CreateProUpRegTx(chainman, utxos, protx_hash, owner_key, contested.GetPublicKey(),
+                                owner_key.GetPubKey().GetID(), GenerateRandomAddress(), setup.coinbaseKey, version,
+                                /*fee=*/100000);
+    };
+
+    // The first claim is admitted pre-v24; the ungated mempool policy rejects the conflicting one.
+    auto tx_a = build_upreg(proTxHashA, owner_key_a, ProTxVersion::LegacyBLS);
+    auto tx_b = build_upreg(proTxHashB, owner_key_b, ProTxVersion::BasicBLS);
+    {
+        LOCK(cs_main);
+        const auto ra = chainman.ProcessTransaction(MakeTransactionRef(tx_a));
+        BOOST_REQUIRE_MESSAGE(ra.m_result_type == MempoolAcceptResult::ResultType::VALID,
+                              "pre-v24 tx_a rejected: " << ra.m_state.GetRejectReason());
+        const auto rb = chainman.ProcessTransaction(MakeTransactionRef(tx_b));
+        BOOST_CHECK_MESSAGE(rb.m_result_type != MempoolAcceptResult::ResultType::VALID,
+                            "the cross-scheme pair was admitted and will survive activation");
+        BOOST_CHECK_EQUAL(rb.m_state.GetRejectReason(), "protx-dup");
+    }
+
+    // Activate v24 with the surviving transaction still resident.
+    setup.MineToV24();
+
+    // tx_a is the valid, non-conflicting claim: it must still be resident, not evicted at activation.
+    auto& mempool = *Assert(setup.m_node.mempool.get());
+    BOOST_REQUIRE(WITH_LOCK(mempool.cs, return mempool.exists(tx_a.GetHash())));
+
+    // A template must still build and must actually select tx_a: proving the honest miner is not left
+    // unable to produce a block, and that this passes because the valid transaction survives rather
+    // than because every special transaction was dropped.
+    std::unique_ptr<node::CBlockTemplate> tmpl;
+    auto make_template = [&] {
+        tmpl = node::BlockAssembler{chainman.ActiveChainstate(), setup.m_node, &mempool}.CreateNewBlock(coinbase_pk);
+    };
+    BOOST_CHECK_NO_THROW(make_template());
+    BOOST_REQUIRE_MESSAGE(tmpl != nullptr, "no template could be built with a pre-v24 cross-scheme pair resident");
+    bool selected_tx_a{false};
+    for (const auto& tx : tmpl->block.vtx) {
+        selected_tx_a |= tx->GetHash() == tx_a.GetHash();
+    }
+    BOOST_CHECK_MESSAGE(selected_tx_a, "the valid surviving special transaction was not selected into the template");
+};
+
+// The same-block case. Per-transaction checks run against pindexPrev, so two registrar updates in one
+// block are invisible to each other and could claim one operator key under different encodings. The
+// mempool keeps an honest miner from assembling that pair; this covers a hand-crafted block, which
+// must be rejected cleanly rather than by AddMN/UpdateMN throwing out of block assembly.
+void FuncSameBlockCrossSchemeKeyPairRejected(TestChainV24SignalBeforeV19Setup& setup)
+{
+    auto& chainman = setup.chainman;
+    auto& dmnman = setup.dmnman;
+
+    BOOST_REQUIRE(bls::bls_legacy_scheme.load());
+    auto& utxos = setup.utxos;
+
+    CKey owner_key_a;
+    CBLSSecretKey operator_key_a;
+    auto tx_reg_a = CreateProRegTx(chainman, utxos, 19999, GenerateRandomAddress(), setup.coinbaseKey, owner_key_a,
+                                   operator_key_a);
+    const auto proTxHashA = tx_reg_a.GetHash();
+    setup.ProcessBlock({tx_reg_a});
+
+    setup.MineToV24();
+    BOOST_REQUIRE_EQUAL(dmnman.GetListAtChainTip().GetMN(proTxHashA)->pdmnState->nVersion, ProTxVersion::LegacyBLS);
+
+    CKey owner_key_b;
+    owner_key_b.MakeNewKey(true);
+    CBLSSecretKey operator_key_b;
+    operator_key_b.MakeNewKey();
+    CProRegTx pro_reg_b;
+    pro_reg_b.nVersion = ProTxVersion::BasicBLS;
+    pro_reg_b.netInfo = NetInfoInterface::MakeNetInfo(pro_reg_b.nVersion);
+    pro_reg_b.collateralOutpoint.n = 0;
+    BOOST_REQUIRE_EQUAL(pro_reg_b.netInfo->AddEntry(NetInfoPurpose::CORE_P2P, "1.1.1.2:20201"), NetInfoStatus::Success);
+    pro_reg_b.keyIDOwner = owner_key_b.GetPubKey().GetID();
+    pro_reg_b.pubKeyOperator.Set(operator_key_b.GetPublicKey(), /*specificLegacyScheme=*/false);
+    pro_reg_b.keyIDVoting = owner_key_b.GetPubKey().GetID();
+    pro_reg_b.scriptPayout = GenerateRandomAddress();
+    CMutableTransaction tx_reg_b;
+    tx_reg_b.nVersion = 3;
+    tx_reg_b.nType = TRANSACTION_PROVIDER_REGISTER;
+    {
+        const auto spent = FundTransaction(chainman, tx_reg_b, utxos, pro_reg_b.scriptPayout,
+                                           dmn_types::Regular.collat_amount);
+        pro_reg_b.inputsHash = CalcTxInputsHash(CTransaction(tx_reg_b));
+        SetTxPayload(tx_reg_b, pro_reg_b);
+        SignTransaction(tx_reg_b, spent, setup.coinbaseKey);
+    }
+    const auto proTxHashB = tx_reg_b.GetHash();
+    setup.ProcessBlock({tx_reg_b});
+    BOOST_REQUIRE(dmnman.GetListAtChainTip().GetMN(proTxHashB));
+
+    CBLSSecretKey contested;
+    contested.MakeNewKey();
+    auto build_upreg = [&](const uint256& protx_hash, const CKey& owner_key, uint16_t version) {
+        return CreateProUpRegTx(chainman, utxos, protx_hash, owner_key, contested.GetPublicKey(),
+                                owner_key.GetPubKey().GetID(), GenerateRandomAddress(), setup.coinbaseKey, version);
+    };
+
+    // MN-B claims the key basic-encoded, MN-A claims the same key legacy-encoded. Each passes its own
+    // consensus check against the previous block's list.
+    auto tx1 = build_upreg(proTxHashB, owner_key_b, ProTxVersion::BasicBLS);
+    auto tx2 = build_upreg(proTxHashA, owner_key_a, ProTxVersion::LegacyBLS);
+    {
+        LOCK(cs_main);
+        TxValidationState s1, s2;
+        BOOST_REQUIRE_MESSAGE(CheckProUpRegTx(CTransaction(tx1), chainman.ActiveChain().Tip(), dmnman,
+                                              chainman.ActiveChainstate().CoinsTip(), chainman, s1, true),
+                              "tx1 rejected standalone: " << s1.GetRejectReason());
+        BOOST_REQUIRE_MESSAGE(CheckProUpRegTx(CTransaction(tx2), chainman.ActiveChain().Tip(), dmnman,
+                                              chainman.ActiveChainstate().CoinsTip(), chainman, s2, true),
+                              "tx2 rejected standalone: " << s2.GetRejectReason());
+    }
+
+    // Together in one block the rebuild must refuse them -- cleanly, with a reject reason, rather than
+    // by AddMN/UpdateMN throwing. The rebuild is driven directly here because the test fixture's
+    // CreateAndProcessBlock asserts rather than reporting a rebuild failure, so it cannot express a
+    // block that is meant to be rejected.
+    CBlock block;
+    // The rebuild skips vtx[0] as the coinbase, so a placeholder must occupy it or the first real
+    // transaction is silently never processed.
+    block.vtx.push_back(MakeTransactionRef(CMutableTransaction{}));
+    block.vtx.push_back(MakeTransactionRef(tx1));
+    block.vtx.push_back(MakeTransactionRef(tx2));
+    BlockValidationState block_state;
+    CDeterministicMNList mn_list_ret;
+    bool rebuilt{true};
+    {
+        LOCK(cs_main);
+        auto& chain_helper = *Assert(setup.m_node.chain_helper.get());
+        BOOST_CHECK_NO_THROW(
+            rebuilt = chain_helper.special_tx->RebuildListFromBlock(
+                block, chainman.ActiveChain().Tip(), dmnman.GetListAtChainTip(),
+                chainman.ActiveChainstate().CoinsTip(), /*debugLogs=*/false, block_state, mn_list_ret));
+    }
+    BOOST_CHECK_MESSAGE(!rebuilt, "a block claiming one operator key under two encodings was accepted");
+    BOOST_CHECK_EQUAL(block_state.GetRejectReason(), "bad-protx-dup-key");
+};
+
+// Two in-flight registrar updates must not be able to claim the same operator key under different
+// encodings. Each is valid against the confirmed list -- neither masternode holds the key yet, so
+// each is invisible to the other's consensus check. Block assembly revalidates each candidate only
+// against the confirmed tip rather than cumulatively, so admitting both would hand an honest miner
+// a template whose block is invalid.
+void FuncMempoolRejectsCrossSchemeKeyRace(TestChainV24SignalBeforeV19Setup& setup)
+{
+    auto& chainman = setup.chainman;
+    auto& dmnman = setup.dmnman;
+
+    BOOST_REQUIRE(bls::bls_legacy_scheme.load());
+    auto& utxos = setup.utxos;
+
+    // MN-A stays legacy; MN-B is registered basic after v24. Both keep their own keys for now.
+    CKey owner_key_a;
+    CBLSSecretKey operator_key_a;
+    auto tx_reg_a = CreateProRegTx(chainman, utxos, 19999, GenerateRandomAddress(), setup.coinbaseKey, owner_key_a,
+                                   operator_key_a);
+    const auto proTxHashA = tx_reg_a.GetHash();
+    setup.ProcessBlock({tx_reg_a});
+
+    setup.MineToV24();
+    BOOST_REQUIRE_EQUAL(dmnman.GetListAtChainTip().GetMN(proTxHashA)->pdmnState->nVersion, ProTxVersion::LegacyBLS);
+
+    CKey owner_key_b;
+    owner_key_b.MakeNewKey(true);
+    CBLSSecretKey operator_key_b;
+    operator_key_b.MakeNewKey();
+    CProRegTx pro_reg_b;
+    pro_reg_b.nVersion = ProTxVersion::BasicBLS;
+    pro_reg_b.netInfo = NetInfoInterface::MakeNetInfo(pro_reg_b.nVersion);
+    pro_reg_b.collateralOutpoint.n = 0;
+    BOOST_REQUIRE_EQUAL(pro_reg_b.netInfo->AddEntry(NetInfoPurpose::CORE_P2P, "1.1.1.2:20101"), NetInfoStatus::Success);
+    pro_reg_b.keyIDOwner = owner_key_b.GetPubKey().GetID();
+    pro_reg_b.pubKeyOperator.Set(operator_key_b.GetPublicKey(), /*specificLegacyScheme=*/false);
+    pro_reg_b.keyIDVoting = owner_key_b.GetPubKey().GetID();
+    pro_reg_b.scriptPayout = GenerateRandomAddress();
+    CMutableTransaction tx_reg_b;
+    tx_reg_b.nVersion = 3;
+    tx_reg_b.nType = TRANSACTION_PROVIDER_REGISTER;
+    {
+        const auto spent = FundTransaction(chainman, tx_reg_b, utxos, pro_reg_b.scriptPayout,
+                                           dmn_types::Regular.collat_amount);
+        pro_reg_b.inputsHash = CalcTxInputsHash(CTransaction(tx_reg_b));
+        SetTxPayload(tx_reg_b, pro_reg_b);
+        SignTransaction(tx_reg_b, spent, setup.coinbaseKey);
+    }
+    const auto proTxHashB = tx_reg_b.GetHash();
+    setup.ProcessBlock({tx_reg_b});
+    BOOST_REQUIRE(dmnman.GetListAtChainTip().GetMN(proTxHashB));
+
+    // The contested key: held by nobody yet, so both updates below pass their consensus checks.
+    CBLSSecretKey contested;
+    contested.MakeNewKey();
+
+    auto build_upreg = [&](const uint256& protx_hash, const CKey& owner_key, uint16_t version) {
+        return CreateProUpRegTx(chainman, utxos, protx_hash, owner_key, contested.GetPublicKey(),
+                                owner_key.GetPubKey().GetID(), GenerateRandomAddress(), setup.coinbaseKey, version,
+                                /*fee=*/100000);
+    };
+
+    // MN-B claims it basic-encoded. Accepted: nobody holds it.
+    auto tx_first = build_upreg(proTxHashB, owner_key_b, ProTxVersion::BasicBLS);
+    {
+        LOCK(cs_main);
+        const auto res = chainman.ProcessTransaction(MakeTransactionRef(tx_first));
+        BOOST_REQUIRE_MESSAGE(res.m_result_type == MempoolAcceptResult::ResultType::VALID,
+                              "first cross-scheme claim rejected: " << res.m_state.GetRejectReason());
+    }
+
+    // MN-A claims the SAME key legacy-encoded. Its consensus check still passes -- the confirmed list
+    // does not contain the key -- so only the mempool can catch this.
+    auto tx_second = build_upreg(proTxHashA, owner_key_a, ProTxVersion::LegacyBLS);
+    {
+        TxValidationState st;
+        LOCK(cs_main);
+        BOOST_REQUIRE_MESSAGE(CheckProUpRegTx(CTransaction(tx_second), chainman.ActiveChain().Tip(), dmnman,
+                                              chainman.ActiveChainstate().CoinsTip(), chainman, st,
+                                              /*check_sigs=*/true),
+                              "second claim should still pass its consensus check: " << st.GetRejectReason());
+    }
+    {
+        LOCK(cs_main);
+        const auto res = chainman.ProcessTransaction(MakeTransactionRef(tx_second));
+        BOOST_CHECK_MESSAGE(res.m_result_type != MempoolAcceptResult::ResultType::VALID,
+                            "second in-flight claim of the same key under the other encoding was accepted");
+        BOOST_CHECK_EQUAL(res.m_state.GetRejectReason(), "protx-dup");
+    }
+};
+
+// A registrar update must not be able to claim an operator key another masternode already holds,
+// under either encoding. Consensus probes when the key changes or a same-key migration re-encodes it.
+// It skips non-migrating same-key updates, which cannot create a duplicate; probing those would let
+// a cross-scheme pair formed before activation permanently block the affected masternode's routine
+// registrar updates, making an old squat more harmful rather than less.
+void FuncProUpRegTxRejectsCrossSchemeKeyReuse(TestChainV24SignalBeforeV19Setup& setup)
+{
+    auto& chainman = setup.chainman;
+    auto& dmnman = setup.dmnman;
+
+    BOOST_REQUIRE(bls::bls_legacy_scheme.load());
+    auto& utxos = setup.utxos;
+
+    // MN-A registers pre-v19: legacy scheme, and stays legacy.
+    CKey owner_key_a;
+    CBLSSecretKey operator_key_a;
+    auto tx_reg_a = CreateProRegTx(chainman, utxos, 19999, GenerateRandomAddress(), setup.coinbaseKey, owner_key_a,
+                                   operator_key_a);
+    const auto proTxHashA = tx_reg_a.GetHash();
+    setup.ProcessBlock({tx_reg_a});
+
+    setup.MineToV24();
+    BOOST_REQUIRE(!bls::bls_legacy_scheme.load());
+    BOOST_REQUIRE_EQUAL(dmnman.GetListAtChainTip().GetMN(proTxHashA)->pdmnState->nVersion, ProTxVersion::LegacyBLS);
+
+    // MN-B registers post-v24 with its own fresh basic key.
+    CKey owner_key_b;
+    owner_key_b.MakeNewKey(true);
+    CBLSSecretKey operator_key_b;
+    operator_key_b.MakeNewKey();
+    CProRegTx pro_reg_b;
+    pro_reg_b.nVersion = ProTxVersion::BasicBLS;
+    pro_reg_b.netInfo = NetInfoInterface::MakeNetInfo(pro_reg_b.nVersion);
+    pro_reg_b.collateralOutpoint.n = 0;
+    BOOST_REQUIRE_EQUAL(pro_reg_b.netInfo->AddEntry(NetInfoPurpose::CORE_P2P, "1.1.1.2:20001"), NetInfoStatus::Success);
+    pro_reg_b.keyIDOwner = owner_key_b.GetPubKey().GetID();
+    pro_reg_b.pubKeyOperator.Set(operator_key_b.GetPublicKey(), /*specificLegacyScheme=*/false);
+    pro_reg_b.keyIDVoting = owner_key_b.GetPubKey().GetID();
+    pro_reg_b.scriptPayout = GenerateRandomAddress();
+    CMutableTransaction tx_reg_b;
+    tx_reg_b.nVersion = 3;
+    tx_reg_b.nType = TRANSACTION_PROVIDER_REGISTER;
+    {
+        const auto spent = FundTransaction(chainman, tx_reg_b, utxos, pro_reg_b.scriptPayout,
+                                           dmn_types::Regular.collat_amount);
+        pro_reg_b.inputsHash = CalcTxInputsHash(CTransaction(tx_reg_b));
+        SetTxPayload(tx_reg_b, pro_reg_b);
+        SignTransaction(tx_reg_b, spent, setup.coinbaseKey);
+    }
+    const auto proTxHashB = tx_reg_b.GetHash();
+    setup.ProcessBlock({tx_reg_b});
+    BOOST_REQUIRE(dmnman.GetListAtChainTip().GetMN(proTxHashB));
+
+    auto build_upreg = [&](const uint256& protx_hash, const CKey& owner_key, const CBLSPublicKey& op_pubkey,
+                           uint16_t version) {
+        return CreateProUpRegTx(chainman, utxos, protx_hash, owner_key, op_pubkey, owner_key.GetPubKey().GetID(),
+                                GenerateRandomAddress(), setup.coinbaseKey, version);
+    };
+    auto check_upreg = [&](const CMutableTransaction& tx, TxValidationState& st) {
+        LOCK(cs_main);
+        return CheckProUpRegTx(CTransaction(tx), chainman.ActiveChain().Tip(), dmnman,
+                               chainman.ActiveChainstate().CoinsTip(), chainman, st, /*check_sigs=*/true);
+    };
+
+    // MN-A tries to take MN-B's key under the OTHER encoding, via a v1 payload. This is the reverse
+    // direction's only route that survives post-v24, since registration cannot carry a legacy key.
+    {
+        auto tx = build_upreg(proTxHashA, owner_key_a, operator_key_b.GetPublicKey(), ProTxVersion::LegacyBLS);
+        TxValidationState st;
+        BOOST_CHECK(!check_upreg(tx, st));
+        BOOST_CHECK_EQUAL(st.GetRejectReason(), "bad-protx-dup-key");
+    }
+
+    // MN-B tries to take MN-A's key, basic-encoded (MN-A holds it legacy-encoded).
+    {
+        auto tx = build_upreg(proTxHashB, owner_key_b, operator_key_a.GetPublicKey(), ProTxVersion::BasicBLS);
+        TxValidationState st;
+        BOOST_CHECK(!check_upreg(tx, st));
+        BOOST_CHECK_EQUAL(st.GetRejectReason(), "bad-protx-dup-key");
+    }
+
+    // No false positive: MN-B re-submitting its OWN key unchanged is not a duplicate. This is the
+    // key-change scoping, and without it a masternode could never update its registrar again.
+    {
+        auto tx = build_upreg(proTxHashB, owner_key_b, operator_key_b.GetPublicKey(), ProTxVersion::BasicBLS);
+        TxValidationState st;
+        BOOST_CHECK_MESSAGE(check_upreg(tx, st), "self-key registrar update wrongly rejected: "
+                                                     << st.GetRejectReason());
+    }
+};
+
+// A ProRegTx must not be able to claim an operator key another masternode already holds, whichever
+// encoding either side uses. ProRegTx never proves ownership of the operator key, so without this a
+// masternode's key can be squatted for the price of a collateral.
+void FuncProRegTxRejectsCrossSchemeKeyReuse(TestChainV24SignalBeforeV19Setup& setup)
+{
+    auto& chainman = setup.chainman;
+    auto& dmnman = setup.dmnman;
+
+    BOOST_REQUIRE(bls::bls_legacy_scheme.load());
+    auto& utxos = setup.utxos;
+    CKey owner_key_a;
+    CBLSSecretKey operator_key;
+    auto tx_reg_a = CreateProRegTx(chainman, utxos, 19999, GenerateRandomAddress(), setup.coinbaseKey, owner_key_a,
+                                   operator_key);
+    setup.ProcessBlock({tx_reg_a});
+    BOOST_REQUIRE(dmnman.GetListAtChainTip().GetMN(tx_reg_a.GetHash())->pdmnState->pubKeyOperator.IsLegacy());
+
+    int port{20000};
+    auto build_proreg = [&](const CBLSPublicKey& op_pubkey, uint16_t version) {
+        CKey owner_key_b;
+        owner_key_b.MakeNewKey(true);
+        CProRegTx pro_reg;
+        pro_reg.nVersion = version;
+        pro_reg.netInfo = NetInfoInterface::MakeNetInfo(pro_reg.nVersion);
+        pro_reg.collateralOutpoint.n = 0;
+        BOOST_REQUIRE_EQUAL(pro_reg.netInfo->AddEntry(NetInfoPurpose::CORE_P2P, strprintf("1.1.1.%d:%d", port % 250 + 2, port)),
+                            NetInfoStatus::Success);
+        ++port;
+        pro_reg.keyIDOwner = owner_key_b.GetPubKey().GetID();
+        pro_reg.pubKeyOperator.Set(op_pubkey, /*specificLegacyScheme=*/version == ProTxVersion::LegacyBLS);
+        pro_reg.keyIDVoting = owner_key_b.GetPubKey().GetID();
+        pro_reg.scriptPayout = GenerateRandomAddress();
+        CMutableTransaction tx;
+        tx.nVersion = 3;
+        tx.nType = TRANSACTION_PROVIDER_REGISTER;
+        const auto spent = FundTransaction(chainman, tx, utxos, pro_reg.scriptPayout,
+                                           dmn_types::Regular.collat_amount);
+        pro_reg.inputsHash = CalcTxInputsHash(CTransaction(tx));
+        SetTxPayload(tx, pro_reg);
+        SignTransaction(tx, spent, setup.coinbaseKey);
+        return tx;
+    };
+    auto check_proreg = [&](const CMutableTransaction& tx, TxValidationState& st) {
+        LOCK(cs_main);
+        return CheckProRegTx(CTransaction(tx), chainman.ActiveChain().Tip(), dmnman,
+                             chainman.ActiveChainstate().CoinsTip(), chainman, st, /*check_sigs=*/true);
+    };
+
+    setup.MineToV19();
+    BOOST_REQUIRE(!DeploymentActiveAfter(setup.Tip(), chainman, Consensus::DEPLOYMENT_V24));
+
+    // Non-retroactivity: before v24 the squat is still accepted, exactly as on develop today.
+    {
+        auto tx = build_proreg(operator_key.GetPublicKey(), ProTxVersion::BasicBLS);
+        TxValidationState st;
+        BOOST_CHECK_MESSAGE(check_proreg(tx, st), "pre-v24 cross-scheme registration wrongly rejected: "
+                                                      << st.GetRejectReason());
+    }
+
+    setup.MineToV24();
+
+    // The main post-v24 vector: reuse the legacy masternode's key, basic-encoded.
+    {
+        auto tx = build_proreg(operator_key.GetPublicKey(), ProTxVersion::BasicBLS);
+        TxValidationState st;
+        BOOST_CHECK(!check_proreg(tx, st));
+        BOOST_CHECK_EQUAL(st.GetRejectReason(), "bad-protx-dup-key");
+    }
+
+    // The reverse direction is unreachable via registration post-v24 for an unrelated reason: a
+    // legacy-encoded payload needs nVersion=1, which registration refuses outright. Pinned so it
+    // cannot start silently passing.
+    {
+        CBLSSecretKey fresh;
+        fresh.MakeNewKey();
+        auto tx = build_proreg(fresh.GetPublicKey(), ProTxVersion::LegacyBLS);
+        TxValidationState st;
+        BOOST_CHECK(!check_proreg(tx, st));
+        BOOST_CHECK_EQUAL(st.GetRejectReason(), "bad-protx-version-disallowed");
+    }
+
+    // No false positives: a fresh key still registers.
+    {
+        CBLSSecretKey fresh;
+        fresh.MakeNewKey();
+        auto tx = build_proreg(fresh.GetPublicKey(), ProTxVersion::BasicBLS);
+        TxValidationState st;
+        BOOST_CHECK_MESSAGE(check_proreg(tx, st), "fresh-key registration wrongly rejected: "
+                                                      << st.GetRejectReason());
+    }
+};
+
+// The unique property map is keyed by the scheme-dependent serialization of a BLS key, so one public
+// key occupies a different slot depending on its encoding. The helper must find it under either, and
+// must exclude only the masternode asked about.
+void FuncHasOperatorKeyUnderAnyScheme(TestChainSetup& setup)
+{
+    auto& chainman = *Assert(setup.m_node.chainman.get());
+    auto& dmnman = *Assert(setup.m_node.dmnman);
+    const CScript coinbase_pk = GetScriptForRawPubKey(setup.coinbaseKey.GetPubKey());
+
+    BOOST_REQUIRE(bls::bls_legacy_scheme.load());
+    auto utxos = BuildSimpleUtxoMap(setup.m_coinbase_txns);
+    CKey owner_key;
+    CBLSSecretKey operator_key;
+    auto tx_reg = CreateProRegTx(chainman, utxos, 19999, GenerateRandomAddress(), setup.coinbaseKey, owner_key,
+                                 operator_key);
+    const auto proTxHash = tx_reg.GetHash();
+    setup.CreateAndProcessBlock({tx_reg}, coinbase_pk);
+    dmnman.UpdatedBlockTip(WITH_LOCK(::cs_main, return chainman.ActiveChain().Tip()));
+
+    const auto list = dmnman.GetListAtChainTip();
+    const auto dmn = list.GetMN(proTxHash);
+    BOOST_REQUIRE(dmn);
+    // Stored legacy-encoded, so a plain lookup under the basic encoding misses it...
+    BOOST_REQUIRE(dmn->pdmnState->pubKeyOperator.IsLegacy());
+    CBLSLazyPublicKey basic_wrapped;
+    basic_wrapped.Set(operator_key.GetPublicKey(), /*specificLegacyScheme=*/false);
+    BOOST_REQUIRE(!list.HasUniqueProperty(basic_wrapped));
+    // ...which is exactly the gap the helper closes.
+    BOOST_CHECK(list.HasOperatorKeyUnderAnyScheme(operator_key.GetPublicKey(), uint256()));
+    // The holder itself is excluded when asked.
+    BOOST_CHECK(!list.HasOperatorKeyUnderAnyScheme(operator_key.GetPublicKey(), proTxHash));
+    // A key nobody holds is absent.
+    CBLSSecretKey other;
+    other.MakeNewKey();
+    BOOST_CHECK(!list.HasOperatorKeyUnderAnyScheme(other.GetPublicKey(), uint256()));
+};
+
+// Non-retroactivity. Every consensus rule added here is gated on v24, which is NEVER_ACTIVE on
+// mainnet and testnet, so before activation both transactions the new rules reject must still be
+// accepted exactly as they are on develop today. If this test ever fails, a rule has leaked past its
+// gate and is changing a live chain — that is the one failure mode here that reaches real users, so
+// fix the gating rather than this test.
+void FuncPreV24BehaviourUnchanged(TestChainSetup& setup)
+{
+    auto& chainman = *Assert(setup.m_node.chainman.get());
+    auto& dmnman = *Assert(setup.m_node.dmnman);
+    auto tip_index    = [&] { return WITH_LOCK(::cs_main, return chainman.ActiveChain().Tip()); };
+    auto sync_dmn_tip = [&] { dmnman.UpdatedBlockTip(tip_index()); };
+    const CScript coinbase_pk = GetScriptForRawPubKey(setup.coinbaseKey.GetPubKey());
+
+    BOOST_REQUIRE(!DeploymentActiveAfter(tip_index(), chainman.GetConsensus(), Consensus::DEPLOYMENT_V19));
+    BOOST_REQUIRE(bls::bls_legacy_scheme.load());
+
+    auto utxos = BuildSimpleUtxoMap(setup.m_coinbase_txns);
+    CKey owner_key;
+    CBLSSecretKey operator_key;
+    auto tx_reg = CreateProRegTx(chainman, utxos, 19999, GenerateRandomAddress(), setup.coinbaseKey, owner_key,
+                                 operator_key);
+    const auto proTxHash = tx_reg.GetHash();
+    setup.CreateAndProcessBlock({tx_reg}, coinbase_pk);
+    sync_dmn_tip();
+
+    while (!DeploymentActiveAfter(tip_index(), chainman.GetConsensus(), Consensus::DEPLOYMENT_V19)) {
+        setup.CreateAndProcessBlock({}, coinbase_pk);
+        sync_dmn_tip();
+    }
+    // v19 active, v24 inactive: this is mainnet's configuration today.
+    BOOST_REQUIRE(!DeploymentActiveAfter(tip_index(), chainman, Consensus::DEPLOYMENT_V24));
+    BOOST_REQUIRE(!bls::bls_legacy_scheme.load());
+
+    // A BasicBLS service update on a legacy masternode: rejected post-v24 by Component 1.
+    auto tx_ups = CreateProUpServTx(chainman, utxos, proTxHash, operator_key, 19998, CScript(), setup.coinbaseKey);
+    {
+        TxValidationState val_state;
+        LOCK(cs_main);
+        BOOST_CHECK_MESSAGE(CheckProUpServTx(CTransaction(tx_ups), chainman.ActiveChain().Tip(), dmnman, chainman,
+                                             val_state, /*check_sigs=*/true),
+                            "pre-v24 v2 ProUpServTx wrongly rejected: " << val_state.GetRejectReason());
+    }
+    setup.CreateAndProcessBlock({tx_ups}, coinbase_pk);
+    sync_dmn_tip();
+    CheckListRoundTrips(dmnman, "pre-v24 after v2 ProUpServTx");
+
+    // A same-key BasicBLS registrar update on a legacy masternode: rejected post-v24 by Component 2.
+    CProUpRegTx pro_upreg;
+    pro_upreg.nVersion = ProTxVersion::BasicBLS;
+    pro_upreg.proTxHash = proTxHash;
+    pro_upreg.pubKeyOperator.Set(operator_key.GetPublicKey(), /*specificLegacyScheme=*/false);
+    pro_upreg.keyIDVoting = owner_key.GetPubKey().GetID();
+    pro_upreg.scriptPayout = GenerateRandomAddress();
+    CMutableTransaction tx_upreg;
+    tx_upreg.nVersion = 3;
+    tx_upreg.nType = TRANSACTION_PROVIDER_UPDATE_REGISTRAR;
+    const auto spent = FundTransaction(chainman, tx_upreg, utxos,
+                                       GetScriptForDestination(PKHash(setup.coinbaseKey.GetPubKey())), 1 * COIN);
+    pro_upreg.inputsHash = CalcTxInputsHash(CTransaction(tx_upreg));
+    CHashSigner::SignHash(::SerializeHash(pro_upreg), owner_key, pro_upreg.vchSig);
+    SetTxPayload(tx_upreg, pro_upreg);
+    SignTransaction(tx_upreg, spent, setup.coinbaseKey);
+    {
+        TxValidationState val_state;
+        LOCK(cs_main);
+        BOOST_CHECK_MESSAGE(CheckProUpRegTx(CTransaction(tx_upreg), chainman.ActiveChain().Tip(), dmnman,
+                                            chainman.ActiveChainstate().CoinsTip(), chainman, val_state,
+                                            /*check_sigs=*/true),
+                            "pre-v24 same-key ProUpRegTx wrongly rejected: " << val_state.GetRejectReason());
+    }
+    setup.CreateAndProcessBlock({tx_upreg}, coinbase_pk);
+    sync_dmn_tip();
+
+    // Pre-v24 the version does not move and the key keeps its scheme, so nothing desyncs.
+    const auto dmn = dmnman.GetListAtChainTip().GetMN(proTxHash);
+    BOOST_REQUIRE(dmn);
+    BOOST_CHECK_EQUAL(dmn->pdmnState->nVersion, ProTxVersion::LegacyBLS);
+    BOOST_CHECK(dmn->pdmnState->pubKeyOperator.IsLegacy());
+    CheckListRoundTrips(dmnman, "pre-v24 after same-key ProUpRegTx");
+};
+
+// A special transaction accepted into the mempool while it was valid is not evicted when a fork
+// activates a rule that invalidates it, and BlockAssembler otherwise trusts mempool validity. It
+// would then select the stale transaction into every template, and every one of those blocks would
+// be rejected by peers, stalling an honest miner.
+void FuncStaleSpecialTxDoesNotPoisonTemplate(TestChainV24SignalBeforeV19Setup& setup)
+{
+    auto& chainman = setup.chainman;
+    auto& dmnman = setup.dmnman;
+    const auto& coinbase_pk = setup.coinbase_pk;
+
+    BOOST_REQUIRE(bls::bls_legacy_scheme.load());
+    auto& utxos = setup.utxos;
+    CKey owner_key;
+    CBLSSecretKey operator_key;
+    auto tx_reg = CreateProRegTx(chainman, utxos, 19999, GenerateRandomAddress(), setup.coinbaseKey, owner_key,
+                                 operator_key);
+    const auto proTxHash = tx_reg.GetHash();
+    setup.ProcessBlock({tx_reg});
+
+    setup.MineToV24();
+    BOOST_REQUIRE_EQUAL(dmnman.GetListAtChainTip().GetMN(proTxHash)->pdmnState->nVersion, ProTxVersion::LegacyBLS);
+
+    // A cross-scheme squatter ProRegTx: it reuses the legacy masternode's operator key basic-encoded.
+    // Such a registration is valid before v24 and rejected after it (bad-protx-dup-key), which is the
+    // shape of transaction that can sit in the mempool when the fork activates. addUnchecked()
+    // reproduces that resident-but-now-invalid state directly.
+    CKey owner_key_b;
+    owner_key_b.MakeNewKey(true);
+    CProRegTx pro_reg_b;
+    pro_reg_b.nVersion = ProTxVersion::BasicBLS;
+    pro_reg_b.netInfo = NetInfoInterface::MakeNetInfo(pro_reg_b.nVersion);
+    pro_reg_b.collateralOutpoint.n = 0;
+    BOOST_REQUIRE_EQUAL(pro_reg_b.netInfo->AddEntry(NetInfoPurpose::CORE_P2P, "1.1.1.2:20002"), NetInfoStatus::Success);
+    pro_reg_b.keyIDOwner = owner_key_b.GetPubKey().GetID();
+    pro_reg_b.pubKeyOperator.Set(operator_key.GetPublicKey(), /*specificLegacyScheme=*/false);
+    pro_reg_b.keyIDVoting = owner_key_b.GetPubKey().GetID();
+    pro_reg_b.scriptPayout = GenerateRandomAddress();
+    CMutableTransaction tx_stale;
+    tx_stale.nVersion = 3;
+    tx_stale.nType = TRANSACTION_PROVIDER_REGISTER;
+    const auto spent = FundTransaction(chainman, tx_stale, utxos, pro_reg_b.scriptPayout,
+                                       dmn_types::Regular.collat_amount);
+    pro_reg_b.inputsHash = CalcTxInputsHash(CTransaction(tx_stale));
+    SetTxPayload(tx_stale, pro_reg_b);
+    SignTransaction(tx_stale, spent, setup.coinbaseKey);
+    const auto stale_hash = tx_stale.GetHash();
+
+    // Sanity: consensus really does reject it now, so this test is about a genuinely invalid entry.
+    {
+        TxValidationState val_state;
+        LOCK(cs_main);
+        BOOST_REQUIRE(!CheckProRegTx(CTransaction(tx_stale), chainman.ActiveChain().Tip(), dmnman,
+                                     chainman.ActiveChainstate().CoinsTip(), chainman, val_state,
+                                     /*check_sigs=*/true));
+        BOOST_REQUIRE_EQUAL(val_state.GetRejectReason(), "bad-protx-dup-key");
+    }
+
+    // Make it fee-eligible so selection would genuinely pick it, then park it in the mempool.
+    auto& mempool = *Assert(setup.m_node.mempool.get());
+    TestMemPoolEntryHelper entry;
+    {
+        LOCK2(cs_main, mempool.cs);
+        mempool.addUnchecked(entry.Fee(50000).Time(Now<NodeSeconds>()).FromTx(tx_stale));
+        BOOST_REQUIRE(mempool.exists(stale_hash));
+    }
+
+    auto block_template = node::BlockAssembler{chainman.ActiveChainstate(), setup.m_node, &mempool}
+                              .CreateNewBlock(coinbase_pk);
+    BOOST_REQUIRE_MESSAGE(block_template != nullptr, "no template built while a stale special tx was resident");
+    for (const auto& tx : block_template->block.vtx) {
+        BOOST_CHECK_MESSAGE(tx->GetHash() != stale_hash,
+                            "a stale special tx was selected into the block template");
+    }
+};
+
+// A legacy masternode migrates to the basic scheme keeping its operator key: SetStateVersion
+// re-encodes the key and UpdateMN re-keys the unique-property map, so no key rotation is forced.
+void FuncProUpRegTxMigratesLegacySameKey(TestChainV24SignalBeforeV19Setup& setup)
+{
+    auto& chainman = setup.chainman;
+    auto& dmnman = setup.dmnman;
+
+    BOOST_REQUIRE(bls::bls_legacy_scheme.load());
+    auto& utxos = setup.utxos;
+    CKey owner_key;
+    CBLSSecretKey operator_key;
+    auto tx_reg = CreateProRegTx(chainman, utxos, 19999, GenerateRandomAddress(), setup.coinbaseKey, owner_key,
+                                 operator_key);
+    const auto proTxHash = tx_reg.GetHash();
+    setup.ProcessBlock({tx_reg});
+
+    setup.MineToV24();
+    BOOST_REQUIRE_EQUAL(dmnman.GetListAtChainTip().GetMN(proTxHash)->pdmnState->nVersion, ProTxVersion::LegacyBLS);
+
+    auto build_upreg = [&](const CBLSPublicKey& op_pubkey, uint16_t version) {
+        return CreateProUpRegTx(chainman, utxos, proTxHash, owner_key, op_pubkey, owner_key.GetPubKey().GetID(),
+                                GenerateRandomAddress(), setup.coinbaseKey, version);
+    };
+
+    // Same key, re-encoded basic: migrates in place. Accepted, version rises, key preserved and
+    // re-encoded, NOT PoSe-banned (no rotation forced), and the list round-trips.
+    {
+        auto tx = build_upreg(operator_key.GetPublicKey(), ProTxVersion::BasicBLS);
+        TxValidationState val_state;
+        {
+            LOCK(cs_main);
+            BOOST_REQUIRE_MESSAGE(CheckProUpRegTx(CTransaction(tx), chainman.ActiveChain().Tip(), dmnman,
+                                                  chainman.ActiveChainstate().CoinsTip(), chainman, val_state,
+                                                  /*check_sigs=*/true),
+                                  "same-key migration rejected: " << val_state.GetRejectReason());
+        }
+        setup.ProcessBlock({tx});
+        const auto dmn = dmnman.GetListAtChainTip().GetMN(proTxHash);
+        BOOST_REQUIRE(dmn);
+        BOOST_CHECK_EQUAL(dmn->pdmnState->nVersion, ProTxVersion::BasicBLS);
+        BOOST_CHECK(!dmn->pdmnState->pubKeyOperator.IsLegacy());
+        BOOST_CHECK(!dmn->pdmnState->IsBanned());
+        BOOST_CHECK(dmn->pdmnState->pubKeyOperator.Get() == operator_key.GetPublicKey());
+        CheckListRoundTrips(dmnman, "after same-key legacy->basic migration");
+        const auto live = dmnman.GetListAtChainTip();
+        CDataStream ds(SER_DISK, CLIENT_VERSION);
+        ds << live;
+        CDeterministicMNList reloaded;
+        ds >> reloaded;
+        BOOST_CHECK(reloaded.GetMN(proTxHash)->pdmnState->pubKeyOperator.Get() == operator_key.GetPublicKey());
+    }
+
+    // A genuinely new key still rotates and PoSe-bans, as before.
+    {
+        CBLSSecretKey new_operator_key;
+        new_operator_key.MakeNewKey();
+        auto tx = build_upreg(new_operator_key.GetPublicKey(), ProTxVersion::BasicBLS);
+        TxValidationState val_state;
+        {
+            LOCK(cs_main);
+            BOOST_REQUIRE_MESSAGE(CheckProUpRegTx(CTransaction(tx), chainman.ActiveChain().Tip(), dmnman,
+                                                  chainman.ActiveChainstate().CoinsTip(), chainman, val_state,
+                                                  /*check_sigs=*/true),
+                                  "new-key rotation rejected: " << val_state.GetRejectReason());
+        }
+        setup.ProcessBlock({tx});
+        const auto dmn = dmnman.GetListAtChainTip().GetMN(proTxHash);
+        BOOST_REQUIRE(dmn);
+        BOOST_CHECK(!dmn->pdmnState->pubKeyOperator.IsLegacy());
+        BOOST_CHECK(dmn->pdmnState->IsBanned());
+        CheckListRoundTrips(dmnman, "after new-key rotation");
+    }
+};
+
+BOOST_AUTO_TEST_CASE(same_mn_same_block_version_crossing_key_rotation)
+{
+    TestChainV24SignalBeforeV19Setup setup;
+    FuncSameMnSameBlockVersionCrossingKeyRotation(setup);
+}
+
+BOOST_AUTO_TEST_CASE(same_mn_same_block_migration_consistent)
+{
+    TestChainV24SignalBeforeV19Setup setup;
+    FuncSameMnSameBlockMigrationConsistent(setup);
+}
+
+BOOST_AUTO_TEST_CASE(pre_v24_cross_scheme_pair_cannot_become_resident)
+{
+    TestChainV24SignalBeforeV19Setup setup;
+    FuncPreV24CrossSchemePairCannotBecomeResident(setup);
+}
+
+BOOST_AUTO_TEST_CASE(same_block_cross_scheme_key_pair_rejected)
+{
+    TestChainV24SignalBeforeV19Setup setup;
+    FuncSameBlockCrossSchemeKeyPairRejected(setup);
+}
+
+BOOST_AUTO_TEST_CASE(mempool_rejects_cross_scheme_key_race)
+{
+    TestChainV24SignalBeforeV19Setup setup;
+    FuncMempoolRejectsCrossSchemeKeyRace(setup);
+}
+
+BOOST_AUTO_TEST_CASE(proupreg_rejects_cross_scheme_key_reuse)
+{
+    TestChainV24SignalBeforeV19Setup setup;
+    FuncProUpRegTxRejectsCrossSchemeKeyReuse(setup);
+}
+
+BOOST_AUTO_TEST_CASE(proregtx_rejects_cross_scheme_key_reuse)
+{
+    TestChainV24SignalBeforeV19Setup setup;
+    FuncProRegTxRejectsCrossSchemeKeyReuse(setup);
+}
+
+BOOST_AUTO_TEST_CASE(statediff_captures_operator_key_reencoding)
+{
+    // A same-key legacy->basic migration re-encodes the operator key (same point, different scheme).
+    // CDeterministicMNStateDiff must capture that, or the evoDB diff path reconstructs the masternode
+    // with the old encoding while an online-built list has the new one -- a reconstruction split that
+    // full-snapshot serialization (which re-derives the encoding from nVersion) would not reveal.
+    CBLSSecretKey sk;
+    sk.MakeNewKey();
+
+    CDeterministicMNState a;
+    a.nVersion = ProTxVersion::LegacyBLS;
+    a.pubKeyOperator.Set(sk.GetPublicKey(), /*specificLegacyScheme=*/true);
+    a.netInfo = NetInfoInterface::MakeNetInfo(a.nVersion);
+
+    CDeterministicMNState b{a};
+    b.nVersion = ProTxVersion::BasicBLS;
+    b.pubKeyOperator.Set(sk.GetPublicKey(), /*specificLegacyScheme=*/false); // same point, re-encoded
+
+    CDeterministicMNStateDiff diff{a, b};
+    CDataStream ds(SER_DISK, CLIENT_VERSION);
+    ds << diff;
+    CDeterministicMNStateDiff diff2;
+    ds >> diff2;
+
+    CDeterministicMNState reconstructed{a};
+    diff2.ApplyToState(reconstructed);
+
+    BOOST_CHECK_EQUAL(reconstructed.nVersion, ProTxVersion::BasicBLS);
+    BOOST_CHECK(!reconstructed.pubKeyOperator.IsLegacy());
+    BOOST_CHECK(reconstructed.pubKeyOperator.Get() == sk.GetPublicKey());
+    BOOST_CHECK(::SerializeHash(reconstructed.pubKeyOperator) == ::SerializeHash(b.pubKeyOperator));
+}
+
+BOOST_AUTO_TEST_CASE(has_operator_key_under_any_scheme)
+{
+    TestChainV19BeforeActivationSetup setup;
+    FuncHasOperatorKeyUnderAnyScheme(setup);
+}
+
+BOOST_AUTO_TEST_CASE(pre_v24_behaviour_unchanged)
+{
+    TestChainV19BeforeActivationSetup setup;
+    FuncPreV24BehaviourUnchanged(setup);
+}
+
+BOOST_AUTO_TEST_CASE(stale_special_tx_does_not_poison_template)
+{
+    TestChainV24SignalBeforeV19Setup setup;
+    FuncStaleSpecialTxDoesNotPoisonTemplate(setup);
+}
+
+BOOST_AUTO_TEST_CASE(proupreg_migrates_legacy_same_key)
+{
+    TestChainV24SignalBeforeV19Setup setup;
+    FuncProUpRegTxMigratesLegacySameKey(setup);
 }
 
 BOOST_AUTO_TEST_CASE(proupreg_version_handling_before_v24)

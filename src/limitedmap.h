@@ -27,25 +27,22 @@ public:
 protected:
     std::unordered_map<K, V, Hash> map;
     typedef typename std::unordered_map<K, V, Hash>::iterator iterator;
+    size_type nCutoffSize;
     size_type nMaxSize;
-    size_type nPruneAfterSize;
 
 public:
-    //! nMaxSizeIn is the number of elements retained after a prune. nPruneAfterSizeIn is the size
-    //! the map may grow to before the next insertion prunes it; it defaults to nMaxSizeIn, which
-    //! means prune() -- and therefore a partition of every element -- runs on *every* insertion
-    //! past nMaxSizeIn. Callers whose keys are attacker-supplied should pass a larger value (e.g.
-    //! 2 * nMaxSizeIn) so that partitioning is amortised over a batch of evictions instead.
-    explicit unordered_limitedmap(size_type nMaxSizeIn, size_type nPruneAfterSizeIn = 0)
+    //! nCutoffSizeIn is the number of elements retained after a prune. nMaxSizeIn is the size the
+    //! map may grow to before a prune; it defaults to nCutoffSizeIn.
+    explicit unordered_limitedmap(size_type nCutoffSizeIn, size_type nMaxSizeIn = 0)
     {
-        assert(nMaxSizeIn > 0);
-        nMaxSize = nMaxSizeIn;
-        if (nPruneAfterSizeIn == 0) {
-            nPruneAfterSize = nMaxSize;
+        assert(nCutoffSizeIn > 0);
+        nCutoffSize = nCutoffSizeIn;
+        if (nMaxSizeIn == 0) {
+            nMaxSize = nCutoffSize;
         } else {
-            nPruneAfterSize = nPruneAfterSizeIn;
+            nMaxSize = nMaxSizeIn;
         }
-        assert(nPruneAfterSize >= nMaxSize);
+        assert(nMaxSize >= nCutoffSize);
     }
     const_iterator begin() const { return map.begin(); }
     const_iterator end() const { return map.end(); }
@@ -74,26 +71,25 @@ public:
         itTarget->second = v;
     }
     //! Number of elements retained after a prune.
+    size_type cutoff_size() const { return nCutoffSize; }
+    //! Size the map is allowed to grow to before a prune is triggered. Always >= cutoff_size().
     size_type max_size() const { return nMaxSize; }
-    //! Size the map is allowed to grow to before a prune is triggered. Always >= max_size();
-    //! when larger, the map temporarily holds more than max_size() elements between prunes.
-    size_type prune_after_size() const { return nPruneAfterSize; }
-    size_type max_size(size_type nMaxSizeIn, size_type nPruneAfterSizeIn = 0)
+    size_type max_size(size_type nCutoffSizeIn, size_type nMaxSizeIn = 0)
     {
-        assert(nMaxSizeIn > 0);
-        nMaxSize = nMaxSizeIn;
-        if (nPruneAfterSizeIn == 0) {
-            nPruneAfterSize = nMaxSize;
+        assert(nCutoffSizeIn > 0);
+        nCutoffSize = nCutoffSizeIn;
+        if (nMaxSizeIn == 0) {
+            nMaxSize = nCutoffSize;
         } else {
-            nPruneAfterSize = nPruneAfterSizeIn;
+            nMaxSize = nMaxSizeIn;
         }
-        assert(nPruneAfterSize >= nMaxSize);
+        assert(nMaxSize >= nCutoffSize);
         prune();
         return nMaxSize;
     }
     void prune()
     {
-        if (map.size() <= nPruneAfterSize) {
+        if (map.size() <= nMaxSize) {
             return;
         }
 
@@ -102,8 +98,8 @@ public:
         for (auto it = map.begin(); it != map.end(); ++it) {
             iterators.emplace_back(it);
         }
-        size_type tooMuch = map.size() - nMaxSize;
-        // nPruneAfterSize >= nMaxSize > 0 keeps tooMuch inside the vector, which nth_element relies on
+        size_type tooMuch = map.size() - nCutoffSize;
+        // nMaxSize >= nCutoffSize > 0 keeps tooMuch inside the vector, which nth_element relies on
         assert(tooMuch > 0 && tooMuch < iterators.size());
         // Only the entries below the eviction boundary have to be identified, their relative order does not matter
         std::nth_element(iterators.begin(), iterators.begin() + tooMuch, iterators.end(),

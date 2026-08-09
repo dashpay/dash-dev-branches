@@ -20,6 +20,9 @@ using SimpleUTXOMap = std::map<COutPoint, Coin>;
 SimpleUTXOMap BuildSimpleUtxoMap(const std::vector<CTransactionRef>& txs);
 SimpleUTXOMap FundTransaction(const ChainstateManager& chainman, CMutableTransaction& tx, SimpleUTXOMap& utxos,
                               const CScript& script_payout, CAmount amount);
+//! Overload for payout scripts that cannot receive the change, e.g. an OP_RETURN burn.
+SimpleUTXOMap FundTransaction(const ChainstateManager& chainman, CMutableTransaction& tx, SimpleUTXOMap& utxos,
+                              const CScript& script_payout, CAmount amount, const CScript& script_change);
 void SignTransaction(CMutableTransaction& tx, const SimpleUTXOMap& coins, const CKey& coinbase_key);
 CMutableTransaction CreateProRegTx(const ChainstateManager& chainman, SimpleUTXOMap& utxos, int port,
                                    const CScript& script_payout, const CKey& coinbase_key, CKey& owner_key_ret,

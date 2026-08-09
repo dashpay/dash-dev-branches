@@ -108,7 +108,7 @@ public:
                              CDeterministicMNManager& dmnman, CDSTXManager& dstxman, CMasternodeMetaMan& mn_metaman,
                              CTxMemPool& mempool, const CActiveMasternodeManager& mn_activeman,
                              const CMasternodeSync& mn_sync, const llmq::CInstantSendManager& isman);
-    ~CCoinJoinServer();
+    ~CCoinJoinServer() override;
 
     void ProcessMessage(CNode& pfrom, const std::string& msg_type, CDataStream& vRecv) override;
     bool ProcessGetData(CNode& pfrom, const CInv& inv, const CNetMsgMaker& msgMaker) override;

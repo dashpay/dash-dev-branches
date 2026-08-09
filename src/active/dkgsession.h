@@ -31,7 +31,7 @@ public:
                      const CActiveMasternodeManager& mn_activeman, const ChainstateManager& chainman,
                      const CSporkManager& sporkman, const CBlockIndex* base_block_index,
                      const Consensus::LLMQParams& params);
-    ~ActiveDKGSession();
+    ~ActiveDKGSession() override;
 
 public:
     // Phase 1: contribution

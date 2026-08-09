@@ -132,9 +132,9 @@ jobs:
     needs: [check-skip, container, cache-sources]
     if: |
       vars.SKIP_LINUX64 == '' ||
+      vars.SKIP_LINUX64_ASAN == '' ||
       vars.SKIP_LINUX64_FUZZ == '' ||
-      vars.SKIP_LINUX64_SQLITE == '' ||
-      vars.SKIP_LINUX64_UBSAN == ''
+      vars.SKIP_LINUX64_SQLITE == ''
     with:
       build-target: linux64
       container-path: ${{ needs.container.outputs.path }}
@@ -222,6 +222,20 @@ jobs:
       depends-artifact: ${{ needs.depends-linux64.outputs.built-artifact }}
       runs-on: ${{ needs.check-skip.outputs['runner-amd64'] }}
 
+  src-linux64_asan:
+    name: linux64_asan-build
+    uses: ./.github/workflows/build-src.yml
+    needs: [check-skip, container, depends-linux64]
+    if: ${{ vars.SKIP_LINUX64_ASAN == '' }}
+    with:
+      build-target: linux64_asan
+      container-path: ${{ needs.container.outputs.path }}
+      depends-key: ${{ needs.depends-linux64.outputs.key }}
+      depends-host: ${{ needs.depends-linux64.outputs.host }}
+      depends-dep-opts: ${{ needs.depends-linux64.outputs.dep-opts }}
+      depends-artifact: ${{ needs.depends-linux64.outputs.built-artifact }}
+      runs-on: ${{ needs.check-skip.outputs['runner-amd64'] }}
+
   src-linux64_fuzz:
     name: linux64_fuzz-build
     uses: ./.github/workflows/build-src.yml
@@ -291,20 +305,6 @@ jobs:
       depends-artifact: ${{ needs.depends-linux64_multiprocess.outputs.built-artifact }}
       runs-on: ${{ needs.check-skip.outputs['runner-arm64'] }}
 
-  src-linux64_ubsan:
-    name: linux64_ubsan-build
-    uses: ./.github/workflows/build-src.yml
-    needs: [check-skip, container, depends-linux64]
-    if: ${{ vars.SKIP_LINUX64_UBSAN == '' }}
-    with:
-      build-target: linux64_ubsan
-      container-path: ${{ needs.container.outputs.path }}
-      depends-key: ${{ needs.depends-linux64.outputs.key }}
-      depends-host: ${{ needs.depends-linux64.outputs.host }}
-      depends-dep-opts: ${{ needs.depends-linux64.outputs.dep-opts }}
-      depends-artifact: ${{ needs.depends-linux64.outputs.built-artifact }}
-      runs-on: ${{ needs.check-skip.outputs['runner-amd64'] }}
-
   src-mac:
     name: mac-build
     uses: ./.github/workflows/build-src.yml
@@ -339,6 +339,16 @@ jobs:
     with:
       bundle-key: ${{ needs.src-linux64.outputs.key }}
       build-target: linux64
+      container-path: ${{ needs.container-slim.outputs.path }}
+      runs-on: ${{ needs.check-skip.outputs['runner-amd64'] }}
+
+  test-linux64_asan:
+    name: linux64_asan-test
+    uses: ./.github/workflows/test-src.yml
+    needs: [check-skip, container-slim, src-linux64_asan, lint]
+    with:
+      bundle-key: ${{ needs.src-linux64_asan.outputs.key }}
+      build-target: linux64_asan
       container-path: ${{ needs.container-slim.outputs.path }}
       runs-on: ${{ needs.check-skip.outputs['runner-amd64'] }}
 
@@ -381,13 +391,3 @@ jobs:
       build-target: linux64_tsan
       container-path: ${{ needs.container-slim.outputs.path }}
       runs-on: ${{ needs.check-skip.outputs['runner-arm64'] }}
-
-  test-linux64_ubsan:
-    name: linux64_ubsan-test
-    uses: ./.github/workflows/test-src.yml
-    needs: [check-skip, container-slim, src-linux64_ubsan, lint]
-    with:
-      bundle-key: ${{ needs.src-linux64_ubsan.outputs.key }}
-      build-target: linux64_ubsan
-      container-path: ${{ needs.container-slim.outputs.path }}
-      runs-on: ${{ needs.check-skip.outputs['runner-amd64'] }}

@@ -529,6 +529,10 @@ static UniValue quorum_sign_helper(const JSONRPCRequest& request, Consensus::LLM
     if (!request.params[3].isNull()) {
         fSubmit = ParseBoolV(request.params[3], "submit");
     }
+    if (!llmq::CSigSharesManager::IsQuorumSigningAllowed(chainman)) {
+        throw JSONRPCError(RPC_MISC_ERROR,
+                           "Quorum signing is disabled until snapshot background validation completes");
+    }
     if (fSubmit) {
         return CHECK_NONFATAL(node.active_ctx)->shareman->AsyncSignIfMember(llmqType, id, msgHash, quorumHash);
     } else {
@@ -1300,7 +1304,7 @@ static RPCHelpMan verifyislock()
         signHeight = pindexMined->nHeight;
     }
 
-    CBlockIndex* pBlockIndex{nullptr};
+    const CBlockIndex* pBlockIndex{nullptr};
     {
         LOCK(cs_main);
         if (signHeight == -1) {
@@ -1384,7 +1388,7 @@ static RPCHelpMan submitchainlock()
 }
 
 
-void RegisterQuorumsRPCCommands(CRPCTable &tableRPC)
+void RegisterQuorumsRPCCommands(CRPCTable& t)
 {
     static const CRPCCommand commands[]{
         {"evo", &quorum_help},
@@ -1409,6 +1413,6 @@ void RegisterQuorumsRPCCommands(CRPCTable &tableRPC)
         {"evo", &verifyislock},
     };
     for (const auto& command : commands) {
-        tableRPC.appendCommand(command.name, &command);
+        t.appendCommand(command.name, &command);
     }
 }

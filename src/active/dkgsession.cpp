@@ -673,9 +673,6 @@ CFinalCommitment ActiveDKGSession::FinalizeSingleCommitment()
 
     CDKGLogger logger(*this, __func__, __LINE__);
 
-    std::vector<CBLSId> signerIds;
-    std::vector<CBLSSignature> thresholdSigs;
-
     CFinalCommitment fqc(params, m_quorum_base_block_index->GetBlockHash());
 
 

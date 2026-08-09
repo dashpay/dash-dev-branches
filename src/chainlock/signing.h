@@ -63,7 +63,7 @@ public:
                              ChainlockHandler& clhandler, const llmq::CInstantSendManager& isman,
                              const llmq::CQuorumManager& qman, llmq::CSigningManager& sigman,
                              llmq::CSigSharesManager& shareman, const CMasternodeSync& mn_sync);
-    ~ChainLockSigner();
+    ~ChainLockSigner() override;
 
     void Start();
     void Stop();

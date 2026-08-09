@@ -34,7 +34,7 @@ protected:
         bool Write(const CTimestampIndexKey& key);
 
         /// Read timestamp index entries within the given range
-        bool ReadRange(uint32_t high, uint32_t low, std::vector<uint256>& hashes);
+        void ReadRange(uint32_t high, uint32_t low, std::vector<uint256>& hashes);
 
         /// Erase timestamp index entry
         bool EraseTimestampIndex(const CTimestampIndexKey& key);
@@ -58,10 +58,7 @@ public:
     virtual ~TimestampIndex() override;
 
     /// Retrieve block hashes within the given timestamp range [low, high]
-    bool GetBlockHashes(uint32_t high, uint32_t low, std::vector<uint256>& hashes) const;
+    void GetBlockHashes(uint32_t high, uint32_t low, std::vector<uint256>& hashes) const;
 };
-
-/// Global TimestampIndex instance
-extern std::unique_ptr<TimestampIndex> g_timestampindex;
 
 #endif // BITCOIN_INDEX_TIMESTAMPINDEX_H

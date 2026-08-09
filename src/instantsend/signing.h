@@ -71,7 +71,7 @@ public:
                                llmq::CInstantSendManager& isman, llmq::CSigningManager& sigman,
                                llmq::CSigSharesManager& shareman, llmq::CQuorumManager& qman, CSporkManager& sporkman,
                                CTxMemPool& mempool, const CMasternodeSync& mn_sync);
-    ~InstantSendSigner();
+    ~InstantSendSigner() override;
 
     void RegisterRecoveryInterface();
     void UnregisterRecoveryInterface();

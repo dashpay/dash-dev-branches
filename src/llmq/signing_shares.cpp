@@ -114,7 +114,7 @@ std::string CBatchedSigShares::ToInvString() const
     return inv.ToString();
 }
 
-static void InitSession(CSigSharesNodeState::Session& s, const llmq::SignHash& signHash, CSigBase from)
+static void InitSession(CSigSharesNodeState::Session& s, const llmq::SignHash& signHash, const CSigBase& from)
 {
     const auto& llmq_params_opt = Params().GetLLMQ(from.getLlmqType());
     assert(llmq_params_opt.has_value());
@@ -766,6 +766,11 @@ bool CSigSharesManager::AsyncSignIfMember(Consensus::LLMQType llmqType, const ui
                                           bool allowDiffMsgHashSigning)
 {
     AssertLockNotHeld(cs_pendingSigns);
+
+    if (!IsQuorumSigningAllowed(m_chainman)) {
+        LogPrint(BCLog::LLMQ, "%s -- refusing quorum signature while snapshot background validation is incomplete\n", __func__);
+        return false;
+    }
 
     if (m_mn_activeman.GetProTxHash().IsNull()) return false;
 
@@ -1511,6 +1516,11 @@ void CSigSharesManager::AsyncSign(CQuorumCPtr quorum, const uint256& id, const u
     pendingSigns.emplace_back(std::move(quorum), id, msgHash);
 }
 
+bool CSigSharesManager::IsQuorumSigningAllowed(const ChainstateManager& chainman)
+{
+    return !chainman.IsSnapshotActiveAndUnvalidated();
+}
+
 std::optional<CSigShare> CSigSharesManager::CreateSigShareForSingleMember(const CQuorum& quorum, const uint256& id, const uint256& msgHash) const
 {
     cxxtimer::Timer t(true);
@@ -1550,6 +1560,13 @@ std::optional<CSigShare> CSigSharesManager::CreateSigShareForSingleMember(const 
 
 std::optional<CSigShare> CSigSharesManager::CreateSigShare(const CQuorum& quorum, const uint256& id, const uint256& msgHash) const
 {
+    // This is the signature-production boundary. Keep the gate here so direct
+    // callers (including `quorum sign ... submit=false`) cannot bypass it.
+    if (!IsQuorumSigningAllowed(m_chainman)) {
+        LogPrint(BCLog::LLMQ, "%s -- refusing quorum signature while snapshot background validation is incomplete\n", __func__);
+        return std::nullopt;
+    }
+
     auto activeMasterNodeProTxHash = m_mn_activeman.GetProTxHash();
 
     if (!quorum.IsValidMember(activeMasterNodeProTxHash)) {

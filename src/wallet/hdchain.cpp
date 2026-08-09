@@ -40,9 +40,9 @@ bool CHDChain::IsCrypted() const
     return fCrypted;
 }
 
-bool CHDChain::SetMnemonic(const SecureVector& vchMnemonic, const SecureVector& vchMnemonicPassphrase, bool fUpdateID)
+bool CHDChain::SetMnemonic(const SecureVector& mnemonic, const SecureVector& mnemonic_passphrase, bool fUpdateID)
 {
-    return SetMnemonic(SecureString(vchMnemonic.begin(), vchMnemonic.end()), SecureString(vchMnemonicPassphrase.begin(), vchMnemonicPassphrase.end()), fUpdateID);
+    return SetMnemonic(SecureString(mnemonic.begin(), mnemonic.end()), SecureString(mnemonic_passphrase.begin(), mnemonic_passphrase.end()), fUpdateID);
 }
 
 bool CHDChain::SetMnemonic(const SecureString& ssMnemonic, const SecureString& ssMnemonicPassphrase, bool fUpdateID)
@@ -130,7 +130,7 @@ uint256 CHDChain::GetSeedHash()
 }
 
 //! Try to derive an extended key, throw if it fails.
-static void DeriveExtKey(CExtKey& key_in, unsigned int index, CExtKey& key_out)
+static void DeriveExtKey(const CExtKey& key_in, unsigned int index, CExtKey& key_out)
 {
     if (!key_in.Derive(key_out, index)) {
         throw std::runtime_error("Could not derive extended key");
@@ -187,7 +187,8 @@ void CHDChain::AddAccount()
 bool CHDChain::GetAccount(uint32_t nAccountIndex, CHDAccount& hdAccountRet)
 {
     LOCK(cs);
-    if (nAccountIndex > mapAccounts.size() - 1)
+    // A chain stored without accounts creates one on first use, with zeroed counters.
+    if (!mapAccounts.empty() && nAccountIndex >= mapAccounts.size())
         return false;
     hdAccountRet = mapAccounts[nAccountIndex];
     return true;
@@ -197,7 +198,7 @@ bool CHDChain::SetAccount(uint32_t nAccountIndex, const CHDAccount& hdAccount)
 {
     LOCK(cs);
     // can only replace existing accounts
-    if (nAccountIndex > mapAccounts.size() - 1)
+    if (!mapAccounts.empty() && nAccountIndex >= mapAccounts.size())
         return false;
     mapAccounts[nAccountIndex] = hdAccount;
     return true;

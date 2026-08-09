@@ -305,8 +305,8 @@ QuorumMembers ComputeQuorumMembers(Consensus::LLMQType llmqType, const CChainPar
 
 void BuildQuorumSnapshot(const Consensus::LLMQParams& llmqParams, const Consensus::Params& consensus_params,
                          const CDeterministicMNList& allMns, const CDeterministicMNList& mnUsedAtH,
-                         std::vector<CDeterministicMNCPtr>& sortedCombinedMns, llmq::CQuorumSnapshot& quorumSnapshot,
-                         std::vector<int>& skipList, const CBlockIndex* pCycleQuorumBaseBlockIndex)
+                         llmq::CQuorumSnapshot& quorumSnapshot, std::vector<int>& skipList,
+                         const CBlockIndex* pCycleQuorumBaseBlockIndex)
 {
     if (!llmqParams.useRotation || pCycleQuorumBaseBlockIndex->nHeight % llmqParams.dkgInterval != 0) {
         ASSERT_IF_DEBUG(false);
@@ -456,8 +456,8 @@ std::vector<QuorumMembers> BuildNewQuorumQuarterMembers(const Consensus::LLMQPar
 
     if (storeSnapshot) {
         llmq::CQuorumSnapshot quorumSnapshot{};
-        BuildQuorumSnapshot(llmqParams, util_params.m_chainman.GetConsensus(), allMns, MnsUsedAtH, sortedCombinedMnsList,
-                            quorumSnapshot, skipList, util_params.m_base_index);
+        BuildQuorumSnapshot(llmqParams, util_params.m_chainman.GetConsensus(), allMns, MnsUsedAtH, quorumSnapshot,
+                            skipList, util_params.m_base_index);
         util_params.m_qsnapman.StoreSnapshotForBlock(llmqParams.type, util_params.m_base_index, quorumSnapshot);
     }
 
@@ -549,9 +549,9 @@ BlsCheck::BlsCheck() = default;
 
 BlsCheck::BlsCheck(CBLSSignature sig, std::vector<CBLSPublicKey> pubkeys, uint256 msg_hash, std::string id_string) :
     m_sig(sig),
-    m_pubkeys(pubkeys),
+    m_pubkeys(std::move(pubkeys)),
     m_msg_hash(msg_hash),
-    m_id_string(id_string)
+    m_id_string(std::move(id_string))
 {
 }
 

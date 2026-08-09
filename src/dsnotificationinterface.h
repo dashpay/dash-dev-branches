@@ -22,7 +22,7 @@ public:
     CDSNotificationInterface& operator=(const CDSNotificationInterface&) = delete;
     explicit CDSNotificationInterface(CConnman& connman, CDSTXManager& dstxman, CMasternodeSync& mn_sync,
                                       CGovernanceManager& govman, const ChainstateManager& chainman,
-                                      const std::unique_ptr<CDeterministicMNManager>& dmnman);
+                                      CDeterministicMNManager& dmnman);
     virtual ~CDSNotificationInterface();
 
     // CValidationInterface
@@ -45,9 +45,7 @@ private:
     CMasternodeSync& m_mn_sync;
     CGovernanceManager& m_govman;
     const ChainstateManager& m_chainman;
-    const std::unique_ptr<CDeterministicMNManager>& m_dmnman;
+    CDeterministicMNManager& m_dmnman;
 };
-
-extern std::unique_ptr<CDSNotificationInterface> g_ds_notification_interface;
 
 #endif // BITCOIN_DSNOTIFICATIONINTERFACE_H

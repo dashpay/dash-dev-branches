@@ -23,10 +23,9 @@ namespace {
 constexpr std::chrono::seconds GOVERNANCE_FUDGE_WINDOW{2h};
 } // anonymous namespace
 
-GovernanceSigner::GovernanceSigner(CConnman& connman, CDeterministicMNManager& dmnman, CGovernanceManager& govman,
+GovernanceSigner::GovernanceSigner(CDeterministicMNManager& dmnman, CGovernanceManager& govman,
                                    governance::SuperblockManager& superblocks, const CActiveMasternodeManager& mn_activeman,
                                    const ChainstateManager& chainman, const CMasternodeSync& mn_sync) :
-    m_connman{connman},
     m_dmnman{dmnman},
     m_govman{govman},
     m_superblocks{superblocks},
@@ -138,7 +137,19 @@ std::optional<const CGovernanceObject> GovernanceSigner::CreateGovernanceTrigger
 
     // Nobody submitted a trigger we'd like to see, so let's do it but only if we are the payee
     const CBlockIndex* tip = m_chainman.ActiveChain().Tip();
-    const auto mnList = m_dmnman.GetListForBlock(tip);
+    CDeterministicMNList mnList;
+    try {
+        mnList = m_dmnman.GetListForBlock(tip);
+    } catch (const BlockDataUnavailableError& e) {
+        // This runs on the scheduler thread, where an uncaught exception
+        // terminates the node. Unavailable history is expected while a
+        // snapshot's background chainstate is still catching up, so skip this
+        // trigger attempt. Any other exception means local EvoDB/list
+        // corruption and must not be hidden, so it deliberately stays
+        // unhandled.
+        LogPrint(BCLog::GOBJECT, "%s -- masternode list unavailable: %s\n", __func__, e.what());
+        return std::nullopt;
+    }
     const auto mn_payees = mnList.GetProjectedMNPayees(tip);
 
     if (mn_payees.empty()) {
@@ -268,7 +279,7 @@ bool GovernanceSigner::VoteFundingTrigger(const uint256& nHash, const vote_outco
     vote.SetSignature(m_mn_activeman.SignBasic(vote.GetSignatureHash()));
 
     CGovernanceException exception;
-    if (!m_govman.ProcessVoteAndRelay(vote, exception, m_connman)) {
+    if (!m_govman.ProcessVoteAndRelay(vote, exception)) {
         LogPrint(BCLog::GOBJECT, "%s -- Vote FUNDING %d for trigger:%s failed:%s\n", __func__, outcome,
                  nHash.ToString(), exception.what());
         return false;
