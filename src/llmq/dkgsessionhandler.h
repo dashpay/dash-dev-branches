@@ -9,7 +9,6 @@
 #include <sync.h>
 
 #include <list>
-#include <map>
 #include <memory>
 #include <optional>
 #include <string_view>
@@ -55,24 +54,31 @@ public:
     using BinaryMessage = std::pair<NodeId, std::shared_ptr<CDataStream>>;
 
 private:
-    const size_t maxMessagesPerNode;
+    const size_t maxMessagesPerProTx;
     mutable Mutex cs_messages;
     std::list<BinaryMessage> pendingMessages GUARDED_BY(cs_messages);
-    std::map<NodeId, size_t> messagesPerNode GUARDED_BY(cs_messages);
+    // Keyed by proTxHash rather than NodeId so the quota survives reconnects,
+    // and cumulative for the round (not refunded on pop) so draining the queue
+    // does not regain retention slots. MNAuth pins keys to registered MNs.
+    Uint256HashMap<size_t> messagesPerProTx GUARDED_BY(cs_messages);
     Uint256HashSet seenMessages GUARDED_BY(cs_messages);
 
 public:
-    explicit CDKGPendingMessages(size_t _maxMessagesPerNode) :
-        maxMessagesPerNode(_maxMessagesPerNode) {};
+    explicit CDKGPendingMessages(size_t _maxMessagesPerProTx) :
+        maxMessagesPerProTx(_maxMessagesPerProTx) {};
 
     /**
      * Enqueue a serialized DKG message under @p from with content hash @p hash.
-     * Caller is responsible for hashing the payload and (for real peers)
-     * routing the erase-request to PeerManager. Drops the message silently on
-     * per-node capacity overflow or duplicate hash.
+     * @p sender_protx keys the per-proTx quota: the sender's MNAuth-verified
+     * proTxHash for remote messages, or this node's own for messages it
+     * produced itself (@p from == -1). Drops the message silently on quota
+     * overflow or duplicate hash; quota-dropped messages are not marked seen,
+     * so another peer with budget can re-deliver them. Caller is responsible
+     * for hashing the payload and (for real peers) routing the erase-request
+     * to PeerManager.
      */
-    void PushPendingMessage(NodeId from, std::shared_ptr<CDataStream> pm, const uint256& hash)
-        EXCLUSIVE_LOCKS_REQUIRED(!cs_messages);
+    void PushPendingMessage(NodeId from, const uint256& sender_protx, std::shared_ptr<CDataStream> pm,
+                            const uint256& hash) EXCLUSIVE_LOCKS_REQUIRED(!cs_messages);
 
     std::list<BinaryMessage> PopPendingMessages(size_t maxCount) EXCLUSIVE_LOCKS_REQUIRED(!cs_messages);
     bool HasSeen(const uint256& hash) const EXCLUSIVE_LOCKS_REQUIRED(!cs_messages);

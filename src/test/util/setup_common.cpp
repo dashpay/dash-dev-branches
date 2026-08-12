@@ -296,10 +296,8 @@ ChainTestingSetup::~ChainTestingSetup()
     m_node.scheduler.reset();
 }
 
-void ChainTestingSetup::LoadVerifyActivateChainstate()
+node::ChainstateLoadOptions ChainTestingSetup::ChainstateLoadOptionsForTest()
 {
-    auto& chainman{*Assert(m_node.chainman)};
-
     node::ChainstateLoadOptions options;
     options.mempool = Assert(m_node.mempool.get());
     options.mn_metaman = Assert(m_node.mn_metaman.get());
@@ -317,6 +315,14 @@ void ChainTestingSetup::LoadVerifyActivateChainstate()
     options.check_level = m_args.GetIntArg("-checklevel", DEFAULT_CHECKLEVEL);
     options.check_interrupt = [] { return false; };
     options.coins_error_cb = [] {};
+    return options;
+}
+
+void ChainTestingSetup::LoadVerifyActivateChainstate()
+{
+    auto& chainman{*Assert(m_node.chainman)};
+
+    const node::ChainstateLoadOptions options{ChainstateLoadOptionsForTest()};
 
     auto [status, error] = LoadChainstate(chainman, m_cache_sizes, options, m_node.evodb, m_node.dmnman, m_node.llmq_ctx,
                                           m_node.chain_helper);

@@ -12,18 +12,29 @@ Adversarial P2P tests for DKG message-intake hardening:
     from a verified peer.
   - structural pre-validation: malformed DKG payloads (valid quorum prefix, garbage
     body) are rejected before retention even from a verified peer.
+  - the per-proTx retention quota is keyed by the MNAuth-verified proTxHash, so
+    reconnecting under a fresh NodeId does not refill it.
   - a well-formed DKG message that the peer never announced and was never asked for
     is dropped before retention, even from a verified peer.
 
 The node must not crash; the sending peer must be scored (Misbehaving).
 """
 
-from test_framework.messages import ser_compact_size, ser_uint256
+from test_framework.messages import (
+    CInv,
+    hash256,
+    msg_inv,
+    ser_compact_size,
+    ser_uint256,
+    uint256_from_str,
+)
 from test_framework.p2p import P2PInterface
 from test_framework.test_framework import DashTestFramework
 from test_framework.util import wait_until_helper
 
 LLMQ_TEST = 100
+# protocol.h GetInventoryType: MSG_QUORUM_CONTRIB
+MSG_QUORUM_CONTRIB = 23
 
 # A masternode protx/operator-pubkey pair accepted by the regtest-only `mnauth`
 # debug RPC, used to mark a P2P connection as MNAuth-verified without BLS signing.
@@ -31,6 +42,13 @@ FAKE_PROTX = "cecf37bf0ec05d2d22cb8227f88074bb882b94cd2081ba318a5a444b1b15b9fd"
 FAKE_PUBKEY = "8e7afdb849e5e2a085b035b62e21c0940c753f2d4501325743894c37162f287bccaffbedd60c36581dabbf127a22e43f"
 
 DKG_PUSH_TYPES = [b"qcontrib", b"qcomplaint", b"qjustify", b"qpcommit"]
+
+# LLMQ_TEST dkgInterval; phaseBlocks=2, so stage 0=Initialized, 2=Contribute, 4=Complain.
+CYCLE_LENGTH = 24
+
+# Mirrors CDKGPendingMessages in src/llmq/dkgsessionhandler.h: the handler is built
+# with maxMessagesPerProTx = params.size * 2, per message type.
+MAX_MESSAGES_PER_PROTX_FACTOR = 2
 
 
 class msg_dkg_raw:
@@ -48,10 +66,12 @@ class msg_dkg_raw:
         return "msg_dkg_raw(type=%s, len=%d)" % (self.msgtype, len(self.payload))
 
 
-def get_p2p_id(node):
+def get_p2p_id(node, uacomment=None):
     def get_id():
         for p in node.getpeerinfo():
             for p2p in node.p2ps:
+                if uacomment is not None and p2p.uacomment != uacomment:
+                    continue
                 if p["subver"] == p2p.strSubVer:
                     return p["id"]
         return None
@@ -68,6 +88,21 @@ def wait_for_banscore(node, peer_id, expected_score):
     wait_until_helper(lambda: get_score() == expected_score, timeout=10)
 
 
+def send_requested_qcontrib(peer, payload):
+    """Announce, wait for GETDATA, then deliver a QCONTRIB payload.
+
+    DKG objects only travel inv -> getdata -> object. NetDKG::ProcessMessage scores
+    unsolicited pushes before retention, so tests that need the message to reach the
+    pending queue must complete a real request first. Inventory hash matches
+    CHashWriter(SER_GETHASH, 0) over the raw wire bytes.
+    """
+    inv_hash = uint256_from_str(hash256(payload))
+    peer.send_message(msg_inv([CInv(MSG_QUORUM_CONTRIB, inv_hash)]))
+    peer.wait_for_getdata([inv_hash])
+    peer.send_message(msg_dkg_raw(b"qcontrib", payload))
+    peer.sync_with_ping()
+
+
 class DkgIntakeTest(DashTestFramework):
     def add_options(self, parser):
         self.add_wallet_options(parser)
@@ -75,8 +110,9 @@ class DkgIntakeTest(DashTestFramework):
     def set_test_params(self):
         # -whitelist keeps the adversarial peer connected even after it crosses the
         #   discouragement threshold, so banscore stays observable for the score==100 cases.
-        # -debug=net surfaces the Misbehaving reason strings in debug.log.
-        extra_args = [["-whitelist=127.0.0.1", "-debug=net", "-deprecatedrpc=banscore"]] * 4
+        # -debug=net surfaces the Misbehaving reason strings in debug.log, while
+        # -debug=llmq-dkg exposes queue-boundary behavior (quota drops).
+        extra_args = [["-whitelist=127.0.0.1", "-debug=net", "-debug=llmq-dkg", "-deprecatedrpc=banscore"]] * 4
         self.set_dash_test_params(4, 3, extra_args=extra_args)
 
     def quorum_hash_prefix(self):
@@ -85,12 +121,12 @@ class DkgIntakeTest(DashTestFramework):
         # real in-progress quorum and reach the size/structural checks.
         return bytes([LLMQ_TEST]) + ser_uint256(int(self.quorum_hash, 16))
 
-    def qcontrib_payload(self, blob_count):
+    def qcontrib_payload(self, blob_count, protx_hash=0):
         # CDKGContribution: llmqType, quorumHash, proTxHash, vvec, contributions, sig.
         # LLMQ_TEST uses threshold=2/minSize=2 by default, so blob_count=1 is
         # well-formed enough to deserialize but below the contribution lower bound.
         r = self.quorum_hash_prefix()
-        r += ser_uint256(0)  # proTxHash
+        r += ser_uint256(protx_hash)
         r += ser_compact_size(2) + b"\x00" * (2 * 48)  # BLSVerificationVector
         r += b"\x00" * 48  # CBLSIESMultiRecipientBlobs::ephemeralPubKey
         r += b"\x00" * 32  # CBLSIESMultiRecipientBlobs::ivSeed
@@ -100,10 +136,10 @@ class DkgIntakeTest(DashTestFramework):
         r += b"\x00" * 96  # sig
         return r
 
-    def add_verified_peer(self, node):
-        peer = node.add_p2p_connection(P2PInterface())
-        peer_id = get_p2p_id(node)
-        assert node.mnauth(peer_id, FAKE_PROTX, FAKE_PUBKEY)
+    def add_verified_peer(self, node, uacomment=None, protx=FAKE_PROTX):
+        peer = node.add_p2p_connection(P2PInterface(), uacomment=uacomment)
+        peer_id = get_p2p_id(node, uacomment)
+        assert node.mnauth(peer_id, protx, FAKE_PUBKEY)
         return peer, peer_id
 
     def run_test(self):
@@ -120,6 +156,7 @@ class DkgIntakeTest(DashTestFramework):
         self.test_unverified_sender_rejected(mn_node)
         self.test_oversized_rejected(mn_node)
         self.test_malformed_rejected(mn_node)
+        self.test_late_messages_bounded(mn_node)
         self.test_under_min_contribution_blobs_rejected(mn_node)
         self.test_unrequested_rejected(mn_node)
 
@@ -161,6 +198,74 @@ class DkgIntakeTest(DashTestFramework):
             peer.send_message(msg_dkg_raw(b"qcontrib", payload))
             peer.sync_with_ping()
         wait_for_banscore(node, peer_id, 100)
+        node.disconnect_p2ps()
+
+    def _start_fresh_dkg_cycle(self, nodes):
+        """Land on the base block of a fresh DKG cycle (phase 1 / Initialized)."""
+        skip_count = CYCLE_LENGTH - (self.nodes[0].getblockcount() % CYCLE_LENGTH)
+        # move_blocks (not plain generate) so mocktime keeps up with the DKG phase clock.
+        self.move_blocks(nodes, skip_count)
+        self.quorum_hash = self.nodes[0].getbestblockhash()
+        self.wait_for_quorum_phase(self.quorum_hash, 1, self.llmq_size, None, 0, self.mninfo)
+
+    def _send_late_qcontrib(self, peer, nonce):
+        """Send a well-formed QCONTRIB that no on-time worker will drain.
+
+        Unique proTxHash bytes per message so retention is bounded by the quotas
+        rather than by duplicate-hash suppression.
+        """
+        send_requested_qcontrib(peer, self.qcontrib_payload(blob_count=2, protx_hash=nonce))
+
+    def test_late_messages_bounded(self, node):
+        self.log.info("Late QCONTRIB retention is bounded per proTx, then cleared at round start")
+        nodes = [self.nodes[0]] + [mn.get_node(self) for mn in self.mninfo]
+        self._start_fresh_dkg_cycle(nodes)
+        stage = self.nodes[0].getblockcount() % CYCLE_LENGTH
+        assert stage == 0, "expected DKG cycle base, got stage %d" % stage
+        # Park in Complain so nothing drains pendingContributions for the rest of the round.
+        complain_stage = 4
+        self.move_blocks(nodes, complain_stage - stage)
+        assert self.nodes[0].getblockcount() % CYCLE_LENGTH == complain_stage
+
+        # The per-proTx quota is keyed by the verified proTxHash, so a peer that
+        # reconnects under a fresh NodeId keeps spending the same budget.
+        protx_quota = MAX_MESSAGES_PER_PROTX_FACTOR * self.llmq_size
+        nonce = 0
+        for i in range(protx_quota):
+            nonce += 1
+            peer, peer_id = self.add_verified_peer(node, "dkg-reconnect-%d" % i)
+            self._send_late_qcontrib(peer, nonce)
+            wait_for_banscore(node, peer_id, 0)
+            peer.peer_disconnect()
+            peer.wait_for_disconnect()
+
+        nonce += 1
+        quota_peer, quota_peer_id = self.add_verified_peer(node, "dkg-reconnect-over")
+        with node.assert_debug_log(["too many messages from %s" % FAKE_PROTX]):
+            self._send_late_qcontrib(quota_peer, nonce)
+        wait_for_banscore(node, quota_peer_id, 0)
+
+        # A distinct proTx has its own quota. Keep it connected to verify that
+        # round-start clearing does not score its retained message.
+        nonce += 1
+        retained_peer, retained_peer_id = self.add_verified_peer(node, "dkg-retained", protx="%064x" % 0xd0)
+        self._send_late_qcontrib(retained_peer, nonce)
+        wait_for_banscore(node, retained_peer_id, 0)
+
+        # Crossing the round boundary must clear the raw queue; the retained
+        # messages must never reach a worker (whose preverification would score
+        # their unknown proTxHashes).
+        remaining = CYCLE_LENGTH - (self.nodes[0].getblockcount() % CYCLE_LENGTH)
+        with node.assert_debug_log(
+            [],
+            unexpected_msgs=["failed preverification"],
+            timeout=60,
+        ):
+            self.move_blocks(nodes, remaining)
+            self.quorum_hash = self.nodes[0].getbestblockhash()
+            self.wait_for_quorum_phase(self.quorum_hash, 1, self.llmq_size, None, 0, self.mninfo)
+        wait_for_banscore(node, retained_peer_id, 0)
+        wait_for_banscore(node, quota_peer_id, 0)
         node.disconnect_p2ps()
 
     def test_under_min_contribution_blobs_rejected(self, node):

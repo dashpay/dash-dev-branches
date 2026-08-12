@@ -7,14 +7,17 @@
 #include <chainlock/chainlock.h>
 #include <chainparams.h>
 #include <evo/creditpool.h>
+#include <evo/deterministicmns.h>
 #include <evo/mnhftx.h>
 #include <evo/specialtxman.h>
 #include <governance/superblock.h>
+#include <hash.h>
 #include <instantsend/instantsend.h>
 #include <instantsend/lock.h>
 #include <logging.h>
 #include <masternode/payments.h>
 #include <masternode/sync.h>
+#include <util/check.h>
 
 CChainstateHelper::CChainstateHelper(CEvoDB& evodb, CDeterministicMNManager& dmnman, const CMasternodeSync& mn_sync,
                                      llmq::CInstantSendManager& isman, llmq::CQuorumBlockProcessor& qblockman,
@@ -23,6 +26,7 @@ CChainstateHelper::CChainstateHelper(CEvoDB& evodb, CDeterministicMNManager& dmn
                                      const llmq::CQuorumManager& qman) :
     isman{isman},
     mn_sync{mn_sync},
+    m_dmnman{dmnman},
     credit_pool_manager{std::make_unique<CCreditPoolManager>(evodb, chainman)},
     m_chainlocks{chainlocks},
     ehf_manager{std::make_unique<CMNHFManager>(evodb, chainman)},
@@ -59,6 +63,11 @@ bool CChainstateHelper::HasChainLock(int nHeight, const uint256& blockHash) cons
 }
 
 int32_t CChainstateHelper::GetBestChainLockHeight() const { return m_chainlocks.GetBestChainLockHeight(); }
+
+uint256 CChainstateHelper::GetDeterministicMNListHash(const CBlockIndex* pindex) const
+{
+    return SerializeHash(m_dmnman.GetListForBlock(Assert(pindex)));
+}
 
 /** Passthrough functions to CCreditPoolManager */
 CCreditPool CChainstateHelper::GetCreditPool(const CBlockIndex* const pindex)

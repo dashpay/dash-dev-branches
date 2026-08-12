@@ -6,7 +6,9 @@
 #include <chainparams.h>
 #include <consensus/validation.h>
 #include <evo/evodb.h>
+#include <evo/deterministicmns.h>
 #include <index/txindex.h>
+#include <node/interface_ui.h>
 #include <random.h>
 #include <rpc/blockchain.h>
 #include <sync.h>
@@ -16,10 +18,30 @@
 #include <test/util/setup_common.h>
 #include <uint256.h>
 #include <validation.h>
+#include <validationinterface.h>
 
 #include <vector>
 
+#include <boost/signals2/connection.hpp>
 #include <boost/test/unit_test.hpp>
+
+namespace {
+
+class TipEventCounter final : public CValidationInterface
+{
+public:
+    int block_connected{0};
+    int updated_tip{0};
+    int mn_list_changed{0};
+    int chainstate_flushed{0};
+
+    void BlockConnected(const std::shared_ptr<const CBlock>&, const CBlockIndex*) override { ++block_connected; }
+    void UpdatedBlockTip(const CBlockIndex*, const CBlockIndex*, bool) override { ++updated_tip; }
+    void NotifyMasternodeListChanged(bool, const CDeterministicMNList&, const CDeterministicMNListDiff&) override { ++mn_list_changed; }
+    void ChainStateFlushed(const CBlockLocator&) override { ++chainstate_flushed; }
+};
+
+} // namespace
 
 BOOST_FIXTURE_TEST_SUITE(validation_chainstate_tests, ChainTestingSetup)
 
@@ -80,6 +102,13 @@ BOOST_FIXTURE_TEST_CASE(chainstate_update_tip, TestChain100Setup)
     // After adding some blocks to the tip, best block should have changed.
     BOOST_CHECK(::g_best_block != curr_tip);
 
+    // Grab block 1 from disk; we'll add it to the background chain later.
+    std::shared_ptr<CBlock> pblockone = std::make_shared<CBlock>();
+    {
+        LOCK(::cs_main);
+        BOOST_REQUIRE(node::ReadBlockFromDisk(*pblockone, chainman.ActiveChain()[1], chainman.GetConsensus()));
+    }
+
     BOOST_REQUIRE(CreateAndActivateUTXOSnapshot(
         this, NoMalleation, /*reset_chainstate=*/ true));
 
@@ -107,11 +136,7 @@ BOOST_FIXTURE_TEST_CASE(chainstate_update_tip, TestChain100Setup)
         assert(false);
     }()};
 
-    // Create a block to append to the validation chain.
-    std::vector<CMutableTransaction> noTxns;
-    CScript scriptPubKey = CScript() << ToByteVector(coinbaseKey.GetPubKey()) << OP_CHECKSIG;
-    CBlock validation_block = this->CreateBlock(noTxns, scriptPubKey, background_cs);
-    auto pblock = std::make_shared<const CBlock>(validation_block);
+    // Append the first block to the background chain.
     BlockValidationState state;
     CBlockIndex* pindex = nullptr;
     const CChainParams& chainparams = Params();
@@ -121,22 +146,39 @@ BOOST_FIXTURE_TEST_CASE(chainstate_update_tip, TestChain100Setup)
     // once it is changed to support multiple chainstates.
     {
         LOCK(::cs_main);
-        bool checked = CheckBlock(*pblock, state, chainparams.GetConsensus());
+        bool checked = CheckBlock(*pblockone, state, chainparams.GetConsensus());
         BOOST_CHECK(checked);
-        bool accepted = background_cs.AcceptBlock(
-            pblock, state, &pindex, true, nullptr, &newblock);
+        bool accepted = chainman.AcceptBlock(
+            pblockone, state, &pindex, true, nullptr, &newblock);
         BOOST_CHECK(accepted);
     }
-    // UpdateTip is called here
-    bool block_added = background_cs.ActivateBestChain(state, pblock);
+
+    SyncWithValidationInterfaceQueue();
+    TipEventCounter event_counter;
+    RegisterValidationInterface(&event_counter);
+    int ui_mn_list_changed{0};
+    auto ui_connection = uiInterface.NotifyMasternodeListChanged_connect(
+        [&](const CDeterministicMNList&, const CBlockIndex*) { ++ui_mn_list_changed; });
+
+    // UpdateTip is called here.
+    bool block_added = background_cs.ActivateBestChain(state, pblockone);
+    WITH_LOCK(::cs_main, background_cs.ForceFlushStateToDisk());
+    SyncWithValidationInterfaceQueue();
+    ui_connection.disconnect();
+    UnregisterValidationInterface(&event_counter);
 
     // Ensure tip is as expected
-    BOOST_CHECK_EQUAL(background_cs.m_chain.Tip()->GetBlockHash(), validation_block.GetHash());
+    BOOST_CHECK_EQUAL(background_cs.m_chain.Tip()->GetBlockHash(), pblockone->GetHash());
 
     // g_best_block should be unchanged after adding a block to the background
     // validation chain.
     BOOST_CHECK(block_added);
     BOOST_CHECK_EQUAL(curr_tip, ::g_best_block);
+    BOOST_CHECK_EQUAL(event_counter.block_connected, 0);
+    BOOST_CHECK_EQUAL(event_counter.updated_tip, 0);
+    BOOST_CHECK_EQUAL(event_counter.mn_list_changed, 0);
+    BOOST_CHECK_EQUAL(event_counter.chainstate_flushed, 0);
+    BOOST_CHECK_EQUAL(ui_mn_list_changed, 0);
 }
 
 //! A chain whose V19 activation sits above the assumeutxo height, so the
@@ -172,6 +214,14 @@ BOOST_FIXTURE_TEST_CASE(chainstate_connectblock_bls_scheme, V19AboveSnapshotSetu
     mineBlocks(9);
     BOOST_REQUIRE(CreateAndActivateUTXOSnapshot(this, NoMalleation, /*reset_chainstate=*/true));
     BOOST_REQUIRE(WITH_LOCK(::cs_main, return chainman.IsSnapshotActive()));
+
+    // The background chainstate was reset to genesis before activation, so
+    // the base MN list was not derivable and no lifecycle marker may have
+    // been captured: deriving one would fabricate an empty list and poison
+    // the shared list cache for the background chainstate's later
+    // re-validation of the base region.
+    uint256 stale_hash;
+    BOOST_CHECK(!m_node.evodb->ReadSnapshotBaseMNListHash(stale_hash));
     mineBlocks(V19_HEIGHT - WITH_LOCK(::cs_main, return chainman.ActiveHeight()));
     BOOST_REQUIRE(!bls::bls_legacy_scheme.load());
 
@@ -192,7 +242,7 @@ BOOST_FIXTURE_TEST_CASE(chainstate_connectblock_bls_scheme, V19AboveSnapshotSetu
         CBlockIndex* pindex = nullptr;
         bool newblock = false;
         BOOST_REQUIRE(CheckBlock(*pblock, state, Params().GetConsensus()));
-        BOOST_REQUIRE(background_cs.AcceptBlock(pblock, state, &pindex, true, nullptr, &newblock));
+        BOOST_REQUIRE(m_node.chainman->AcceptBlock(pblock, state, &pindex, true, nullptr, &newblock));
     }
     BOOST_REQUIRE(background_cs.ActivateBestChain(state, pblock));
 

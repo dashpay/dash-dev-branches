@@ -112,7 +112,7 @@ class CoinJoinTest(BitcoinTestFramework):
         # cs_wallet_manager_map, so the newkeypool call below, which acquires
         # cs_wallet_manager_map while holding cs_wallet, would abort
         # -DDEBUG_LOCKORDER builds with a potential-deadlock error.
-        with self.nodes[0].wait_for_debug_log([b'Not enough funds to mix.']):
+        with self.nodes[0].busy_wait_for_debug_log([b'Not enough funds to mix.']):
             node.coinjoin('start')
             assert_equal(node.getcoinjoininfo()['running'], True)
         node.newkeypool()

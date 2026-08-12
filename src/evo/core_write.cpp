@@ -16,7 +16,9 @@
 #include <util/std23.h>
 
 #include <core_io.h>
+#include <key_io.h>
 #include <rpc/util.h>
+#include <script/standard.h>
 #include <util/check.h>
 
 #include <univalue.h>
@@ -114,7 +116,9 @@ RPCResult CAssetLockPayload::GetJsonHelp(const std::string& key, bool optional)
                     {RPCResult::Type::STR, "asm", "The asm"},
                     {RPCResult::Type::STR_HEX, "hex", "The hex"},
                     {RPCResult::Type::STR, "type", "The type, eg 'pubkeyhash'"},
-        }}}}}}
+                }},
+                {RPCResult::Type::STR, "address", /*optional=*/true, "DIP-18 Platform address (version >= 2 only)"},
+        }}}}
     }};
 }
 
@@ -128,6 +132,12 @@ UniValue CAssetLockPayload::ToJson() const
         UniValue spk(UniValue::VOBJ);
         ScriptToUniv(credit_output.scriptPubKey, spk, /*include_hex=*/true, /*include_address=*/false);
         out.pushKV("scriptPubKey", spk);
+        if (nVersion >= 2) {
+            if (const PlatformDestination dest = PlatformDestinationFromScript(credit_output.scriptPubKey);
+                IsValidPlatformDestination(dest)) {
+                out.pushKV("address", EncodePlatformDestination(dest));
+            }
+        }
         outputs.push_back(out);
     }
 

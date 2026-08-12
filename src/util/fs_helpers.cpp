@@ -161,6 +161,43 @@ void DirectoryCommit(const fs::path& dirname)
 #endif
 }
 
+//! DirectoryCommit() deliberately swallows failures because most callers only
+//! use it opportunistically. The snapshot lifecycle cannot: it promotes durable
+//! EvoDB markers on the strength of a completed rename, so a silently
+//! unsynced directory could leave markers describing a layout that a crash
+//! rolls back. Report the failure instead, as the exception type the lifecycle
+//! callers already handle.
+static void SyncDirectoryOrThrow(const fs::path& dirname)
+{
+#ifndef WIN32
+    FILE* file = fsbridge::fopen(dirname, "r");
+    if (!file) {
+        throw fs::filesystem_error("failed to open directory for sync", dirname,
+                                   std::error_code{errno, std::generic_category()});
+    }
+    const int sync_result{fsync(fileno(file))};
+    const int sync_errno{errno};
+    fclose(file);
+    // As in FileCommit(), a filesystem that does not support this is not an error.
+    if (sync_result != 0 && sync_errno != EINVAL) {
+        throw fs::filesystem_error("failed to sync directory", dirname,
+                                   std::error_code{sync_errno, std::generic_category()});
+    }
+#endif
+}
+
+void RenameDurably(const fs::path& src, const fs::path& dest)
+{
+    fs::rename(src, dest);
+    SyncDirectoryOrThrow(dest.parent_path());
+}
+
+void RemoveAllDurably(const fs::path& path)
+{
+    fs::remove_all(path);
+    SyncDirectoryOrThrow(path.parent_path());
+}
+
 bool TruncateFile(FILE* file, unsigned int length)
 {
 #if defined(WIN32)

@@ -258,6 +258,34 @@ bool CPubKey::Derive(CPubKey& pubkeyChild, ChainCode &ccChild, unsigned int nChi
     return true;
 }
 
+bool CPubKey::Derive256(CPubKey& pubkeyChild, ChainCode& ccChild, Span<const unsigned char> nChild, const ChainCode& cc) const {
+    assert(IsValid());
+    if (nChild.size() != 32) return false;
+    assert(size() == COMPRESSED_SIZE);
+    // DIP-14 compatibility mode: indexes below 2^32 derive exactly as BIP32.
+    // A hardened (high bit set) 32-bit index cannot be derived from a pubkey.
+    if (std::all_of(nChild.begin(), nChild.begin() + 28, [](unsigned char c) { return c == 0; })) {
+        uint32_t child32 = ReadBE32(nChild.data() + 28);
+        if (child32 >> 31) return false;
+        return Derive(pubkeyChild, ccChild, child32, cc);
+    }
+    unsigned char out[64];
+    DIP14Hash(cc, nChild.data(), *begin(), begin() + 1, out);
+    memcpy(ccChild.begin(), out + 32, 32);
+    secp256k1_pubkey pubkey;
+    if (!secp256k1_ec_pubkey_parse(secp256k1_context_static, &pubkey, vch, size())) {
+        return false;
+    }
+    if (!secp256k1_ec_pubkey_tweak_add(secp256k1_context_static, &pubkey, out)) {
+        return false;
+    }
+    unsigned char pub[COMPRESSED_SIZE];
+    size_t publen = COMPRESSED_SIZE;
+    secp256k1_ec_pubkey_serialize(secp256k1_context_static, pub, &publen, &pubkey, SECP256K1_EC_COMPRESSED);
+    pubkeyChild.Set(pub, pub + publen);
+    return true;
+}
+
 EllSwiftPubKey::EllSwiftPubKey(Span<const std::byte> ellswift) noexcept
 {
     assert(ellswift.size() == SIZE);

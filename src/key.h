@@ -157,6 +157,11 @@ public:
     //! Derive BIP32 child key.
     [[nodiscard]] bool Derive(CKey& keyChild, ChainCode &ccChild, unsigned int nChild, const ChainCode& cc) const;
 
+    //! Derive DIP-14 child key with a 256-bit index (32 bytes, big-endian).
+    //! Indexes below 2^32 fall back to BIP32 derivation for compatibility
+    //! (the hardened flag is then folded into the 32-bit index).
+    [[nodiscard]] bool Derive256(CKey& keyChild, ChainCode& ccChild, Span<const unsigned char> nChild, bool hardened, const ChainCode& cc) const;
+
     /**
      * Verify thoroughly whether a private key and a public key match.
      * This is done using a different mechanism than just regenerating it.

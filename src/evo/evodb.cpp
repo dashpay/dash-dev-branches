@@ -6,6 +6,8 @@
 
 #include <uint256.h>
 
+#include <tuple>
+
 CEvoDBScopedCommitter::CEvoDBScopedCommitter(CEvoDB& _evoDB, EvoDbIdentity identity) :
     evoDB{_evoDB},
     identity{identity}
@@ -90,13 +92,13 @@ void CEvoDB::RollbackCurTransaction(EvoDbIdentity identity)
     active_transaction.reset();
 }
 
-bool CEvoDB::CommitRootTransaction(EvoDbIdentity identity)
+bool CEvoDB::CommitRootTransaction(EvoDbIdentity identity, bool sync)
 {
     LOCK(cs);
     auto& context = GetContext(identity);
     assert(context.cur_transaction.IsClean());
     context.root_transaction.Commit();
-    bool ret = db->WriteBatch(context.root_batch);
+    bool ret = db->WriteBatch(context.root_batch, sync);
     context.root_batch.Clear();
     return ret;
 }
@@ -146,5 +148,93 @@ void CEvoDB::EraseSnapshotMarkers()
     LOCK(cs);
     auto& transaction = GetContext(GetCurrentIdentity()).cur_transaction;
     transaction.Erase(std::make_pair(EVODB_BEST_BLOCK, uint8_t{1}));
+    transaction.Erase(EVODB_SNAPSHOT_MNLIST_HASH);
+    transaction.Erase(EVODB_BACKGROUND_MNLIST_HASH);
     transaction.Erase(EVODB_DUAL_CHAINSTATE);
+}
+
+void CEvoDB::WriteSnapshotBaseMNListHash(const uint256& hash)
+{
+    Write(EVODB_SNAPSHOT_MNLIST_HASH, hash);
+}
+
+bool CEvoDB::ReadSnapshotBaseMNListHash(uint256& hash)
+{
+    // Lifecycle markers are read at rest (completion after both identities'
+    // sync commits, or startup recovery). Read the raw DB so the result cannot
+    // depend on which transaction-less default identity happens to be current.
+    LOCK(cs);
+    return db->Read(EVODB_SNAPSHOT_MNLIST_HASH, hash);
+}
+
+void CEvoDB::WriteBackgroundMNListHash(const uint256& block_hash, const uint256& mn_list_hash)
+{
+    Write(EVODB_BACKGROUND_MNLIST_HASH, std::make_pair(block_hash, mn_list_hash));
+}
+
+bool CEvoDB::ReadBackgroundMNListHash(uint256& block_hash, uint256& mn_list_hash)
+{
+    // See ReadSnapshotBaseMNListHash: at-rest raw read, identity-independent.
+    LOCK(cs);
+    std::pair<uint256, uint256> value;
+    if (!db->Read(EVODB_BACKGROUND_MNLIST_HASH, value)) return false;
+    std::tie(block_hash, mn_list_hash) = value;
+    return true;
+}
+
+bool CEvoDB::PromoteSnapshotMarkers(const uint256& expected_snapshot_tip)
+{
+    LOCK(cs);
+    assert(!active_transaction.has_value());
+    for (const auto& [_, context] : transaction_contexts) {
+        if (!context) continue;
+        assert(context->cur_transaction.IsClean());
+        assert(context->root_transaction.IsClean());
+    }
+
+    const auto snapshot_key = std::make_pair(EVODB_BEST_BLOCK, uint8_t{1});
+    uint256 snapshot_tip;
+    if (!db->Read(snapshot_key, snapshot_tip)) {
+        uint256 normal_tip;
+        const bool already_promoted = db->Read(EVODB_BEST_BLOCK, normal_tip) && normal_tip == expected_snapshot_tip &&
+                                      !db->Exists(EVODB_DUAL_CHAINSTATE) && !db->Exists(EVODB_SNAPSHOT_MNLIST_HASH) &&
+                                      !db->Exists(EVODB_BACKGROUND_MNLIST_HASH);
+        if (already_promoted) m_default_identity = EvoDbIdentity::NORMAL;
+        return already_promoted;
+    }
+    if (snapshot_tip != expected_snapshot_tip) return false;
+
+    CDBBatch batch{*db};
+    batch.Write(EVODB_BEST_BLOCK, snapshot_tip);
+    batch.Erase(snapshot_key);
+    batch.Erase(EVODB_SNAPSHOT_MNLIST_HASH);
+    batch.Erase(EVODB_BACKGROUND_MNLIST_HASH);
+    batch.Erase(EVODB_DUAL_CHAINSTATE);
+    if (!db->WriteBatch(batch, /*fSync=*/true)) return false;
+    // The dual-chainstate run is over: the promoted state is the NORMAL
+    // identity, so transaction-less access must resolve there again.
+    m_default_identity = EvoDbIdentity::NORMAL;
+    return true;
+}
+
+bool CEvoDB::DiscardSnapshotMarkers()
+{
+    LOCK(cs);
+    assert(!active_transaction.has_value());
+    for (const auto& [_, context] : transaction_contexts) {
+        if (!context) continue;
+        assert(context->cur_transaction.IsClean());
+        assert(context->root_transaction.IsClean());
+    }
+
+    CDBBatch batch{*db};
+    batch.Erase(std::make_pair(EVODB_BEST_BLOCK, uint8_t{1}));
+    batch.Erase(EVODB_SNAPSHOT_MNLIST_HASH);
+    batch.Erase(EVODB_BACKGROUND_MNLIST_HASH);
+    batch.Erase(EVODB_DUAL_CHAINSTATE);
+    if (!db->WriteBatch(batch, /*fSync=*/true)) return false;
+    // The snapshot chainstate is gone; transaction-less access must resolve
+    // against the NORMAL identity again.
+    m_default_identity = EvoDbIdentity::NORMAL;
+    return true;
 }

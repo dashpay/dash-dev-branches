@@ -60,6 +60,14 @@ std::optional<uint256> ReadSnapshotBaseBlockhash(fs::path chaindir)
 //! a snapshot.
 constexpr std::string_view SNAPSHOT_CHAINSTATE_SUFFIX = "_snapshot";
 
+//! Suffix appended to the snapshot chainstate dir when the snapshot fails
+//! validation and the directory is set aside for later inspection.
+constexpr std::string_view SNAPSHOT_INVALID_SUFFIX = "_INVALID";
+
+//! Suffix appended to the background chainstate dir while a fully validated
+//! snapshot chainstate is moved into its place.
+constexpr std::string_view SNAPSHOT_TODELETE_SUFFIX = "_todelete";
+
 
 //! Return a path to the snapshot-based chainstate dir, if one exists.
 std::optional<fs::path> FindSnapshotChainstateDir();

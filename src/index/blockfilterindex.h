@@ -12,6 +12,8 @@
 #include <index/base.h>
 #include <util/hasher.h>
 
+class AutoFile;
+
 static const char* const DEFAULT_BLOCKFILTERINDEX = "0";
 
 /** Interval between compact filter checkpoints. See BIP 157. */
@@ -36,6 +38,7 @@ private:
     FlatFilePos m_next_filter_pos;
     std::unique_ptr<FlatFileSeq> m_filter_fileseq;
 
+    bool ReadFilterFromFile(AutoFile& file, const uint256& hash, BlockFilter& filter) const;
     bool ReadFilterFromDisk(const FlatFilePos& pos, const uint256& hash, BlockFilter& filter) const;
     size_t WriteFilterToDisk(FlatFilePos& pos, const BlockFilter& filter);
 

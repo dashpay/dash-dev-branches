@@ -227,7 +227,7 @@ BOOST_AUTO_TEST_CASE(checkblock_accept_known_hash)
         BlockValidationState state;
         CBlockIndex* pindex = nullptr;
         bool newblock = false;
-        BOOST_REQUIRE(m_node.chainman->ActiveChainstate().AcceptBlock(
+        BOOST_REQUIRE(m_node.chainman->AcceptBlock(
             good, state, &pindex, /*fRequested=*/true,
             /*dbp=*/nullptr, &newblock, &hash));
         BOOST_REQUIRE(state.IsValid());

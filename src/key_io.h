@@ -59,4 +59,9 @@ PlatformDestination DecodePlatformDestination(const std::string& str);
 PlatformDestination DecodePlatformDestination(const std::string& str, std::string& error_str);
 PlatformDestination DecodePlatformDestination(const std::string& str, const CChainParams& params, std::string& error_str);
 
+/** The credit output script an asset lock carries for this Platform destination. */
+CScript GetScriptForPlatformDestination(const PlatformDestination& dest);
+/** Inverse of GetScriptForPlatformDestination; CNoDestination for any other script. */
+PlatformDestination PlatformDestinationFromScript(const CScript& script);
+
 #endif // BITCOIN_KEY_IO_H

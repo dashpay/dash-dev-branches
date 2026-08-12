@@ -256,14 +256,14 @@ void RelayInvToParticipants(const CDKGSession& session, const CConnman& connman,
 }
 
 template <typename Message>
-void EnqueueOwn(CDKGPendingMessages& pending, const Message& msg)
+void EnqueueOwn(CDKGPendingMessages& pending, const uint256& own_protx, const Message& msg)
 {
     CDataStream ds(SER_NETWORK, PROTOCOL_VERSION);
     ds << msg;
     auto pm = std::make_shared<CDataStream>(std::move(ds));
     CHashWriter hw(SER_GETHASH, 0);
     hw.write(AsWritableBytes(Span{*pm}));
-    pending.PushPendingMessage(/*from=*/-1, std::move(pm), hw.GetHash());
+    pending.PushPendingMessage(/*from=*/-1, own_protx, std::move(pm), hw.GetHash());
 }
 
 template <typename Message>
@@ -392,7 +392,9 @@ void NetDKG::ProcessMessage(CNode& pfrom, const std::string& msg_type, CDataStre
     // attacker-controlled payloads, so they must originate from an MNAuth-verified
     // masternode. qwatch is unauthenticated (any peer can set it via QWATCH) and is
     // only meaningful for pull/observation paths; it must not bypass this gate.
-    if (pfrom.GetVerifiedProRegTxHash().IsNull()) {
+    // Read once: the same value keys the retention quota below
+    const uint256 sender_protx = pfrom.GetVerifiedProRegTxHash();
+    if (sender_protx.IsNull()) {
         m_peer_manager->PeerMisbehaving(pfrom.GetId(), 10, "DKG message from non-verified peer");
         return;
     }
@@ -524,7 +526,7 @@ void NetDKG::ProcessMessage(CNode& pfrom, const std::string& msg_type, CDataStre
             break;
         }
         Assume(pending != nullptr);
-        pending->PushPendingMessage(from, std::move(pm), hash);
+        pending->PushPendingMessage(from, sender_protx, std::move(pm), hash);
     });
     if (!dispatched) {
         LogPrintf("NetDKG -- no session handlers for quorumIndex [%d]\n", quorumIndex);
@@ -744,7 +746,7 @@ void NetDKG::HandleDKGRound(ActiveDKGSessionHandler& handler)
     // Contribute
     auto fContributeStart = [curSession, &handler]() {
         if (auto qc = curSession->Contribute(); qc) {
-            EnqueueOwn(handler.pendingContributions, *qc);
+            EnqueueOwn(handler.pendingContributions, curSession->ProTx(), *qc);
         }
     };
     auto fContributeWait = [this, curSession, &handler, &active] {
@@ -757,7 +759,7 @@ void NetDKG::HandleDKGRound(ActiveDKGSessionHandler& handler)
     // Complain
     auto fComplainStart = [curSession, &handler, &active]() {
         if (auto qc = curSession->VerifyAndComplain(active.connman); qc) {
-            EnqueueOwn(handler.pendingComplaints, *qc);
+            EnqueueOwn(handler.pendingComplaints, curSession->ProTx(), *qc);
         }
     };
     auto fComplainWait = [this, curSession, &handler, &active] {
@@ -769,7 +771,7 @@ void NetDKG::HandleDKGRound(ActiveDKGSessionHandler& handler)
     // Justify
     auto fJustifyStart = [curSession, &handler]() {
         if (auto qj = curSession->VerifyAndJustify(); qj) {
-            EnqueueOwn(handler.pendingJustifications, *qj);
+            EnqueueOwn(handler.pendingJustifications, curSession->ProTx(), *qj);
         }
     };
     auto fJustifyWait = [this, curSession, &handler, &active] {
@@ -781,7 +783,7 @@ void NetDKG::HandleDKGRound(ActiveDKGSessionHandler& handler)
     // Commit
     auto fCommitStart = [curSession, &handler]() {
         if (auto qc = curSession->VerifyAndCommit(); qc) {
-            EnqueueOwn(handler.pendingPrematureCommitments, *qc);
+            EnqueueOwn(handler.pendingPrematureCommitments, curSession->ProTx(), *qc);
         }
     };
     auto fCommitWait = [this, curSession, &handler, &active] {

@@ -15,6 +15,7 @@
 #include <evo/chainhelper.h>
 #include <evo/creditpool.h>
 #include <evo/deterministicmns.h>
+#include <evo/specialtxman.h>
 #include <external_signer.h>
 #include <governance/governance.h>
 #include <governance/object.h>
@@ -1432,6 +1433,11 @@ public:
     {
         if (!m_node.mempool) return CFeeRate{DUST_RELAY_TX_FEE};
         return m_node.mempool->m_dust_relay_feerate;
+    }
+    bool isNonStandardSpecialTx(const CTransactionRef& tx, std::string& reason) override
+    {
+        if (!m_node.mempool || !m_node.mempool->m_require_standard) return false;
+        return !IsStandardSpecialTx(*tx, reason);
     }
     bool havePruned() override
     {

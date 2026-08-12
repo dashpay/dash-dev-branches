@@ -188,8 +188,8 @@ bool BuildSimplifiedMNListDiff(CDeterministicMNManager& dmnman, const Chainstate
     // node has not validated the base yet. Only the target block is read
     // from disk (for cbTx and its merkle tree).
     if (!(blockIndex->nStatus & BLOCK_HAVE_DATA)) {
-        errorRet = strprintf("block data for block %s is not available (pruned or below an unvalidated snapshot base)",
-                             blockIndex->GetBlockHash().ToString());
+        errorRet = strprintf("block data for block %s %s",
+                             blockIndex->GetBlockHash().ToString(), BLOCK_DATA_UNAVAILABLE_SUFFIX);
         return false;
     }
 
@@ -247,5 +247,5 @@ bool BuildSimplifiedMNListDiff(CDeterministicMNManager& dmnman, const Chainstate
 
 bool IsBlockDataUnavailableError(const std::string& error)
 {
-    return error.find("is not available (pruned or below an unvalidated snapshot base)") != std::string::npos;
+    return error.find(BLOCK_DATA_UNAVAILABLE_SUFFIX) != std::string::npos;
 }

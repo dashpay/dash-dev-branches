@@ -26,6 +26,7 @@
 #include <limits>
 #include <numeric>
 #include <stdexcept>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -723,12 +724,21 @@ struct MNListUpdates
     CDeterministicMNListDiff diff;
 };
 
+/** Sentinel suffix carried by serving-failure messages that report locally
+ *  missing block data (pruned, or below an unvalidated snapshot base) rather
+ *  than peer misbehavior. Every producer must append this verbatim so that
+ *  IsBlockDataUnavailableError() keeps recognizing the condition; matching on
+ *  this constant is what keeps such requests from penalizing the peer. */
+inline constexpr std::string_view BLOCK_DATA_UNAVAILABLE_SUFFIX{
+    "is not available (pruned or below an unvalidated snapshot base)"};
+
 /** Thrown when the masternode list for a block cannot be reconstructed because
  *  the data is not on this node yet (pruned, or below an unvalidated snapshot
  *  base, or pending in another chainstate's unflushed EvoDB overlay). Distinct
  *  from the plain std::runtime_error that CDeterministicMNList::ApplyDiff
  *  raises for genuine local corruption, which must never be swallowed.
- *  The message carries the sentinel matched by IsBlockDataUnavailableError(). */
+ *  The message carries BLOCK_DATA_UNAVAILABLE_SUFFIX, matched by
+ *  IsBlockDataUnavailableError(). */
 class BlockDataUnavailableError : public std::runtime_error
 {
 public:
@@ -778,6 +788,12 @@ public:
         return GetListForBlockInternal(pindex);
     };
     CDeterministicMNList GetListAtChainTip() EXCLUSIVE_LOCKS_REQUIRED(!cs);
+
+    void SetListForBlockForTesting(const CDeterministicMNList& list) EXCLUSIVE_LOCKS_REQUIRED(!cs)
+    {
+        LOCK(cs);
+        mnListsCache.insert_or_assign(list.GetBlockHash(), list);
+    }
 
     // Test if given TX is a ProRegTx which also contains the collateral at index n
     static bool IsProTxWithCollateral(const CTransactionRef& tx, uint32_t n);

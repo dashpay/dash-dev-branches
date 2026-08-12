@@ -14,6 +14,7 @@
 #include <rpc/blockchain.h>
 #include <sync.h>
 #include <test/util/chainstate.h>
+#include <test/util/logging.h>
 #include <test/util/random.h>
 #include <test/util/setup_common.h>
 #include <timedata.h>
@@ -28,32 +29,16 @@
 #include <llmq/signing.h>
 #include <llmq/signing_shares.h>
 #include <node/blockstorage.h>
-#include <node/interface_ui.h>
 
 #include <tinyformat.h>
 
 #include <vector>
 
-#include <boost/signals2/connection.hpp>
 #include <boost/test/unit_test.hpp>
 
 using node::SnapshotMetadata;
 
 namespace {
-
-class TipEventCounter final : public CValidationInterface
-{
-public:
-    int block_connected{0};
-    int updated_tip{0};
-    int mn_list_changed{0};
-    int chainstate_flushed{0};
-
-    void BlockConnected(const std::shared_ptr<const CBlock>&, const CBlockIndex*) override { ++block_connected; }
-    void UpdatedBlockTip(const CBlockIndex*, const CBlockIndex*, bool) override { ++updated_tip; }
-    void NotifyMasternodeListChanged(bool, const CDeterministicMNList&, const CDeterministicMNListDiff&) override { ++mn_list_changed; }
-    void ChainStateFlushed(const CBlockLocator&) override { ++chainstate_flushed; }
-};
 
 void SeedSnapshotMarker(CEvoDB& evodb, const uint256& hash)
 {
@@ -118,7 +103,10 @@ BOOST_AUTO_TEST_CASE(chainstatemanager)
     WITH_LOCK(::cs_main, c1.InitCoinsCache(1 << 23));
 
     DashChainstateSetup(manager, m_node, /*llmq_dbs_in_memory=*/true, /*llmq_dbs_wipe=*/false);
+
     BOOST_REQUIRE(c1.LoadGenesisBlock());
+    BlockValidationState val_state;
+    BOOST_CHECK(c1.ActivateBestChain(val_state, nullptr));
 
     BOOST_CHECK(!manager.IsSnapshotActive());
     BOOST_CHECK(!manager.IsSnapshotActiveAndUnvalidated());
@@ -130,7 +118,7 @@ BOOST_AUTO_TEST_CASE(chainstatemanager)
     auto& active_chain = WITH_LOCK(manager.GetMutex(), return manager.ActiveChain());
     BOOST_CHECK_EQUAL(&active_chain, &c1.m_chain);
 
-    BOOST_CHECK_EQUAL(WITH_LOCK(manager.GetMutex(), return manager.ActiveHeight()), -1);
+    BOOST_CHECK_EQUAL(WITH_LOCK(manager.GetMutex(), return manager.ActiveHeight()), 0);
 
     auto active_tip = WITH_LOCK(manager.GetMutex(), return manager.ActiveTip());
     auto exp_tip = c1.m_chain.Tip();
@@ -142,13 +130,17 @@ BOOST_AUTO_TEST_CASE(chainstatemanager)
 
     // Create a snapshot-based chainstate.
     //
-    const uint256 snapshot_blockhash = GetRandHash();
+    const uint256 snapshot_blockhash = active_tip->GetBlockHash();
     SeedSnapshotMarker(evodb, snapshot_blockhash);
     Chainstate* c2_ptr = WITH_LOCK(::cs_main, return manager.ActivateExistingSnapshot(
         &mempool, snapshot_blockhash));
     BOOST_REQUIRE(c2_ptr);
     Chainstate& c2 = *c2_ptr;
     chainstates.push_back(&c2);
+
+    // Only the active chainstate keeps the mempool.
+    BOOST_CHECK_EQUAL(c2.GetMempool(), &mempool);
+    BOOST_CHECK(!c1.GetMempool());
 
     DashChainstateSetup(manager, m_node, /*llmq_dbs_in_memory=*/true, /*llmq_dbs_wipe=*/false);
 
@@ -157,12 +149,9 @@ BOOST_AUTO_TEST_CASE(chainstatemanager)
     c2.InitCoinsDB(
         /*cache_size_bytes=*/1 << 23, /*in_memory=*/true, /*should_wipe=*/false);
     WITH_LOCK(::cs_main, c2.InitCoinsCache(1 << 23));
-    // Give the snapshot chainstate its own genesis candidate and tip.
-    c2.LoadGenesisBlock();
-    WITH_LOCK(::cs_main, c2.setBlockIndexCandidates.insert(
-        manager.m_blockman.LookupBlockIndex(Params().GenesisBlock().GetHash())));
-    BlockValidationState dummy_state;
-    BOOST_CHECK(c2.ActivateBestChain(dummy_state, nullptr));
+    c2.m_chain.SetTip(*active_tip);
+    BlockValidationState _;
+    BOOST_CHECK(c2.ActivateBestChain(_, nullptr));
 
     BOOST_CHECK(manager.IsSnapshotActive());
     BOOST_CHECK(WITH_LOCK(::cs_main, return !manager.IsSnapshotValidated()));
@@ -182,31 +171,7 @@ BOOST_AUTO_TEST_CASE(chainstatemanager)
     auto exp_tip2 = c2.m_chain.Tip();
     BOOST_CHECK_EQUAL(active_tip2, exp_tip2);
 
-    // Ensure that these pointers actually correspond to different
-    // CCoinsViewCache instances.
-    BOOST_CHECK(exp_tip != exp_tip2);
-
-    // Connect genesis through the now-background chainstate. This exercises
-    // Dash special-transaction and quorum processing with a non-active caller,
-    // and background validation must not emit active-tip notifications.
-    SyncWithValidationInterfaceQueue();
-    TipEventCounter event_counter;
-    RegisterValidationInterface(&event_counter);
-    int ui_mn_list_changed{0};
-    auto ui_connection = uiInterface.NotifyMasternodeListChanged_connect(
-        [&](const CDeterministicMNList&, const CBlockIndex*) { ++ui_mn_list_changed; });
-    BlockValidationState background_state;
-    BOOST_CHECK(c1.ActivateBestChain(background_state, nullptr));
-    WITH_LOCK(::cs_main, c1.ForceFlushStateToDisk());
-    SyncWithValidationInterfaceQueue();
-    ui_connection.disconnect();
-    UnregisterValidationInterface(&event_counter);
-    BOOST_CHECK_EQUAL(c1.m_chain.Tip(), WITH_LOCK(::cs_main, return manager.ActiveChain().Genesis()));
-    BOOST_CHECK_EQUAL(event_counter.block_connected, 0);
-    BOOST_CHECK_EQUAL(event_counter.updated_tip, 0);
-    BOOST_CHECK_EQUAL(event_counter.mn_list_changed, 0);
-    BOOST_CHECK_EQUAL(event_counter.chainstate_flushed, 0);
-    BOOST_CHECK_EQUAL(ui_mn_list_changed, 0);
+    BOOST_CHECK_EQUAL(exp_tip, exp_tip2);
 
     // Let scheduler events finish running to avoid accessing memory that is going to be unloaded
     SyncWithValidationInterfaceQueue();
@@ -217,7 +182,7 @@ BOOST_AUTO_TEST_CASE(chainstatemanager)
 }
 
 //! Test rebalancing the caches associated with each chainstate.
-BOOST_AUTO_TEST_CASE(chainstatemanager_rebalance_caches)
+BOOST_FIXTURE_TEST_CASE(chainstatemanager_rebalance_caches, TestChain100Setup)
 {
     ChainstateManager& manager = *m_node.chainman;
     CTxMemPool& mempool = *m_node.mempool;
@@ -230,7 +195,7 @@ BOOST_AUTO_TEST_CASE(chainstatemanager_rebalance_caches)
 
     // Create a legacy (IBD) chainstate.
     //
-    Chainstate& c1 = WITH_LOCK(cs_main, return manager.InitializeChainstate(&mempool, evodb, m_node.chain_helper));
+    Chainstate& c1 = manager.ActiveChainstate();
     chainstates.push_back(&c1);
     c1.InitCoinsDB(
         /*cache_size_bytes=*/1 << 23, /*in_memory=*/true, /*should_wipe=*/false);
@@ -238,8 +203,6 @@ BOOST_AUTO_TEST_CASE(chainstatemanager_rebalance_caches)
     {
         LOCK(::cs_main);
         c1.InitCoinsCache(1 << 23);
-        BOOST_REQUIRE(c1.LoadGenesisBlock());
-        c1.CoinsTip().SetBestBlock(InsecureRand256());
         manager.MaybeRebalanceCaches();
     }
 
@@ -248,9 +211,9 @@ BOOST_AUTO_TEST_CASE(chainstatemanager_rebalance_caches)
 
     // Create a snapshot-based chainstate.
     //
-    const uint256 snapshot_blockhash = GetRandHash();
-    SeedSnapshotMarker(evodb, snapshot_blockhash);
-    Chainstate* c2_ptr = WITH_LOCK(cs_main, return manager.ActivateExistingSnapshot(&mempool, snapshot_blockhash));
+    CBlockIndex* snapshot_base{WITH_LOCK(manager.GetMutex(), return manager.ActiveChain()[manager.ActiveChain().Height() / 2])};
+    SeedSnapshotMarker(evodb, snapshot_base->GetBlockHash());
+    Chainstate* c2_ptr = WITH_LOCK(cs_main, return manager.ActivateExistingSnapshot(&mempool, snapshot_base->GetBlockHash()));
     BOOST_REQUIRE(c2_ptr);
     Chainstate& c2 = *c2_ptr;
     chainstates.push_back(&c2);
@@ -260,8 +223,6 @@ BOOST_AUTO_TEST_CASE(chainstatemanager_rebalance_caches)
     {
         LOCK(::cs_main);
         c2.InitCoinsCache(1 << 23);
-        BOOST_REQUIRE(c2.LoadGenesisBlock());
-        c2.CoinsTip().SetBestBlock(InsecureRand256());
         manager.MaybeRebalanceCaches();
     }
 
@@ -522,6 +483,55 @@ BOOST_FIXTURE_TEST_CASE(chainstatemanager_activate_snapshot, SnapshotTestSetup)
     this->SetupSnapshot();
 }
 
+BOOST_FIXTURE_TEST_CASE(chainstatemanager_reconsider_block_candidates, SnapshotTestSetup)
+{
+    auto [background_chainstate, snapshot_chainstate] = this->SetupSnapshot();
+    ChainstateManager& chainman = *Assert(m_node.chainman);
+
+    // Build a valid fork block directly on the background tip. Since the
+    // background tip is the snapshot base, this block is not on the path the
+    // background chainstate is allowed to validate.
+    CScript script_pub_key = CScript() << ToByteVector(coinbaseKey.GetPubKey()) << OP_CHECKSIG;
+    CBlock fork_block = CreateBlock(/*txns=*/{}, script_pub_key, *background_chainstate);
+    BOOST_REQUIRE_EQUAL(fork_block.hashPrevBlock, WITH_LOCK(::cs_main, return background_chainstate->m_chain.Tip()->GetBlockHash()));
+    BOOST_REQUIRE(chainman.ProcessNewBlock(std::make_shared<const CBlock>(fork_block), /*force_processing=*/true, /*new_block=*/nullptr));
+
+    CBlockIndex* fork_index{WITH_LOCK(::cs_main, return chainman.m_blockman.LookupBlockIndex(fork_block.GetHash()))};
+    BOOST_REQUIRE(fork_index);
+
+    {
+        LOCK(::cs_main);
+        const arith_uint256 original_work{fork_index->nChainWork};
+        const CBlockIndex* snapshot_base{snapshot_chainstate->SnapshotBase()};
+        BOOST_REQUIRE(snapshot_base);
+        BOOST_REQUIRE_EQUAL(background_chainstate->m_chain.Tip(), snapshot_base);
+        BOOST_REQUIRE(!snapshot_base->GetAncestor(fork_index->nHeight));
+
+        // Make the fork the highest-work block and simulate validation having
+        // marked it failed. ResetBlockFailureFlags used to add it only to the
+        // invoking background chainstate's candidate set.
+        fork_index->nChainWork = snapshot_chainstate->m_chain.Tip()->nChainWork + 1;
+        fork_index->nStatus |= BLOCK_FAILED_VALID;
+        chainman.m_failed_blocks.insert(fork_index);
+        background_chainstate->setBlockIndexCandidates.erase(fork_index);
+        snapshot_chainstate->setBlockIndexCandidates.erase(fork_index);
+
+        background_chainstate->ResetBlockFailureFlags(fork_index);
+
+        BOOST_CHECK(fork_index->IsValid());
+        BOOST_CHECK_EQUAL(background_chainstate->setBlockIndexCandidates.count(fork_index), 0);
+        BOOST_CHECK_EQUAL(snapshot_chainstate->setBlockIndexCandidates.count(fork_index), 1);
+        for (const CBlockIndex* candidate : background_chainstate->setBlockIndexCandidates) {
+            BOOST_CHECK_EQUAL(snapshot_base->GetAncestor(candidate->nHeight), candidate);
+        }
+
+        // Restore the synthetic work value so the shared block index remains
+        // internally consistent for fixture teardown.
+        snapshot_chainstate->setBlockIndexCandidates.erase(fork_index);
+        fork_index->nChainWork = original_work;
+    }
+}
+
 //! Test LoadBlockIndex behavior when multiple chainstates are in use.
 //!
 //! - First, verify that setBlockIndexCandidates is as expected when using a single,
@@ -530,7 +540,7 @@ BOOST_FIXTURE_TEST_CASE(chainstatemanager_activate_snapshot, SnapshotTestSetup)
 //! - Then mark a region of the chain BLOCK_ASSUMED_VALID and introduce a second chainstate
 //!   that will tolerate assumed-valid blocks. Run LoadBlockIndex() and ensure that the first
 //!   chainstate only contains fully validated blocks and the other chainstate contains all blocks,
-//!   even those assumed-valid.
+//!   except those marked assume-valid, because those entries don't HAVE_DATA.
 //!
 BOOST_FIXTURE_TEST_CASE(chainstatemanager_loadblockindex, TestChain100Setup)
 {
@@ -545,28 +555,34 @@ BOOST_FIXTURE_TEST_CASE(chainstatemanager_loadblockindex, TestChain100Setup)
     const int assumed_valid_start_idx = last_assumed_valid_idx - expected_assumed_valid;
 
     CBlockIndex* validated_tip{nullptr};
+    CBlockIndex* assumed_base{nullptr};
     CBlockIndex* assumed_tip{WITH_LOCK(chainman.GetMutex(), return chainman.ActiveChain().Tip())};
 
     auto reload_all_block_indexes = [&]() {
+        // For completeness, we also reset the block sequence counters to
+        // ensure that no state which affects the ranking of tip-candidates is
+        // retained (even though this isn't strictly necessary).
+        WITH_LOCK(::cs_main, return chainman.ResetBlockSequenceCounters());
         for (Chainstate* cs : chainman.GetAll()) {
             LOCK(::cs_main);
-            cs->UnloadBlockIndex();
+            cs->ClearBlockIndexCandidates();
             BOOST_CHECK(cs->setBlockIndexCandidates.empty());
         }
 
         WITH_LOCK(::cs_main, chainman.LoadBlockIndex());
     };
 
-    // Ensure that without any assumed-valid BlockIndex entries, all entries are considered
-    // tip candidates.
+    // Ensure that without any assumed-valid BlockIndex entries, only the current tip is
+    // considered as a candidate.
     reload_all_block_indexes();
-    BOOST_CHECK_EQUAL(cs1.setBlockIndexCandidates.size(), cs1.m_chain.Height() + 1);
+    BOOST_CHECK_EQUAL(cs1.setBlockIndexCandidates.size(), 1);
 
-    // Mark some region of the chain assumed-valid.
+    // Mark some region of the chain assumed-valid, and remove the HAVE_DATA flag.
     for (int i = 0; i <= cs1.m_chain.Height(); ++i) {
         LOCK(::cs_main);
         auto index = cs1.m_chain[i];
 
+        // Blocks with heights in range [20, 40) are marked ASSUMED_VALID
         if (i < last_assumed_valid_idx && i >= assumed_valid_start_idx) {
             index->nStatus = BlockStatus::BLOCK_VALID_TREE | BlockStatus::BLOCK_ASSUMED_VALID;
         }
@@ -579,37 +595,54 @@ BOOST_FIXTURE_TEST_CASE(chainstatemanager_loadblockindex, TestChain100Setup)
             validated_tip = index;
             BOOST_CHECK(!index->IsAssumedValid());
         }
+        // Note the last assumed valid block as the snapshot base
+        if (i == last_assumed_valid_idx - 1) {
+            assumed_base = index;
+            BOOST_CHECK(index->IsAssumedValid());
+        } else if (i == last_assumed_valid_idx) {
+            BOOST_CHECK(!index->IsAssumedValid());
+        }
     }
 
     BOOST_CHECK_EQUAL(expected_assumed_valid, num_assumed_valid);
 
-    const uint256 snapshot_blockhash = GetRandHash();
+    const uint256 snapshot_blockhash = assumed_base->GetBlockHash();
     SeedSnapshotMarker(*m_node.evodb, snapshot_blockhash);
     Chainstate* cs2_ptr = WITH_LOCK(::cs_main,
         return chainman.ActivateExistingSnapshot(&mempool, snapshot_blockhash));
     BOOST_REQUIRE(cs2_ptr);
     Chainstate& cs2 = *cs2_ptr;
 
+    // Note: cs2's tip is not set when ActivateExistingSnapshot is called.
+    // Set tip of the fully validated chain to be the validated tip
+    cs1.m_chain.SetTip(*validated_tip);
+
+    // Set tip of the assume-valid-based chain to the assume-valid block
+    cs2.m_chain.SetTip(*assumed_base);
+
     reload_all_block_indexes();
 
-    // The fully validated chain only has candidates up to the start of the assumed-valid
-    // blocks.
+    // The fully validated chain should have the current validated tip
+    // and the assumed valid base as candidates.
+    BOOST_CHECK_EQUAL(cs1.setBlockIndexCandidates.size(), 2);
     BOOST_CHECK_EQUAL(cs1.setBlockIndexCandidates.count(validated_tip), 1);
-    BOOST_CHECK_EQUAL(cs1.setBlockIndexCandidates.count(assumed_tip), 0);
-    BOOST_CHECK_EQUAL(cs1.setBlockIndexCandidates.size(), assumed_valid_start_idx);
+    BOOST_CHECK_EQUAL(cs1.setBlockIndexCandidates.count(assumed_base), 1);
 
-    // The assumed-valid tolerant chain has all blocks as candidates.
-    BOOST_CHECK_EQUAL(cs2.setBlockIndexCandidates.count(validated_tip), 1);
+    // The assumed-valid tolerant chain has the assumed valid base as a
+    // candidate, but otherwise has none of the assumed-valid (which do not
+    // HAVE_DATA) blocks as candidates.
+    BOOST_CHECK_EQUAL(cs2.setBlockIndexCandidates.count(validated_tip), 0);
     BOOST_CHECK_EQUAL(cs2.setBlockIndexCandidates.count(assumed_tip), 1);
-    BOOST_CHECK_EQUAL(cs2.setBlockIndexCandidates.size(), num_indexes);
+    BOOST_CHECK_EQUAL(cs2.setBlockIndexCandidates.size(), num_indexes - last_assumed_valid_idx + 1);
 }
 
 //! Ensure that snapshot chainstates initialize properly when found on disk.
 BOOST_FIXTURE_TEST_CASE(chainstatemanager_snapshot_init, SnapshotTestSetup)
 {
-    this->SetupSnapshot();
-
     ChainstateManager& chainman = *Assert(m_node.chainman);
+    Chainstate& bg_chainstate = chainman.ActiveChainstate();
+
+    this->SetupSnapshot();
 
     fs::path snapshot_chainstate_dir = *node::FindSnapshotChainstateDir();
     BOOST_CHECK(fs::exists(snapshot_chainstate_dir));
@@ -621,6 +654,24 @@ BOOST_FIXTURE_TEST_CASE(chainstatemanager_snapshot_init, SnapshotTestSetup)
 
     auto all_chainstates = chainman.GetAll();
     BOOST_CHECK_EQUAL(all_chainstates.size(), 2);
+
+    // Runtime activation moved the mempool to the (active) snapshot chainstate.
+    BOOST_CHECK_EQUAL(chainman.ActiveChainstate().GetMempool(), m_node.mempool.get());
+    BOOST_CHECK(!bg_chainstate.GetMempool());
+
+    // "Rewind" the background chainstate so that its tip is not at the
+    // base block of the snapshot - this is so after simulating a node restart,
+    // it will initialize instead of attempting to complete validation.
+    //
+    // Note that this is not a realistic use of DisconnectTip().
+    DisconnectedBlockTransactions unused_pool;
+    BlockValidationState unused_state;
+    {
+        LOCK2(::cs_main, bg_chainstate.MempoolMutex());
+        BOOST_CHECK(bg_chainstate.DisconnectTip(unused_state, &unused_pool));
+        unused_pool.clear();  // to avoid queuedTx assertion errors on teardown
+    }
+    BOOST_CHECK_EQUAL(bg_chainstate.m_chain.Height(), 109);
 
     // Test that simulating a shutdown (resetting ChainstateManager) and then performing
     // chainstate reinitializing successfully cleans up the background-validation
@@ -653,7 +704,7 @@ BOOST_FIXTURE_TEST_CASE(chainstatemanager_snapshot_init, SnapshotTestSetup)
         // chainstate.
         for (Chainstate* cs : chainman_restarted.GetAll()) {
             if (cs != &chainman_restarted.ActiveChainstate()) {
-                BOOST_CHECK_EQUAL(cs->m_chain.Height(), 110);
+                BOOST_CHECK_EQUAL(cs->m_chain.Height(), 109);
             }
         }
     }
@@ -774,8 +825,23 @@ BOOST_FIXTURE_TEST_CASE(chainstatemanager_mined_commitment_is_chain_aware, Snaps
 
 BOOST_FIXTURE_TEST_CASE(chainstatemanager_evodb_snapshot_only_flush_restart, SnapshotTestSetup)
 {
-    this->SetupSnapshot();
+    auto chainstates = this->SetupSnapshot();
+    Chainstate* background_chainstate = std::get<0>(chainstates);
     ChainstateManager& chainman = *Assert(m_node.chainman);
+
+    // Keep this M2 marker-independence test below completion height; #25740 now
+    // completes and cleans up immediately on restart when background is at base.
+    DisconnectedBlockTransactions unused_pool;
+    BlockValidationState unused_state;
+    {
+        LOCK2(::cs_main, background_chainstate->MempoolMutex());
+        BOOST_CHECK(background_chainstate->DisconnectTip(unused_state, &unused_pool));
+        unused_pool.clear();
+        background_chainstate->TryAddBlockIndexCandidate(background_chainstate->m_chain.Tip());
+        background_chainstate->ForceFlushStateToDisk();
+    }
+    BOOST_CHECK_EQUAL(background_chainstate->m_chain.Height(), 109);
+
     uint256 normal_marker;
     BOOST_REQUIRE(m_node.evodb->ReadBestBlock(EvoDbIdentity::NORMAL, normal_marker));
 
@@ -830,6 +896,7 @@ BOOST_FIXTURE_TEST_CASE(chainstatemanager_snapshot_init_missing_evodb_marker, Sn
 
     WITH_LOCK(::cs_main, restarted.ResetChainstates());
     fs::remove_all(gArgs.GetDataDirNet() / "chainstate_snapshot");
+    BOOST_REQUIRE(m_node.evodb->DiscardSnapshotMarkers());
     this->LoadVerifyActivateChainstate();
 }
 
@@ -853,6 +920,404 @@ BOOST_FIXTURE_TEST_CASE(chainstatemanager_snapshot_discarded_on_reindex, Snapsho
     BOOST_CHECK_EQUAL(reindexed.GetAll().size(), 1);
     uint256 stale_marker;
     BOOST_CHECK(!m_node.evodb->ReadBestBlock(EvoDbIdentity::SNAPSHOT, stale_marker));
+}
+
+BOOST_FIXTURE_TEST_CASE(chainstatemanager_snapshot_completion, SnapshotTestSetup)
+{
+    this->SetupSnapshot();
+
+    ChainstateManager& chainman = *Assert(m_node.chainman);
+    Chainstate& active_cs = chainman.ActiveChainstate();
+    auto tip_cache_before_complete = active_cs.m_coinstip_cache_size_bytes;
+    auto db_cache_before_complete = active_cs.m_coinsdb_cache_size_bytes;
+
+    SnapshotCompletionResult res;
+    auto mock_shutdown = [](bilingual_str msg) {};
+
+    fs::path snapshot_chainstate_dir = *node::FindSnapshotChainstateDir();
+    BOOST_CHECK(fs::exists(snapshot_chainstate_dir));
+    BOOST_CHECK_EQUAL(snapshot_chainstate_dir, gArgs.GetDataDirNet() / "chainstate_snapshot");
+
+    BOOST_CHECK(chainman.IsSnapshotActive());
+    const uint256 snapshot_tip_hash = WITH_LOCK(chainman.GetMutex(),
+        return chainman.ActiveTip()->GetBlockHash());
+
+    res = WITH_LOCK(::cs_main,
+        return chainman.MaybeCompleteSnapshotValidation(mock_shutdown));
+    BOOST_CHECK_EQUAL(res, SnapshotCompletionResult::SUCCESS);
+
+    WITH_LOCK(::cs_main, BOOST_CHECK(chainman.IsSnapshotValidated()));
+    BOOST_CHECK(chainman.IsSnapshotActive());
+
+    // Cache should have been rebalanced and reallocated to the "only" remaining
+    // chainstate.
+    BOOST_CHECK(active_cs.m_coinstip_cache_size_bytes > tip_cache_before_complete);
+    BOOST_CHECK(active_cs.m_coinsdb_cache_size_bytes > db_cache_before_complete);
+
+    auto all_chainstates = chainman.GetAll();
+    BOOST_CHECK_EQUAL(all_chainstates.size(), 1);
+    BOOST_CHECK_EQUAL(all_chainstates[0], &active_cs);
+
+    // Trying completion again should return false.
+    res = WITH_LOCK(::cs_main,
+        return chainman.MaybeCompleteSnapshotValidation(mock_shutdown));
+    BOOST_CHECK_EQUAL(res, SnapshotCompletionResult::SKIPPED);
+
+    // The invalid snapshot path should not have been used.
+    fs::path snapshot_invalid_dir = gArgs.GetDataDirNet() / "chainstate_snapshot_INVALID";
+    BOOST_CHECK(!fs::exists(snapshot_invalid_dir));
+    // chainstate_snapshot should still exist.
+    BOOST_CHECK(fs::exists(snapshot_chainstate_dir));
+
+    // Test that simulating a shutdown (reseting ChainstateManager) and then performing
+    // chainstate reinitializing successfully cleans up the background-validation
+    // chainstate data, and we end up with a single chainstate that is at tip.
+    ChainstateManager& chainman_restarted = this->SimulateNodeRestart();
+
+    BOOST_TEST_MESSAGE("Performing Load/Verify/Activate of chainstate");
+
+    // This call reinitializes the chainstates, and should clean up the now unnecessary
+    // background-validation leveldb contents.
+    this->LoadVerifyActivateChainstate();
+
+    BOOST_CHECK(!fs::exists(snapshot_invalid_dir));
+    // chainstate_snapshot should now *not* exist.
+    BOOST_CHECK(!fs::exists(snapshot_chainstate_dir));
+    BOOST_CHECK(m_node.evodb->VerifyBestBlock(EvoDbIdentity::NORMAL, snapshot_tip_hash));
+    uint256 obsolete_marker;
+    BOOST_CHECK(!m_node.evodb->ReadBestBlock(EvoDbIdentity::SNAPSHOT, obsolete_marker));
+    BOOST_CHECK(!m_node.evodb->ReadSnapshotBaseMNListHash(obsolete_marker));
+    BOOST_CHECK(!m_node.evodb->HasDualChainstateMarker());
+
+    const Chainstate& active_cs2 = chainman_restarted.ActiveChainstate();
+
+    {
+        LOCK(chainman_restarted.GetMutex());
+        BOOST_CHECK_EQUAL(chainman_restarted.GetAll().size(), 1);
+        BOOST_CHECK(!chainman_restarted.IsSnapshotActive());
+        BOOST_CHECK(!chainman_restarted.IsSnapshotValidated());
+        BOOST_CHECK(active_cs2.m_coinstip_cache_size_bytes > tip_cache_before_complete);
+        BOOST_CHECK(active_cs2.m_coinsdb_cache_size_bytes > db_cache_before_complete);
+
+        BOOST_CHECK_EQUAL(chainman_restarted.ActiveTip()->GetBlockHash(), snapshot_tip_hash);
+        BOOST_CHECK_EQUAL(chainman_restarted.ActiveHeight(), 210);
+    }
+
+    BOOST_TEST_MESSAGE(
+        "Ensure we can mine blocks on top of the \"new\" IBD chainstate");
+    mineBlocks(10);
+    {
+        LOCK(chainman_restarted.GetMutex());
+        BOOST_CHECK_EQUAL(chainman_restarted.ActiveHeight(), 220);
+    }
+}
+
+BOOST_FIXTURE_TEST_CASE(chainstatemanager_snapshot_completion_incorrect_base_mn_list, SnapshotTestSetup)
+{
+    auto [validation_chainstate, snapshot_chainstate] = this->SetupSnapshot();
+    ChainstateManager& chainman = *Assert(m_node.chainman);
+
+    const CBlockIndex* base_index = WITH_LOCK(::cs_main, return validation_chainstate->m_chain.Tip());
+    BOOST_REQUIRE(base_index);
+    const CDeterministicMNList incorrect_base_list{
+        base_index->GetBlockHash(), base_index->nHeight, /*totalRegisteredCount=*/1};
+    const uint256 incorrect_hash{SerializeHash(incorrect_base_list)};
+    uint256 captured_block;
+    uint256 captured_hash;
+    BOOST_REQUIRE(m_node.evodb->ReadBackgroundMNListHash(captured_block, captured_hash));
+    BOOST_CHECK_EQUAL(captured_block, base_index->GetBlockHash());
+    BOOST_CHECK_NE(captured_hash, incorrect_hash);
+    m_node.dmnman->SetListForBlockForTesting(incorrect_base_list);
+
+    // The regtest assumeutxo fixture predates DIP3. Temporarily make DIP3 active
+    // so the legacy completion lookup would consume the poisoned shared cache.
+    Consensus::Params& mutable_consensus{
+        const_cast<Consensus::Params&>(Params().GetConsensus())};
+    const int old_dip3_height{mutable_consensus.DIP0003Height};
+    mutable_consensus.DIP0003Height = 1;
+    // Boost's execution monitor longjmps past normal unwinding on fatal
+    // failures, but for ordinary exceptions (BOOST_REQUIRE, deserialization
+    // errors from the poisoned record below) this guard keeps the process-wide
+    // consensus params from leaking into later test cases.
+    struct Dip3HeightRestore {
+        Consensus::Params& params;
+        int height;
+        ~Dip3HeightRestore() { params.DIP0003Height = height; }
+    } dip3_restore{mutable_consensus, old_dip3_height};
+
+    {
+        auto tx = m_node.evodb->BeginTransaction(EvoDbIdentity::SNAPSHOT);
+        // Seed an incorrect full base list, not merely an incorrect comparison
+        // hash. The key mirrors DB_LIST_SNAPSHOT in evo/deterministicmns.cpp
+        // (file-local there); keep them in sync.
+        m_node.evodb->Write(
+            std::make_pair(std::string{"dmn_S3"}, base_index->GetBlockHash()),
+            incorrect_base_list);
+        m_node.evodb->WriteSnapshotBaseMNListHash(incorrect_hash);
+        tx->Commit();
+    }
+    BOOST_REQUIRE(m_node.evodb->CommitRootTransaction(EvoDbIdentity::SNAPSHOT, /*sync=*/true));
+
+    const auto result = WITH_LOCK(::cs_main,
+        return chainman.MaybeCompleteSnapshotValidation([](bilingual_str) {}));
+    BOOST_CHECK_EQUAL(result, SnapshotCompletionResult::EVO_STATE_MISMATCH);
+    BOOST_CHECK_EQUAL(&chainman.ActiveChainstate(), validation_chainstate);
+    BOOST_CHECK(snapshot_chainstate != &chainman.ActiveChainstate());
+    BOOST_CHECK(!m_node.evodb->HasDualChainstateMarker());
+    uint256 obsolete_marker;
+    BOOST_CHECK(!m_node.evodb->ReadBestBlock(EvoDbIdentity::SNAPSHOT, obsolete_marker));
+}
+
+BOOST_FIXTURE_TEST_CASE(chainstatemanager_snapshot_cleanup_recovers_first_rename, SnapshotTestSetup)
+{
+    this->SetupSnapshot();
+    ChainstateManager& chainman = *Assert(m_node.chainman);
+    const uint256 snapshot_tip = WITH_LOCK(::cs_main, return chainman.ActiveChainstate().CoinsTip().GetBestBlock());
+    BOOST_REQUIRE_EQUAL(WITH_LOCK(::cs_main,
+        return chainman.MaybeCompleteSnapshotValidation([](bilingual_str) {})),
+        SnapshotCompletionResult::SUCCESS);
+
+    this->SimulateNodeRestart();
+    const fs::path data_dir{gArgs.GetDataDirNet()};
+    fs::rename(data_dir / "chainstate", data_dir / "chainstate_todelete");
+
+    this->LoadVerifyActivateChainstate();
+
+    BOOST_CHECK(fs::exists(data_dir / "chainstate"));
+    BOOST_CHECK(!fs::exists(data_dir / "chainstate_snapshot"));
+    BOOST_CHECK(!fs::exists(data_dir / "chainstate_todelete"));
+    BOOST_CHECK(m_node.evodb->VerifyBestBlock(EvoDbIdentity::NORMAL, snapshot_tip));
+}
+
+BOOST_FIXTURE_TEST_CASE(chainstatemanager_snapshot_cleanup_recovers_completed_swap, SnapshotTestSetup)
+{
+    this->SetupSnapshot();
+    ChainstateManager& chainman = *Assert(m_node.chainman);
+    const uint256 snapshot_tip = WITH_LOCK(::cs_main, return chainman.ActiveChainstate().CoinsTip().GetBestBlock());
+    BOOST_REQUIRE_EQUAL(WITH_LOCK(::cs_main,
+        return chainman.MaybeCompleteSnapshotValidation([](bilingual_str) {})),
+        SnapshotCompletionResult::SUCCESS);
+
+    this->SimulateNodeRestart();
+    const fs::path data_dir{gArgs.GetDataDirNet()};
+    fs::rename(data_dir / "chainstate", data_dir / "chainstate_todelete");
+    fs::rename(data_dir / "chainstate_snapshot", data_dir / "chainstate");
+
+    this->LoadVerifyActivateChainstate();
+    BOOST_CHECK(m_node.evodb->VerifyBestBlock(EvoDbIdentity::NORMAL, snapshot_tip));
+    BOOST_CHECK(!m_node.evodb->HasDualChainstateMarker());
+
+    // A restart of the already-promoted state is an idempotent no-op.
+    this->SimulateNodeRestart();
+    this->LoadVerifyActivateChainstate();
+    BOOST_CHECK(m_node.evodb->VerifyBestBlock(EvoDbIdentity::NORMAL, snapshot_tip));
+}
+
+BOOST_FIXTURE_TEST_CASE(chainstatemanager_snapshot_cleanup_recovers_invalid_rename, SnapshotTestSetup)
+{
+    this->SetupSnapshot();
+    ChainstateManager& restarted = this->SimulateNodeRestart();
+    const fs::path data_dir{gArgs.GetDataDirNet()};
+    fs::rename(data_dir / "chainstate_snapshot", data_dir / "chainstate_snapshot_INVALID");
+
+    this->LoadVerifyActivateChainstate();
+
+    BOOST_CHECK(fs::exists(data_dir / "chainstate_snapshot_INVALID"));
+    BOOST_CHECK(!fs::exists(data_dir / "chainstate_snapshot"));
+    BOOST_CHECK(!m_node.evodb->HasDualChainstateMarker());
+    uint256 obsolete;
+    BOOST_CHECK(!m_node.evodb->ReadBestBlock(EvoDbIdentity::SNAPSHOT, obsolete));
+    BOOST_CHECK(m_node.evodb->VerifyBestBlock(
+        EvoDbIdentity::NORMAL,
+        WITH_LOCK(::cs_main, return restarted.ActiveChainstate().CoinsTip().GetBestBlock())));
+}
+
+//! Pin the documented promote/discard overlap in RecoverSnapshotCleanup: a
+//! crash between an invalid-snapshot rename and its marker discard while the
+//! SNAPSHOT marker equals the background coins tip (completion failed with the
+//! snapshot chainstate still at its base) makes recovery take the promote
+//! branch. That must produce the same end state a completed discard would.
+BOOST_FIXTURE_TEST_CASE(chainstatemanager_snapshot_cleanup_overlap_promote_equals_discard, SnapshotTestSetup)
+{
+    Chainstate* background_chainstate = std::get<0>(this->SetupSnapshot());
+    const uint256 bg_tip = WITH_LOCK(::cs_main, return background_chainstate->CoinsTip().GetBestBlock());
+
+    ChainstateManager& restarted = this->SimulateNodeRestart();
+    const fs::path data_dir{gArgs.GetDataDirNet()};
+    // Rewind the on-disk SNAPSHOT marker to the base block, as if the snapshot
+    // chainstate had never advanced past its base when completion failed, then
+    // simulate the crash after InvalidateCoinsDBOnDisk's rename.
+    SeedSnapshotMarker(*m_node.evodb, bg_tip);
+    fs::rename(data_dir / "chainstate_snapshot", data_dir / "chainstate_snapshot_INVALID");
+
+    this->LoadVerifyActivateChainstate();
+
+    BOOST_CHECK(fs::exists(data_dir / "chainstate_snapshot_INVALID"));
+    BOOST_CHECK(!fs::exists(data_dir / "chainstate_snapshot"));
+    BOOST_CHECK(!m_node.evodb->HasDualChainstateMarker());
+    uint256 obsolete;
+    BOOST_CHECK(!m_node.evodb->ReadBestBlock(EvoDbIdentity::SNAPSHOT, obsolete));
+    BOOST_CHECK(!m_node.evodb->ReadSnapshotBaseMNListHash(obsolete));
+    {
+        LOCK(::cs_main);
+        BOOST_CHECK_EQUAL(restarted.GetAll().size(), 1);
+        BOOST_CHECK(!restarted.IsSnapshotActive());
+        BOOST_CHECK(m_node.evodb->VerifyBestBlock(
+            EvoDbIdentity::NORMAL, restarted.ActiveChainstate().CoinsTip().GetBestBlock()));
+    }
+}
+
+BOOST_FIXTURE_TEST_CASE(chainstatemanager_snapshot_cleanup_recovers_promoted_swap, SnapshotTestSetup)
+{
+    this->SetupSnapshot();
+    ChainstateManager& chainman = *Assert(m_node.chainman);
+    const uint256 snapshot_tip = WITH_LOCK(::cs_main, return chainman.ActiveChainstate().CoinsTip().GetBestBlock());
+    BOOST_REQUIRE_EQUAL(WITH_LOCK(::cs_main,
+        return chainman.MaybeCompleteSnapshotValidation([](bilingual_str) {})),
+        SnapshotCompletionResult::SUCCESS);
+
+    this->SimulateNodeRestart();
+    const fs::path data_dir{gArgs.GetDataDirNet()};
+    fs::rename(data_dir / "chainstate", data_dir / "chainstate_todelete");
+    fs::rename(data_dir / "chainstate_snapshot", data_dir / "chainstate");
+    BOOST_REQUIRE(m_node.evodb->PromoteSnapshotMarkers(snapshot_tip));
+
+    this->LoadVerifyActivateChainstate();
+    BOOST_CHECK(!fs::exists(data_dir / "chainstate_todelete"));
+    BOOST_CHECK(m_node.evodb->VerifyBestBlock(EvoDbIdentity::NORMAL, snapshot_tip));
+}
+
+BOOST_FIXTURE_TEST_CASE(chainstatemanager_snapshot_base_is_cached, SnapshotTestSetup)
+{
+    this->SetupSnapshot();
+    ChainstateManager& chainman = *Assert(m_node.chainman);
+    const uint256 base_hash{*chainman.SnapshotBlockhash()};
+
+    {
+        LOCK(::cs_main);
+        const CBlockIndex* cached_base = chainman.ActiveChainstate().SnapshotBase();
+        BOOST_REQUIRE(cached_base);
+        auto node = chainman.BlockIndex().extract(base_hash);
+        BOOST_REQUIRE(!node.empty());
+        BOOST_CHECK_EQUAL(chainman.ActiveChainstate().SnapshotBase(), cached_base);
+        chainman.BlockIndex().insert(std::move(node));
+    }
+}
+
+//! A snapshot chainstate whose base block is missing from the on-disk block
+//! index must fail startup with a recoverable error (reindex discards the
+//! snapshot), not abort in candidate admission.
+BOOST_FIXTURE_TEST_CASE(chainstatemanager_snapshot_missing_base_fails_load, SnapshotTestSetup)
+{
+    this->SetupSnapshot();
+    this->SimulateNodeRestart();
+
+    // Simulate a block-tree database that has lost the snapshot's history
+    // (wiped or swapped blocks/index) while the snapshot chainstate directory
+    // and its EvoDB marker survive.
+    fs::remove_all(gArgs.GetDataDirNet() / "blocks" / "index");
+
+    ChainstateManager& chainman = *Assert(m_node.chainman);
+    node::ChainstateLoadStatus status;
+    bilingual_str error;
+    {
+        ASSERT_DEBUG_LOG("missing from the block index");
+        std::tie(status, error) = node::LoadChainstate(chainman, m_cache_sizes, ChainstateLoadOptionsForTest(),
+                                                       m_node.evodb, m_node.dmnman, m_node.llmq_ctx,
+                                                       m_node.chain_helper);
+    }
+    BOOST_CHECK(status == node::ChainstateLoadStatus::FAILURE);
+}
+
+BOOST_FIXTURE_TEST_CASE(chainstatemanager_snapshot_completion_without_base_list_marker, SnapshotTestSetup)
+{
+    this->SetupSnapshot();
+    ChainstateManager& chainman = *Assert(m_node.chainman);
+
+    // Simulate a cold-start activation, where the base MN list was not
+    // derivable and so no lifecycle hash markers were captured: completion
+    // must fall back to the UTXO-set hash alone instead of quarantining a
+    // valid snapshot.
+    {
+        auto tx = m_node.evodb->BeginTransaction(EvoDbIdentity::SNAPSHOT);
+        m_node.evodb->Erase(EVODB_SNAPSHOT_MNLIST_HASH);
+        m_node.evodb->Erase(EVODB_BACKGROUND_MNLIST_HASH);
+        tx->Commit();
+    }
+    BOOST_REQUIRE(m_node.evodb->CommitRootTransaction(EvoDbIdentity::SNAPSHOT, /*sync=*/true));
+
+    const auto res = WITH_LOCK(::cs_main,
+        return chainman.MaybeCompleteSnapshotValidation([](bilingual_str) {}));
+    BOOST_CHECK_EQUAL(res, SnapshotCompletionResult::SUCCESS);
+    WITH_LOCK(::cs_main, BOOST_CHECK(chainman.IsSnapshotValidated()));
+}
+
+BOOST_FIXTURE_TEST_CASE(chainstatemanager_snapshot_completion_hash_mismatch, SnapshotTestSetup)
+{
+    auto chainstates = this->SetupSnapshot();
+    Chainstate& validation_chainstate = *std::get<0>(chainstates);
+    ChainstateManager& chainman = *Assert(m_node.chainman);
+    SnapshotCompletionResult res;
+    auto mock_shutdown = [](bilingual_str msg) {};
+
+    // Test tampering with the IBD UTXO set with an extra coin to ensure it causes
+    // snapshot completion to fail.
+    CCoinsViewCache& ibd_coins = WITH_LOCK(::cs_main,
+        return validation_chainstate.CoinsTip());
+    Coin badcoin;
+    badcoin.out.nValue = InsecureRand32();
+    badcoin.nHeight = 1;
+    badcoin.out.scriptPubKey.assign(InsecureRandBits(6), 0);
+    uint256 txid = InsecureRand256();
+    ibd_coins.AddCoin(COutPoint(txid, 0), std::move(badcoin), false);
+
+    fs::path snapshot_chainstate_dir = gArgs.GetDataDirNet() / "chainstate_snapshot";
+    BOOST_CHECK(fs::exists(snapshot_chainstate_dir));
+
+    {
+        ASSERT_DEBUG_LOG("failed to validate the -assumeutxo snapshot state");
+        res = WITH_LOCK(::cs_main,
+            return chainman.MaybeCompleteSnapshotValidation(mock_shutdown));
+        BOOST_CHECK_EQUAL(res, SnapshotCompletionResult::HASH_MISMATCH);
+    }
+
+    auto all_chainstates = chainman.GetAll();
+    BOOST_CHECK_EQUAL(all_chainstates.size(), 1);
+    BOOST_CHECK_EQUAL(all_chainstates[0], &validation_chainstate);
+    BOOST_CHECK_EQUAL(&chainman.ActiveChainstate(), &validation_chainstate);
+
+    fs::path snapshot_invalid_dir = gArgs.GetDataDirNet() / "chainstate_snapshot_INVALID";
+    BOOST_CHECK(fs::exists(snapshot_invalid_dir));
+
+    // Test that simulating a shutdown (reseting ChainstateManager) and then performing
+    // chainstate reinitializing successfully loads only the fully-validated
+    // chainstate data, and we end up with a single chainstate that is at tip.
+    ChainstateManager& chainman_restarted = this->SimulateNodeRestart();
+
+    BOOST_TEST_MESSAGE("Performing Load/Verify/Activate of chainstate");
+
+    // This call reinitializes the chainstates, and should clean up the now unnecessary
+    // background-validation leveldb contents.
+    this->LoadVerifyActivateChainstate();
+
+    BOOST_CHECK(fs::exists(snapshot_invalid_dir));
+    BOOST_CHECK(!fs::exists(snapshot_chainstate_dir));
+
+    {
+        LOCK(::cs_main);
+        BOOST_CHECK_EQUAL(chainman_restarted.GetAll().size(), 1);
+        BOOST_CHECK(!chainman_restarted.IsSnapshotActive());
+        BOOST_CHECK(!chainman_restarted.IsSnapshotValidated());
+        BOOST_CHECK_EQUAL(chainman_restarted.ActiveHeight(), 210);
+    }
+
+    BOOST_TEST_MESSAGE(
+        "Ensure we can mine blocks on top of the \"new\" IBD chainstate");
+    mineBlocks(10);
+    {
+        LOCK(::cs_main);
+        BOOST_CHECK_EQUAL(chainman_restarted.ActiveHeight(), 220);
+    }
 }
 
 BOOST_AUTO_TEST_SUITE_END()

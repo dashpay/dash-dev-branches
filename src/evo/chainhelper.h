@@ -42,6 +42,7 @@ class CChainstateHelper
 private:
     llmq::CInstantSendManager& isman;
     const CMasternodeSync& mn_sync;
+    CDeterministicMNManager& m_dmnman;
 
 public:
     const std::unique_ptr<CCreditPoolManager> credit_pool_manager;
@@ -68,6 +69,9 @@ public:
     bool HasConflictingChainLock(int nHeight, const uint256& blockHash) const;
     bool HasChainLock(int nHeight, const uint256& blockHash) const;
     int32_t GetBestChainLockHeight() const;
+
+    /** Return a canonical hash of the deterministic MN list derived at a block. */
+    uint256 GetDeterministicMNListHash(const CBlockIndex* pindex) const;
 
     /** Passthrough functions to CCreditPoolManager */
     CCreditPool GetCreditPool(const CBlockIndex* const pindex);

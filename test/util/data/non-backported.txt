@@ -1,6 +1,7 @@
 src/active/*.cpp
 src/active/*.h
 src/batchedlogger.*
+src/bench/blockfilter_index.cpp
 src/bench/bls*.cpp
 src/bls/*.cpp
 src/bls/*.h
@@ -61,6 +62,7 @@ src/test/block_reward_reallocation_tests.cpp
 src/test/bls_tests.cpp
 src/test/coinjoin_*.cpp
 src/test/dip0020opcodes_tests.cpp
+src/test/dip14_tests.cpp
 src/test/dynamic_activation*.cpp
 src/test/evo*.cpp
 src/test/llmq*.cpp

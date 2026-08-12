@@ -21,6 +21,7 @@ bench_bench_dash_SOURCES = \
   bench/bench_bitcoin.cpp \
   bench/bip324_ecdh.cpp \
   bench/block_assemble.cpp \
+  bench/blockfilter_index.cpp \
   bench/bls.cpp \
   bench/bls_dkg.cpp \
   bench/bls_pubkey_agg.cpp \

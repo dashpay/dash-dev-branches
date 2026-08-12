@@ -1,4 +1,5 @@
 # Suppress warnings triggered in dependencies
 leak:libQt5Widgets
 leak:QDBusConnectionPrivate
+leak:QDBusConnectionManager
 leak:QLayoutPrivate

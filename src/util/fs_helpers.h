@@ -25,6 +25,23 @@ bool FileCommit(FILE* file);
  */
 void DirectoryCommit(const fs::path& dirname);
 
+/**
+ * fs::rename() followed by a synced parent directory, so the rename is durable
+ * before the caller takes any dependent step. Crash-recovery state machines
+ * (e.g. the assumeutxo snapshot lifecycle) rely on every rename being committed
+ * this way; use this instead of a bare fs::rename() there.
+ *
+ * Throws fs::filesystem_error if the rename fails, and also if the directory
+ * sync fails -- unlike DirectoryCommit(), a sync failure is reported rather
+ * than ignored, so callers never treat a non-durable transition as complete.
+ * A filesystem that does not support directory syncing is not a failure.
+ */
+void RenameDurably(const fs::path& src, const fs::path& dest);
+
+/** fs::remove_all() followed by a synced parent directory; the durable
+ *  counterpart for deletions, with the same throw contract as RenameDurably(). */
+void RemoveAllDurably(const fs::path& path);
+
 bool TruncateFile(FILE* file, unsigned int length);
 int RaiseFileDescriptorLimit(int nMinFD);
 void AllocateFileRange(FILE* file, unsigned int offset, unsigned int length);

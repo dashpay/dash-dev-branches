@@ -814,8 +814,8 @@ CDeterministicMNList CDeterministicMNManager::GetListForBlockInternal(gsl::not_n
                 // cached chain) bootstraps an empty list here and rebuilds via
                 // ProcessBlock from that point on.
                 throw BlockDataUnavailableError(strprintf(
-                    "CDeterministicMNManager::%s -- masternode list diff for block %s is not available (pruned or below an unvalidated snapshot base)",
-                    __func__, pindex->GetBlockHash().ToString()));
+                    "CDeterministicMNManager::%s -- masternode list diff for block %s %s",
+                    __func__, pindex->GetBlockHash().ToString(), BLOCK_DATA_UNAVAILABLE_SUFFIX));
             }
             // no snapshot and no diff on disk means that it's the initial snapshot
             m_initial_snapshot_index = pindex;

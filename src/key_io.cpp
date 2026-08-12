@@ -304,3 +304,27 @@ PlatformDestination DecodePlatformDestination(const std::string& str)
     std::string error_str;
     return DecodePlatformDestination(str, error_str);
 }
+
+CScript GetScriptForPlatformDestination(const PlatformDestination& dest)
+{
+    if (const auto* pkh = std::get_if<PlatformP2PKHDestination>(&dest)) {
+        return GetScriptForDestination(PKHash(uint160(*pkh)));
+    }
+    if (const auto* sh = std::get_if<PlatformP2SHDestination>(&dest)) {
+        return GetScriptForDestination(ScriptHash(uint160(*sh)));
+    }
+    return {};
+}
+
+PlatformDestination PlatformDestinationFromScript(const CScript& script)
+{
+    CTxDestination dest;
+    if (!ExtractDestination(script, dest)) return CNoDestination();
+    if (const auto* pkh = std::get_if<PKHash>(&dest)) {
+        return PlatformP2PKHDestination(uint160(*pkh));
+    }
+    if (const auto* sh = std::get_if<ScriptHash>(&dest)) {
+        return PlatformP2SHDestination(uint160(*sh));
+    }
+    return CNoDestination();
+}

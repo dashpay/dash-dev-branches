@@ -5,6 +5,7 @@
 #include <llmq/snapshot.h>
 
 #include <chainparams.h>
+#include <evo/deterministicmns.h>
 #include <evo/evodb.h>
 #include <evo/simplifiedmns.h>
 #include <evo/smldiff.h>
@@ -23,8 +24,7 @@ bool CheckBlockDataAvailable(gsl::not_null<const CBlockIndex*> pindex, std::stri
     EXCLUSIVE_LOCKS_REQUIRED(::cs_main)
 {
     if (pindex->nStatus & BLOCK_HAVE_DATA) return true;
-    error = strprintf("block data for block %s is not available (pruned or below an unvalidated snapshot base)",
-                      pindex->GetBlockHash().ToString());
+    error = strprintf("block data for block %s %s", pindex->GetBlockHash().ToString(), BLOCK_DATA_UNAVAILABLE_SUFFIX);
     return false;
 }
 

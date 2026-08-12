@@ -190,7 +190,6 @@ protected:
     //   key   - governance object's hash
     //   value - expiration time for deleted objects
     std::map<uint256, int64_t> mapErasedGovernanceObjects GUARDED_BY(cs_store);
-    CacheMap<uint256, CGovernanceVote> cmapInvalidVotes GUARDED_BY(cs_store);
     vote_cmm_t cmmapOrphanVotes GUARDED_BY(cs_store);
     txout_m_t mapLastMasternodeObject GUARDED_BY(cs_store);
     // used to check for changed voting keys
@@ -204,9 +203,11 @@ public:
     void Serialize(Stream &s) const EXCLUSIVE_LOCKS_REQUIRED(!cs_store)
     {
         LOCK(cs_store);
+        // TODO: Remove the historical invalid-vote-cache field on the next disk-format version bump.
+        const CacheMap<uint256, CGovernanceVote> empty_invalid_votes{MAX_CACHE_SIZE};
         s   << SERIALIZATION_VERSION_STRING
             << mapErasedGovernanceObjects
-            << cmapInvalidVotes
+            << empty_invalid_votes
             << cmmapOrphanVotes
             << mapObjects
             << mapLastMasternodeObject
@@ -225,8 +226,10 @@ public:
             return;
         }
 
+        // TODO: Stop consuming the historical invalid-vote-cache field on the next disk-format version bump.
+        CacheMap<uint256, CGovernanceVote> discarded_invalid_votes;
         s   >> mapErasedGovernanceObjects
-            >> cmapInvalidVotes
+            >> discarded_invalid_votes
             >> cmmapOrphanVotes
             >> mapObjects
             >> mapLastMasternodeObject

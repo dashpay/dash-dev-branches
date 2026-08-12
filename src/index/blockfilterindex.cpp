@@ -188,11 +188,16 @@ bool BlockFilterIndex::ReadFilterFromDisk(const FlatFilePos& pos, const uint256&
         return false;
     }
 
+    return ReadFilterFromFile(filein, hash, filter);
+}
+
+bool BlockFilterIndex::ReadFilterFromFile(AutoFile& file, const uint256& hash, BlockFilter& filter) const
+{
     // Check that the hash of the encoded_filter matches the one stored in the db.
     uint256 block_hash;
     std::vector<uint8_t> encoded_filter;
     try {
-        filein >> block_hash >> encoded_filter;
+        file >> block_hash >> encoded_filter;
         if (Hash(encoded_filter) != hash) return error("Checksum mismatch in filter decode.");
         filter = BlockFilter(GetFilterType(), block_hash, std::move(encoded_filter), /*skip_decode_check=*/true);
     }
@@ -465,8 +470,17 @@ bool BlockFilterIndex::LookupFilterRange(int start_height, const CBlockIndex* st
 
     filters_out.resize(entries.size());
     auto filter_pos_it = filters_out.begin();
+    std::unique_ptr<AutoFile> file;
+    int file_num{-1};
     for (const auto& entry : entries) {
-        if (!ReadFilterFromDisk(entry.pos, entry.hash, *filter_pos_it)) {
+        if (!file || entry.pos.nFile != file_num) {
+            file = std::make_unique<AutoFile>(m_filter_fileseq->Open(entry.pos, true));
+            file_num = entry.pos.nFile;
+        } else if (fseek(file->Get(), entry.pos.nPos, SEEK_SET) != 0) {
+            return error("%s: unable to seek to position %u in filter file %d",
+                         __func__, entry.pos.nPos, entry.pos.nFile);
+        }
+        if (file->IsNull() || !ReadFilterFromFile(*file, entry.hash, *filter_pos_it)) {
             return false;
         }
         ++filter_pos_it;

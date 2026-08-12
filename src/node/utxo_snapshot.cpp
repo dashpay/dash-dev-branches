@@ -8,6 +8,7 @@
 #include <streams.h>
 #include <uint256.h>
 #include <util/fs.h>
+#include <util/fs_helpers.h>
 #include <util/system.h>
 #include <validation.h>
 
@@ -34,11 +35,18 @@ bool WriteSnapshotBaseBlockhash(Chainstate& snapshot_chainstate)
     }
     afile << *snapshot_chainstate.m_from_snapshot_blockhash;
 
+    if (!FileCommit(afile.Get())) {
+        LogPrintf("[snapshot] failed to sync base blockhash file %s\n",
+                  fs::PathToString(write_to));
+        return false;
+    }
+
     if (afile.fclose() != 0) {
         LogPrintf("[snapshot] failed to close base blockhash file %s after writing\n",
                   fs::PathToString(write_to));
         return false;
     }
+    DirectoryCommit(*chaindir);
     return true;
 }
 

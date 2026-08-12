@@ -32,7 +32,8 @@ class BlockManager;
 class CAssetLockPayload
 {
 public:
-    static constexpr uint8_t CURRENT_VERSION = 1;
+    static constexpr uint8_t INITIAL_VERSION = 1;
+    static constexpr uint8_t CURRENT_VERSION = 2;
     static constexpr auto SPECIALTX_TYPE = TRANSACTION_ASSET_LOCK;
 
 private:
@@ -40,8 +41,8 @@ private:
     std::vector<CTxOut> creditOutputs;
 
 public:
-    explicit CAssetLockPayload(const std::vector<CTxOut>& creditOutputs) :
-        creditOutputs(creditOutputs)
+    explicit CAssetLockPayload(const std::vector<CTxOut>& creditOutputs, uint8_t nVersion = CURRENT_VERSION) :
+        nVersion(nVersion), creditOutputs(creditOutputs)
     {}
 
     CAssetLockPayload() = default;
@@ -161,7 +162,7 @@ public:
     }
 };
 
-bool CheckAssetLockTx(const CTransaction& tx, TxValidationState& state);
+bool CheckAssetLockTx(const CTransaction& tx, TxValidationState& state, bool is_v24_active);
 bool CheckAssetUnlockTx(const node::BlockManager& blockman, const llmq::CQuorumManager& qman, const CTransaction& tx, gsl::not_null<const CBlockIndex*> pindexPrev, const std::optional<CRangesSet>& indexes, TxValidationState& state);
 bool CheckAssetUnlockTx(const node::BlockManager& blockman, const llmq::CQuorumManager& qman, const CChain& chain,
                         const CTransaction& tx, gsl::not_null<const CBlockIndex*> pindexPrev,

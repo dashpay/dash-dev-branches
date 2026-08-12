@@ -18,6 +18,7 @@
 #include <netfulfilledman.h>
 #include <primitives/transaction.h>
 #include <script/standard.h>
+#include <streams.h>
 #include <timedata.h>
 #include <uint256.h>
 #include <util/strencodings.h>
@@ -202,6 +203,16 @@ struct GovernanceVoteSetup : public TestChainSetup {
         return vote;
     }
 };
+
+struct TestGovernanceStore : GovernanceStore {
+    using GovernanceStore::last_object_rec;
+
+    size_t ObjectCount() const
+    {
+        LOCK(cs_store);
+        return mapObjects.size();
+    }
+};
 } // namespace
 
 BOOST_FIXTURE_TEST_SUITE(governance_vote_processing_tests, GovernanceVoteSetup)
@@ -280,7 +291,7 @@ BOOST_AUTO_TEST_CASE(unsigned_and_unknown_masternode_votes_are_rejected)
     BOOST_CHECK_EQUAL(exception.GetNodePenalty(), 20);
     BOOST_CHECK(!govman.HaveVoteForHash(forged.GetHash()));
 
-    // Re-sending a vote already known to be invalid is still punished, without re-verifying it.
+    // Re-sending the same invalid vote is still rejected and punished.
     CGovernanceException repeat_exception;
     BOOST_CHECK(!govman.ProcessVote(forged, repeat_exception, hash_to_request));
     BOOST_CHECK_EQUAL(repeat_exception.GetType(), GOVERNANCE_EXCEPTION_PERMANENT_ERROR);
@@ -324,6 +335,47 @@ BOOST_AUTO_TEST_CASE(unsigned_and_unknown_masternode_votes_are_rejected)
     BOOST_REQUIRE(stored != nullptr);
     BOOST_CHECK_EQUAL(stored->GetAbsoluteYesCount(tip_mn_list(), VOTE_SIGNAL_FUNDING), 0);
     BOOST_CHECK_EQUAL(stored->GetAbsoluteYesCount(tip_mn_list(), VOTE_SIGNAL_VALID), 0);
+}
+
+BOOST_AUTO_TEST_CASE(invalid_signature_does_not_suppress_valid_vote)
+{
+    auto& govman = *m_node.govman;
+    const CGovernanceObject proposal{MakeProposal(uint256::ONE)};
+    const uint256 parent_hash{proposal.GetHash()};
+    govman.AddGovernanceObjectForTesting(proposal);
+    auto stored = govman.FindConstGovernanceObject(parent_hash);
+    BOOST_REQUIRE(stored != nullptr);
+
+    CKey attacker_key;
+    attacker_key.MakeNewKey(true);
+    CGovernanceVote forged{MakeVote(parent_hash, VOTE_SIGNAL_FUNDING, VOTE_OUTCOME_YES)};
+    SignWithVotingKey(forged, attacker_key);
+
+    CGovernanceException exception;
+    uint256 hash_to_request;
+    BOOST_CHECK(!govman.ProcessVote(forged, exception, hash_to_request));
+    BOOST_CHECK_EQUAL(exception.GetNodePenalty(), 20);
+
+    CGovernanceVote legitimate{forged};
+    SignWithVotingKey(legitimate, mn_voting_key);
+    BOOST_CHECK_EQUAL(forged.GetHash(), legitimate.GetHash());
+    BOOST_CHECK(govman.ProcessVote(legitimate, exception, hash_to_request));
+    BOOST_CHECK(govman.HaveVoteForHash(legitimate.GetHash()));
+    BOOST_CHECK_EQUAL(stored->GetAbsoluteYesCount(tip_mn_list(), VOTE_SIGNAL_FUNDING), 1);
+
+    CBLSSecretKey attacker_operator_key;
+    attacker_operator_key.MakeNewKey();
+    CGovernanceVote forged_bls{MakeVote(parent_hash, VOTE_SIGNAL_VALID, VOTE_OUTCOME_YES)};
+    SignWithOperatorKey(forged_bls, attacker_operator_key);
+    BOOST_CHECK(!govman.ProcessVote(forged_bls, exception, hash_to_request));
+    BOOST_CHECK_EQUAL(exception.GetNodePenalty(), 20);
+
+    CGovernanceVote legitimate_bls{forged_bls};
+    SignWithOperatorKey(legitimate_bls, mn_operator_key);
+    BOOST_CHECK_EQUAL(forged_bls.GetHash(), legitimate_bls.GetHash());
+    BOOST_CHECK(govman.ProcessVote(legitimate_bls, exception, hash_to_request));
+    BOOST_CHECK(govman.HaveVoteForHash(legitimate_bls.GetHash()));
+    BOOST_CHECK_EQUAL(stored->GetAbsoluteYesCount(tip_mn_list(), VOTE_SIGNAL_VALID), 1);
 }
 
 // Funding a proposal is the one decision reserved for the voting key; every other signal may be
@@ -379,6 +431,42 @@ BOOST_AUTO_TEST_CASE(proposal_funding_votes_require_the_voting_key)
     BOOST_CHECK(!govman.ProcessVote(funding_by_voting_key, duplicate_exception, hash_to_request));
     BOOST_CHECK_EQUAL(duplicate_exception.GetNodePenalty(), 0);
     BOOST_CHECK_EQUAL(stored->GetAbsoluteYesCount(tip_mn_list(), VOTE_SIGNAL_FUNDING), 1);
+}
+
+BOOST_AUTO_TEST_CASE(legacy_invalid_vote_cache_is_discarded)
+{
+    const uint256 parent_hash{MakeProposal(uint256::ONE).GetHash()};
+    CKey attacker_key;
+    attacker_key.MakeNewKey(true);
+
+    CGovernanceVote forged{MakeVote(parent_hash, VOTE_SIGNAL_FUNDING, VOTE_OUTCOME_YES)};
+    SignWithVotingKey(forged, attacker_key);
+
+    CacheMap<uint256, CGovernanceVote> legacy_invalid_votes{3};
+    legacy_invalid_votes.Insert(forged.GetHash(), forged);
+    const auto proposal = std::make_shared<CGovernanceObject>(MakeProposal(uint256::ONE));
+
+    CDataStream stream{SER_DISK, CLIENT_VERSION};
+    stream << std::string{"CGovernanceManager-Version-16"}
+           << std::map<uint256, int64_t>{}
+           << legacy_invalid_votes
+           << CacheMultiMap<uint256, governance::OrphanVote>{3}
+           << std::map<uint256, std::shared_ptr<CGovernanceObject>>{{proposal->GetHash(), proposal}}
+           << std::map<COutPoint, TestGovernanceStore::last_object_rec>{}
+           << CDeterministicMNList{};
+
+    TestGovernanceStore store;
+    store.Unserialize(stream);
+    BOOST_CHECK_EQUAL(store.ObjectCount(), 1U);
+
+    CDataStream saved{SER_DISK, CLIENT_VERSION};
+    store.Serialize(saved);
+    std::string version;
+    std::map<uint256, int64_t> erased_objects;
+    CacheMap<uint256, CGovernanceVote> saved_invalid_votes;
+    saved >> version >> erased_objects >> saved_invalid_votes;
+    BOOST_CHECK_EQUAL(version, "CGovernanceManager-Version-16");
+    BOOST_CHECK_EQUAL(saved_invalid_votes.GetSize(), 0U);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

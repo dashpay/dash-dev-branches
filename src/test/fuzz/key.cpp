@@ -18,6 +18,7 @@
 #include <test/fuzz/util.h>
 #include <util/strencodings.h>
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstddef>
@@ -98,6 +99,48 @@ FUZZ_TARGET(key, .init = initialize_key)
     }
 
     const CPubKey pubkey = key.GetPubKey();
+
+    const auto test_derive256 = [&](const std::array<unsigned char, 32>& child_index) {
+        CKey child_key;
+        ChainCode child_chaincode;
+        const bool private_ok = key.Derive256(child_key, child_chaincode, child_index, false, random_uint256);
+
+        CPubKey child_pubkey;
+        ChainCode child_pub_chaincode;
+        const bool public_ok = pubkey.Derive256(child_pubkey, child_pub_chaincode, child_index, random_uint256);
+        assert(private_ok == public_ok);
+        if (private_ok) {
+            assert(child_key.IsValid());
+            assert(child_pubkey == child_key.GetPubKey());
+            assert(child_chaincode == child_pub_chaincode);
+        }
+
+        CKey hardened_child_key;
+        ChainCode hardened_child_chaincode;
+        if (key.Derive256(hardened_child_key, hardened_child_chaincode, child_index, true, random_uint256)) {
+            assert(hardened_child_key.IsValid());
+        }
+    };
+
+    std::array<unsigned char, 32> wide_child_index;
+    std::copy(random_uint256.begin(), random_uint256.end(), wide_child_index.begin());
+    wide_child_index.front() |= 1;
+    test_derive256(wide_child_index);
+
+    std::array<unsigned char, 32> boundary_child_index{};
+    std::copy(random_uint256.begin(), random_uint256.begin() + 4, boundary_child_index.end() - 4);
+    boundary_child_index[27] = 1;
+    test_derive256(boundary_child_index);
+
+    std::array<unsigned char, 32> bip32_child_index{};
+    std::copy(random_uint256.begin(), random_uint256.begin() + 4, bip32_child_index.end() - 4);
+    bip32_child_index[28] &= 0x7f;
+    test_derive256(bip32_child_index);
+
+    bip32_child_index[28] |= 0x80;
+    CPubKey hardened_child_pubkey;
+    ChainCode hardened_child_chaincode;
+    assert(!pubkey.Derive256(hardened_child_pubkey, hardened_child_chaincode, bip32_child_index, random_uint256));
 
     {
         assert(pubkey.size() == 33);

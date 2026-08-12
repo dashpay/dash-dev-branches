@@ -63,7 +63,6 @@ GovernanceStore::GovernanceStore() :
     cs_store(),
     mapObjects(),
     mapErasedGovernanceObjects(),
-    cmapInvalidVotes(MAX_CACHE_SIZE),
     cmmapOrphanVotes(MAX_CACHE_SIZE),
     mapLastMasternodeObject(),
     lastMNListForVotingKeys(std::make_shared<CDeterministicMNList>())
@@ -816,14 +815,6 @@ bool CGovernanceManager::ProcessVote(const CGovernanceVote& vote, CGovernanceExc
         return false;
     }
 
-    if (cmapInvalidVotes.HasKey(nHashVote)) {
-        std::string msg{strprintf("CGovernanceManager::%s -- Old invalid vote, MN outpoint = %s, governance object hash = %s",
-            __func__, vote.GetMasternodeOutpoint().ToStringShort(), nHashGovobj.ToString())};
-        LogPrint(BCLog::GOBJECT, "%s\n", msg);
-        exception = CGovernanceException(msg, GOVERNANCE_EXCEPTION_PERMANENT_ERROR, 20);
-        return false;
-    }
-
     auto it = mapObjects.find(nHashGovobj);
     if (it == mapObjects.end()) {
         if (!vote.IsValidForUnknownParent(tip_mn_list)) {
@@ -856,8 +847,6 @@ bool CGovernanceManager::ProcessVote(const CGovernanceVote& vote, CGovernanceExc
     bool fOk = govobj.ProcessVote(m_mn_metaman, fRateChecksEnabled, tip_mn_list, vote, exception);
     if (fOk) {
         fOk = cmapVoteToObject.Insert(nHashVote, it->second);
-    } else if (exception.GetType() == GOVERNANCE_EXCEPTION_PERMANENT_ERROR && exception.GetNodePenalty() == 20) {
-        cmapInvalidVotes.Insert(nHashVote, vote);
     }
     return fOk;
 }
@@ -1022,7 +1011,6 @@ void GovernanceStore::Clear()
     LOCK(cs_store);
     mapObjects.clear();
     mapErasedGovernanceObjects.clear();
-    cmapInvalidVotes.Clear();
     cmmapOrphanVotes.Clear();
     mapLastMasternodeObject.clear();
     lastMNListForVotingKeys = std::make_shared<CDeterministicMNList>();
@@ -1169,7 +1157,6 @@ void CGovernanceManager::RemoveInvalidVotes()
             }
             for (const auto& voteHash : removed) {
                 cmapVoteToObject.Erase(voteHash);
-                cmapInvalidVotes.Erase(voteHash);
                 cmmapOrphanVotes.Erase(voteHash);
             }
         }

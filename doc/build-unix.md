@@ -258,7 +258,7 @@ Setup and Build Example: Arch Linux
 This example lists the steps necessary to setup and build a command line only distribution of the latest changes on Arch Linux:
 
 ```sh
-pacman --sync --needed autoconf automake boost gcc git libbacktrace libevent libtool make pkgconf python sqlite
+pacman --sync --needed autoconf automake base-devel boost cmake gcc git libbacktrace libevent libtool make patch pkgconf python sqlite
 git clone https://github.com/dashpay/dash.git
 cd dash/
 ./autogen.sh

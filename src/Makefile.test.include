@@ -106,6 +106,7 @@ BITCOIN_TESTS =\
   test/cuckoocache_tests.cpp \
   test/denialofservice_tests.cpp \
   test/dip0020opcodes_tests.cpp \
+  test/dip14_tests.cpp \
   test/descriptor_tests.cpp \
   test/dynamic_activation_thresholds_tests.cpp \
   test/evo_assetlocks_tests.cpp \
@@ -113,6 +114,7 @@ BITCOIN_TESTS =\
   test/evo_db_tests.cpp \
   test/evo_deterministicmns_tests.cpp \
   test/evo_islock_tests.cpp \
+  test/evo_mnauth_tests.cpp \
   test/evo_mnhf_tests.cpp \
   test/evo_netinfo_tests.cpp \
   test/evo_simplifiedmns_tests.cpp \

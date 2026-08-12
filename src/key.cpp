@@ -13,6 +13,8 @@
 #include <secp256k1_ellswift.h>
 #include <secp256k1_recovery.h>
 
+#include <algorithm>
+
 static secp256k1_context* secp256k1_context_sign = nullptr;
 
 /** These functions are taken from the libsecp256k1 distribution and are very ugly. */
@@ -299,6 +301,32 @@ bool CKey::Derive(CKey& keyChild, ChainCode &ccChild, unsigned int nChild, const
         BIP32Hash(cc, nChild, 0, begin(), vout.data());
     }
     memcpy(ccChild.begin(), vout.data()+32, 32);
+    keyChild.Set(begin(), begin() + 32, true);
+    bool ret = secp256k1_ec_seckey_tweak_add(secp256k1_context_sign, (unsigned char*)keyChild.begin(), vout.data());
+    if (!ret) keyChild.ClearKeyData();
+    return ret;
+}
+
+bool CKey::Derive256(CKey& keyChild, ChainCode& ccChild, Span<const unsigned char> nChild, bool hardened, const ChainCode& cc) const {
+    assert(IsValid());
+    assert(IsCompressed());
+    if (nChild.size() != 32) return false;
+    // DIP-14 compatibility mode: indexes below 2^32 derive exactly as BIP32,
+    // with the hardened flag folded into the high bit of the 32-bit index.
+    if (std::all_of(nChild.begin(), nChild.begin() + 28, [](unsigned char c) { return c == 0; })) {
+        uint32_t child32 = ReadBE32(nChild.data() + 28);
+        return Derive(keyChild, ccChild, child32 | (hardened ? 0x80000000u : 0), cc);
+    }
+    std::vector<unsigned char, secure_allocator<unsigned char>> vout(64);
+    if (!hardened) {
+        CPubKey pubkey = GetPubKey();
+        assert(pubkey.size() == CPubKey::COMPRESSED_SIZE);
+        DIP14Hash(cc, nChild.data(), *pubkey.begin(), pubkey.begin() + 1, vout.data());
+    } else {
+        assert(size() == 32);
+        DIP14Hash(cc, nChild.data(), 0, begin(), vout.data());
+    }
+    memcpy(ccChild.begin(), vout.data() + 32, 32);
     keyChild.Set(begin(), begin() + 32, true);
     bool ret = secp256k1_ec_seckey_tweak_add(secp256k1_context_sign, (unsigned char*)keyChild.begin(), vout.data());
     if (!ret) keyChild.ClearKeyData();

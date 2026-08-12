@@ -369,6 +369,12 @@ bool CQuorumBlockProcessor::ProcessCommitment(Chainstate& chainstate, int nHeigh
         !SerializedEqual(stored_commitment, std::make_pair(qc, blockHash))) {
         // Preserve the existing duplicate-commitment result while allowing an
         // exact block re-derivation to proceed through all validation below.
+        // Note: a commitment retained by UndoBlock for another chainstate's
+        // benefit would hit this path if this chain later re-mined the same
+        // qc in a different block. That needs a disconnect of a block shared
+        // with the other chainstate, which background validation (advancing
+        // only toward the snapshot base along the snapshot chain) never does;
+        // revisit if background reorgs ever become possible.
         return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-qc-dup");
     }
 

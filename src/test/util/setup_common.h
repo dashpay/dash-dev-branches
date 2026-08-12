@@ -9,6 +9,7 @@
 #include <chainparamsbase.h>
 #include <key.h>
 #include <node/caches.h>
+#include <node/chainstate.h>
 #include <node/context.h> // IWYU pragma: export
 #include <primitives/transaction.h>
 #include <pubkey.h>
@@ -118,6 +119,10 @@ struct ChainTestingSetup : public BasicTestingSetup {
 
     // Supplies a chainstate, if one is needed
     void LoadVerifyActivateChainstate();
+
+    // The options LoadVerifyActivateChainstate() feeds to LoadChainstate();
+    // exposed for tests that drive LoadChainstate() to an expected failure.
+    node::ChainstateLoadOptions ChainstateLoadOptionsForTest();
 };
 
 /** Testing setup that configures a complete environment.

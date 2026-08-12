@@ -238,6 +238,8 @@ BOOST_AUTO_TEST_CASE(snapshot_markers_can_be_discarded)
         WriteMarker(db, EvoDbIdentity::SNAPSHOT, BlockHash(40));
         {
             auto tx = db.BeginTransaction(EvoDbIdentity::SNAPSHOT);
+            db.WriteSnapshotBaseMNListHash(BlockHash(4));
+            db.WriteBackgroundMNListHash(BlockHash(40), BlockHash(4));
             db.WriteDualChainstateMarker();
             tx->Commit();
         }
@@ -257,8 +259,55 @@ BOOST_AUTO_TEST_CASE(snapshot_markers_can_be_discarded)
     }
     CEvoDB reopened{util::DbWrapperParams{.path = path, .memory = false, .wipe = false}};
     uint256 hash;
+    uint256 hash2;
     BOOST_CHECK(!reopened.ReadBestBlock(EvoDbIdentity::SNAPSHOT, hash));
+    BOOST_CHECK(!reopened.ReadSnapshotBaseMNListHash(hash));
+    BOOST_CHECK(!reopened.ReadBackgroundMNListHash(hash, hash2));
     BOOST_CHECK(!reopened.HasDualChainstateMarker());
+}
+
+BOOST_AUTO_TEST_CASE(snapshot_marker_promotion_and_discard)
+{
+    CEvoDB db{util::DbWrapperParams{.path = m_args.GetDataDirBase() / "evodb_promotion", .memory = true, .wipe = true}};
+    const uint256 normal_tip = BlockHash(30);
+    const uint256 snapshot_tip = BlockHash(300);
+    const uint256 mn_list_hash = BlockHash(3);
+
+    WriteMarker(db, EvoDbIdentity::NORMAL, normal_tip);
+    {
+        auto tx = db.BeginTransaction(EvoDbIdentity::SNAPSHOT);
+        db.WriteBestBlock(EvoDbIdentity::SNAPSHOT, snapshot_tip);
+        db.WriteSnapshotBaseMNListHash(mn_list_hash);
+        db.WriteDualChainstateMarker();
+        tx->Commit();
+    }
+    BOOST_REQUIRE(db.CommitRootTransaction(EvoDbIdentity::NORMAL));
+    BOOST_REQUIRE(db.CommitRootTransaction(EvoDbIdentity::SNAPSHOT));
+
+    BOOST_REQUIRE(db.PromoteSnapshotMarkers(snapshot_tip));
+    // Promotion is idempotent across a restart after the synced batch lands.
+    BOOST_REQUIRE(db.PromoteSnapshotMarkers(snapshot_tip));
+    BOOST_CHECK(db.VerifyBestBlock(EvoDbIdentity::NORMAL, snapshot_tip));
+    uint256 value;
+    BOOST_CHECK(!db.ReadBestBlock(EvoDbIdentity::SNAPSHOT, value));
+    BOOST_CHECK(!db.ReadSnapshotBaseMNListHash(value));
+    BOOST_CHECK(!db.HasDualChainstateMarker());
+
+    WriteMarker(db, EvoDbIdentity::SNAPSHOT, BlockHash(301));
+    {
+        auto tx = db.BeginTransaction(EvoDbIdentity::SNAPSHOT);
+        db.WriteSnapshotBaseMNListHash(BlockHash(4));
+        db.WriteDualChainstateMarker();
+        tx->Commit();
+    }
+    BOOST_REQUIRE(db.CommitRootTransaction(EvoDbIdentity::SNAPSHOT));
+    BOOST_REQUIRE(db.DiscardSnapshotMarkers());
+    // Discard is likewise safe to retry.
+    BOOST_REQUIRE(db.DiscardSnapshotMarkers());
+    BOOST_CHECK(db.VerifyBestBlock(EvoDbIdentity::NORMAL, snapshot_tip));
+    BOOST_CHECK(!db.ReadBestBlock(EvoDbIdentity::SNAPSHOT, value));
+    BOOST_CHECK(!db.ReadSnapshotBaseMNListHash(value));
+    BOOST_CHECK(!db.HasDualChainstateMarker());
 }
 
 BOOST_AUTO_TEST_SUITE_END()

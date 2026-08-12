@@ -24,20 +24,31 @@
 namespace wallet {
 static void ParseRecipients(const UniValue& address_amounts, const UniValue& subtract_fee_outputs, std::vector<CRecipient>& recipients)
 {
-    std::set<CTxDestination> destinations;
+    // A Platform address and a base58 address can encode the same hash, so recipients
+    // are deduplicated by the script they pay rather than by the decoded destination.
+    std::set<CScript> scripts;
     int i = 0;
     for (const std::string& address: address_amounts.getKeys()) {
-        CTxDestination dest = DecodeDestination(address);
-        if (!IsValidDestination(dest)) {
-            throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, std::string("Invalid Dash address: ") + address);
+        std::string error_msg;
+        const CTxDestination dest = DecodeDestination(address, error_msg);
+        const bool is_platform = !IsValidDestination(dest);
+
+        CScript script_pub_key;
+        if (is_platform) {
+            const PlatformDestination platform_dest = DecodePlatformDestination(address);
+            if (!IsValidPlatformDestination(platform_dest)) {
+                throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY,
+                                   strprintf("Invalid Dash address: %s (%s)", address, error_msg));
+            }
+            script_pub_key = GetScriptForPlatformDestination(platform_dest);
+        } else {
+            script_pub_key = GetScriptForDestination(dest);
         }
 
-        if (destinations.count(dest)) {
+        if (!scripts.insert(script_pub_key).second) {
             throw JSONRPCError(RPC_INVALID_PARAMETER, std::string("Invalid parameter, duplicated address: ") + address);
         }
-        destinations.insert(dest);
 
-        CScript script_pub_key = GetScriptForDestination(dest);
         CAmount amount = AmountFromValue(address_amounts[i++]);
 
         bool subtract_fee = false;
@@ -48,7 +59,10 @@ static void ParseRecipients(const UniValue& address_amounts, const UniValue& sub
             }
         }
 
-        CRecipient recipient = {script_pub_key, amount, subtract_fee};
+        if (is_platform && subtract_fee) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "subtractfeefromamount is not supported for Platform addresses");
+        }
+        CRecipient recipient = {script_pub_key, amount, subtract_fee, is_platform};
         recipients.push_back(recipient);
     }
 }
@@ -211,7 +225,8 @@ RPCHelpMan sendtoaddress()
         "\nSend an amount to a given address." +
         HELP_REQUIRING_PASSPHRASE,
                 {
-                    {"address", RPCArg::Type::STR, RPCArg::Optional::NO, "The Dash address to send to."},
+                    {"address", RPCArg::Type::STR, RPCArg::Optional::NO, "The Dash address to send to.\n"
+                                "A DIP-18 Dash Platform address makes this an asset lock transaction."},
                     {"amount", RPCArg::Type::AMOUNT, RPCArg::Optional::NO, "The amount in " + CURRENCY_UNIT + " to send. eg 0.1"},
                     {"comment", RPCArg::Type::STR, RPCArg::Optional::OMITTED_NAMED_ARG, "A comment used to store what the transaction is for.\n"
                                          "This is not part of the transaction, just kept in your wallet."},
@@ -318,7 +333,8 @@ RPCHelpMan sendmany()
                     {"dummy", RPCArg::Type::STR, RPCArg::Optional::NO, "Must be set to \"\" for backwards compatibility.", RPCArgOptions{.oneline_description="\"\""}},
                     {"amounts", RPCArg::Type::OBJ_USER_KEYS, RPCArg::Optional::NO, "The addresses and amounts",
                         {
-                            {"address", RPCArg::Type::AMOUNT, RPCArg::Optional::NO, "The Dash address is the key, the numeric amount (can be string) in " + CURRENCY_UNIT + " is the value"},
+                            {"address", RPCArg::Type::AMOUNT, RPCArg::Optional::NO, "The Dash address is the key, the numeric amount (can be string) in " + CURRENCY_UNIT + " is the value.\n"
+                                        "A DIP-18 Dash Platform address makes this an asset lock transaction"},
                         },
                     },
                     {"minconf", RPCArg::Type::NUM, RPCArg::Optional::OMITTED_NAMED_ARG, "Ignored dummy value"},

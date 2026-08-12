@@ -59,7 +59,13 @@ struct ChainstateLoadOptions {
 //! case, and treat other cases as errors. More complex applications may want to
 //! try reindexing in the generic failure case, and pass an interrupt callback
 //! and exit cleanly in the interrupted case.
-enum class ChainstateLoadStatus { SUCCESS, FAILURE, FAILURE_INCOMPATIBLE_DB, INTERRUPTED };
+enum class ChainstateLoadStatus {
+    SUCCESS,
+    FAILURE, //!< Generic failure which reindexing may fix
+    FAILURE_FATAL, //!< Fatal error which should not prompt to reindex
+    FAILURE_INCOMPATIBLE_DB,
+    INTERRUPTED,
+};
 
 //! Chainstate load status code and optional error string.
 using ChainstateLoadResult = std::tuple<ChainstateLoadStatus, bilingual_str>;

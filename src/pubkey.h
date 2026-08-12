@@ -215,6 +215,11 @@ public:
 
     //! Derive BIP32 child pubkey.
     [[nodiscard]] bool Derive(CPubKey& pubkeyChild, ChainCode &ccChild, unsigned int nChild, const ChainCode& cc) const;
+
+    //! Derive DIP-14 (non-hardened) child pubkey with a 256-bit index
+    //! (32 bytes, big-endian). Indexes below 2^32 fall back to BIP32
+    //! derivation for compatibility; a hardened 32-bit index fails.
+    [[nodiscard]] bool Derive256(CPubKey& pubkeyChild, ChainCode& ccChild, Span<const unsigned char> nChild, const ChainCode& cc) const;
 };
 
 /** An ElligatorSwift-encoded public key. */

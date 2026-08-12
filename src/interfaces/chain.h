@@ -262,6 +262,11 @@ public:
     //! Relay dust fee setting (-dustrelayfee), reflecting lowest rate it's economical to spend.
     virtual CFeeRate relayDustFee() = 0;
 
+    //! Whether the mempool would reject this special transaction as non-standard
+    //! under the current policy (-acceptnonstdtxn), and if so, the reject reason.
+    //! Always false when non-standard transactions are accepted.
+    virtual bool isNonStandardSpecialTx(const CTransactionRef& tx, std::string& reason) = 0;
+
     //! Check if any block has been pruned.
     virtual bool havePruned() = 0;
 

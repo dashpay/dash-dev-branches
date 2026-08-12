@@ -242,6 +242,11 @@ unsigned int MurmurHash3(unsigned int nHashSeed, Span<const unsigned char> vData
 
 void BIP32Hash(const ChainCode &chainCode, unsigned int nChild, unsigned char header, const unsigned char data[32], unsigned char output[64]);
 
+/** DIP-14 child key derivation HMAC: like BIP32Hash but with a 256-bit child
+ * index, serialized big-endian (ser256). Used for Dash Platform (DashPay)
+ * derivation paths. */
+void DIP14Hash(const ChainCode& chainCode, const unsigned char nChild[32], unsigned char header, const unsigned char data[32], unsigned char output[64]);
+
 /** Return a HashWriter primed for tagged hashes (as specified in BIP 340).
  *
  * The returned object will have SHA256(tag) written to it twice (= 64 bytes).

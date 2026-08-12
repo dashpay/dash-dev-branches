@@ -6,13 +6,14 @@
 
 #include <logging.h>
 #include <uint256.h>
+#include <util/check.h>
 
 #include <stdexcept>
 
 namespace llmq {
 CDKGSessionHandler::CDKGSessionHandler(const Consensus::LLMQParams& _params) :
     params{_params},
-    // we allow size*2 messages as we need to make sure we see bad behavior (double messages)
+    // we allow size*2 messages per proTx as we need to make sure we see bad behavior (double messages)
     pendingContributions{(size_t)_params.size * 2},
     pendingComplaints{(size_t)_params.size * 2},
     pendingJustifications{(size_t)_params.size * 2},
@@ -25,22 +26,32 @@ CDKGSessionHandler::CDKGSessionHandler(const Consensus::LLMQParams& _params) :
 
 CDKGSessionHandler::~CDKGSessionHandler() = default;
 
-void CDKGPendingMessages::PushPendingMessage(NodeId from, std::shared_ptr<CDataStream> pm, const uint256& hash)
+void CDKGPendingMessages::PushPendingMessage(NodeId from, const uint256& sender_protx,
+                                             std::shared_ptr<CDataStream> pm, const uint256& hash)
 {
     LOCK(cs_messages);
 
-    if (messagesPerNode[from] >= maxMessagesPerNode) {
-        // TODO ban?
-        LogPrint(BCLog::LLMQ_DKG, "CDKGPendingMessages::%s -- too many messages, peer=%d\n", __func__, from);
-        return;
-    }
-    messagesPerNode[from]++;
-
-    if (!seenMessages.emplace(hash).second) {
+    // Check duplicates before the quota so resent hashes don't burn budget
+    if (seenMessages.count(hash) != 0) {
         LogPrint(BCLog::LLMQ_DKG, "CDKGPendingMessages::%s -- already seen %s, peer=%d\n", __func__, hash.ToString(), from);
         return;
     }
 
+    // Callers always pass an identity (the MNAuth gate for remote, our own
+    // proTxHash for local); drop rather than share a null-keyed quota bucket
+    if (!Assume(!sender_protx.IsNull())) {
+        return;
+    }
+    auto& count = messagesPerProTx[sender_protx];
+    if (count >= maxMessagesPerProTx) {
+        // TODO ban?
+        LogPrint(BCLog::LLMQ_DKG, "CDKGPendingMessages::%s -- too many messages from %s, peer=%d\n", __func__,
+                 sender_protx.ToString(), from);
+        return;
+    }
+    count++;
+
+    seenMessages.emplace(hash);
     pendingMessages.emplace_back(std::make_pair(from, std::move(pm)));
 }
 
@@ -67,7 +78,7 @@ void CDKGPendingMessages::Clear()
 {
     LOCK(cs_messages);
     pendingMessages.clear();
-    messagesPerNode.clear();
+    messagesPerProTx.clear();
     seenMessages.clear();
 }
 
