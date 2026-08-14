@@ -185,6 +185,9 @@ static std::vector<RPCResult> DecodeTxDoc(const std::string& txid_field_doc)
                     {RPCResult::Type::STR, "asm", "Disassembly of the signature script"},
                     {RPCResult::Type::STR_HEX, "hex", "The raw signature script bytes, hex-encoded"},
                 }},
+                {RPCResult::Type::STR_AMOUNT, "value", /*optional=*/true, "The value of the spent output in " + CURRENCY_UNIT + " (only if spentindex is enabled)"},
+                {RPCResult::Type::NUM, "valueSat", /*optional=*/true, "The value of the spent output in duffs (only if spentindex is enabled)"},
+                {RPCResult::Type::STR, "address", /*optional=*/true, "The Dash address of the spent output (only if spentindex is enabled and a well-defined address exists)"},
                 {RPCResult::Type::NUM, "sequence", "The script sequence number"},
             }},
         }},
@@ -193,6 +196,7 @@ static std::vector<RPCResult> DecodeTxDoc(const std::string& txid_field_doc)
             {RPCResult::Type::OBJ, "", "",
             {
                 {RPCResult::Type::STR_AMOUNT, "value", "The value in " + CURRENCY_UNIT},
+                {RPCResult::Type::NUM, "valueSat", "The value in duffs"},
                 {RPCResult::Type::NUM, "n", "index"},
                 {RPCResult::Type::OBJ, "scriptPubKey", "",
                 {
@@ -202,6 +206,9 @@ static std::vector<RPCResult> DecodeTxDoc(const std::string& txid_field_doc)
                     {RPCResult::Type::STR, "type", "The type, eg 'pubkeyhash'"},
                     {RPCResult::Type::STR, "address", /*optional=*/true, "The Dash address (only if a well-defined address exists)"},
                 }},
+                {RPCResult::Type::STR_HEX, "spentTxId", /*optional=*/true, "The transaction id that spent this output (only if spentindex is enabled)"},
+                {RPCResult::Type::NUM, "spentIndex", /*optional=*/true, "The input index of the spending transaction (only if spentindex is enabled)"},
+                {RPCResult::Type::NUM, "spentHeight", /*optional=*/true, "The block height of the spending transaction (only if spentindex is enabled)"},
             }},
         }},
         {RPCResult::Type::NUM, "extraPayloadSize", /*optional=*/true, "Size of DIP2 extra payload. Only present if it's a special TX"},
@@ -348,7 +355,7 @@ static RPCHelpMan getrawtransaction()
                          {
                              {RPCResult::Type::BOOL, "in_active_chain", /*optional=*/true, "Whether specified block is in the active chain or not (only present with explicit \"blockhash\" argument)"},
                              {RPCResult::Type::STR_HEX, "blockhash", /*optional=*/true, "the block hash"},
-                             {RPCResult::Type::NUM, "height", "The block height"},
+                             {RPCResult::Type::NUM, "height", /*optional=*/true, "The block height (only present if the transaction is mined)"},
                              {RPCResult::Type::NUM, "confirmations", /*optional=*/true, "The confirmations"},
                              {RPCResult::Type::NUM_TIME, "blocktime", /*optional=*/true, "The block time expressed in " + UNIX_EPOCH_TIME},
                              {RPCResult::Type::NUM, "time", /*optional=*/true, "Same as \"blocktime\""},
@@ -460,16 +467,14 @@ static RPCHelpMan getrawtransactionmulti() {
                      "If false, return a string, otherwise return a json object"},
             },
             RPCResult{
-                RPCResult::Type::OBJ, "", "",
+                RPCResult::Type::OBJ_DYN, "", "json object with transaction id as keys",
                 {
-                    {"If verbose is not set or set to false",
-                        RPCResult::Type::STR_HEX, "txid", "The serialized, hex-encoded data for 'txid'"},
-                    {"if verbose is set to true",
-                        RPCResult::Type::OBJ, "txid", "The decoded network-serialized transaction.",
-                        {
-                            {RPCResult::Type::ELISION, "", "The layout is the same as the output of getrawtransaction."},
-                        }},
-                    {"If tx is unknown", RPCResult::Type::STR, "txid", "None"},
+                    // Conditional variants are only resolved for top-level results, so the
+                    // per-verbosity shapes cannot be spelled out as alternatives here.
+                    {RPCResult::Type::ANY, "txid", "The serialized, hex-encoded data for 'txid' if verbose is not set or "
+                                                   "set to false; the decoded transaction (same layout as the output of "
+                                                   "getrawtransaction) if verbose is set to true; the string \"None\" if "
+                                                   "the transaction is unknown"},
                 },
             },
             RPCExamples{
@@ -567,10 +572,10 @@ static RPCHelpMan getislocks()
                     {RPCResult::Type::STR_HEX, "cycleHash", "The Cycle Hash"},
                     {RPCResult::Type::STR_HEX, "signature", "The InstantSend's BLS signature"},
                     {RPCResult::Type::STR_HEX, "hex", "The serialized, hex-encoded data for 'txid'"},
-                }},
-                RPCResult{"if no InstantSend Lock is known for specified txid",
-                     RPCResult::Type::STR, "data", "Just 'None' string"
                 },
+                // An element is the plain string "None" when no InstantSend Lock is known for
+                // that txid, so the element type cannot be checked against this object.
+                /*skip_type_check=*/true},
             }},
         RPCExamples{
             HelpExampleCli("getislocks", "'[\"txid\",...]'")
@@ -920,6 +925,7 @@ static RPCHelpMan decodescript()
                 {RPCResult::Type::STR, "desc", "Inferred descriptor for the script"},
                 {RPCResult::Type::STR, "type", "The output type (e.g. " + GetAllOutputTypes() + ")"},
                 {RPCResult::Type::STR, "address", /*optional=*/true, "The Dash address (only if a well-defined address exists)"},
+                {RPCResult::Type::STR, "p2sh", /*optional=*/true, "address of P2SH script wrapping this redeem script (not returned for types that should not be wrapped)"},
             },
         },
         RPCExamples{

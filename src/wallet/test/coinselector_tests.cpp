@@ -258,9 +258,9 @@ BOOST_AUTO_TEST_CASE(bnb_search_test)
 
     // Iteration exhaustion test
     CAmount target = make_hard_case(17, utxo_pool);
-    BOOST_CHECK(!SelectCoinsBnB(GroupCoins(utxo_pool), target, 0)); // Should exhaust
+    BOOST_CHECK(!SelectCoinsBnB(GroupCoins(utxo_pool), target, 1)); // Should exhaust
     target = make_hard_case(14, utxo_pool);
-    const auto result7 = SelectCoinsBnB(GroupCoins(utxo_pool), target, 0); // Should not exhaust
+    const auto result7 = SelectCoinsBnB(GroupCoins(utxo_pool), target, 1); // Should not exhaust
     BOOST_CHECK(result7);
 
     // Test same value early bailout optimization
@@ -299,8 +299,8 @@ BOOST_AUTO_TEST_CASE(bnb_search_test)
     // Make sure that effective value is working in AttemptSelection when BnB is used
     CoinSelectionParams coin_selection_params_bnb{
         rand,
-        /*change_output_size=*/ 0,
-        /*change_spend_size=*/ 0,
+        /*change_output_size=*/ 31,
+        /*change_spend_size=*/ 68,
         /*min_change_target=*/ 0,
         /*effective_feerate=*/ CFeeRate(3000),
         /*long_term_feerate=*/ CFeeRate(1000),
@@ -310,6 +310,9 @@ BOOST_AUTO_TEST_CASE(bnb_search_test)
     };
     coin_selection_params_bnb.m_subtract_fee_outputs = true;
 
+    coin_selection_params_bnb.m_change_fee = coin_selection_params_bnb.m_effective_feerate.GetFee(coin_selection_params_bnb.change_output_size);
+    coin_selection_params_bnb.m_cost_of_change = coin_selection_params_bnb.m_effective_feerate.GetFee(coin_selection_params_bnb.change_spend_size) + coin_selection_params_bnb.m_change_fee;
+    coin_selection_params_bnb.min_viable_change = coin_selection_params_bnb.m_effective_feerate.GetFee(coin_selection_params_bnb.change_spend_size);
     {
         std::unique_ptr<CWallet> wallet = std::make_unique<CWallet>(m_node.chain.get(), /*coinjoin_loader=*/nullptr, "", m_args, CreateMockWalletDatabase());
         wallet->LoadWallet();
@@ -789,6 +792,8 @@ BOOST_AUTO_TEST_CASE(SelectCoins_test)
             /*tx_noinputs_size=*/ 0,
             /*avoid_partial=*/ false,
         };
+        cs_params.m_cost_of_change = 1;
+        cs_params.min_viable_change = 1;
         CCoinControl cc;
         const auto result = SelectCoins(*wallet, available_coins, target, cc, cs_params);
         BOOST_CHECK(result);
@@ -929,6 +934,53 @@ BOOST_AUTO_TEST_CASE(effective_value_test)
     BOOST_CHECK_EQUAL(output5.GetEffectiveValue(), nValue); // The effective value should be equal to the absolute value if input_bytes is -1
 }
 
+BOOST_AUTO_TEST_CASE(SelectCoins_effective_value_test)
+{
+    // Test that the effective value is used to check whether preset inputs provide sufficient funds when subtract_fee_outputs is not used.
+    // This test creates a coin whose value is higher than the target but whose effective value is lower than the target.
+    // The coin is selected using coin control, with m_allow_other_inputs = false. SelectCoins should fail due to insufficient funds.
+
+    std::unique_ptr<CWallet> wallet = std::make_unique<CWallet>(m_node.chain.get(), /*coinjoin_loader=*/nullptr, "", m_args, CreateMockWalletDatabase());
+    wallet->LoadWallet();
+    LOCK(wallet->cs_wallet);
+    wallet->SetWalletFlag(WALLET_FLAG_DESCRIPTORS);
+    wallet->SetupDescriptorScriptPubKeyMans("", "");
+
+    CoinsResult available_coins;
+    {
+        std::unique_ptr<CWallet> dummyWallet = std::make_unique<CWallet>(m_node.chain.get(), /*coinjoin_loader=*/nullptr, "dummy", m_args, CreateMockWalletDatabase());
+        dummyWallet->LoadWallet();
+        LOCK(dummyWallet->cs_wallet);
+        dummyWallet->SetWalletFlag(WALLET_FLAG_DESCRIPTORS);
+        dummyWallet->SetupDescriptorScriptPubKeyMans("", "");
+
+        add_coin(available_coins, *dummyWallet, 100000); // 0.001 DASH
+    }
+
+    CAmount target{99900}; // 0.000999 DASH
+
+    FastRandomContext rand;
+    CoinSelectionParams cs_params{
+        rand,
+        /*change_output_size=*/34,
+        /*change_spend_size=*/148,
+        /*min_change_target=*/1000,
+        /*effective_feerate=*/CFeeRate(3000),
+        /*long_term_feerate=*/CFeeRate(1000),
+        /*discard_feerate=*/CFeeRate(1000),
+        /*tx_noinputs_size=*/0,
+        /*avoid_partial=*/false,
+    };
+    CCoinControl cc;
+    cc.m_allow_other_inputs = false;
+    COutput output = available_coins.all().at(0);
+    cc.SetInputWeight(output.outpoint, 148);
+    cc.SelectExternal(output.outpoint, output.txout);
+
+    const auto result = SelectCoins(*wallet, available_coins, target, cc, cs_params);
+    BOOST_CHECK(!result);
+}
+
 static util::Result<SelectionResult> SelectCoinsSRDResult(const CAmount& target,
                                                           const CoinSelectionParams& cs_params,
                                                           const node::NodeContext& m_node,
@@ -944,7 +996,7 @@ static util::Result<SelectionResult> SelectCoinsSRDResult(const CAmount& target,
     CoinEligibilityFilter filter(0, 0, 0);
     auto available_coins = coin_setup(*wallet);
     auto groups = GroupOutputs(*wallet, available_coins.all(), cs_params, filter, /*positive_only=*/true);
-    return wallet::SelectCoinsSRD(groups, target, cs_params.rng_fast, max_weight);
+    return wallet::SelectCoinsSRD(groups, target, cs_params.rng_fast, max_weight, false);
 }
 
 BOOST_AUTO_TEST_CASE(srd_tests)

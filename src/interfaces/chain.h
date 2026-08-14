@@ -267,6 +267,10 @@ public:
     //! Always false when non-standard transactions are accepted.
     virtual bool isNonStandardSpecialTx(const CTransactionRef& tx, std::string& reason) = 0;
 
+    //! Whether v24 hard fork rules apply to the next block, which is what
+    //! enables version 2 asset lock transactions by consensus.
+    virtual bool isV24Active() = 0;
+
     //! Check if any block has been pruned.
     virtual bool havePruned() = 0;
 

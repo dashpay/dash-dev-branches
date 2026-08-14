@@ -60,7 +60,7 @@ private:
     /// Charge fees to bad actors (Charge clients a fee if they're abusive)
     void ChargeFees() const EXCLUSIVE_LOCKS_REQUIRED(!cs_coinjoin);
     /// Rarely charge fees to pay miners
-    void ChargeRandomFees() const;
+    void ChargeRandomFees() const EXCLUSIVE_LOCKS_REQUIRED(!cs_coinjoin);
     /// Consume collateral in cases when peer misbehaved
     void ConsumeCollateral(const CTransactionRef& txref) const;
 

@@ -427,17 +427,17 @@ static RPCHelpMan getcoinjoininfo()
                             {RPCResult::Type::NUM, "max_amount", "Target CoinJoin balance in " + CURRENCY_UNIT + ""},
                             {RPCResult::Type::NUM, "denoms_goal", "How many inputs of each denominated amount to target"},
                             {RPCResult::Type::NUM, "denoms_hardcap", "Maximum limit of how many inputs of each denominated amount to create"},
-                            {RPCResult::Type::NUM, "queue_size", "How many queues there are currently on the network"},
-                            {RPCResult::Type::BOOL, "running", "Whether mixing is currently running"},
-                            {RPCResult::Type::NUM, "pending_inputs", "The number of successfully mixed inputs kept locked until the transaction spending them is observed"},
-                            {RPCResult::Type::ARR, "sessions", "",
+                            {RPCResult::Type::NUM, "queue_size", /*optional=*/true, "How many queues there are currently on the network"},
+                            {RPCResult::Type::BOOL, "running", /*optional=*/true, "Whether mixing is currently running (not returned when no wallet is loaded)"},
+                            {RPCResult::Type::NUM, "pending_inputs", /*optional=*/true, "The number of successfully mixed inputs kept locked until the transaction spending them is observed (not returned when no wallet is loaded)"},
+                            {RPCResult::Type::ARR, "sessions", /*optional=*/true, "Not returned when no wallet is loaded",
                             {
                                 {RPCResult::Type::OBJ, "", "",
                                 {
-                                    {RPCResult::Type::STR_HEX, "protxhash", "The ProTxHash of the masternode"},
-                                    GetRpcResult("outpoint"),
-                                    {RPCResult::Type::STR, "service", "The IP address and port of the masternode (DEPRECATED, returned only if config option -deprecatedrpc=service is passed)"},
-                                    {RPCResult::Type::ARR, "addrs_core_p2p", "Network addresses of the masternode used for protocol P2P",
+                                    {RPCResult::Type::STR_HEX, "protxhash", /*optional=*/true, "The ProTxHash of the masternode (only while connected to one)"},
+                                    GetRpcResult("outpoint", /*optional=*/true),
+                                    {RPCResult::Type::STR, "service", /*optional=*/true, "The IP address and port of the masternode (DEPRECATED, returned only if config option -deprecatedrpc=service is passed)"},
+                                    {RPCResult::Type::ARR, "addrs_core_p2p", /*optional=*/true, "Network addresses of the masternode used for protocol P2P",
                                         {
                                             {RPCResult::Type::STR, "address", ""},
                                         }
@@ -448,7 +448,7 @@ static RPCHelpMan getcoinjoininfo()
                                 }},
                             }},
                             {RPCResult::Type::NUM, "keys_left", /*optional=*/true, "How many new keys are left since last automatic backup (if applicable)"},
-                            {RPCResult::Type::STR, "warnings", "Warnings if any"},
+                            {RPCResult::Type::STR, "warnings", /*optional=*/true, "Warnings if any (not returned when no wallet is loaded)"},
                         }},
                     RPCResult{"for masternodes",
                         RPCResult::Type::OBJ, "", "",
@@ -458,6 +458,8 @@ static RPCHelpMan getcoinjoininfo()
                             {RPCResult::Type::STR_HEX, "state", "Current state of the mixing session"},
                             {RPCResult::Type::NUM, "entries_count", "The number of entries in the mixing session"},
                         }},
+                    RPCResult{"for non-masternodes without wallet support",
+                      RPCResult::Type::OBJ, "", /*optional=*/false, "", {}},
                 },
                 RPCExamples{
                     HelpExampleCli("getcoinjoininfo", "")

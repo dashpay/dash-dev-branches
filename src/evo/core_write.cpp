@@ -285,9 +285,10 @@ UniValue CDeterministicMNState::ToJson(MnType nType) const
 // CDeterministicMNStateDiff::ToJson() defined in evo/dmnstate.cpp
 RPCResult CDeterministicMNStateDiff::GetJsonHelp(const std::string& key, bool optional)
 {
+    // Every field is emitted only when the diff actually carries it, version included.
     return {RPCResult::Type::OBJ, key, optional, key.empty() ? "" : "The masternode state diff",
     {
-        {RPCResult::Type::NUM, "version", "Version of the masternode state diff"},
+        {RPCResult::Type::NUM, "version", /*optional=*/true, "Version of the masternode state diff"},
         GetRpcResult("service", /*optional=*/true),
         GetRpcResult("registeredHeight", /*optional=*/true),
         GetRpcResult("lastPaidHeight", /*optional=*/true),
@@ -478,8 +479,8 @@ RPCResult CSimplifiedMNListDiff::GetJsonHelp(const std::string& key, bool option
         GetRpcResult("merkleRootMNList", /*optional=*/true),
         GetRpcResult("merkleRootQuorums", /*optional=*/true),
         {RPCResult::Type::ARR, "quorumsCLSigs", "ChainLock signature details", {
-            {RPCResult::Type::OBJ, "", "", {
-                {RPCResult::Type::ARR, "<sig_hex>", "Array of quorum indices, keyed by BLS signature", {
+            {RPCResult::Type::OBJ_DYN, "", "json object with the BLS signature as key", {
+                {RPCResult::Type::ARR, "<sig_hex>", "Array of quorum indices signed by this BLS signature", {
                     {RPCResult::Type::NUM, "", "Quorum index"}
         }}}}}},
     }};

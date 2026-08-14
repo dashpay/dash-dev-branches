@@ -19,61 +19,37 @@ namespace llmq {
 // CDKGDebugSessionStatus::ToJson() defined in llmq/debug.cpp
 RPCResult CDKGDebugSessionStatus::GetJsonHelp(const std::string& key, bool optional)
 {
-    return {RPCResult::Type::OBJ, key, optional, key.empty() ? "" : "The state of a DKG session",
+    // A member tally is a count for detail_level = 0, an array of member indexes for
+    // detail_level = 1, and an array of {memberIndex, proTxHash} objects for
+    // detail_level = 2. RPCResult can only express such a union as ANY: conditional
+    // variants are only resolved for top-level results, so listing one variant per
+    // detail level here would make every level fail the runtime doc check.
+    const auto member_tally{[](const std::string& name, const std::string& what) {
+        return RPCResult{RPCResult::Type::ANY, name,
+                         strprintf("Number of %s (detail_level = 0), array of quorum member indexes "
+                                   "(detail_level = 1), or array of {memberIndex, proTxHash} objects "
+                                   "(detail_level = 2)",
+                                   what)};
+    }};
+    return {RPCResult::Type::OBJ, key, optional, key.empty() ? "" : "The state of a DKG session. Empty for an unknown LLMQ type or quorum hash",
     {
-        GetRpcResult("llmqType"),
-        GetRpcResult("quorumHash"),
-        {RPCResult::Type::NUM, "quorumHeight", "Block height of the quorum"},
-        {RPCResult::Type::NUM, "phase", "Active DKG phase"},
-        {RPCResult::Type::BOOL, "sentContributions", "Returns true if contributions sent"},
-        {RPCResult::Type::BOOL, "sentComplaint", "Returns true if complaints sent"},
-        {RPCResult::Type::BOOL, "sentJustification", "Returns true if justifications sent"},
-        {RPCResult::Type::BOOL, "sentPrematureCommitment", "Returns true if premature commitments sent"},
-        {RPCResult::Type::BOOL, "aborted", "Returns true if DKG session aborted"},
-        {RPCResult{"for detail_level = 0", RPCResult::Type::NUM, "badMembers", "Number of bad members"}},
-        {RPCResult{"for detail_level = 0", RPCResult::Type::NUM, "weComplain", "Number of complaints sent"}},
-        {RPCResult{"for detail_level = 0", RPCResult::Type::NUM, "receivedContributions", "Number of contributions received"}},
-        {RPCResult{"for detail_level = 0", RPCResult::Type::NUM, "receivedComplaints", "Number of complaints received"}},
-        {RPCResult{"for detail_level = 0", RPCResult::Type::NUM, "receivedJustifications", "Number of justifications received"}},
-        {RPCResult{"for detail_level = 0", RPCResult::Type::NUM, "receivedPrematureCommitments", "Number of premature commitments received"}},
-        {RPCResult{"for detail_level = 1", RPCResult::Type::ARR, "badMembers", "Array of indexes for each bad member", {
-            {RPCResult::Type::NUM, "", "Quorum member index"}}}},
-        {RPCResult{"for detail_level = 1", RPCResult::Type::ARR, "weComplain", "Array of indexes for each complaint sent", {
-            {RPCResult::Type::NUM, "", "Quorum member index"}}}},
-        {RPCResult{"for detail_level = 1", RPCResult::Type::ARR, "receivedContributions", "Array of indexes for each contribution received", {
-            {RPCResult::Type::NUM, "", "Quorum member index"}}}},
-        {RPCResult{"for detail_level = 1", RPCResult::Type::ARR, "receivedComplaints", "Array of indexes for each complaint received", {
-            {RPCResult::Type::NUM, "", "Quorum member index"}}}},
-        {RPCResult{"for detail_level = 1", RPCResult::Type::ARR, "receivedJustifications", "Array of indexes for each justification received", {
-            {RPCResult::Type::NUM, "", "Quorum member index"}}}},
-        {RPCResult{"for detail_level = 1", RPCResult::Type::ARR, "receivedPrematureCommitments", "Array of indexes for each commitment received", {
-            {RPCResult::Type::NUM, "", "Quorum member index"}}}},
-        {RPCResult{"for detail_level = 2", RPCResult::Type::ARR, "badMembers", "Array of objects for each bad member", {
-            {RPCResult::Type::OBJ, "", "", {
-                GetRpcResult("memberIndex"),
-                GetRpcResult("proTxHash", /*optional=*/true)}}}}},
-        {RPCResult{"for detail_level = 2", RPCResult::Type::ARR, "weComplain", "Array of objects for each complaint sent", {
-            {RPCResult::Type::OBJ, "", "", {
-                GetRpcResult("memberIndex"),
-                GetRpcResult("proTxHash", /*optional=*/true)}}}}},
-        {RPCResult{"for detail_level = 2", RPCResult::Type::ARR, "receivedContributions", "Array of objects for each contribution received", {
-            {RPCResult::Type::OBJ, "", "", {
-                GetRpcResult("memberIndex"),
-                GetRpcResult("proTxHash", /*optional=*/true)}}}}},
-        {RPCResult{"for detail_level = 2", RPCResult::Type::ARR, "receivedComplaints", "Array of objects for each complaint received", {
-            {RPCResult::Type::OBJ, "", "", {
-                GetRpcResult("memberIndex"),
-                GetRpcResult("proTxHash", /*optional=*/true)}}}}},
-        {RPCResult{"for detail_level = 2", RPCResult::Type::ARR, "receivedJustifications", "Array of objects for each justification received", {
-            {RPCResult::Type::OBJ, "", "", {
-                GetRpcResult("memberIndex"),
-                GetRpcResult("proTxHash", /*optional=*/true)}}}}},
-        {RPCResult{"for detail_level = 2", RPCResult::Type::ARR, "receivedPrematureCommitments", "Array of objects for each commitment received", {
-            {RPCResult::Type::OBJ, "", "", {
-                GetRpcResult("memberIndex"),
-                GetRpcResult("proTxHash", /*optional=*/true)}}}}},
-        {RPCResult{"for detail_level = 2", RPCResult::Type::ARR, "allMembers", "Array of provider registration transaction hash for all quorum members", {
-            GetRpcResult("proTxHash")}}},
+        GetRpcResult("llmqType", /*optional=*/true),
+        GetRpcResult("quorumHash", /*optional=*/true),
+        {RPCResult::Type::NUM, "quorumHeight", /*optional=*/true, "Block height of the quorum"},
+        {RPCResult::Type::NUM, "phase", /*optional=*/true, "Active DKG phase"},
+        {RPCResult::Type::BOOL, "sentContributions", /*optional=*/true, "Returns true if contributions sent"},
+        {RPCResult::Type::BOOL, "sentComplaint", /*optional=*/true, "Returns true if complaints sent"},
+        {RPCResult::Type::BOOL, "sentJustification", /*optional=*/true, "Returns true if justifications sent"},
+        {RPCResult::Type::BOOL, "sentPrematureCommitment", /*optional=*/true, "Returns true if premature commitments sent"},
+        {RPCResult::Type::BOOL, "aborted", /*optional=*/true, "Returns true if DKG session aborted"},
+        member_tally("badMembers", "bad members"),
+        member_tally("weComplain", "complaints sent"),
+        member_tally("receivedContributions", "contributions received"),
+        member_tally("receivedComplaints", "complaints received"),
+        member_tally("receivedJustifications", "justifications received"),
+        member_tally("receivedPrematureCommitments", "premature commitments received"),
+        {RPCResult::Type::ARR, "allMembers", /*optional=*/true, "Provider registration transaction hash for all quorum members. Only present for detail_level = 2", {
+            GetRpcResult("proTxHash")}},
     }};
 }
 
@@ -86,7 +62,7 @@ RPCResult CDKGDebugManager::GetJsonHelp(const std::string& key, bool optional, b
         {RPCResult::Type::STR, "timeStr", inner_optional, "Adjusted time for the last update, human friendly"},
         {RPCResult::Type::ARR, "session", inner_optional, "", {
             {RPCResult::Type::OBJ, "", "", {
-                {RPCResult::Type::NUM, "llmqType", "Name of quorum"},
+                {RPCResult::Type::STR, "llmqType", "Name of quorum"},
                 GetRpcResult("quorumIndex"),
                 CDKGDebugSessionStatus::GetJsonHelp(/*key=*/"status", /*optional=*/false)
             }},
@@ -258,7 +234,7 @@ RPCResult CRecoveredSig::GetJsonHelp(const std::string& key, bool optional)
     {
         GetRpcResult("llmqType"),
         GetRpcResult("quorumHash"),
-        {RPCResult::Type::NUM, "id", "Signing session ID"},
+        {RPCResult::Type::STR_HEX, "id", "Signing session ID"},
         {RPCResult::Type::STR_HEX, "msgHash", "Hash of message"},
         {RPCResult::Type::STR_HEX, "sig", "BLS signature recovered"},
         {RPCResult::Type::STR_HEX, "hash", "Hash of the BLS signature recovered"},

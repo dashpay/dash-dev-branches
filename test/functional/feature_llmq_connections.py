@@ -23,7 +23,7 @@ class LLMQConnections(DashTestFramework):
         self.add_wallet_options(parser)
 
     def set_test_params(self):
-        self.set_dash_test_params(15, 14)
+        self.set_dash_test_params(11, 10)
         self.set_dash_llmq_test_params(5, 3)
         # Probes should age after this many seconds.
         # NOTE: mine_quorum() can bump mocktime quite often internally so make sure this number is high enough.
@@ -41,7 +41,7 @@ class LLMQConnections(DashTestFramework):
             count = self.get_mn_connection_count(mn.get_node(self))
             total_count += count
             assert_greater_than_or_equal(count, 2)
-        assert total_count < 40
+        assert total_count < 25
 
         self.check_reconnects(2)
 

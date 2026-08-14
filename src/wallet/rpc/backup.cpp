@@ -92,7 +92,7 @@ RPCHelpMan importprivkey()
             "\nNote: This call can take over an hour to complete if rescan is true, during that time, other rpc calls\n"
             "may report that the imported key exists but related transactions are still missing, leading to temporarily incorrect/bogus balances and unspent outputs until rescan completes.\n"
             "The rescan parameter can be set to false if the key was never used to create transactions. If it is set to false,\n"
-            "but the key was used to create transactions, rescanwallet needs to be called with the appropriate block range.\n"
+            "but the key was used to create transactions, rescanblockchain needs to be called with the appropriate block range.\n"
             "Note: This command is only compatible with legacy wallets. Use \"importdescriptors\" with \"combo(X)\" for descriptor wallets.\n",
                 {
                     {"privkey", RPCArg::Type::STR, RPCArg::Optional::NO, "The private key (see dumpprivkey)"},
@@ -211,7 +211,7 @@ RPCHelpMan importaddress()
             "\nNote: This call can take over an hour to complete if rescan is true, during that time, other rpc calls\n"
             "may report that the imported address exists but related transactions are still missing, leading to temporarily incorrect/bogus balances and unspent outputs until rescan completes.\n"
             "The rescan parameter can be set to false if the key was never used to create transactions. If it is set to false,\n"
-            "but the key was used to create transactions, rescanwallet needs to be called with the appropriate block range.\n"
+            "but the key was used to create transactions, rescanblockchain needs to be called with the appropriate block range.\n"
             "If you have the full public key, you should call importpubkey instead of this.\n"
             "Hint: use importmulti to import more than one address.\n"
             "\nNote: If you import a non-standard raw script in hex form, outputs sending to it will be treated\n"
@@ -296,10 +296,7 @@ RPCHelpMan importaddress()
     if (fRescan)
     {
         RescanWallet(*pwallet, reserver);
-        {
-            LOCK(pwallet->cs_wallet);
-            pwallet->ReacceptWalletTransactions();
-        }
+        pwallet->ResubmitWalletTransactions(/*relay=*/false, /*force=*/true);
     }
 
     return UniValue::VNULL;
@@ -409,7 +406,7 @@ RPCHelpMan importpubkey()
             "\nNote: This call can take over an hour to complete if rescan is true, during that time, other rpc calls\n"
             "may report that the imported pubkey exists but related transactions are still missing, leading to temporarily incorrect/bogus balances and unspent outputs until rescan completes.\n"
             "The rescan parameter can be set to false if the key was never used to create transactions. If it is set to false,\n"
-            "but the key was used to create transactions, rescanwallet needs to be called with the appropriate block range.\n"
+            "but the key was used to create transactions, rescanblockchain needs to be called with the appropriate block range.\n"
             "Note: This command is only compatible with legacy wallets. Use \"importdescriptors\" with \"combo(X)\" for descriptor wallets.\n",
                 {
                     {"pubkey", RPCArg::Type::STR, RPCArg::Optional::NO, "The hex-encoded public key"},
@@ -475,10 +472,7 @@ RPCHelpMan importpubkey()
     if (fRescan)
     {
         RescanWallet(*pwallet, reserver);
-        {
-            LOCK(pwallet->cs_wallet);
-            pwallet->ReacceptWalletTransactions();
-        }
+        pwallet->ResubmitWalletTransactions(/*relay=*/false, /*force=*/true);
     }
 
     return UniValue::VNULL;
@@ -937,6 +931,11 @@ RPCHelpMan dumpwallet()
                 RPCResult{
                     RPCResult::Type::OBJ, "", "",
                     {
+                        {RPCResult::Type::STR, "dashcoreversion", "The Dash Core version that created the wallet dump"},
+                        {RPCResult::Type::NUM, "lastblockheight", "The height of the last block processed by the wallet"},
+                        {RPCResult::Type::STR_HEX, "lastblockhash", "The hash of the last block processed by the wallet"},
+                        {RPCResult::Type::NUM_TIME, "lastblocktime", "The time of the last block processed by the wallet, expressed in " + UNIX_EPOCH_TIME},
+                        {RPCResult::Type::NUM, "hdaccounts", /*optional=*/true, "The number of HD accounts contained in the wallet dump (only present if the wallet is HD)"},
                         {RPCResult::Type::NUM, "keys", "The number of keys contained in the wallet dump"},
                         {RPCResult::Type::STR, "filename", "The filename with full absolute path"},
                         {RPCResult::Type::STR, "warning", "A warning about not sharing the wallet dump with anyone"},
@@ -1485,7 +1484,7 @@ RPCHelpMan importmulti()
             "\nNote: This call can take over an hour to complete if rescan is true, during that time, other rpc calls\n"
             "may report that the imported keys, addresses or scripts exists but related transactions are still missing.\n"
             "The rescan parameter can be set to false if the key was never used to create transactions. If it is set to false,\n"
-            "but the key was used to create transactions, rescanwallet needs to be called with the appropriate block range.\n"
+            "but the key was used to create transactions, rescanblockchain needs to be called with the appropriate block range.\n"
             "Note: This command is only compatible with legacy wallets. Use \"importdescriptors\" for descriptor wallets.\n",
                 {
                     {"requests", RPCArg::Type::ARR, RPCArg::Optional::NO, "Data to be imported",
@@ -1633,10 +1632,7 @@ RPCHelpMan importmulti()
     }
     if (fRescan && fRunScan && requests.size()) {
         int64_t scannedTime = pwallet->RescanFromTime(nLowestTimestamp, reserver, true /* update */);
-        {
-            LOCK(pwallet->cs_wallet);
-            pwallet->ReacceptWalletTransactions();
-        }
+        pwallet->ResubmitWalletTransactions(/*relay=*/false, /*force=*/true);
 
         if (pwallet->IsAbortingRescan()) {
             throw JSONRPCError(RPC_MISC_ERROR, "Rescan aborted by user.");
@@ -1928,10 +1924,7 @@ RPCHelpMan importdescriptors() {
     // Rescan the blockchain using the lowest timestamp
     if (rescan) {
         int64_t scanned_time = pwallet->RescanFromTime(lowest_timestamp, reserver, true /* update */);
-        {
-            LOCK(pwallet->cs_wallet);
-            pwallet->ReacceptWalletTransactions();
-        }
+        pwallet->ResubmitWalletTransactions(/*relay=*/false, /*force=*/true);
 
         if (pwallet->IsAbortingRescan()) {
             throw JSONRPCError(RPC_MISC_ERROR, "Rescan aborted by user.");
@@ -1992,8 +1985,8 @@ RPCHelpMan listdescriptors()
             {
                 {RPCResult::Type::OBJ, "", "", {
                     {RPCResult::Type::STR, "desc", "Descriptor string representation"},
-                    {RPCResult::Type::STR, "mnemonic", "The mnemonic for this descriptor wallet (BIP39, english words). Presented only if private=true and created with a mnemonic"},
-                    {RPCResult::Type::STR, "mnemonicpassphrase", "The mnemonic passphrase for this descriptor wallet (BIP39). Presented only if private=true and created with a mnemonic"},
+                    {RPCResult::Type::STR, "mnemonic", /*optional=*/true, "The mnemonic for this descriptor wallet (BIP39, english words). Presented only if private=true and created with a mnemonic"},
+                    {RPCResult::Type::STR, "mnemonicpassphrase", /*optional=*/true, "The mnemonic passphrase for this descriptor wallet (BIP39). Presented only if private=true and created with a mnemonic"},
                     {RPCResult::Type::NUM, "timestamp", "The creation time of the descriptor"},
                     {RPCResult::Type::BOOL, "active", "Whether this descriptor is currently used to generate new addresses"},
                     {RPCResult::Type::BOOL, "internal", /*optional=*/true, "True if this descriptor is used to generate change addresses. False if this descriptor is used to generate receiving addresses; defined only for active descriptors"},

@@ -4,6 +4,7 @@
 
 #include <consensus/validation.h>
 #include <core_io.h>
+#include <interfaces/chain.h>
 #include <key_io.h>
 #include <policy/policy.h>
 #include <rpc/rawtransaction_util.h>
@@ -22,7 +23,7 @@
 #include <map>
 
 namespace wallet {
-static void ParseRecipients(const UniValue& address_amounts, const UniValue& subtract_fee_outputs, std::vector<CRecipient>& recipients)
+static void ParseRecipients(interfaces::Chain& chain, const UniValue& address_amounts, const UniValue& subtract_fee_outputs, std::vector<CRecipient>& recipients)
 {
     // A Platform address and a base58 address can encode the same hash, so recipients
     // are deduplicated by the script they pay rather than by the decoded destination.
@@ -39,6 +40,12 @@ static void ParseRecipients(const UniValue& address_amounts, const UniValue& sub
             if (!IsValidPlatformDestination(platform_dest)) {
                 throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY,
                                    strprintf("Invalid Dash address: %s (%s)", address, error_msg));
+            }
+            if (!chain.isV24Active()) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER,
+                                   strprintf("Invalid param for %s, paying a Platform address requires an asset lock "
+                                             "transaction of version 2, which is only valid after v24 activation",
+                                             address));
             }
             script_pub_key = GetScriptForPlatformDestination(platform_dest);
         } else {
@@ -316,7 +323,7 @@ RPCHelpMan sendtoaddress()
     }
 
     std::vector<CRecipient> recipients;
-    ParseRecipients(address_amounts, subtractFeeFromAmount, recipients);
+    ParseRecipients(pwallet->chain(), address_amounts, subtractFeeFromAmount, recipients);
     const bool verbose{request.params[11].isNull() ? false : request.params[11].get_bool()};
 
     return SendMoney(*pwallet, coin_control, recipients, mapValue, verbose);
@@ -412,7 +419,7 @@ RPCHelpMan sendmany()
     SetFeeEstimateMode(*pwallet, coin_control, /*conf_target=*/request.params[8], /*estimate_mode=*/request.params[9], /*fee_rate=*/request.params[10], /*override_min_fee=*/false);
 
     std::vector<CRecipient> recipients;
-    ParseRecipients(sendTo, subtractFeeFromAmount, recipients);
+    ParseRecipients(pwallet->chain(), sendTo, subtractFeeFromAmount, recipients);
     const bool verbose{request.params[11].isNull() ? false : request.params[11].get_bool()};
 
     return SendMoney(*pwallet, coin_control, recipients, std::move(mapValue), verbose);

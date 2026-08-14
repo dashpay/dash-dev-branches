@@ -247,7 +247,7 @@ CAmount GetMasternodePayment(int nHeight, CAmount blockValue, const Consensus::P
     return true;
 }
 
-[[nodiscard]] bool CMNPaymentsProcessor::IsOldBudgetBlockValueValid(const CBlock& block, const int nBlockHeight, const CAmount blockReward, std::string& strErrorRet)
+[[nodiscard]] bool CMNPaymentsProcessor::IsOldBudgetBlockValueValid(const CBlock& block, const int nBlockHeight, const CAmount blockReward, std::string& strErrorRet, SuperBlockCheckType check_superblock)
 {
     bool isBlockRewardValueMet = (block.vtx[0]->GetValueOut() <= blockReward);
 
@@ -267,6 +267,12 @@ CAmount GetMasternodePayment(int nHeight, CAmount blockValue, const Consensus::P
     int nOffset = nBlockHeight % m_consensus_params.nBudgetPaymentsCycleBlocks;
     if (nOffset < m_consensus_params.nBudgetPaymentsWindowBlocks) {
         // NOTE: old budget system is disabled since 12.1
+        if (check_superblock == SuperBlockCheckType::NoCheck) {
+            // historical mainnet blocks in this window do pay old budgets and we have no
+            // data to validate them with, so rely on online nodes (all networks)
+            LogPrint(BCLog::GOBJECT, "CMNPaymentsProcessor::%s -- WARNING! Skipping old budget block value checks, accepting block\n", __func__);
+            return true;
+        }
         // no old budget blocks should be accepted here on mainnet,
         // testnet/devnet/regtest should produce regular blocks only
         if(!isBlockRewardValueMet) {
@@ -308,7 +314,7 @@ bool CMNPaymentsProcessor::IsBlockValueValid(const CChain& active_chain, const C
         return isBlockRewardValueMet;
     } else if (nBlockHeight < m_consensus_params.nSuperblockStartBlock) {
         // superblocks are not enabled yet, check if we can pass old budget rules
-        return IsOldBudgetBlockValueValid(block, nBlockHeight, blockReward, strErrorRet);
+        return IsOldBudgetBlockValueValid(block, nBlockHeight, blockReward, strErrorRet, check_superblock);
     }
 
     LogPrint(BCLog::MNPAYMENTS, "block.vtx[0]->GetValueOut() %lld <= blockReward %lld\n", block.vtx[0]->GetValueOut(), blockReward);

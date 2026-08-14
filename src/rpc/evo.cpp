@@ -1524,12 +1524,11 @@ static RPCHelpMan protx_list()
         RPCResult{
             RPCResult::Type::ARR, "", "List of masternodes",
             {
-                RPCResult{"when detailed=false", RPCResult::Type::STR, "", "ProTx hash"},
-                RPCResult{"when detailed=true", RPCResult::Type::OBJ, "", "",
-                    {
-                        // TODO: document fields of the detailed entry
-                        {RPCResult::Type::ELISION, "", ""}
-                    }},
+                // Array elements are matched against this doc by index, so the two shapes
+                // cannot be listed as alternatives here - the first entry would be applied
+                // to element 0 only and the second to every element after it.
+                // TODO: document fields of the detailed entry
+                {RPCResult::Type::ANY, "", "The ProTx hash when detailed=false, otherwise an object describing the masternode"},
             }},
         RPCExamples{""},
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
@@ -1783,11 +1782,11 @@ static RPCHelpMan protx_listdiff()
                         {RPCResult::Type::NUM, "blockHeight", "Height of target (ending) block"},
                         {RPCResult::Type::ARR, "addedMNs", "Added masternodes",
                             {CDeterministicMN::GetJsonHelp(/*key=*/"", /*optional=*/false)}},
-                        {RPCResult::Type::ARR, "removedMns", "Removed masternodes",
+                        {RPCResult::Type::ARR, "removedMNs", "Removed masternodes",
                             {{RPCResult::Type::STR_HEX, "protx", "ProTx of removed masternode"}}},
                         {RPCResult::Type::ARR, "updatedMNs", "Updated masternodes",
-                            {{RPCResult::Type::OBJ, "<protx_hash>", "",
-                                {CDeterministicMNStateDiff::GetJsonHelp(/*key=*/"", /*optional=*/false)}}}},
+                            {{RPCResult::Type::OBJ_DYN, "", "json object with ProTx hash as keys",
+                                {CDeterministicMNStateDiff::GetJsonHelp(/*key=*/"<protx_hash>", /*optional=*/false)}}}},
                     },
                 },
                 RPCExamples{""},

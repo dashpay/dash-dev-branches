@@ -17,28 +17,32 @@
 namespace wallet {
 static CAmount GetReceived(const CWallet& wallet, const UniValue& params, bool by_label) EXCLUSIVE_LOCKS_REQUIRED(wallet.cs_wallet)
 {
-    std::vector<CScript> output_scripts;
+    std::vector<CTxDestination> addresses;
 
     if (by_label) {
         // Get the set of addresses assigned to label
-        std::string label = LabelFromValue(params[0]);
-        for (const auto& address : wallet.ListAddrBookAddresses(CWallet::AddrBookFilter{label})) {
-            auto output_script{GetScriptForDestination(address)};
-            if (wallet.IsMine(output_script)) {
-                output_scripts.emplace_back(output_script);
-            }
-        }
+        addresses = wallet.ListAddrBookAddresses(CWallet::AddrBookFilter{LabelFromValue(params[0])});
+        if (addresses.empty()) throw JSONRPCError(RPC_WALLET_ERROR, "Label not found in wallet");
     } else {
         // Get the address
         CTxDestination dest = DecodeDestination(params[0].get_str());
         if (!IsValidDestination(dest)) {
             throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid Dash address");
         }
-        CScript script_pub_key = GetScriptForDestination(dest);
-        if (!wallet.IsMine(script_pub_key)) {
-            throw JSONRPCError(RPC_WALLET_ERROR, "Address not found in wallet");
+        addresses.emplace_back(dest);
+    }
+
+    // Filter by own scripts only
+    std::vector<CScript> output_scripts;
+    for (const auto& address : addresses) {
+        auto output_script{GetScriptForDestination(address)};
+        if (wallet.IsMine(output_script)) {
+            output_scripts.emplace_back(output_script);
         }
-        output_scripts.emplace_back(script_pub_key);
+    }
+
+    if (output_scripts.empty()) {
+        throw JSONRPCError(RPC_WALLET_ERROR, "Address not found in wallet");
     }
 
     // Minimum confirmations
@@ -588,6 +592,9 @@ RPCHelpMan listunspent()
                             {RPCResult::Type::BOOL, "solvable", "Whether we know how to spend this output, ignoring the lack of keys"},
                             {RPCResult::Type::STR, "desc", /*optional=*/true, "(only when solvable) A descriptor for spending this output"},
                             {RPCResult::Type::BOOL, "reused", /* optional*/ true, "(only present if avoid_reuse is set) Whether this output is reused/dirty (sent to an address that was previously spent from)"},
+                            {RPCResult::Type::ARR, "parent_descs", /*optional=*/false, "List of parent descriptors for the scriptPubKey of this coin.", {
+                                {RPCResult::Type::STR, "desc", "The descriptor string."},
+                            }},
                             {RPCResult::Type::BOOL, "safe", "Whether this output is considered safe to spend. Unconfirmed transactions"
                                                             "from outside keys and unconfirmed replacement transactions are considered unsafe\n"
                                                             "and are not eligible for spending by fundrawtransaction and sendtoaddress."},
@@ -758,6 +765,7 @@ RPCHelpMan listunspent()
                 entry.pushKV("desc", descriptor->ToString());
             }
         }
+        PushParentDescriptors(*pwallet, scriptPubKey, entry);
         if (avoid_reuse) entry.pushKV("reused", reused);
         entry.pushKV("safe", out.safe);
         entry.pushKV("coinjoin_rounds", pwallet->GetRealOutpointCoinJoinRounds(out.outpoint));

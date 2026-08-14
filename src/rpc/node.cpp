@@ -166,6 +166,7 @@ static RPCHelpMan spork()
                 {
                     {RPCResult::Type::BOOL, "SPORK_NAME", "'true' for time-based sporks if spork is active and 'false' otherwise"},
                 }},
+            RPCResult{"For an unrecognized command", RPCResult::Type::NONE, "", ""},
         },
         RPCExamples {
             HelpExampleCli("spork", "show")
@@ -205,8 +206,9 @@ static RPCHelpMan sporkupdate()
             {"name", RPCArg::Type::STR, RPCArg::Optional::NO, "The name of the spork to update"},
             {"value", RPCArg::Type::NUM, RPCArg::Optional::NO, "The new desired value of the spork"},
         },
-        RPCResult{
-            RPCResult::Type::STR, "result", "\"success\" if spork value was updated or this help otherwise"
+        {
+            RPCResult{"if the spork value was updated", RPCResult::Type::STR, "result", "\"success\""},
+            RPCResult{"if the update was rejected", RPCResult::Type::NONE, "", ""},
         },
         RPCExamples{
             HelpExampleCli("sporkupdate", "SPORK_2_INSTANTSEND_ENABLED 4070908800")
@@ -395,8 +397,8 @@ static RPCHelpMan getaddressmempool()
                     {RPCResult::Type::NUM, "index", "The related input or output index"},
                     {RPCResult::Type::NUM, "satoshis", "The difference of duffs"},
                     {RPCResult::Type::NUM_TIME, "timestamp", "The time the transaction entered the mempool (seconds)"},
-                    {RPCResult::Type::STR_HEX, "prevtxid", "The previous txid (if spending)"},
-                    {RPCResult::Type::NUM, "prevout", "The previous transaction output index (if spending)"},
+                    {RPCResult::Type::STR_HEX, "prevtxid", /*optional=*/true, "The previous txid (if spending)"},
+                    {RPCResult::Type::NUM, "prevout", /*optional=*/true, "The previous transaction output index (if spending)"},
                 }},
             }},
         RPCExamples{
@@ -474,7 +476,7 @@ static RPCHelpMan getaddressutxos()
                 {
                     {RPCResult::Type::STR, "address", "The address base58check encoded"},
                     {RPCResult::Type::STR_HEX, "txid", "The output txid"},
-                    {RPCResult::Type::NUM, "index", "The output index"},
+                    {RPCResult::Type::NUM, "outputIndex", "The output index"},
                     {RPCResult::Type::STR_HEX, "script", "The script hex-encoded"},
                     {RPCResult::Type::NUM, "satoshis", "The number of duffs of the output"},
                     {RPCResult::Type::NUM, "height", "The block height"},
@@ -810,6 +812,7 @@ static RPCHelpMan getspentinfo()
             {
                 {RPCResult::Type::STR_HEX, "txid", "The transaction id"},
                 {RPCResult::Type::NUM, "index", "The spending input index"},
+                {RPCResult::Type::NUM, "height", "The block height of the spending transaction"},
             }},
         RPCExamples{
             HelpExampleCli("getspentinfo", "'{\"txid\": \"0437cd7f8525ceed2324359c2d0ba26006d92d856a9c20fa0241106ee5a597c9\", \"index\": 0}'")

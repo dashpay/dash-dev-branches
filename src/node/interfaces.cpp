@@ -1439,6 +1439,11 @@ public:
         if (!m_node.mempool || !m_node.mempool->m_require_standard) return false;
         return !IsStandardSpecialTx(*tx, reason);
     }
+    bool isV24Active() override
+    {
+        LOCK(::cs_main);
+        return DeploymentActiveAfter(chainman().ActiveChain().Tip(), chainman(), Consensus::DEPLOYMENT_V24);
+    }
     bool havePruned() override
     {
         LOCK(::cs_main);

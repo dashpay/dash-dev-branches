@@ -71,6 +71,8 @@ DEFAULT_DESCENDANT_LIMIT = 25  # default max number of in-mempool descendants
 # Default setting for -datacarriersize. 80 bytes of data, +1 for OP_RETURN, +2 for the pushdata opcodes.
 MAX_OP_RETURN_RELAY = 83
 
+DEFAULT_MEMPOOL_EXPIRY_HOURS = 336  # hours
+
 MAGIC_BYTES = {
     "mainnet": b"\xbf\x0c\x6b\xbd",   # mainnet
     "testnet3": b"\xce\xe2\xca\xff",  # testnet3
@@ -2563,20 +2565,27 @@ class msg_qwatch:
 
 
 class msg_qgetdata:
-    __slots__ = ("quorum_hash", "quorum_type", "data_mask", "protx_hash")
+    __slots__ = ("quorum_hash", "quorum_type", "data_mask", "protx_hash", "error")
     msgtype = b"qgetdata"
 
-    def __init__(self, quorum_hash=0, quorum_type=-1, data_mask=0, protx_hash=0):
+    def __init__(self, quorum_hash=0, quorum_type=-1, data_mask=0, protx_hash=0, error=None):
         self.quorum_hash = quorum_hash
         self.quorum_type = quorum_type
         self.data_mask = data_mask
         self.protx_hash = protx_hash
+        # error is response-only on the wire. Honest requesters leave it None so
+        # it is not serialized. Attackers can set it to smuggle a QDATA error
+        # code into a request (see CQuorumDataRequest SERIALIZE_METHODS).
+        self.error = error
 
     def deserialize(self, f):
         self.quorum_type = struct.unpack("<B", f.read(1))[0]
         self.quorum_hash = deser_uint256(f)
         self.data_mask = struct.unpack("<H", f.read(2))[0]
         self.protx_hash = deser_uint256(f)
+        # Optional trailing byte (present on QDATA responses; may be smuggled on requests).
+        extra = f.read(1)
+        self.error = struct.unpack("<B", extra)[0] if extra else None
 
     def serialize(self):
         r = b""
@@ -2584,14 +2593,17 @@ class msg_qgetdata:
         r += ser_uint256(self.quorum_hash)
         r += struct.pack("<H", self.data_mask)
         r += ser_uint256(self.protx_hash)
+        if self.error is not None:
+            r += struct.pack("<B", self.error)
         return r
 
     def __repr__(self):
-        return "msg_qgetdata(quorum_hash=%064x, quorum_type=%d, data_mask=%d, protx_hash=%064x)" % (
+        return "msg_qgetdata(quorum_hash=%064x, quorum_type=%d, data_mask=%d, protx_hash=%064x, error=%s)" % (
                                                                                 self.quorum_hash,
                                                                                 self.quorum_type,
                                                                                 self.data_mask,
-                                                                                self.protx_hash)
+                                                                                self.protx_hash,
+                                                                                self.error)
 
 
 class msg_qdata:

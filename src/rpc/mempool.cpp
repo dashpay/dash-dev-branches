@@ -262,7 +262,7 @@ static std::vector<RPCResult> MempoolEntryDescription()
             {RPCResult{RPCResult::Type::STR_HEX, "transactionid", "parent transaction id"}}},
         RPCResult{RPCResult::Type::ARR, "spentby", "unconfirmed transactions spending outputs from this transaction",
             {RPCResult{RPCResult::Type::STR_HEX, "transactionid", "child transaction id"}}},
-        RPCResult{RPCResult::Type::BOOL, "instantsend", "True if this transaction was locked via InstantSend"},
+        RPCResult{RPCResult::Type::STR, "instantlock", "\"true\" if this transaction was locked via InstantSend, \"unknown\" if InstantSend is unavailable"},
         RPCResult{RPCResult::Type::BOOL, "unbroadcast", "Whether this transaction is currently unbroadcast (initial broadcast not yet acknowledged by any peers)"}
     };
 }
@@ -773,8 +773,8 @@ static RPCHelpMan submitpackage()
                 {
                     {RPCResult::Type::OBJ, "txid", "transaction txid", {
                         {RPCResult::Type::STR_HEX, "txid", "The transaction hash in hex"},
-                        {RPCResult::Type::NUM, "size", "Size of transaction in bytes"},
-                        {RPCResult::Type::OBJ, "fees", "Transaction fees", {
+                        {RPCResult::Type::NUM, "size", /*optional=*/true, "Size of transaction in bytes"},
+                        {RPCResult::Type::OBJ, "fees", /*optional=*/true, "Transaction fees", {
                             {RPCResult::Type::STR_AMOUNT, "base", "transaction fee in " + CURRENCY_UNIT},
                         }},
                     }}

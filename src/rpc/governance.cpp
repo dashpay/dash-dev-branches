@@ -498,7 +498,7 @@ const RPCResult vote_results{
     RPCResult::Type::OBJ, "", "",
         {
             {RPCResult::Type::STR, "overall", "Total number of successful and failed votes"},
-            {RPCResult::Type::OBJ, "detail", "Detailed information for each vote",
+            {RPCResult::Type::OBJ_DYN, "detail", "Detailed information for each vote, keyed by the ProTx of the voting masternode",
             {
                 {RPCResult::Type::OBJ, "protx", "ProTx of masternode for voting",
                 {
@@ -679,7 +679,7 @@ static RPCHelpMan gobject_list_helper(const bool make_a_diff)
         },
         {
             RPCResult{"If request is valid",
-                RPCResult::Type::OBJ, "hash", "Object details", {ListObjectsHelp()},
+                RPCResult::Type::OBJ_DYN, "", "json object with governance object hash as keys", {ListObjectsHelp()},
             },
             RPCResult{"If request is invalid",
                 RPCResult::Type::STR, "", "Error string"
@@ -726,10 +726,10 @@ static RPCResult gobject_get_help()
 {
     auto ret = CGovernanceObject::GetStateJsonHelp(/*key=*/"", /*optional=*/false, /*local_valid_key=*/"fLocalValidity");
     auto mod_inner = ret.m_inner;
-    mod_inner.push_back({RPCResult::Type::OBJ, "FundingResult", "Funding vote details", {CGovernanceObject::GetVotesJsonHelp(/*key=*/"", /*optional=*/false)}});
-    mod_inner.push_back({RPCResult::Type::OBJ, "ValidResult", "Object validity vote details", {CGovernanceObject::GetVotesJsonHelp(/*key=*/"", /*optional=*/false)}});
-    mod_inner.push_back({RPCResult::Type::OBJ, "DeleteResult", "Delete vote details", {CGovernanceObject::GetVotesJsonHelp(/*key=*/"", /*optional=*/false)}});
-    mod_inner.push_back({RPCResult::Type::OBJ, "EndorsedResult", "Endorsed vote details", {CGovernanceObject::GetVotesJsonHelp(/*key=*/"", /*optional=*/false)}});
+    mod_inner.push_back(CGovernanceObject::GetVotesJsonHelp(/*key=*/"FundingResult", /*optional=*/false));
+    mod_inner.push_back(CGovernanceObject::GetVotesJsonHelp(/*key=*/"ValidResult", /*optional=*/false));
+    mod_inner.push_back(CGovernanceObject::GetVotesJsonHelp(/*key=*/"DeleteResult", /*optional=*/false));
+    mod_inner.push_back(CGovernanceObject::GetVotesJsonHelp(/*key=*/"EndorsedResult", /*optional=*/false));
     return RPCResult{ret.m_type, ret.m_key_name, ret.m_description, mod_inner};
 }
 

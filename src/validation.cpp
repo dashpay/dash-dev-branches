@@ -161,12 +161,16 @@ namespace {
 class ScopedBLSLegacyScheme
 {
 public:
-    explicit ScopedBLSLegacyScheme(std::optional<bool> enter = std::nullopt) noexcept :
+    ScopedBLSLegacyScheme() noexcept :
         m_saved(bls::bls_legacy_scheme.load())
     {
-        if (enter.has_value() && *enter != m_saved) {
-            bls::bls_legacy_scheme.store(*enter);
-            LogPrintf("ScopedBLSLegacyScheme: entered bls_legacy_scheme=%d\n", *enter);
+    }
+    explicit ScopedBLSLegacyScheme(bool enter) noexcept :
+        m_saved(bls::bls_legacy_scheme.load())
+    {
+        if (enter != m_saved) {
+            bls::bls_legacy_scheme.store(enter);
+            LogPrintf("ScopedBLSLegacyScheme: entered bls_legacy_scheme=%d\n", enter);
         }
     }
     ~ScopedBLSLegacyScheme() noexcept

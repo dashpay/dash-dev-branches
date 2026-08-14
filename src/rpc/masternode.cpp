@@ -95,8 +95,7 @@ static RPCHelpMan masternode_count()
             {
                 {RPCResult::Type::NUM, "total", "Total number of Masternodes"},
                 {RPCResult::Type::NUM, "enabled", "Number of enabled Masternodes"},
-                {RPCResult::Type::OBJ, "details", "Breakdown of masternodes by type",
-                    {{RPCResult::Type::OBJ, "", "",
+                {RPCResult::Type::OBJ, "detailed", "Breakdown of masternodes by type",
                     {
                         {RPCResult::Type::OBJ, "regular", "Details for regular masternodes",
                             {
@@ -108,7 +107,6 @@ static RPCHelpMan masternode_count()
                                 {RPCResult::Type::NUM, "total", "Total number of Evo nodes"},
                                 {RPCResult::Type::NUM, "enabled", "Number of enabled Evo nodes"}
                         }},
-                    }},
                     }}
             }
         },
@@ -369,13 +367,19 @@ static RPCHelpMan masternode_payments()
                     {RPCResult::Type::NUM, "amount", "Amount received in this block by all masternodes"},
                     {RPCResult::Type::ARR, "masternodes", "Masternodes that received payments in this block",
                     {
-                        {RPCResult::Type::STR_HEX, "proTxHash", "The hash of the corresponding ProRegTx"},
-                        {RPCResult::Type::NUM, "amount", "Amount received by this masternode"},
-                        {RPCResult::Type::ARR, "payees", "Payees who received a share of this payment",
+                        {RPCResult::Type::OBJ, "", "",
                         {
-                            {RPCResult::Type::STR, "address", "Payee address"},
-                            {RPCResult::Type::STR_HEX, "script", "Payee scriptPubKey"},
-                            {RPCResult::Type::NUM, "amount", "Amount received by this payee"},
+                            {RPCResult::Type::STR_HEX, "proTxHash", "The hash of the corresponding ProRegTx"},
+                            {RPCResult::Type::NUM, "amount", "Amount received by this masternode"},
+                            {RPCResult::Type::ARR, "payees", "Payees who received a share of this payment",
+                            {
+                                {RPCResult::Type::OBJ, "", "",
+                                {
+                                    {RPCResult::Type::STR, "address", "Payee address"},
+                                    {RPCResult::Type::STR_HEX, "script", "Payee scriptPubKey"},
+                                    {RPCResult::Type::NUM, "amount", "Amount received by this payee"},
+                                }},
+                            }},
                         }},
                     }},
                 }},
@@ -558,12 +562,15 @@ static RPCHelpMan masternodelist_helper(bool is_composite)
             {"mode", RPCArg::Type::STR, RPCArg::DefaultHint{"json"}, "The mode to run list in"},
             {"filter", RPCArg::Type::STR, RPCArg::Default{""}, "Filter results. Partial match by outpoint by default in all modes, additional matches in some modes are also available"},
         },
-        RPCResult{
-            RPCResult::Type::OBJ, "<outpoint>", "", {
-                RPCResult{"for mode = addr", RPCResult::Type::STR, "<address>", "Flattened list of all addresses registered to masternode"},
-                RPCResult{"for mode = full", RPCResult::Type::STR, "<info>", "Flattened list of a masternode's status, payee address, last paid block's timestamp, height and service addresses"},
-                RPCResult{"for mode = info", RPCResult::Type::STR, "<info>", "Flattened list of a masternode's status, payee address and service addresses"},
-                RPCResult{"for mode = evo, json or recent", RPCResult::Type::OBJ, "", "", {
+        {
+            RPCResult{"for mode = addr", RPCResult::Type::OBJ_DYN, "", "json object with masternode outpoint as keys",
+                {{RPCResult::Type::STR, "<outpoint>", "Flattened list of all addresses registered to masternode"}}},
+            RPCResult{"for mode = full", RPCResult::Type::OBJ_DYN, "", "json object with masternode outpoint as keys",
+                {{RPCResult::Type::STR, "<outpoint>", "Flattened list of a masternode's status, payee address, last paid block's timestamp, height and service addresses"}}},
+            RPCResult{"for mode = info", RPCResult::Type::OBJ_DYN, "", "json object with masternode outpoint as keys",
+                {{RPCResult::Type::STR, "<outpoint>", "Flattened list of a masternode's status, payee address and service addresses"}}},
+            RPCResult{"for mode = evo, json or recent", RPCResult::Type::OBJ_DYN, "", "json object with masternode outpoint as keys",
+                {{RPCResult::Type::OBJ, "<outpoint>", "", {
                     GetRpcResult("proTxHash"),
                     GetRpcResult("service", /*optional=*/true, /*override_name=*/"address"),
                     GetRpcResult("addresses"),
@@ -581,15 +588,21 @@ static RPCHelpMan masternodelist_helper(bool is_composite)
                     GetRpcResult("votingAddress", /*optional=*/false, /*override_name=*/"votingaddress"),
                     GetRpcResult("collateralAddress", /*optional=*/false, /*override_name=*/"collateraladdress"),
                     GetRpcResult("pubKeyOperator", /*optional=*/false, /*override_name=*/"pubkeyoperator"),
-                }},
-                RPCResult{"for mode = lastpaidblock", RPCResult::Type::NUM, "<height>", "Height masternode was last paid"},
-                RPCResult{"for mode = lastpaidtime", RPCResult::Type::NUM, "<time>", "Timestamp of block the masternode was last paid"},
-                RPCResult{"for mode = payee", RPCResult::Type::STR, "<addr>", "Dash address used for masternode reward payments"},
-                RPCResult{"for mode = owneraddress", RPCResult::Type::STR, "<addr>", "Dash address used for payee updates and proposal voting"},
-                RPCResult{"for mode = pubkeyoperator", RPCResult::Type::STR, "<addr>", "BLS public key used for operator signing"},
-                RPCResult{"for mode = status", RPCResult::Type::STR, "<status>", "Masternode status (human-readable string)"},
-                RPCResult{"for mode = votingaddress", RPCResult::Type::STR, "<addr>", "Dash address used for voting"},
-            }
+                }}}},
+            RPCResult{"for mode = lastpaidblock", RPCResult::Type::OBJ_DYN, "", "json object with masternode outpoint as keys",
+                {{RPCResult::Type::NUM, "<outpoint>", "Height masternode was last paid"}}},
+            RPCResult{"for mode = lastpaidtime", RPCResult::Type::OBJ_DYN, "", "json object with masternode outpoint as keys",
+                {{RPCResult::Type::NUM, "<outpoint>", "Timestamp of block the masternode was last paid"}}},
+            RPCResult{"for mode = payee", RPCResult::Type::OBJ_DYN, "", "json object with masternode outpoint as keys",
+                {{RPCResult::Type::STR, "<outpoint>", "Dash address used for masternode reward payments"}}},
+            RPCResult{"for mode = owneraddress", RPCResult::Type::OBJ_DYN, "", "json object with masternode outpoint as keys",
+                {{RPCResult::Type::STR, "<outpoint>", "Dash address used for payee updates and proposal voting"}}},
+            RPCResult{"for mode = pubkeyoperator", RPCResult::Type::OBJ_DYN, "", "json object with masternode outpoint as keys",
+                {{RPCResult::Type::STR, "<outpoint>", "BLS public key used for operator signing"}}},
+            RPCResult{"for mode = status", RPCResult::Type::OBJ_DYN, "", "json object with masternode outpoint as keys",
+                {{RPCResult::Type::STR, "<outpoint>", "Masternode status (human-readable string)"}}},
+            RPCResult{"for mode = votingaddress", RPCResult::Type::OBJ_DYN, "", "json object with masternode outpoint as keys",
+                {{RPCResult::Type::STR, "<outpoint>", "Dash address used for voting"}}},
         },
         RPCExamples{""},
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue

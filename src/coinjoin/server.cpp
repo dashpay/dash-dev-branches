@@ -67,7 +67,7 @@ void CCoinJoinServer::ProcessDSACCEPT(CNode& peer, CDataStream& vRecv)
 {
     assert(m_mn_metaman.IsValid());
 
-    if (IsSessionReady()) {
+    if (WITH_LOCK(cs_coinjoin, return IsSessionReady())) {
         // too many users in this session already, reject new ones
         LogPrint(BCLog::COINJOIN, "DSACCEPT -- queue is already full!\n");
         PushStatus(peer, STATUS_REJECTED, ERR_QUEUE_FULL);
@@ -86,7 +86,7 @@ void CCoinJoinServer::ProcessDSACCEPT(CNode& peer, CDataStream& vRecv)
         return;
     }
 
-    if (vecSessionCollaterals.empty()) {
+    if (WITH_LOCK(cs_coinjoin, return vecSessionCollaterals.empty())) {
         {
             const auto hasQueue = m_queueman.TryHasQueueFromMasternode(m_mn_activeman.GetOutPoint());
             if (!hasQueue.has_value()) return;
@@ -490,7 +490,15 @@ void CCoinJoinServer::ChargeFees() const
 */
 void CCoinJoinServer::ChargeRandomFees() const
 {
-    for (const auto& txCollateral : vecSessionCollaterals) {
+    AssertLockNotHeld(cs_coinjoin);
+
+    std::vector<CTransactionRef> session_collaterals;
+    {
+        LOCK(cs_coinjoin);
+        session_collaterals = vecSessionCollaterals;
+    }
+
+    for (const auto& txCollateral : session_collaterals) {
         if (GetRand<int>(/*nMax=*/100) > 10) return;
         LogPrint(BCLog::COINJOIN, /* Continued */
                  "CCoinJoinServer::ChargeRandomFees -- charging random fees, txCollateral=%s", txCollateral->ToString());
@@ -541,17 +549,23 @@ void CCoinJoinServer::CheckTimeout()
 */
 void CCoinJoinServer::CheckForCompleteQueue()
 {
-    if (nState == POOL_STATE_QUEUE && IsSessionReady()) {
-        SetState(POOL_STATE_ACCEPTING_ENTRIES);
+    int session_denom;
+    size_t participants;
+    {
+        LOCK(cs_coinjoin);
+        if (nState != POOL_STATE_QUEUE || !IsSessionReady()) return;
 
-        CCoinJoinQueue dsq(nSessionDenom, m_mn_activeman.GetOutPoint(), m_mn_activeman.GetProTxHash(),
-                           GetAdjustedTime(), true);
-        LogPrint(BCLog::COINJOIN, "CCoinJoinServer::CheckForCompleteQueue -- queue is ready, signing and relaying (%s) " /* Continued */
-                                     "with %d participants\n", dsq.ToString(), vecSessionCollaterals.size());
-        dsq.vchSig = m_mn_activeman.SignBasic(dsq.GetSignatureHash());
-        m_peer_manager->PeerRelayDSQ(dsq);
-        m_queueman.AddQueue(std::move(dsq));
+        SetState(POOL_STATE_ACCEPTING_ENTRIES);
+        session_denom = nSessionDenom;
+        participants = vecSessionCollaterals.size();
     }
+
+    CCoinJoinQueue dsq(session_denom, m_mn_activeman.GetOutPoint(), m_mn_activeman.GetProTxHash(), GetAdjustedTime(), true);
+    LogPrint(BCLog::COINJOIN, "CCoinJoinServer::CheckForCompleteQueue -- ready queue %s with %d participants\n",
+             dsq.ToString(), participants);
+    dsq.vchSig = m_mn_activeman.SignBasic(dsq.GetSignatureHash());
+    m_peer_manager->PeerRelayDSQ(dsq);
+    m_queueman.AddQueue(std::move(dsq));
 }
 
 // Check to make sure a given input matches an input in the pool and its scriptSig is valid
@@ -807,33 +821,42 @@ bool CCoinJoinServer::CreateNewSession(const CCoinJoinAccept& dsa, PoolMessage& 
 
 bool CCoinJoinServer::AddUserToExistingSession(const CCoinJoinAccept& dsa, PoolMessage& nMessageIDRet)
 {
-    if (nSessionID == 0 || IsSessionReady()) return false;
+    int session_id;
+    int session_denom;
+    {
+        LOCK(cs_coinjoin);
+        if (nSessionID == 0 || nState != POOL_STATE_QUEUE) {
+            nMessageIDRet = ERR_MODE;
+            return false;
+        }
+        if (IsSessionReady()) {
+            nMessageIDRet = ERR_QUEUE_FULL;
+            return false;
+        }
+        session_id = nSessionID;
+        session_denom = nSessionDenom;
+    }
 
     if (!IsAcceptableDSA(dsa, nMessageIDRet)) {
         return false;
     }
 
-    // we only add new users to an existing session when we are in queue mode
-    if (nState != POOL_STATE_QUEUE) {
-        nMessageIDRet = ERR_MODE;
-        LogPrint(BCLog::COINJOIN, "CCoinJoinServer::AddUserToExistingSession -- incompatible mode: nState=%d\n", nState);
-        return false;
-    }
-
-    if (dsa.nDenom != nSessionDenom) {
-        LogPrint(BCLog::COINJOIN, "CCoinJoinServer::AddUserToExistingSession -- incompatible denom %d (%s) != nSessionDenom %d (%s)\n",
-            dsa.nDenom, CoinJoin::DenominationToString(dsa.nDenom), nSessionDenom, CoinJoin::DenominationToString(nSessionDenom));
+    if (dsa.nDenom != session_denom) {
+        LogPrint(BCLog::COINJOIN, "CCoinJoinServer::AddUserToExistingSession -- incompatible denom %d (%s) != %d (%s)\n",
+                 dsa.nDenom, CoinJoin::DenominationToString(dsa.nDenom), session_denom,
+                 CoinJoin::DenominationToString(session_denom));
         nMessageIDRet = ERR_DENOM;
         return false;
     }
 
     LOCK(cs_coinjoin);
 
-    // A scheduler-thread timeout can reset the session via SetNull() between the checks above
-    // and taking cs_coinjoin, so revalidate: a collateral must never be committed to a session
-    // that no longer exists.
-    if (nSessionID == 0 || nState != POOL_STATE_QUEUE) {
+    if (nSessionID != session_id || nSessionDenom != session_denom || nState != POOL_STATE_QUEUE) {
         nMessageIDRet = ERR_MODE;
+        return false;
+    }
+    if (IsSessionReady()) {
+        nMessageIDRet = ERR_QUEUE_FULL;
         return false;
     }
 

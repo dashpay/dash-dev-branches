@@ -376,6 +376,19 @@ class QuorumDataMessagesTest(DashTestFramework):
             self.restart_mn(mn1)
             self.wait_for_quorum_data([mn1], 100, quorum_hash, recover=False)
 
+        # Requester-supplied nError on QGETDATA is rejected (+100) and disconnects.
+        # Independent of cleanup / rate-limit state — one poisoned message is enough.
+        def test_qgetdata_rejects_requester_error():
+            for error in (ENCRYPTED_CONTRIBUTIONS_MISSING, 0, 0xFF):
+                self.log.info(f"Test QGETDATA with requester-supplied nError {error:#x} is disconnected")
+                p2p_mn = p2p_connection(mn2.get_node(self))
+                id_p2p_mn = get_p2p_id(mn2.get_node(self))
+                mnauth(mn2.get_node(self), id_p2p_mn, fake_mnauth_2[0], fake_mnauth_2[1])
+                wait_for_banscore(mn2.get_node(self), id_p2p_mn, 0)
+                p2p_mn.send_message(msg_qgetdata(quorum_hash_int, 100, 0x01, error=error))
+                self.wait_until(lambda: not p2p_mn.is_connected, timeout=10)
+                mn2.get_node(self).disconnect_p2ps()
+
         # Test request limiting / banscore increase
         def test_request_limit():
 
@@ -531,6 +544,8 @@ class QuorumDataMessagesTest(DashTestFramework):
             test_watchquorums()
             test_rpc_quorum_getdata_protx_hash()
 
+        # Once: nError rejection does not depend on request-expiry cleanup.
+        test_qgetdata_rejects_requester_error()
         test_qsigshares_inv_oom()
 
 

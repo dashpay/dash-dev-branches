@@ -4,6 +4,18 @@
 
 #include <util/ranges_set.h>
 
+#include <limits>
+
+namespace {
+//! Successor of a value in the half-open range encoding: the range containing
+//! UINT64_MAX stores a wrapped end of 0. Spelled as a branch so the wrap is
+//! explicit intent rather than arithmetic overflow (-fsanitize=integer).
+constexpr uint64_t WrappedSuccessor(uint64_t value) noexcept
+{
+    return value == std::numeric_limits<uint64_t>::max() ? 0 : value + 1;
+}
+} // namespace
+
 CRangesSet::Range::Range() : CRangesSet::Range::Range(0, 0) {}
 
 CRangesSet::Range::Range(uint64_t begin_in, uint64_t end_in) :
@@ -22,7 +34,7 @@ bool CRangesSet::Add(uint64_t value)
     //   all 3 of them should be merged in one range [x, y)
     // - if there's exist a range [x, value) - we need to replace it to new range [x, value + 1)
     // - if there's exist a range [value + 1, y) - we need to replace it to new range [value, y)
-    Range new_range{value, value + 1};
+    Range new_range{value, WrappedSuccessor(value)};
     auto it = ranges.lower_bound({value, value});
     if (it != ranges.begin()) {
         auto prev = it;
@@ -35,7 +47,7 @@ bool CRangesSet::Add(uint64_t value)
     }
     const auto next = it;
     if (next != ranges.end()) {
-        if (next->begin == value + 1) {
+        if (next->begin == WrappedSuccessor(value)) {
             new_range.end = next->end;
             ranges.erase(next);
         }
@@ -65,8 +77,8 @@ bool CRangesSet::Remove(uint64_t value)
         const auto ret = ranges.insert({current_range.begin, value});
         assert(ret.second);
     }
-    if (value + 1 != current_range.end) {
-        const auto ret = ranges.insert({value + 1, current_range.end});
+    if (WrappedSuccessor(value) != current_range.end) {
+        const auto ret = ranges.insert({WrappedSuccessor(value), current_range.end});
         assert(ret.second);
     }
     return true;
@@ -81,7 +93,9 @@ size_t CRangesSet::Size() const noexcept
 {
     size_t result{0};
     for (auto i : ranges) {
-        result += i.end - i.begin;
+        // end == 0 is the half-open representation of a range containing
+        // UINT64_MAX. Avoid the unsigned subtraction wrap for that range.
+        result += i.end == 0 ? std::numeric_limits<uint64_t>::max() - i.begin + 1 : i.end - i.begin;
     }
     return result;
 }
@@ -93,5 +107,5 @@ bool CRangesSet::Contains(uint64_t value) const noexcept
     if (it == ranges.begin()) return false;
     auto prev = it;
     --prev;
-    return prev->begin <= value && prev->end > value;
+    return prev->begin <= value && (prev->end == 0 || prev->end > value);
 }

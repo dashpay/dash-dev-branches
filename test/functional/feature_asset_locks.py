@@ -779,6 +779,12 @@ class AssetLocksTest(DashTestFramework):
             result_expected={'allowed': False, 'reject-reason': 'bad-assetlocktx-version-2'})
         self.log.info("v2 asset lock correctly rejected pre-v24")
 
+        self.log.info("Spending RPCs refuse to pay a Platform address before the fork")
+        assert_raises_rpc_error(-8, "only valid after v24 activation", node_wallet.sendtoaddress,
+                                encode_platform_p2pkh('tdash', hash160(pubkey)), 1)
+        assert_raises_rpc_error(-8, "only valid after v24 activation", node_wallet.sendmany, "",
+                                {encode_platform_p2pkh('tdash', hash160(pubkey)): 1})
+
     def test_asset_locks_v2(self, node_wallet, node, pubkey):
         self.log.info("Testing asset lock v2 after v24 activation...")
         assert softfork_active(node_wallet, 'v24')

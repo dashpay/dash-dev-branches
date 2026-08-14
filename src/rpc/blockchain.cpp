@@ -256,7 +256,7 @@ static RPCHelpMan getbestchainlock()
         RPCResult{
             RPCResult::Type::OBJ, "", "",
             {
-                {RPCResult::Type::STR_HEX, "hash", "The block hash hex-encoded"},
+                {RPCResult::Type::STR_HEX, "blockhash", "The block hash hex-encoded"},
                 {RPCResult::Type::NUM, "height", "The block height or index"},
                 {RPCResult::Type::STR_HEX, "signature", "The ChainLock's BLS signature"},
                 {RPCResult::Type::BOOL, "known_block", "True if the block is known by our node"},

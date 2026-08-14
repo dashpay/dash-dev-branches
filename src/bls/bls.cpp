@@ -8,6 +8,7 @@
 
 #ifndef BUILD_BITCOIN_INTERNAL
 #include <support/allocators/mt_pooled_secure.h>
+#include <support/cleanse.h>
 #endif
 
 #include <cassert>
@@ -73,6 +74,7 @@ void CBLSSecretKey::MakeNewKey()
         } catch (...) {
         }
     }
+    memory_cleanse(buf, sizeof(buf));
     fValid = true;
     cachedHash.SetNull();
 }

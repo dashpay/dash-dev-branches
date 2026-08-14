@@ -1423,6 +1423,35 @@ BOOST_AUTO_TEST_CASE(test_CRanges)
             BOOST_CHECK(ranges.Size() > ((1u << test) / 4));
         }
     }
+
+    // The range containing UINT64_MAX is stored with a wrapped half-open end
+    // of 0. Membership, sizing, duplicate detection, and removal must all
+    // treat that representation as "extends through the maximum value".
+    const uint64_t max{std::numeric_limits<uint64_t>::max()};
+    CRangesSet max_values;
+    BOOST_CHECK(max_values.Add(max - 2));
+    BOOST_CHECK(max_values.Add(max - 1));
+    BOOST_CHECK(max_values.Add(max));
+    BOOST_CHECK_EQUAL(max_values.Size(), 3U);
+    BOOST_CHECK(max_values.Contains(max - 2));
+    BOOST_CHECK(max_values.Contains(max - 1));
+    BOOST_CHECK(max_values.Contains(max));
+    BOOST_CHECK(!max_values.Contains(0));
+    BOOST_CHECK(!max_values.Add(max));
+    BOOST_CHECK(max_values.Remove(max));
+    BOOST_CHECK_EQUAL(max_values.Size(), 2U);
+    BOOST_CHECK(max_values.Contains(max - 1));
+    BOOST_CHECK(!max_values.Contains(max));
+    BOOST_CHECK(max_values.Add(max));
+    BOOST_CHECK(max_values.Contains(max));
+
+    CRangesSet lone_max;
+    BOOST_CHECK(lone_max.Add(max));
+    BOOST_CHECK_EQUAL(lone_max.Size(), 1U);
+    BOOST_CHECK(lone_max.Contains(max));
+    BOOST_CHECK(!lone_max.Add(max));
+    BOOST_CHECK(lone_max.Remove(max));
+    BOOST_CHECK(lone_max.IsEmpty());
 }
 
 static std::string SpanToStr(const Span<const char>& span)

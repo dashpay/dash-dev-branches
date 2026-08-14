@@ -4,8 +4,15 @@
 
 #include <masternode/payments.h>
 
+#include <chain.h>
+#include <chainparams.h>
+#include <evo/chainhelper.h>
+#include <primitives/block.h>
 #include <primitives/transaction.h>
 #include <script/script.h>
+#include <validation.h>
+
+#include <test/util/setup_common.h>
 
 #include <vector>
 
@@ -83,6 +90,46 @@ BOOST_AUTO_TEST_CASE(strict_amount_must_match_exactly)
     const std::vector<CTxOut> actual{MakeOut(99, 0x01)};
     BOOST_CHECK_EQUAL(FindUnmatchedMasternodePayment(expected, actual, /*strict_multiplicity=*/true), 0);
     BOOST_CHECK_EQUAL(FindUnmatchedMasternodePayment(expected, actual, /*strict_multiplicity=*/false), 0);
+}
+
+// Regression: mainnet block 332320 sits inside an old-budget cycle window and pays
+// out a budget on top of the block reward. The old budget data is long gone, so a
+// node that is not synced yet (SuperBlockCheckType::NoCheck) has no way to validate
+// such a block and must accept it, otherwise it can never sync past that height.
+BOOST_FIXTURE_TEST_CASE(old_budget_window_accepted_while_unsynced, TestingSetup)
+{
+    const Consensus::Params& consensus{Params().GetConsensus()};
+    constexpr int nBlockHeight{332320};
+    BOOST_REQUIRE(nBlockHeight >= consensus.nBudgetPaymentsStartBlock);
+    BOOST_REQUIRE(nBlockHeight < consensus.nSuperblockStartBlock);
+    BOOST_REQUIRE(nBlockHeight % consensus.nBudgetPaymentsCycleBlocks < consensus.nBudgetPaymentsWindowBlocks);
+
+    CBlockIndex pindexPrev;
+    pindexPrev.nHeight = nBlockHeight - 1;
+
+    constexpr CAmount blockReward{508031847};
+    CMutableTransaction coinbase;
+    coinbase.vin.resize(1);
+    coinbase.vin[0].prevout.SetNull();
+    coinbase.vout = {MakeOut(blockReward, 0x01), MakeOut(117600000000, 0x02)};
+
+    CBlock block;
+    block.vtx.push_back(MakeTransactionRef(coinbase));
+
+    auto& mn_payments{*Assert(m_node.chain_helper)->mn_payments};
+    LOCK(cs_main);
+    const CChain& active_chain{m_node.chainman->ActiveChain()};
+
+    std::string strError;
+    BOOST_CHECK(mn_payments.IsBlockValueValid(active_chain, block, &pindexPrev, blockReward, strError,
+                                              SuperBlockCheckType::NoCheck));
+    BOOST_CHECK(strError.empty());
+
+    // The enforcing branch is only reached by a node that is synced and has no
+    // chainlock at that height, and it still rejects the over-reward block.
+    BOOST_CHECK(!mn_payments.IsBlockValueValid(active_chain, block, &pindexPrev, blockReward, strError,
+                                               SuperBlockCheckType::AllowDuplicates));
+    BOOST_CHECK(!strError.empty());
 }
 
 BOOST_AUTO_TEST_SUITE_END()

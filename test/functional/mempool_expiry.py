@@ -12,6 +12,7 @@ definable expiry timeout via the '-mempoolexpiry=<n>' command line argument
 
 from datetime import timedelta
 
+from test_framework.messages import DEFAULT_MEMPOOL_EXPIRY_HOURS
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import (
     assert_equal,
@@ -19,7 +20,6 @@ from test_framework.util import (
 )
 from test_framework.wallet import MiniWallet
 
-DEFAULT_MEMPOOL_EXPIRY_HOURS = 336  # hours
 CUSTOM_MEMPOOL_EXPIRY = 10  # hours
 
 

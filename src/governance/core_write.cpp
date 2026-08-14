@@ -119,20 +119,23 @@ RPCResult Object::GetJsonHelp(const std::string& key, bool optional)
         GetRpcResult("collateralHash"),
         {RPCResult::Type::NUM, "createdAt", "Proposal creation timestamp"},
         {RPCResult::Type::NUM, "revision", "Proposal revision number"},
+        // Everything but "hex" is the submitter's own JSON echoed back verbatim, so neither the
+        // set of keys nor their types is ours to promise: a proposal may carry extra fields and
+        // may encode the numeric ones as strings. Hence the type check is skipped here.
         {RPCResult::Type::OBJ, "data", "", {
             // Fields emitted through GetDataAsPlainString(), read by CProposalValidator
-            {RPCResult::Type::STR, "end_epoch", /*optional=*/true, "Proposal end timestamp"},
-            {RPCResult::Type::STR, "name", /*optional=*/true, "Proposal name"},
-            {RPCResult::Type::STR, "payment_address", /*optional=*/true, "Proposal payment address"},
-            {RPCResult::Type::STR, "payment_amount", /*optional=*/true, "Proposal payment amount"},
-            {RPCResult::Type::STR, "start_epoch", /*optional=*/true, "Proposal start timestamp"},
-            {RPCResult::Type::STR, "type", /*optional=*/true, "Object type"},
-            {RPCResult::Type::STR, "url", /*optional=*/true, "Proposal URL"},
+            {RPCResult::Type::ANY, "end_epoch", /*optional=*/true, "Proposal end timestamp"},
+            {RPCResult::Type::ANY, "name", /*optional=*/true, "Proposal name"},
+            {RPCResult::Type::ANY, "payment_address", /*optional=*/true, "Proposal payment address"},
+            {RPCResult::Type::ANY, "payment_amount", /*optional=*/true, "Proposal payment amount"},
+            {RPCResult::Type::ANY, "start_epoch", /*optional=*/true, "Proposal start timestamp"},
+            {RPCResult::Type::ANY, "type", /*optional=*/true, "Object type"},
+            {RPCResult::Type::ANY, "url", /*optional=*/true, "Proposal URL"},
             // Failure case for GetDataAsPlainString()
             {RPCResult::Type::STR, "plain", /*optional=*/true, "Governance object data as string"},
             // Always emitted by ToJson()
             {RPCResult::Type::STR_HEX, "hex", "Governance object data as hex"},
-        }},
+        }, /*skip_type_check=*/true},
     }};
 }
 
