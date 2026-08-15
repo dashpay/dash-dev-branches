@@ -13,6 +13,7 @@
 
 #include <map>
 #include <memory>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -25,7 +26,11 @@ class CMasternodeMetaMan;
 class CSporkManager;
 namespace llmq {
 class ActiveDKGSessionHandler;
+class CDKGComplaint;
+class CDKGContribution;
 class CDKGDebugManager;
+class CDKGJustification;
+class CDKGPrematureCommitment;
 class CDKGSessionManager;
 class CQuorumBlockProcessor;
 class CQuorumManager;
@@ -34,17 +39,43 @@ class QuorumRole;
 } // namespace llmq
 
 namespace llmq {
+
+/**
+ * Framing-only validation of a raw DKG payload, run at network intake before
+ * retention: checks truncation, trailing bytes, and quorum-param bounds on a
+ * copy of @p payload without decoding any BLS object. Typed deserialization
+ * happens exactly once, later, on the DKG worker thread.
+ *
+ * @warning This walk mirrors the (Un)serialize implementations in
+ *          llmq/dkgmessages.h. Any change to those must be reflected here;
+ *          src/test/fuzz/dkg_message_framing.cpp asserts that this never
+ *          rejects a payload the worker would accept.
+ */
+bool CheckDKGMessageWireStructure(std::string_view msg_type, const CDataStream& payload,
+                                  const Consensus::LLMQParams& params);
+
+/**
+ * Param-only structural bounds on a typed DKG message, run by the DKG worker
+ * right after deserializing queued bytes and before PreVerifyMessage.
+ */
+bool CheckDKGMessageStructure(const CDKGContribution& qc, const Consensus::LLMQParams& params);
+bool CheckDKGMessageStructure(const CDKGComplaint& qc, const Consensus::LLMQParams& params);
+bool CheckDKGMessageStructure(const CDKGJustification& qj, const Consensus::LLMQParams& params);
+bool CheckDKGMessageStructure(const CDKGPrematureCommitment& qc, const Consensus::LLMQParams& params);
+
 /**
  * NetHandler responsible for DKG networking:
  *  - QCONTRIB / QCOMPLAINT / QJUSTIFICATION / QPCOMMITMENT / QWATCH ProcessMessage
- *    routing into CDKGSessionManager. The resulting MessageProcessingResult is
- *    consumed locally via PeerManagerInternal and never propagated up.
- *  - AlreadyHave for the four MSG_QUORUM_* DKG inv types.
+ *    routing into CDKGSessionManager in active mode. Observer mode ignores DKG
+ *    round payloads because it has no worker to consume them.
+ *  - AlreadyHave for the four MSG_QUORUM_* DKG inv types. Observer mode returns
+ *    true so it does not request payloads it cannot consume.
  *  - ProcessGetData for the four MSG_QUORUM_* DKG inv types (active mode only;
  *    in observer mode the underlying Get* calls return false by construction).
  *
  * Active-mode-only deps live in @ref ActiveDKG; @ref m_active is null in
- * observer mode and non-null in active mode (all-or-none).
+ * observer mode and non-null in active mode (all-or-none). Observers neither
+ * request nor retain DKG round payloads.
  *
  * On nodes that run neither active nor observer mode, register @ref NetDKGStub
  * instead.

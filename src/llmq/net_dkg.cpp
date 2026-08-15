@@ -22,7 +22,9 @@
 #include <net.h>
 #include <netmessagemaker.h>
 #include <protocol.h>
+#include <serialize.h>
 #include <span.h>
+#include <streams.h>
 #include <unordered_lru_cache.h>
 #include <util/std23.h>
 #include <util/thread.h>
@@ -72,47 +74,143 @@ size_t MaxDKGMessageSize(std::string_view msg_type, const Consensus::LLMQParams&
     return cap < HARD_CEILING ? cap : HARD_CEILING;
 }
 
-// Cheap, param-only structural validation of a pushed DKG message, run at intake
-// before retention. Deserializes a COPY of the payload (leaving the caller's bytes
-// intact for the pending queue and its inventory hash) and checks only safe upper
-// bounds derived from quorum params: no member-list lookup and no signature
-// verification, which remain on the DKG worker thread. Deserializing the copy does
-// decompress the BLS points carried in the payload, but that work is bounded by
-// the size cap applied just before this check. Rejects malformed or clearly
-// oversized payloads before retention.
-bool CheckDKGMessageStructure(std::string_view msg_type, const CDataStream& vRecv, const Consensus::LLMQParams& params)
+constexpr size_t DKG_MSG_PREFIX_SIZE = 1 + 32 + 32; // llmqType + quorumHash + proTxHash
+
+// The framing walks below use throwing stream primitives; truncation anywhere
+// surfaces as an exception the dispatcher turns into a reject. They return
+// false on a params bound violation and true only when the whole payload was
+// consumed. BLS encodings have fixed wire sizes, so the walks only establish
+// that the bytes are present; decoding happens once, on the DKG worker.
+
+// Reads a DYNBITSET bounded by @p max_size and returns its bit count. Reuses
+// ReadFixedBitSet -- the exact deserializer the typed path uses -- so
+// truncation and padding-bit handling cannot diverge.
+uint64_t ReadBoundedDynBitset(CDataStream& ds, size_t max_size)
+{
+    const uint64_t bit_count = ReadCompactSize(ds);
+    if (bit_count > max_size) {
+        throw std::ios_base::failure("dynamic bitset exceeds quorum size");
+    }
+    std::vector<bool> bits;
+    ReadFixedBitSet(ds, bits, bit_count);
+    return bit_count;
+}
+
+bool CheckContributionWireStructure(CDataStream& ds, const Consensus::LLMQParams& params)
 {
     const size_t size = params.size > 0 ? static_cast<size_t>(params.size) : 0;
     const size_t min_size = params.minSize > 0 ? static_cast<size_t>(params.minSize) : 0;
     const size_t threshold = params.threshold > 0 ? static_cast<size_t>(params.threshold) : 0;
-    try {
-        CDataStream s(vRecv); // copy; deserialization does not advance the caller's stream
-        if (msg_type == NetMsgType::QCONTRIB) {
-            CDKGContribution qc;
-            s >> qc;
-            return qc.vvec != nullptr && qc.vvec->size() == threshold &&
-                   qc.contributions != nullptr &&
-                   qc.contributions->blobs.size() >= min_size &&
-                   qc.contributions->blobs.size() <= size;
-        } else if (msg_type == NetMsgType::QCOMPLAINT) {
-            CDKGComplaint qc;
-            s >> qc;
-            return qc.badMembers.size() == qc.complainForMembers.size() &&
-                   qc.badMembers.size() <= size;
-        } else if (msg_type == NetMsgType::QJUSTIFICATION) {
-            CDKGJustification qj;
-            s >> qj;
-            return qj.contributions.size() <= size;
-        } else if (msg_type == NetMsgType::QPCOMMITMENT) {
-            CDKGPrematureCommitment qc;
-            s >> qc;
-            return qc.validMembers.size() <= size;
-        }
-        return false;
-    } catch (const std::exception&) {
+
+    ds.ignore(DKG_MSG_PREFIX_SIZE);
+    if (ReadCompactSize(ds) != threshold) { // vvec
         return false;
     }
+    ds.ignore(threshold * CBLSPublicKey::SerSize);
+    ds.ignore(CBLSPublicKey::SerSize + 32); // IES ephemeralPubKey + ivSeed
+    const uint64_t blob_count = ReadCompactSize(ds);
+    if (blob_count < min_size || blob_count > size) {
+        return false;
+    }
+    for (uint64_t i = 0; i < blob_count; ++i) {
+        ds.ignore(ReadCompactSize(ds)); // encrypted contribution blob
+    }
+    ds.ignore(CBLSSignature::SerSize);
+    return ds.empty();
 }
+
+bool CheckComplaintWireStructure(CDataStream& ds, const Consensus::LLMQParams& params)
+{
+    const size_t size = params.size > 0 ? static_cast<size_t>(params.size) : 0;
+
+    ds.ignore(DKG_MSG_PREFIX_SIZE);
+    const uint64_t bad_members = ReadBoundedDynBitset(ds, size);
+    const uint64_t complain_for_members = ReadBoundedDynBitset(ds, size);
+    if (bad_members != complain_for_members) {
+        return false;
+    }
+    ds.ignore(CBLSSignature::SerSize);
+    return ds.empty();
+}
+
+bool CheckJustificationWireStructure(CDataStream& ds, const Consensus::LLMQParams& params)
+{
+    const size_t size = params.size > 0 ? static_cast<size_t>(params.size) : 0;
+
+    ds.ignore(DKG_MSG_PREFIX_SIZE);
+    const uint64_t contribution_count = ReadCompactSize(ds);
+    if (contribution_count > size) {
+        return false;
+    }
+    ds.ignore(contribution_count * (4 + CBLSSecretKey::SerSize)); // {u32 index, encrypted key share}
+    ds.ignore(CBLSSignature::SerSize);
+    return ds.empty();
+}
+
+bool CheckPrematureCommitmentWireStructure(CDataStream& ds, const Consensus::LLMQParams& params)
+{
+    const size_t size = params.size > 0 ? static_cast<size_t>(params.size) : 0;
+
+    ds.ignore(DKG_MSG_PREFIX_SIZE);
+    ReadBoundedDynBitset(ds, size); // validMembers
+    // quorumPublicKey + quorumVvecHash + quorumSig + sig
+    ds.ignore(CBLSPublicKey::SerSize + 32 + 2 * CBLSSignature::SerSize);
+    return ds.empty();
+}
+
+} // namespace
+
+bool CheckDKGMessageWireStructure(std::string_view msg_type, const CDataStream& payload,
+                                  const Consensus::LLMQParams& params)
+{
+    // Walk a copy so the caller's read position (and the bytes backing its
+    // inventory hash) survive. The copy is a memcpy bounded by the size cap
+    // applied just before this call -- negligible next to the BLS point
+    // decompression that deserializing the payload here would have cost.
+    CDataStream ds{payload};
+    try {
+        if (msg_type == NetMsgType::QCONTRIB) {
+            return CheckContributionWireStructure(ds, params);
+        } else if (msg_type == NetMsgType::QCOMPLAINT) {
+            return CheckComplaintWireStructure(ds, params);
+        } else if (msg_type == NetMsgType::QJUSTIFICATION) {
+            return CheckJustificationWireStructure(ds, params);
+        } else if (msg_type == NetMsgType::QPCOMMITMENT) {
+            return CheckPrematureCommitmentWireStructure(ds, params);
+        }
+    } catch (const std::exception&) {
+    }
+    return false;
+}
+
+bool CheckDKGMessageStructure(const CDKGContribution& qc, const Consensus::LLMQParams& params)
+{
+    const size_t size = params.size > 0 ? static_cast<size_t>(params.size) : 0;
+    const size_t min_size = params.minSize > 0 ? static_cast<size_t>(params.minSize) : 0;
+    const size_t threshold = params.threshold > 0 ? static_cast<size_t>(params.threshold) : 0;
+    return qc.vvec != nullptr && qc.vvec->size() == threshold && qc.contributions != nullptr &&
+           qc.contributions->blobs.size() >= min_size && qc.contributions->blobs.size() <= size;
+}
+
+bool CheckDKGMessageStructure(const CDKGComplaint& qc, const Consensus::LLMQParams& params)
+{
+    const size_t size = params.size > 0 ? static_cast<size_t>(params.size) : 0;
+    return qc.badMembers.size() == qc.complainForMembers.size() && qc.badMembers.size() <= size;
+}
+
+bool CheckDKGMessageStructure(const CDKGJustification& qj, const Consensus::LLMQParams& params)
+{
+    const size_t size = params.size > 0 ? static_cast<size_t>(params.size) : 0;
+    return qj.contributions.size() <= size;
+}
+
+bool CheckDKGMessageStructure(const CDKGPrematureCommitment& qc, const Consensus::LLMQParams& params)
+{
+    const size_t size = params.size > 0 ? static_cast<size_t>(params.size) : 0;
+    return qc.validMembers.size() <= size;
+}
+
+namespace {
 
 // returns a set of NodeIds which sent invalid messages
 template <typename Message>
@@ -266,11 +364,35 @@ void EnqueueOwn(CDKGPendingMessages& pending, const uint256& own_protx, const Me
     pending.PushPendingMessage(/*from=*/-1, own_protx, std::move(pm), hw.GetHash());
 }
 
+// The single typed deserialization pass over a queued payload, followed by the
+// param-derived structural bounds. Returns nullptr on failure; caller scores.
 template <typename Message>
-bool ProcessPendingMessageBatch(const CConnman& connman, CDKGSession& session, CDKGPendingMessages& pendingMessages,
-                                PeerManagerInternal& peerman, size_t maxCount)
+std::shared_ptr<Message> DeserializeCheckedDKGMessage(CDataStream& ds, const Consensus::LLMQParams& params,
+                                                      NodeId nodeId)
 {
-    auto msgs = pendingMessages.PopAndDeserializeMessages<Message>(maxCount);
+    auto msg = std::make_shared<Message>();
+    try {
+        ds >> *msg;
+    } catch (...) {
+        LogPrint(BCLog::LLMQ_DKG, "%s -- failed to deserialize message, peer=%d\n", __func__, nodeId);
+        return nullptr;
+    }
+    if (!ds.empty()) {
+        LogPrint(BCLog::LLMQ_DKG, "%s -- failed to deserialize message, peer=%d\n", __func__, nodeId);
+        return nullptr;
+    }
+    if (!CheckDKGMessageStructure(*msg, params)) {
+        LogPrint(BCLog::LLMQ_DKG, "%s -- message failed structure check, peer=%d\n", __func__, nodeId);
+        return nullptr;
+    }
+    return msg;
+}
+
+template <typename Message>
+bool ProcessPendingMessageBatch(const CConnman& connman, CDKGSession& session, const Consensus::LLMQParams& params,
+                                CDKGPendingMessages& pendingMessages, PeerManagerInternal& peerman, size_t maxCount)
+{
+    auto msgs = pendingMessages.PopPendingMessages(maxCount);
     if (msgs.empty()) {
         return false;
     }
@@ -280,13 +402,13 @@ bool ProcessPendingMessageBatch(const CConnman& connman, CDKGSession& session, C
 
     for (const auto& p : msgs) {
         const NodeId& nodeId = p.first;
-        if (!p.second) {
-            LogPrint(BCLog::LLMQ_DKG, "%s -- failed to deserialize message, peer=%d\n", __func__, nodeId);
+        auto msg = DeserializeCheckedDKGMessage<Message>(*p.second, params, nodeId);
+        if (!msg) {
             peerman.PeerMisbehaving(nodeId, 100);
             continue;
         }
         bool ban = false;
-        if (!session.PreVerifyMessage(*p.second, ban)) {
+        if (!session.PreVerifyMessage(*msg, ban)) {
             if (ban) {
                 LogPrint(BCLog::LLMQ_DKG, "%s -- banning node due to failed preverification, peer=%d\n", __func__, nodeId);
                 peerman.PeerMisbehaving(nodeId, 100);
@@ -294,7 +416,7 @@ bool ProcessPendingMessageBatch(const CConnman& connman, CDKGSession& session, C
             LogPrint(BCLog::LLMQ_DKG, "%s -- skipping message due to failed preverification, peer=%d\n", __func__, nodeId);
             continue;
         }
-        preverifiedMessages.emplace_back(p);
+        preverifiedMessages.emplace_back(nodeId, std::move(msg));
     }
     if (preverifiedMessages.empty()) {
         return true;
@@ -376,15 +498,22 @@ void NetDKG::ProcessMessage(CNode& pfrom, const std::string& msg_type, CDataStre
         return;
     }
 
-    const bool is_masternode = m_active != nullptr;
-
     if (msg_type == NetMsgType::QWATCH) {
-        if (!is_masternode) {
+        if (m_active == nullptr) {
             // non-masternodes should never receive this
             m_peer_manager->PeerMisbehaving(pfrom.GetId(), 10);
             return;
         }
         pfrom.qwatch = true;
+        return;
+    }
+
+    // Observer handlers have no DKG worker and therefore cannot validate or
+    // drain queued payloads. Observers learn completed quorums through the
+    // quorum-data path; retaining round messages here would only create
+    // process-lifetime state.
+    if (m_active == nullptr) {
+        LogPrint(BCLog::LLMQ_DKG, "NetDKG -- ignoring %s in observer mode\n", msg_type);
         return;
     }
 
@@ -399,17 +528,16 @@ void NetDKG::ProcessMessage(CNode& pfrom, const std::string& msg_type, CDataStre
         return;
     }
 
-    if (vRecv.empty()) {
-        m_peer_manager->PeerMisbehaving(pfrom.GetId(), 100);
+    if (vRecv.size() < sizeof(uint8_t) + sizeof(uint256)) {
+        m_peer_manager->PeerMisbehaving(pfrom.GetId(), 100, "malformed DKG message");
         return;
     }
 
+    // Peek the prefix without touching vRecv's read position; the full payload
+    // stays available for the framing walk, inventory hash, and retention below
     Consensus::LLMQType llmqType;
     uint256 quorumHash;
-    vRecv >> llmqType;
-    vRecv >> quorumHash;
-    vRecv.Rewind(sizeof(uint256));
-    vRecv.Rewind(sizeof(uint8_t));
+    SpanReader{vRecv.GetType(), vRecv.GetVersion(), MakeUCharSpan(vRecv)} >> llmqType >> quorumHash;
 
     const auto& llmq_params_opt = Params().GetLLMQ(llmqType);
     if (!llmq_params_opt.has_value()) {
@@ -467,9 +595,9 @@ void NetDKG::ProcessMessage(CNode& pfrom, const std::string& msg_type, CDataStre
         return;
     }
 
-    // Cheap structural pre-validation before retention. Validates a copy so the
-    // original bytes (and their inventory hash) are preserved for the worker.
-    if (!CheckDKGMessageStructure(msg_type, vRecv, llmq_params)) {
+    // Framing-only pre-validation before retention; BLS decoding happens
+    // exactly once, on the DKG worker, after retention.
+    if (!CheckDKGMessageWireStructure(msg_type, vRecv, llmq_params)) {
         m_peer_manager->PeerMisbehaving(pfrom.GetId(), 100, "malformed DKG message");
         return;
     }
@@ -544,6 +672,9 @@ bool NetDKG::AlreadyHave(const CInv& inv)
     case MSG_QUORUM_COMPLAINT:
     case MSG_QUORUM_JUSTIFICATION:
     case MSG_QUORUM_PREMATURE_COMMITMENT: {
+        // Observers have no worker that could consume or validate DKG round
+        // payloads, so do not request them in response to inventory.
+        if (m_active == nullptr) return true;
         if (!IsQuorumDKGEnabled(m_sporkman)) return false;
         bool seen = false;
         m_qdkgsman.ForEachHandler([&](const CDKGSessionHandler& h) {
@@ -705,6 +836,7 @@ void NetDKG::HandleDKGRound(ActiveDKGSessionHandler& handler)
 
     handler.WaitForNextPhase(std::nullopt, QuorumPhase::Initialized);
 
+    // Leftovers missed their phase; discard raw bytes without BLS work
     handler.ClearPendingMessages();
     uint256 curQuorumHash = handler.GetCurrentQuorumHash();
 
@@ -750,8 +882,8 @@ void NetDKG::HandleDKGRound(ActiveDKGSessionHandler& handler)
         }
     };
     auto fContributeWait = [this, curSession, &handler, &active] {
-        return ProcessPendingMessageBatch<CDKGContribution>(active.connman, *curSession, handler.pendingContributions,
-                                                            *m_peer_manager, 8);
+        return ProcessPendingMessageBatch<CDKGContribution>(active.connman, *curSession, handler.params,
+                                                            handler.pendingContributions, *m_peer_manager, 8);
     };
     handler.HandlePhase(QuorumPhase::Contribute, QuorumPhase::Complain, curQuorumHash, 0.05, fContributeStart,
                         fContributeWait);
@@ -763,8 +895,8 @@ void NetDKG::HandleDKGRound(ActiveDKGSessionHandler& handler)
         }
     };
     auto fComplainWait = [this, curSession, &handler, &active] {
-        return ProcessPendingMessageBatch<CDKGComplaint>(active.connman, *curSession, handler.pendingComplaints,
-                                                         *m_peer_manager, 8);
+        return ProcessPendingMessageBatch<CDKGComplaint>(active.connman, *curSession, handler.params,
+                                                         handler.pendingComplaints, *m_peer_manager, 8);
     };
     handler.HandlePhase(QuorumPhase::Complain, QuorumPhase::Justify, curQuorumHash, 0.05, fComplainStart, fComplainWait);
 
@@ -775,8 +907,8 @@ void NetDKG::HandleDKGRound(ActiveDKGSessionHandler& handler)
         }
     };
     auto fJustifyWait = [this, curSession, &handler, &active] {
-        return ProcessPendingMessageBatch<CDKGJustification>(active.connman, *curSession, handler.pendingJustifications,
-                                                             *m_peer_manager, 8);
+        return ProcessPendingMessageBatch<CDKGJustification>(active.connman, *curSession, handler.params,
+                                                             handler.pendingJustifications, *m_peer_manager, 8);
     };
     handler.HandlePhase(QuorumPhase::Justify, QuorumPhase::Commit, curQuorumHash, 0.05, fJustifyStart, fJustifyWait);
 
@@ -787,7 +919,7 @@ void NetDKG::HandleDKGRound(ActiveDKGSessionHandler& handler)
         }
     };
     auto fCommitWait = [this, curSession, &handler, &active] {
-        return ProcessPendingMessageBatch<CDKGPrematureCommitment>(active.connman, *curSession,
+        return ProcessPendingMessageBatch<CDKGPrematureCommitment>(active.connman, *curSession, handler.params,
                                                                    handler.pendingPrematureCommitments, *m_peer_manager,
                                                                    8);
     };

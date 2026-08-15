@@ -83,31 +83,6 @@ public:
     std::list<BinaryMessage> PopPendingMessages(size_t maxCount) EXCLUSIVE_LOCKS_REQUIRED(!cs_messages);
     bool HasSeen(const uint256& hash) const EXCLUSIVE_LOCKS_REQUIRED(!cs_messages);
     void Clear() EXCLUSIVE_LOCKS_REQUIRED(!cs_messages);
-
-    // Might return nullptr messages, which indicates that deserialization failed for some reason
-    template <typename Message>
-    std::vector<std::pair<NodeId, std::shared_ptr<Message>>> PopAndDeserializeMessages(size_t maxCount)
-        EXCLUSIVE_LOCKS_REQUIRED(!cs_messages)
-    {
-        auto binaryMessages = PopPendingMessages(maxCount);
-        if (binaryMessages.empty()) {
-            return {};
-        }
-
-        std::vector<std::pair<NodeId, std::shared_ptr<Message>>> ret;
-        ret.reserve(binaryMessages.size());
-        for (const auto& bm : binaryMessages) {
-            auto msg = std::make_shared<Message>();
-            try {
-                *bm.second >> *msg;
-            } catch (...) {
-                msg = nullptr;
-            }
-            ret.emplace_back(std::make_pair(bm.first, std::move(msg)));
-        }
-
-        return ret;
-    }
 };
 
 /**

@@ -65,6 +65,7 @@ src/test/dip0020opcodes_tests.cpp
 src/test/dip14_tests.cpp
 src/test/dynamic_activation*.cpp
 src/test/evo*.cpp
+src/test/fuzz/dkg_message_framing.cpp
 src/test/llmq*.cpp
 src/test/masternode_payments_tests.cpp
 src/test/spork_tests.cpp
