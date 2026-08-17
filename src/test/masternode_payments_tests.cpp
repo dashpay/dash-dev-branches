@@ -5,7 +5,6 @@
 #include <masternode/payments.h>
 
 #include <chain.h>
-#include <chainparams.h>
 #include <evo/chainhelper.h>
 #include <primitives/block.h>
 #include <primitives/transaction.h>
@@ -98,7 +97,7 @@ BOOST_AUTO_TEST_CASE(strict_amount_must_match_exactly)
 // such a block and must accept it, otherwise it can never sync past that height.
 BOOST_FIXTURE_TEST_CASE(old_budget_window_accepted_while_unsynced, TestingSetup)
 {
-    const Consensus::Params& consensus{Params().GetConsensus()};
+    const Consensus::Params& consensus{m_node.chainman->GetConsensus()};
     constexpr int nBlockHeight{332320};
     BOOST_REQUIRE(nBlockHeight >= consensus.nBudgetPaymentsStartBlock);
     BOOST_REQUIRE(nBlockHeight < consensus.nSuperblockStartBlock);
@@ -129,7 +128,8 @@ BOOST_FIXTURE_TEST_CASE(old_budget_window_accepted_while_unsynced, TestingSetup)
     // chainlock at that height, and it still rejects the over-reward block.
     BOOST_CHECK(!mn_payments.IsBlockValueValid(active_chain, block, &pindexPrev, blockReward, strError,
                                                SuperBlockCheckType::AllowDuplicates));
-    BOOST_CHECK(!strError.empty());
+    BOOST_CHECK_EQUAL(strError, "coinbase pays too much at height 332320 (actual=118108031847 vs limit=508031847), "
+                                "exceeded block reward, old budgets are disabled");
 }
 
 BOOST_AUTO_TEST_SUITE_END()

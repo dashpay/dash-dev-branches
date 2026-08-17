@@ -42,6 +42,8 @@ src/qt/masternodelist.*
 src/qt/masternodemodel.*
 src/qt/mnemonicverificationdialog.*
 src/qt/networkwidget.*
+src/qt/test/providertransactiontests.cpp
+src/qt/test/providertransactiontests.h
 src/qt/proposalcreate.*
 src/qt/proposalinfo.*
 src/qt/proposallist.*

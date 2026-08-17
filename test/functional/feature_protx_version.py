@@ -258,7 +258,11 @@ class ProTxVersionTest(DashTestFramework):
         upserv_hash = surviving_legacy_mn.update_service(node, submit=True,
                                                          addrs_core_p2p=[f'127.0.0.1:{surviving_legacy_mn.nodePort}'])
         self.bump_mocktime(10 * 60 + 1)
-        tip = self.generate(node, 1)[0]
+        # Same CMNAuth disconnect as a key rotation: SetStateVersion re-encodes pubKeyOperator, so
+        # skip sync_all until the old peers are gone and this node is reconnected.
+        assert surviving_legacy_mn.nodeIdx is not None
+        old_peer_ids = self.get_peer_ids(surviving_legacy_mn.nodeIdx)
+        tip = self.generate(node, 1, sync_fun=self.no_op)[0]
         assert_equal(node.getrawtransaction(upserv_hash, 1, tip)['proUpServTx']['version'], 3)
         state = node.protx('info', surviving_legacy_mn.proTxHash)['state']
         assert_equal(state['version'], 3)  # migrated in place
@@ -266,10 +270,7 @@ class ProTxVersionTest(DashTestFramework):
         # masternode is not PoSe-banned).
         assert state['pubKeyOperator'] != key_before
         assert_equal(state['PoSeBanHeight'], -1)
-        # The key re-encoding churns the migrated node's masternode connections, so reconnect it (as
-        # the rotation path does) before syncing, then confirm the list still reloads from disk
-        # identically after the in-place migration.
-        assert surviving_legacy_mn.nodeIdx is not None
+        self.wait_for_peers_disconnected(surviving_legacy_mn.nodeIdx, old_peer_ids)
         self.connect_nodes(surviving_legacy_mn.nodeIdx, 0)
         self.sync_all()
         list_before = self.nodes[1].masternodelist()

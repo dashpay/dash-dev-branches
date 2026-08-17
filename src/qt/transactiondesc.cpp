@@ -105,30 +105,36 @@ QString TransactionDesc::toHTML(interfaces::Node& node, interfaces::Wallet& wall
     CAmount nCredit = wtx.credit;
     CAmount nDebit = wtx.debit;
     CAmount nNet = nCredit - nDebit;
+    const bool is_masternode_transaction{rec->type == TransactionRecord::MasternodeRegistration ||
+                                         rec->type == TransactionRecord::MasternodeUpdate};
 
     strHTML += "<b>" + tr("Status") + ":</b> " + FormatTxStatus(status, inMempool);
     strHTML += "<br>";
 
     strHTML += "<b>" + tr("Date") + ":</b> " + (nTime ? GUIUtil::dateTimeStr(nTime) : "") + "<br>";
 
+    switch (rec->type) {
+    case TransactionRecord::MasternodeRegistration:
+        strHTML += "<b>" + tr("Type") + ":</b> " + tr("Masternode Registration") + "<br>";
+        break;
+    case TransactionRecord::MasternodeUpdate:
+        strHTML += "<b>" + tr("Type") + ":</b> " + tr("Masternode Update") + "<br>";
+        break;
+    default:
+        break;
+    }
+
     //
     // From
     //
-    if (wtx.is_coinbase)
-    {
+    if (!is_masternode_transaction && wtx.is_coinbase) {
         strHTML += "<b>" + tr("Source") + ":</b> " + tr("Generated") + "<br>";
-    }
-    else if (wtx.is_platform_transfer)
-    {
+    } else if (!is_masternode_transaction && wtx.is_platform_transfer) {
         strHTML += "<b>" + tr("Source") + ":</b> " + tr("Platform Transfer") + "<br>";
-    }
-    else if (wtx.value_map.count("from") && !wtx.value_map["from"].empty())
-    {
+    } else if (!is_masternode_transaction && wtx.value_map.count("from") && !wtx.value_map["from"].empty()) {
         // Online transaction
         strHTML += "<b>" + tr("From") + ":</b> " + GUIUtil::HtmlEscape(wtx.value_map["from"]) + "<br>";
-    }
-    else
-    {
+    } else if (!is_masternode_transaction) {
         // Offline transaction
         if (nNet > 0)
         {
@@ -156,8 +162,7 @@ QString TransactionDesc::toHTML(interfaces::Node& node, interfaces::Wallet& wall
     //
     // To
     //
-    if (wtx.value_map.count("to") && !wtx.value_map["to"].empty())
-    {
+    if (!is_masternode_transaction && wtx.value_map.count("to") && !wtx.value_map["to"].empty()) {
         // Online transaction
         std::string strAddress = wtx.value_map["to"];
         strHTML += "<b>" + tr("To") + ":</b> ";
@@ -172,8 +177,7 @@ QString TransactionDesc::toHTML(interfaces::Node& node, interfaces::Wallet& wall
     //
     // Amount
     //
-    if (wtx.is_coinbase && nCredit == 0)
-    {
+    if (!is_masternode_transaction && wtx.is_coinbase && nCredit == 0) {
         //
         // Coinbase
         //
@@ -186,16 +190,12 @@ QString TransactionDesc::toHTML(interfaces::Node& node, interfaces::Wallet& wall
         else
             strHTML += "(" + tr("not accepted") + ")";
         strHTML += "<br>";
-    }
-    else if (nNet > 0)
-    {
+    } else if (!is_masternode_transaction && nNet > 0) {
         //
         // Credit
         //
         strHTML += "<b>" + tr("Credit") + ":</b> " + BitcoinUnits::formatHtmlWithUnit(unit, nNet) + "<br>";
-    }
-    else
-    {
+    } else if (!is_masternode_transaction) {
         isminetype fAllFromMe = ISMINE_SPENDABLE;
         for (const isminetype mine : wtx.txin_is_mine)
         {
@@ -293,7 +293,9 @@ QString TransactionDesc::toHTML(interfaces::Node& node, interfaces::Wallet& wall
         strHTML += "<br><b>" + tr("Comment") + ":</b><br>" + GUIUtil::HtmlEscape(wtx.value_map["comment"], true) + "<br>";
 
     strHTML += "<b>" + tr("Transaction ID") + ":</b> " + rec->getTxHash() + "<br>";
-    strHTML += "<b>" + tr("Output index") + ":</b> " + QString::number(rec->getOutputIndex()) + "<br>";
+    if (!is_masternode_transaction) {
+        strHTML += "<b>" + tr("Output index") + ":</b> " + QString::number(rec->getOutputIndex()) + "<br>";
+    }
     strHTML += "<b>" + tr("Transaction total size") + ":</b> " + QString::number(wtx.tx->GetTotalSize()) + " bytes<br>";
 
     // Show OP_RETURN payload for this specific output

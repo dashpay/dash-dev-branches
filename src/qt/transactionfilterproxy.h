@@ -24,7 +24,8 @@ class TransactionFilterProxy : public QSortFilterProxyModel
 public:
     explicit TransactionFilterProxy(QObject *parent = nullptr);
 
-    /** Types to exclude from common transaction lists (CoinJoin internal transactions and dust) */
+    /** Types to exclude from common transaction lists (CoinJoin internal transactions and dust).
+     *  Masternode transactions remain visible in the default common-transactions view. */
     static constexpr quint32 EXCLUDED_TYPES =
         TransactionTypeToBit(TransactionRecord::CoinJoinCollateralPayment) |
         TransactionTypeToBit(TransactionRecord::CoinJoinCreateDenominations) |
@@ -36,6 +37,8 @@ public:
     static constexpr quint32 ALL_TYPES = 0xFFFFFFFF;
     /** Type filter bit field (all types except excluded) */
     static constexpr quint32 COMMON_TYPES = ALL_TYPES & ~EXCLUDED_TYPES;
+    static_assert(TransactionRecord::MasternodeUpdate < 32,
+                  "TransactionRecord::Type no longer fits in the quint32 type filter");
 
     static constexpr quint32 TYPE(int type) { return TransactionTypeToBit(type); }
 

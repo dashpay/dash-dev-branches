@@ -6,12 +6,15 @@
 #include <qt/transactionrecord.h>
 
 #include <chain.h>
-#include <interfaces/wallet.h>
 #include <interfaces/node.h>
+#include <interfaces/wallet.h>
+#include <primitives/transaction.h>
 
 #include <wallet/ismine.h>
 
+#include <algorithm>
 #include <cstdint>
+#include <optional>
 
 using wallet::ISMINE_SPENDABLE;
 using wallet::ISMINE_WATCH_ONLY;
@@ -24,6 +27,22 @@ bool TransactionRecord::showTransaction()
     // There are currently no cases where we hide transactions, but
     // we may want to use this in the future for things like RBF.
     return true;
+}
+
+static std::optional<TransactionRecord::Type> MasternodeRecordType(const CTransaction& tx)
+{
+    if (!tx.IsSpecialTxVersion()) return std::nullopt;
+
+    switch (tx.nType) {
+    case TRANSACTION_PROVIDER_REGISTER:
+        return TransactionRecord::MasternodeRegistration;
+    case TRANSACTION_PROVIDER_UPDATE_SERVICE:
+    case TRANSACTION_PROVIDER_UPDATE_REGISTRAR:
+    case TRANSACTION_PROVIDER_UPDATE_REVOKE:
+        return TransactionRecord::MasternodeUpdate;
+    default:
+        return std::nullopt;
+    }
 }
 
 /*
@@ -39,6 +58,18 @@ QList<TransactionRecord> TransactionRecord::decomposeTransaction(interfaces::Nod
     CAmount nNet = nCredit - nDebit;
     uint256 hash = wtx.tx->GetHash();
     std::map<std::string, std::string> mapValue = wtx.value_map;
+
+    if (const auto mn_type = MasternodeRecordType(*wtx.tx)) {
+        TransactionRecord record(hash, nTime, *mn_type, /*_strAddress=*/"", std::min<CAmount>(nNet, 0),
+                                 std::max<CAmount>(nNet, 0));
+        record.involvesWatchAddress = std::any_of(wtx.txin_is_mine.begin(), wtx.txin_is_mine.end(),
+                                                  [](const isminetype mine) { return mine & ISMINE_WATCH_ONLY; }) ||
+                                      std::any_of(wtx.txout_is_mine.begin(), wtx.txout_is_mine.end(),
+                                                  [](const isminetype mine) { return mine & ISMINE_WATCH_ONLY; });
+        parts.append(record);
+        return parts;
+    }
+
     auto& coinJoinOptions = node.coinJoinOptions();
 
     // Check if any inputs belong to this wallet (for dust detection)

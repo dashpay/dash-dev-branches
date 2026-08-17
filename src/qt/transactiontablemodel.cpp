@@ -437,6 +437,10 @@ QString TransactionTableModel::formatTxType(const TransactionRecord *wtx) const
         return tr("Data Transaction");
     case TransactionRecord::DustReceive:
         return tr("Dust Receive");
+    case TransactionRecord::MasternodeRegistration:
+        return tr("Masternode Registration");
+    case TransactionRecord::MasternodeUpdate:
+        return tr("Masternode Update");
 
     case TransactionRecord::CoinJoinMixing:
         return tr("%1 Mixing").arg(QString::fromStdString(gCoinJoinName));
@@ -492,6 +496,8 @@ QString TransactionTableModel::formatTxToAddress(const TransactionRecord *wtx, b
     case TransactionRecord::CoinJoinMakeCollaterals:
     case TransactionRecord::CoinJoinCreateDenominations:
     case TransactionRecord::DataTransaction:
+    case TransactionRecord::MasternodeRegistration:
+    case TransactionRecord::MasternodeUpdate:
     case TransactionRecord::Other:
         break; // use fail-over here
     } // no default case, so the compiler can warn about missing cases
@@ -521,6 +527,8 @@ QVariant TransactionTableModel::addressColor(const TransactionRecord *wtx) const
     case TransactionRecord::CoinJoinMakeCollaterals:
     case TransactionRecord::CoinJoinCollateralPayment:
     case TransactionRecord::DataTransaction:
+    case TransactionRecord::MasternodeRegistration:
+    case TransactionRecord::MasternodeUpdate:
         return GUIUtil::getThemedQColor(GUIUtil::ThemedColor::BAREADDRESS);
     case TransactionRecord::SendToOther:
     case TransactionRecord::RecvFromOther:
@@ -564,6 +572,8 @@ QVariant TransactionTableModel::amountColor(const TransactionRecord *rec) const
     case TransactionRecord::CoinJoinMakeCollaterals:
     case TransactionRecord::CoinJoinCreateDenominations:
     case TransactionRecord::DustReceive:
+    case TransactionRecord::MasternodeRegistration:
+    case TransactionRecord::MasternodeUpdate:
         return GUIUtil::getThemedQColor(GUIUtil::ThemedColor::ORANGE);
     }
     return GUIUtil::getThemedQColor(GUIUtil::ThemedColor::DEFAULT);
@@ -617,6 +627,18 @@ QString TransactionTableModel::formatTooltip(const TransactionRecord *rec) const
        rec->type==TransactionRecord::SendToAddress || rec->type==TransactionRecord::RecvWithAddress)
     {
         tooltip += QString(" ") + formatTxToAddress(rec, true);
+    }
+    switch (rec->type) {
+    case TransactionRecord::MasternodeRegistration:
+        tooltip += QString("\n") + tr("Registers a masternode. The amount is this wallet's net balance change and is "
+                                      "normally only the network fee when the collateral remains in this wallet.");
+        break;
+    case TransactionRecord::MasternodeUpdate:
+        tooltip += QString("\n") + tr("Updates an existing masternode registration. The amount is this wallet's net "
+                                      "balance change, normally only the network fee.");
+        break;
+    default:
+        break;
     }
     return tooltip;
 }

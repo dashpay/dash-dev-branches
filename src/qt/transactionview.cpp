@@ -99,6 +99,8 @@ TransactionView::TransactionView(QWidget* parent) :
     typeWidget->addItem(tr("Data Transaction"), TransactionFilterProxy::TYPE(TransactionRecord::DataTransaction));
     typeWidget->addItem(tr("Dust Receive"), TransactionFilterProxy::TYPE(TransactionRecord::DustReceive));
     typeWidget->addItem(tr("Other"), TransactionFilterProxy::TYPE(TransactionRecord::Other));
+    typeWidget->addItem(tr("Masternode"), TransactionFilterProxy::TYPE(TransactionRecord::MasternodeRegistration) |
+                                              TransactionFilterProxy::TYPE(TransactionRecord::MasternodeUpdate));
     typeWidget->setCurrentIndex(settings.value("transactionType").toInt());
 
     hlayout->addWidget(typeWidget);
@@ -790,10 +792,14 @@ void TransactionView::updateCoinJoinVisibility()
     int idx = fEnabled ? 0 : 1;
     chooseType(idx);
     typeWidget->setCurrentIndex(idx);
-    // Hide all CoinJoin related filters
+    // Hide all CoinJoin related filters by value so this stays correct when entries are reordered.
     QListView* typeList = qobject_cast<QListView*>(typeWidget->view());
-    std::vector<int> vecRows{4, 5, 6, 7, 8};
-    for (auto nRow : vecRows) {
-        typeList->setRowHidden(nRow, !fEnabled);
+    for (const quint32 type_filter : {TransactionFilterProxy::TYPE(TransactionRecord::CoinJoinSend),
+                                      TransactionFilterProxy::TYPE(TransactionRecord::CoinJoinMakeCollaterals),
+                                      TransactionFilterProxy::TYPE(TransactionRecord::CoinJoinCreateDenominations),
+                                      TransactionFilterProxy::TYPE(TransactionRecord::CoinJoinMixing),
+                                      TransactionFilterProxy::TYPE(TransactionRecord::CoinJoinCollateralPayment)}) {
+        const int row = typeWidget->findData(type_filter);
+        if (row >= 0) typeList->setRowHidden(row, !fEnabled);
     }
 }
