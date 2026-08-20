@@ -70,6 +70,12 @@ bool BuildQuorumRotationInfo(CDeterministicMNManager& dmnman, CQuorumSnapshotMan
 {
     AssertLockHeld(::cs_main);
 
+    // Peers are rejected at deserialization; this covers callers that build the request in memory (RPC).
+    if (request.baseBlockHashes.size() > MAX_BASE_BLOCK_HASHES) {
+        errorRet = strprintf("too many baseBlockHashes: %d > %d", request.baseBlockHashes.size(), MAX_BASE_BLOCK_HASHES);
+        return false;
+    }
+
     std::vector<const CBlockIndex*> baseBlockIndexes;
     if (request.baseBlockHashes.size() == 0) {
         const CBlockIndex* blockIndex = chainman.ActiveChain().Genesis();

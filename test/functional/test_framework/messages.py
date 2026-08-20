@@ -33,6 +33,7 @@ from test_framework.util import assert_equal
 import dash_hash # type: ignore[import]
 
 MAX_LOCATOR_SZ = 101
+MAX_BASE_BLOCK_HASHES = 4096
 MAX_BLOCK_SIZE = 2000000
 MAX_BLOOM_FILTER_SIZE = 36000
 MAX_BLOOM_HASH_FUNCS = 50
@@ -2327,6 +2328,32 @@ class msg_getmnlistd:
 
     def __repr__(self):
         return "msg_getmnlistd(baseBlockHash=%064x, blockHash=%064x)" % (self.baseBlockHash, self.blockHash)
+
+class msg_getqrinfo:
+    __slots__ = ("baseBlockHashes", "blockRequestHash", "extraShare",)
+    msgtype = b"getqrinfo"
+
+    def __init__(self, baseBlockHashes=None, blockRequestHash=0, extraShare=False):
+        self.baseBlockHashes = baseBlockHashes if baseBlockHashes is not None else []
+        self.blockRequestHash = blockRequestHash
+        self.extraShare = extraShare
+
+    def deserialize(self, f):
+        self.baseBlockHashes = deser_uint256_vector(f)
+        self.blockRequestHash = deser_uint256(f)
+        self.extraShare = struct.unpack("<?", f.read(1))[0]
+
+    def serialize(self):
+        r = b""
+        r += ser_uint256_vector(self.baseBlockHashes)
+        r += ser_uint256(self.blockRequestHash)
+        r += struct.pack("<?", self.extraShare)
+        return r
+
+    def __repr__(self):
+        return "msg_getqrinfo(baseBlockHashes=%d entries, blockRequestHash=%064x, extraShare=%r)" % (
+            len(self.baseBlockHashes), self.blockRequestHash, self.extraShare)
+
 
 QuorumId = namedtuple('QuorumId', ['llmqType', 'quorumHash'])
 

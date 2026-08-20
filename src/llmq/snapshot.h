@@ -89,6 +89,16 @@ public:
     [[nodiscard]] UniValue ToJson() const;
 };
 
+/** Upper bound on the diff bases a GETQUORUMROTATIONINFO request may carry.
+ *
+ * Only the highest base at or below each constructed diff target is ever used, and a
+ * response builds at most 3 * signingActiveQuorumCount snapshot diffs (96 for llmq_60_75)
+ * plus the target cycles and the tip, so no request can usefully carry more than ~101 bases.
+ * Shipping clients send far fewer: DashSync sends one, dashj at most six, dash-spv at most
+ * one. Without a limit the wire format allows MAX_PROTOCOL_MESSAGE_LENGTH / sizeof(uint256)
+ * = 98304 entries, each of which costs a block-index lookup under cs_main. */
+static constexpr size_t MAX_BASE_BLOCK_HASHES{4096};
+
 class CGetQuorumRotationInfo
 {
 public:
@@ -98,7 +108,7 @@ public:
 
     SERIALIZE_METHODS(CGetQuorumRotationInfo, obj)
     {
-        READWRITE(obj.baseBlockHashes, obj.blockRequestHash, obj.extraShare);
+        READWRITE(LIMITED_VECTOR(obj.baseBlockHashes, MAX_BASE_BLOCK_HASHES), obj.blockRequestHash, obj.extraShare);
     }
 };
 

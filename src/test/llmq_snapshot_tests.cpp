@@ -245,6 +245,37 @@ BOOST_AUTO_TEST_CASE(get_quorum_rotation_info_serialization_test)
     BOOST_CHECK(TestSerializationRoundtrip(emptyInfo));
 }
 
+BOOST_AUTO_TEST_CASE(get_quorum_rotation_info_base_block_hashes_limit_test)
+{
+    const auto serialize_with_count{[](size_t count) {
+        CGetQuorumRotationInfo info;
+        info.blockRequestHash = GetTestBlockHash(100);
+        info.baseBlockHashes.assign(count, GetTestBlockHash(1));
+        CDataStream ss(SER_NETWORK, PROTOCOL_VERSION);
+        ss << info;
+        return ss;
+    }};
+
+    // A request at the limit still round-trips.
+    {
+        CDataStream ss{serialize_with_count(MAX_BASE_BLOCK_HASHES)};
+        CGetQuorumRotationInfo parsed;
+        BOOST_CHECK_NO_THROW(ss >> parsed);
+        BOOST_CHECK_EQUAL(parsed.baseBlockHashes.size(), MAX_BASE_BLOCK_HASHES);
+    }
+
+    // One past it is rejected before any element is decoded, so an unauthenticated peer
+    // cannot make the server hold a list sized by MAX_PROTOCOL_MESSAGE_LENGTH.
+    {
+        CDataStream ss{serialize_with_count(MAX_BASE_BLOCK_HASHES + 1)};
+        const size_t payload_after_count{ss.size() - 3}; // CompactSize for 4097 is 3 bytes
+        CGetQuorumRotationInfo parsed;
+        BOOST_CHECK_THROW(ss >> parsed, std::ios_base::failure);
+        BOOST_CHECK(parsed.baseBlockHashes.empty());
+        BOOST_CHECK_EQUAL(ss.size(), payload_after_count);
+    }
+}
+
 BOOST_AUTO_TEST_CASE(quorum_rotation_info_serialization_test)
 {
     // Note: mnListDiff{smth} testing requires proper CSimplifiedMNListDiff setup

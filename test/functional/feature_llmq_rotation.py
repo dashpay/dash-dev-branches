@@ -13,11 +13,27 @@ import struct
 from io import BytesIO
 
 from test_framework.test_framework import DashTestFramework
-from test_framework.messages import CBlock, CBlockHeader, CCbTx, CMerkleBlock, from_hex, hash256, msg_getmnlistd, QuorumId, ser_uint256, sha256
+from test_framework.messages import (
+    CBlock,
+    CBlockHeader,
+    CCbTx,
+    CMerkleBlock,
+    MAX_BASE_BLOCK_HASHES,
+    QuorumId,
+    from_hex,
+    hash256,
+    msg_generic,
+    msg_getmnlistd,
+    msg_getqrinfo,
+    ser_compact_size,
+    ser_uint256,
+    sha256,
+)
 from test_framework.p2p import P2PInterface
 from test_framework.util import (
     assert_equal,
     assert_greater_than_or_equal,
+    assert_raises_rpc_error,
 )
 
 
@@ -247,6 +263,32 @@ class LLMQQuorumRotationTest(DashTestFramework):
         assert_equal(rpc_qr_info["mnListDiffAtHMinusC"]["deletedQuorums"], [])
         assert_equal(rpc_qr_info["mnListDiffAtHMinus2C"]["baseBlockHash"], rpc_qr_info["mnListDiffAtHMinus3C"]["blockHash"])
         assert_equal(rpc_qr_info["mnListDiffAtHMinus3C"]["baseBlockHash"], genesis_blockhash)
+
+        self.test_getqrinfo_base_block_hashes_limit(int(best_block_hash, 16), int(hmc_base_blockhash, 16))
+
+    def test_getqrinfo_base_block_hashes_limit(self, blockRequestHash, baseBlockHash):
+        self.log.info("Test getqrinfo baseBlockHashes limit over P2P")
+        node = self.nodes[0]
+        # RPC path shares the cap, but reports it as an error instead of dropping the request.
+        assert_raises_rpc_error(-32600, "too many baseBlockHashes", node.quorum, "rotationinfo",
+                                "%064x" % blockRequestHash, False, ["%064x" % baseBlockHash] * (MAX_BASE_BLOCK_HASHES + 1))
+
+        peer = node.add_p2p_connection(TestP2PConn())
+        self.log.info("A request at the limit is answered")
+        with node.assert_debug_log([], unexpected_msgs=["Misbehaving"]):
+            peer.send_and_ping(msg_getqrinfo([baseBlockHash] * MAX_BASE_BLOCK_HASHES, blockRequestHash))
+        self.wait_until(lambda: node.getpeerinfo()[-1]["bytessent_per_msg"].get("qrinfo", 0) > 0)
+
+        self.log.info("One past the limit is rejected and the peer is disconnected")
+        with node.assert_debug_log(["Misbehaving", "malformed getqrinfo received"]):
+            peer.send_message(msg_getqrinfo([baseBlockHash] * (MAX_BASE_BLOCK_HASHES + 1), blockRequestHash))
+            peer.wait_for_disconnect()
+        # The count alone is enough: the list is rejected before any element is decoded or allocated.
+        peer = node.add_p2p_connection(TestP2PConn())
+        with node.assert_debug_log(["Misbehaving", "malformed getqrinfo received"]):
+            peer.send_message(msg_generic(b"getqrinfo", ser_compact_size(MAX_BASE_BLOCK_HASHES + 1)))
+            peer.wait_for_disconnect()
+        node.disconnect_p2ps()
 
     def test_getmnlistdiff_quorums(self, baseBlockHash, blockHash, baseQuorumList, expectedDeleted, expectedNew, testQuorumsCLSigs = True):
         d = self.test_getmnlistdiff_base(baseBlockHash, blockHash, testQuorumsCLSigs)
