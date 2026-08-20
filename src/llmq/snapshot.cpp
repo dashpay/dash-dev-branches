@@ -11,11 +11,14 @@
 #include <evo/smldiff.h>
 #include <llmq/blockprocessor.h>
 #include <llmq/commitment.h>
+#include <node/blockstorage.h>
 #include <validation.h>
 
 #include <univalue.h>
 
 #include <algorithm>
+
+using node::CBlockIndexHeightOnlyComparator;
 
 namespace {
 constexpr std::string_view DB_QUORUM_SNAPSHOT{"llmq_S"};
@@ -60,6 +63,14 @@ std::optional<llmq::CycleData> ConstructCycle(llmq::CQuorumSnapshotManager& qsna
     }
     return ret;
 }
+
+//! Add a base block, keeping the by-height ordering GetLastBaseBlockHash() requires.
+void InsertBaseBlockSorted(std::vector<const CBlockIndex*>& baseBlockIndexes, const CBlockIndex* blockIndex)
+{
+    const auto pos{std::upper_bound(baseBlockIndexes.begin(), baseBlockIndexes.end(), blockIndex,
+                                    CBlockIndexHeightOnlyComparator())};
+    baseBlockIndexes.insert(pos, blockIndex);
+}
 } // anonymous namespace
 
 namespace llmq {
@@ -101,10 +112,10 @@ bool BuildQuorumRotationInfo(CDeterministicMNManager& dmnman, CQuorumSnapshotMan
             // a snapshot node cannot construct a base list yet.
             baseBlockIndexes.push_back(blockIndex);
         }
-        // Sort in all cases: the legacy path (served to peers < EFFICIENT_QRINFO_VERSION)
-        // relies on the order for baseBlockIndexes.back() and GetLastBaseBlockHash().
-        std::sort(baseBlockIndexes.begin(), baseBlockIndexes.end(),
-                  [](const CBlockIndex* a, const CBlockIndex* b) { return a->nHeight < b->nHeight; });
+        // GetLastBaseBlockHash() requires the list sorted by height, and the legacy path (served to
+        // peers < EFFICIENT_QRINFO_VERSION) also reads baseBlockIndexes.back(). Later inserts keep
+        // the order via InsertBaseBlockSorted().
+        std::sort(baseBlockIndexes.begin(), baseBlockIndexes.end(), CBlockIndexHeightOnlyComparator());
         if (!use_legacy_construction) {
             // Only deduplicate on the non-legacy path; leave the legacy path untouched so the
             // wire response to older peers stays bit-for-bit identical to the pre-fix behavior.
@@ -153,8 +164,7 @@ bool BuildQuorumRotationInfo(CDeterministicMNManager& dmnman, CQuorumSnapshotMan
     if (use_legacy_construction) {
         // Build MN list Diff always with highest baseblock
         if (!BuildSimplifiedMNListDiff(dmnman, chainman, qblockman, qman,
-                                       GetLastBaseBlockHash(baseBlockIndexes, cycle_base_opt->m_work_index,
-                                                            use_legacy_construction),
+                                       GetLastBaseBlockHash(baseBlockIndexes, cycle_base_opt->m_work_index),
                                        cycle_base_opt->m_work_index->GetBlockHash(), response.mnListDiffH, errorRet)) {
             return false;
         }
@@ -173,8 +183,7 @@ bool BuildQuorumRotationInfo(CDeterministicMNManager& dmnman, CQuorumSnapshotMan
         }
         if (use_legacy_construction) {
             if (!BuildSimplifiedMNListDiff(dmnman, chainman, qblockman, qman,
-                                           GetLastBaseBlockHash(baseBlockIndexes, cycle_opt->m_work_index,
-                                                                use_legacy_construction),
+                                           GetLastBaseBlockHash(baseBlockIndexes, cycle_opt->m_work_index),
                                            cycle_opt->m_work_index->GetBlockHash(), cycle_opt->m_diff, errorRet)) {
                 return false;
             }
@@ -210,13 +219,12 @@ bool BuildQuorumRotationInfo(CDeterministicMNManager& dmnman, CQuorumSnapshotMan
         response.quorumSnapshotList.push_back(cycle_opt->m_snap);
         CSimplifiedMNListDiff mnhneeded;
         if (!BuildSimplifiedMNListDiff(dmnman, chainman, qblockman, qman,
-                                       GetLastBaseBlockHash(baseBlockIndexes, cycle_opt->m_work_index,
-                                                            use_legacy_construction),
+                                       GetLastBaseBlockHash(baseBlockIndexes, cycle_opt->m_work_index),
                                        cycle_opt->m_work_index->GetBlockHash(), mnhneeded, errorRet)) {
             return false;
         }
         if (!use_legacy_construction) {
-            baseBlockIndexes.push_back(cycle_opt->m_work_index);
+            InsertBaseBlockSorted(baseBlockIndexes, cycle_opt->m_work_index);
         }
         response.mnListDiffList.push_back(mnhneeded);
     }
@@ -225,24 +233,22 @@ bool BuildQuorumRotationInfo(CDeterministicMNManager& dmnman, CQuorumSnapshotMan
         for (size_t n = target_cycles.size(); n > 0; --n) {
             auto* cycle{target_cycles[n - 1]};
             if (!BuildSimplifiedMNListDiff(dmnman, chainman, qblockman, qman,
-                                           GetLastBaseBlockHash(baseBlockIndexes, cycle->m_work_index,
-                                                                use_legacy_construction),
+                                           GetLastBaseBlockHash(baseBlockIndexes, cycle->m_work_index),
                                            cycle->m_work_index->GetBlockHash(), cycle->m_diff, errorRet)) {
                 return false;
             }
-            baseBlockIndexes.push_back(cycle->m_work_index);
+            InsertBaseBlockSorted(baseBlockIndexes, cycle->m_work_index);
         }
 
         if (!BuildSimplifiedMNListDiff(dmnman, chainman, qblockman, qman,
-                                       GetLastBaseBlockHash(baseBlockIndexes, cycle_base_opt->m_work_index,
-                                                            use_legacy_construction),
+                                       GetLastBaseBlockHash(baseBlockIndexes, cycle_base_opt->m_work_index),
                                        cycle_base_opt->m_work_index->GetBlockHash(), response.mnListDiffH, errorRet)) {
             return false;
         }
-        baseBlockIndexes.push_back(cycle_base_opt->m_work_index);
+        InsertBaseBlockSorted(baseBlockIndexes, cycle_base_opt->m_work_index);
 
         if (!BuildSimplifiedMNListDiff(dmnman, chainman, qblockman, qman,
-                                       GetLastBaseBlockHash(baseBlockIndexes, tipBlockIndex, use_legacy_construction),
+                                       GetLastBaseBlockHash(baseBlockIndexes, tipBlockIndex),
                                        tipBlockIndex->GetBlockHash(), response.mnListDiffTip, errorRet)) {
             return false;
         }
@@ -250,20 +256,12 @@ bool BuildQuorumRotationInfo(CDeterministicMNManager& dmnman, CQuorumSnapshotMan
     return true;
 }
 
-uint256 GetLastBaseBlockHash(Span<const CBlockIndex*> baseBlockIndexes, const CBlockIndex* blockIndex,
-                             bool use_legacy_construction)
+uint256 GetLastBaseBlockHash(Span<const CBlockIndex* const> baseBlockIndexes, const CBlockIndex* blockIndex)
 {
-    if (!use_legacy_construction) {
-        std::sort(baseBlockIndexes.begin(), baseBlockIndexes.end(),
-                  [](const CBlockIndex* a, const CBlockIndex* b) { return a->nHeight < b->nHeight; });
-    }
-    // default to genesis block
-    uint256 hash{Params().GenesisBlock().GetHash()};
-    for (const auto baseBlock : baseBlockIndexes) {
-        if (baseBlock->nHeight > blockIndex->nHeight) break;
-        hash = baseBlock->GetBlockHash();
-    }
-    return hash;
+    const auto pos{std::upper_bound(baseBlockIndexes.begin(), baseBlockIndexes.end(), blockIndex,
+                                    CBlockIndexHeightOnlyComparator())};
+    if (pos == baseBlockIndexes.begin()) return Params().GetConsensus().hashGenesisBlock;
+    return (*std::prev(pos))->GetBlockHash();
 }
 
 CQuorumSnapshot::CQuorumSnapshot() = default;
