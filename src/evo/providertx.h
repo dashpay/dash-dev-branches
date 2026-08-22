@@ -48,7 +48,10 @@ using MasternodePayoutShares = std::vector<MasternodePayoutShare>;
 
 [[nodiscard]] MasternodePayoutShares LegacyPayoutAsList(const CScript& script_payout);
 template<class T>
-[[nodiscard]] MasternodePayoutShares GetOwnerPayouts(const T& protx);
+[[nodiscard]] MasternodePayoutShares GetOwnerPayouts(const T& protx)
+{
+    return protx.nVersion >= ProTxVersion::ExtAddr ? protx.payouts : LegacyPayoutAsList(protx.scriptPayout);
+}
 
 [[nodiscard]] bool IsPayoutListTriviallyValid(const MasternodePayoutShares& payouts, const CKeyID& keyIDOwner,
                                               const CKeyID& keyIDVoting, TxValidationState& state);
@@ -58,6 +61,12 @@ template<class T>
 [[nodiscard]] std::string PayoutListToString(const MasternodePayoutShares& payouts);
 [[nodiscard]] UniValue PayoutListToJson(const MasternodePayoutShares& payouts);
 
+/** Validate all provider network fields using the same rules as special transaction validation.
+ *  Pass nullptr for platform_node_id when validating endpoint input separately from the rest of a payload. */
+[[nodiscard]] bool CheckProviderNetworkFields(const std::shared_ptr<NetInfoInterface>& net_info, MnType type,
+                                              uint16_t version, const uint160* platform_node_id, uint16_t platform_p2p_port,
+                                              uint16_t platform_http_port, bool allow_empty, TxValidationState& state);
+
 class CProRegTx
 {
 public:
@@ -66,7 +75,7 @@ public:
     uint16_t nVersion{ProTxVersion::LegacyBLS}; // message version
     MnType nType{MnType::Regular};
     uint16_t nMode{0};                                     // only 0 supported for now
-    COutPoint collateralOutpoint{uint256(), (uint32_t)-1}; // if hash is null, we refer to a ProRegTx output
+    COutPoint collateralOutpoint{uint256(), static_cast<uint32_t>(-1)}; // if hash is null, we refer to a ProRegTx output
     std::shared_ptr<NetInfoInterface> netInfo{nullptr};
     uint160 platformNodeID{};
     uint16_t platformP2PPort{0};

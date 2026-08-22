@@ -1896,9 +1896,9 @@ BOOST_AUTO_TEST_CASE(v2_short_id_version_negotiation)
         BOOST_REQUIRE(ret && ret->empty());
         tester_old.ReceiveMessage("platformban", msg_data_old); // long encoding
 
-        // New peer (v70240) - knows about PLATFORMBAN short ID 168
+        // New peer (v70240+) - knows about PLATFORMBAN short ID 168
         V2TransportTester tester_new(true);
-        // Uses PROTOCOL_VERSION (70240) by default
+        // Uses PROTOCOL_VERSION by default
 
         ret = tester_new.Interact();
         BOOST_REQUIRE(ret && ret->empty());

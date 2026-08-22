@@ -8,7 +8,6 @@
 #include <evo/deterministicmns.h>
 #include <masternode/meta.h>
 #include <masternode/sync.h>
-#include <rpc/evo_util.h>
 #include <util/helpers.h>
 #include <wallet/coinjoin.h>
 
@@ -25,6 +24,7 @@
 #include <util/moneystr.h>
 #include <util/system.h>
 #include <util/translation.h>
+#include <validation.h>
 #include <version.h>
 #include <wallet/coincontrol.h>
 #include <wallet/coinselection.h>
@@ -180,6 +180,12 @@ void CCoinJoinClientSession::SetNull()
     // Client side
     mixingMasternode = nullptr;
     pendingDsaRequest = CPendingDsaRequest();
+
+    // Post-V24: rebalance inputs are recorded in vecOutPointLocked at lock time
+    // (SelectRebalanceInputs), so UnlockCoins() releases them - just clear the bookkeeping
+    m_fPromotion = false;
+    m_fDemotion = false;
+    m_vecRebalanceInputs.clear();
 
     CCoinJoinBaseSession::SetNull();
 }
@@ -378,13 +384,21 @@ bool CCoinJoinClientSession::SendDenominate(const std::vector<std::pair<CTxDSIn,
     std::vector<CTxOut> vecTxOutTmp;
 
     for (const auto& [txDsIn, txOut] : vecPSInOutPairsIn) {
-        vecTxDSInTmp.emplace_back(txDsIn);
-        vecTxOutTmp.emplace_back(txOut);
-        tx.vin.emplace_back(txDsIn);
-        tx.vout.emplace_back(txOut);
+        // For promotion/demotion, filter out empty inputs/outputs
+        // Promotion: 10 inputs with only 1 real output (others are empty)
+        // Demotion: 1 input with 10 outputs (only first has real input)
+        if (!txDsIn.prevout.IsNull()) {
+            vecTxDSInTmp.emplace_back(txDsIn);
+            tx.vin.emplace_back(txDsIn);
+        }
+        if (txOut.nValue > 0) {
+            vecTxOutTmp.emplace_back(txOut);
+            tx.vout.emplace_back(txOut);
+        }
     }
 
-    WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::SendDenominate -- Submitting partial tx %s", tx.ToString()); /* Continued */
+    WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::SendDenominate -- Submitting partial tx with %d inputs, %d outputs: %s\n",
+                     vecTxDSInTmp.size(), vecTxOutTmp.size(), tx.ToString());
 
     // store our entry for later use
     LOCK(cs_coinjoin);
@@ -452,6 +466,13 @@ bool CCoinJoinClientSession::SignFinalTransaction(CNode& peer, Chainstate& activ
 
     if (!mixingMasternode) return false;
 
+    // Evaluated before taking cs_wallet (IsPromotionDemotionActive locks cs_main).
+    // A session we joined for 1:1 mixing can still admit a rebalance participant, so the final
+    // tx may legitimately be unbalanced while our own tip is one block short of V24 - refusing
+    // to sign it would cost us our collateral. Further behind than that is our own problem.
+    const bool fRebalanceShapesPossible =
+        CoinJoin::IsPromotionDemotionActive(active_chainstate.m_chainman, /*fNextBlock=*/true);
+
     LOCK(m_wallet->cs_wallet);
     LOCK(cs_coinjoin);
 
@@ -474,8 +495,9 @@ bool CCoinJoinClientSession::SignFinalTransaction(CNode& peer, Chainstate& activ
 
     // Make sure all inputs/outputs are valid
     PoolMessage nMessageID{MSG_NOERR};
+    CoinJoin::SessionDenomCounts denomCounts;
     if (!IsValidInOuts(active_chainstate, m_isman, mempool, finalMutableTransaction.vin, finalMutableTransaction.vout,
-                       nMessageID, nullptr)) {
+                       nSessionDenom, /*fAllowRebalanceShapes=*/fRebalanceShapesPossible, nMessageID, nullptr, /*fFinalTx=*/true, &denomCounts)) {
         WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::%s -- ERROR! IsValidInOuts() failed: %s\n", __func__, CoinJoin::GetMessageByID(nMessageID).translated);
         UnlockCoins();
         keyHolderStorage.ReturnAll();
@@ -530,6 +552,38 @@ bool CCoinJoinClientSession::SignFinalTransaction(CNode& peer, Chainstate& activ
             WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::%s -- found my input %i\n", __func__, nMyInputIndex);
             // add a pair with an empty value
             coins[finalMutableTransaction.vin.at(nMyInputIndex).prevout];
+        }
+    }
+
+    // Post-V24: refuse to sign unless somebody else holds coins at the session denomination on
+    // whichever side we do. Only same-denomination coins conceal ours - coins at the larger
+    // adjacent denomination are told apart by amount - so a malicious masternode could
+    // otherwise pad the transaction with larger-denom coins and publish one that links our ten
+    // promotion inputs, or our ten demotion outputs, to each other in plain sight. The server
+    // never finalizes a session where a side has a lone occupant, so this never rejects an
+    // honest final transaction.
+    if (fRebalanceShapesPossible) {
+        const CAmount nSessionAmount = CoinJoin::DenominationToAmount(nSessionDenom);
+        size_t nOwnSessionInputs{0};
+        size_t nOwnSessionOutputs{0};
+        for (const auto& entry : vecEntries) {
+            // Our own promotion inputs and standard inputs are at the session denomination; a
+            // demotion spends a single larger-denom coin, which needs no cover of its own.
+            if (entry.GetMixShape() != CoinJoin::MixShape::DEMOTION) nOwnSessionInputs += entry.vecTxDSIn.size();
+            for (const auto& txout : entry.vecTxOut) {
+                if (txout.nValue == nSessionAmount) ++nOwnSessionOutputs;
+            }
+        }
+
+        const bool fInputsCovered = nOwnSessionInputs == 0 || denomCounts.inputs > nOwnSessionInputs;
+        const bool fOutputsCovered = nOwnSessionOutputs == 0 || denomCounts.outputs > nOwnSessionOutputs;
+        if (!fInputsCovered || !fOutputsCovered) {
+            WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::%s -- no cover at the session denom (inputs %d/%d, outputs %d/%d), refusing to sign!\n",
+                             __func__, nOwnSessionInputs, denomCounts.inputs, nOwnSessionOutputs, denomCounts.outputs);
+            UnlockCoins();
+            keyHolderStorage.ReturnAll();
+            SetNull();
+            return false;
         }
     }
 
@@ -916,7 +970,13 @@ bool CCoinJoinClientSession::DoAutomaticDenominating(ChainstateManager& chainman
 
     if (!CCoinJoinClientOptions::IsEnabled()) return false;
 
+    // Post-V24: whether denomination promotion/demotion is active. Evaluated before taking
+    // cs_wallet (IsPromotionDemotionActive locks cs_main).
+    const bool fV24Active = CoinJoin::IsPromotionDemotionActive(chainman);
+
     CAmount nBalanceNeedsAnonymized;
+    wallet::CoinJoinDenomCounts denomCounts;
+    bool fRebalanceOpportunity{false};
 
     {
         LOCK(m_wallet->cs_wallet);
@@ -950,7 +1010,22 @@ bool CCoinJoinClientSession::DoAutomaticDenominating(ChainstateManager& chainman
         CAmount nBalanceAnonymized = bal.m_anonymized;
         nBalanceNeedsAnonymized = CCoinJoinClientOptions::GetAmount() * COIN - nBalanceAnonymized;
 
-        if (nBalanceNeedsAnonymized < 0) {
+        // Post-V24: check for promotion/demotion opportunities before the "nothing to do"
+        // exits below - rebalancing matters precisely when the anonymization target is
+        // reached and all coins are already fully mixed
+        if (fV24Active) {
+            // Single wallet scan covering all denominations, reused across every
+            // adjacent-pair check instead of re-scanning per pair.
+            denomCounts = m_wallet->GetDenominationCounts();
+            for (size_t i = 0; i + 1 < CoinJoin::vecStandardDenominations.size() && !fRebalanceOpportunity; ++i) {
+                const int nLargerDenom = 1 << i;
+                const int nSmallerDenom = 1 << (i + 1);
+                fRebalanceOpportunity = m_clientman.ShouldPromote(nSmallerDenom, nLargerDenom, denomCounts) ||
+                                        m_clientman.ShouldDemote(nLargerDenom, nSmallerDenom, denomCounts);
+            }
+        }
+
+        if (nBalanceNeedsAnonymized < 0 && !fRebalanceOpportunity) {
             WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::DoAutomaticDenominating -- Nothing to do\n");
             // nothing to do, just keep it in idle mode
             return false;
@@ -967,8 +1042,9 @@ bool CCoinJoinClientSession::DoAutomaticDenominating(ChainstateManager& chainman
         // including denoms but applying some restrictions
         CAmount nBalanceAnonymizable = m_wallet->GetAnonymizableBalance();
 
-        // mixable balance is way too small
-        if (nBalanceAnonymizable < nValueMin) {
+        // mixable balance is way too small; note that fully-mixed coins don't count as
+        // anonymizable, so a rebalance opportunity must bypass this check too
+        if (nBalanceAnonymizable < nValueMin && !fRebalanceOpportunity) {
             strAutoDenomResult = _("Not enough funds to mix.");
             WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::DoAutomaticDenominating -- %s\n", strAutoDenomResult.original);
             return false;
@@ -1072,13 +1148,63 @@ bool CCoinJoinClientSession::DoAutomaticDenominating(ChainstateManager& chainman
         }
     } // LOCK(m_wallet->cs_wallet);
 
-    // Always attempt to join an existing queue
-    if (JoinExistingQueue(nBalanceNeedsAnonymized, connman)) {
-        return true;
+    // Post-V24: Check if we should promote or demote denominations
+    // This helps maintain optimal denomination distribution as coins are spent
+    if (fRebalanceOpportunity) {
+        // Check all adjacent denomination pairs for promotion/demotion opportunities
+        // Denominations: 10, 1, 0.1, 0.01, 0.001 (indices 0-4, smaller index = larger denom)
+        for (size_t i = 0; i + 1 < CoinJoin::vecStandardDenominations.size(); ++i) {
+            const int nLargerDenom = 1 << i;       // Larger denomination (e.g., 10 DASH)
+            const int nSmallerDenom = 1 << (i + 1); // Smaller denomination (e.g., 1 DASH)
+
+            // Check if we should promote smaller -> larger; ShouldPromote() requires
+            // PROMOTION_RATIO fully-mixed coins, the queue functions re-verify on selection
+            if (m_clientman.ShouldPromote(nSmallerDenom, nLargerDenom, denomCounts)) {
+                WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::DoAutomaticDenominating -- Promotion opportunity: %d x %s -> 1 x %s\n",
+                    CoinJoin::PROMOTION_RATIO,
+                    CoinJoin::DenominationToString(nSmallerDenom),
+                    CoinJoin::DenominationToString(nLargerDenom));
+
+                // Try to join an existing queue for promotion
+                if (JoinExistingQueue(nBalanceNeedsAnonymized, connman, nSmallerDenom, /*fPromotion=*/true)) {
+                    return true;
+                }
+                // No existing queue found - try to start a new one for promotion
+                if (StartNewQueue(nBalanceNeedsAnonymized, connman, nSmallerDenom, /*fPromotion=*/true, /*fDemotion=*/false)) {
+                    return true;
+                }
+            }
+
+            // Check if we should demote larger -> smaller
+            if (m_clientman.ShouldDemote(nLargerDenom, nSmallerDenom, denomCounts)) {
+                WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::DoAutomaticDenominating -- Demotion opportunity: 1 x %s -> %d x %s\n",
+                    CoinJoin::DenominationToString(nLargerDenom),
+                    CoinJoin::PROMOTION_RATIO,
+                    CoinJoin::DenominationToString(nSmallerDenom));
+
+                // Try to join an existing queue for demotion
+                if (JoinExistingQueue(nBalanceNeedsAnonymized, connman, nSmallerDenom, /*fPromotion=*/false, /*fDemotion=*/true)) {
+                    return true;
+                }
+                // No existing queue found - try to start a new one for demotion
+                if (StartNewQueue(nBalanceNeedsAnonymized, connman, nSmallerDenom, /*fPromotion=*/false, /*fDemotion=*/true)) {
+                    return true;
+                }
+            }
+        }
     }
 
-    // If we were unable to find/join an existing queue then start a new one.
-    if (StartNewQueue(nBalanceNeedsAnonymized, connman)) return true;
+    // Standard mixing only makes sense while there is still balance to anonymize; a
+    // rebalance-only pass (target reached) must not fall through to standard queues
+    if (nBalanceNeedsAnonymized > 0) {
+        // Always attempt to join an existing queue
+        if (JoinExistingQueue(nBalanceNeedsAnonymized, connman)) {
+            return true;
+        }
+
+        // If we were unable to find/join an existing queue then start a new one.
+        if (StartNewQueue(nBalanceNeedsAnonymized, connman)) return true;
+    }
 
     strAutoDenomResult = _("No compatible Masternode found.");
     return false;
@@ -1106,11 +1232,11 @@ bool CCoinJoinClientManager::DoAutomaticDenominating(ChainstateManager& chainman
     int nThreshold_low = nThreshold_high * 0.7;
     size_t used_count{m_mn_metaman.GetUsedMasternodesCount()};
 
-    WalletCJLogPrint(m_wallet, "Checking threshold - used: %d, threshold: %d\n", (int)used_count, nThreshold_high);
+    WalletCJLogPrint(m_wallet, "Checking threshold - used: %d, threshold: %d\n", static_cast<int>(used_count), nThreshold_high);
 
-    if ((int)used_count > nThreshold_high) {
+    if (static_cast<int>(used_count) > nThreshold_high) {
         m_mn_metaman.RemoveUsedMasternodes(used_count - nThreshold_low);
-        WalletCJLogPrint(m_wallet, "  new used: %d, threshold: %d\n", (int)m_mn_metaman.GetUsedMasternodesCount(),
+        WalletCJLogPrint(m_wallet, "  new used: %d, threshold: %d\n", static_cast<int>(m_mn_metaman.GetUsedMasternodesCount()),
                          nThreshold_high);
     }
 
@@ -1177,16 +1303,106 @@ static int WinnersToSkip()
             ? 1 : 8;
 }
 
-bool CCoinJoinClientSession::JoinExistingQueue(CAmount nBalanceNeedsAnonymized, CConnman& connman)
+bool CCoinJoinClientSession::SelectRebalanceInputs(int nTargetDenom, bool fPromotion, std::vector<CTxDSIn>& vecTxDSInRet)
+{
+    vecTxDSInRet.clear();
+    m_vecRebalanceInputs.clear();
+
+    if (fPromotion) {
+        // Promotion: select 10 fully-mixed coins of the smaller denomination
+        auto vecCoins = m_wallet->SelectFullyMixedForPromotion(nTargetDenom, CoinJoin::PROMOTION_RATIO);
+        if (static_cast<int>(vecCoins.size()) < CoinJoin::PROMOTION_RATIO) {
+            WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::%s -- Not enough fully-mixed coins for promotion\n", __func__);
+            return false;
+        }
+        // Convert COutPoints to CTxDSIn
+        LOCK(m_wallet->cs_wallet);
+        for (const auto& outpoint : vecCoins) {
+            const auto it = m_wallet->mapWallet.find(outpoint.hash);
+            if (it == m_wallet->mapWallet.end()) continue;
+            const wallet::CWalletTx& wtx = it->second;
+            if (outpoint.n >= wtx.tx->vout.size()) {
+                WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::%s -- invalid outpoint index %u for tx %s\n", __func__, outpoint.n, outpoint.hash.ToString());
+                continue;
+            }
+            vecTxDSInRet.emplace_back(CTxIn(outpoint), wtx.tx->vout[outpoint.n].scriptPubKey,
+                                      m_wallet->GetRealOutpointCoinJoinRounds(outpoint));
+        }
+        if (static_cast<int>(vecTxDSInRet.size()) < CoinJoin::PROMOTION_RATIO) {
+            WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::%s -- Failed to build promotion inputs\n", __func__);
+            vecTxDSInRet.clear();
+            return false;
+        }
+    } else {
+        // Demotion: select 1 fully-mixed coin of the larger adjacent denomination. Like
+        // promotion inputs, the coin's history must already be protected: the demotion's
+        // 1:10 shape publicly clusters its outputs, which therefore start mixing over
+        // (see GetRealOutpointCoinJoinRounds), and only a fully-mixed input is worth that.
+        const int nLargerDenom = CoinJoin::GetLargerAdjacentDenom(nTargetDenom);
+        if (nLargerDenom == 0) {
+            WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::%s -- No larger adjacent denom for demotion\n", __func__);
+            return false;
+        }
+        if (!m_wallet->SelectTxDSInsByDenomination(nLargerDenom, CoinJoin::DenominationToAmount(nLargerDenom), vecTxDSInRet, CoinType::ONLY_FULLY_MIXED)) {
+            WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::%s -- Couldn't find coin for demotion\n", __func__);
+            return false;
+        }
+        // Keep only 1 input for demotion
+        vecTxDSInRet.resize(1);
+    }
+
+    // Lock the selected coins immediately to prevent races with other concurrent CoinJoin
+    // sessions and record them so UnlockCoins() releases them on any failure path
+    LOCK(m_wallet->cs_wallet);
+    for (const auto& txdsin : vecTxDSInRet) {
+        m_wallet->LockCoin(txdsin.prevout);
+        m_vecRebalanceInputs.push_back(txdsin.prevout);
+        vecOutPointLocked.push_back(txdsin.prevout);
+    }
+    return true;
+}
+
+void CCoinJoinClientSession::UnlockRebalanceInputs()
+{
+    if (m_vecRebalanceInputs.empty()) return;
+    {
+        LOCK(m_wallet->cs_wallet);
+        for (const auto& outpoint : m_vecRebalanceInputs) {
+            m_wallet->UnlockCoin(outpoint);
+        }
+    }
+    vecOutPointLocked.erase(std::remove_if(vecOutPointLocked.begin(), vecOutPointLocked.end(),
+                                           [&](const COutPoint& outpoint) {
+                                               return std::find(m_vecRebalanceInputs.begin(), m_vecRebalanceInputs.end(),
+                                                                outpoint) != m_vecRebalanceInputs.end();
+                                           }),
+                            vecOutPointLocked.end());
+    m_vecRebalanceInputs.clear();
+}
+
+bool CCoinJoinClientSession::JoinExistingQueue(CAmount nBalanceNeedsAnonymized, CConnman& connman,
+                                                int nTargetDenom, bool fPromotion, bool fDemotion)
 {
     if (!CCoinJoinClientOptions::IsEnabled()) return false;
+
+    // Promotion and demotion are mutually exclusive
+    assert(!(fPromotion && fDemotion));
+
+    // For promotion/demotion select and lock the inputs up front: the selection only depends
+    // on the target denomination, not on the queue, so there is no need to re-select per queue
+    std::vector<CTxDSIn> vecRebalanceTxDSIn;
+    const bool fRebalance = (fPromotion || fDemotion) && nTargetDenom != 0;
+    if (fRebalance && !SelectRebalanceInputs(nTargetDenom, fPromotion, vecRebalanceTxDSIn)) {
+        strAutoDenomResult = _("Can't mix: no compatible inputs found!");
+        return false;
+    }
 
     const auto mnList = m_dmnman.GetListAtChainTip();
     const int nWeightedMnCount = mnList.GetCounts().m_valid_weighted;
 
     // Look through the queues and see if anything matches
     CCoinJoinQueue dsq;
-    while (m_clientman.GetQueueItemAndTry(dsq)) {
+    while (m_clientman.GetQueueItemAndTry(dsq, fRebalance ? nTargetDenom : 0)) {
         auto dmn = mnList.GetValidMNByCollateral(dsq.masternodeOutpoint);
 
         if (!dmn) {
@@ -1208,10 +1424,12 @@ bool CCoinJoinClientSession::JoinExistingQueue(CAmount nBalanceNeedsAnonymized, 
 
         std::vector<CTxDSIn> vecTxDSInTmp;
 
-        // Try to match their denominations if possible, select exact number of denominations
-        if (!m_wallet->SelectTxDSInsByDenomination(dsq.nDenom, nBalanceNeedsAnonymized, vecTxDSInTmp)) {
-            WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::JoinExistingQueue -- Couldn't match denomination %d (%s)\n", dsq.nDenom, CoinJoin::DenominationToString(dsq.nDenom));
-            continue;
+        if (!fRebalance) {
+            // Standard mixing: try to match their denominations if possible
+            if (!m_wallet->SelectTxDSInsByDenomination(dsq.nDenom, nBalanceNeedsAnonymized, vecTxDSInTmp)) {
+                WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::JoinExistingQueue -- Couldn't match denomination %d (%s)\n", dsq.nDenom, CoinJoin::DenominationToString(dsq.nDenom));
+                continue;
+            }
         }
 
         m_mn_metaman.AddUsedMasternode(dmn->proTxHash);
@@ -1224,18 +1442,30 @@ bool CCoinJoinClientSession::JoinExistingQueue(CAmount nBalanceNeedsAnonymized, 
 
         nSessionDenom = dsq.nDenom;
         mixingMasternode = dmn;
-        pendingDsaRequest = CPendingDsaRequest(dmn->proTxHash, CCoinJoinAccept(nSessionDenom, txMyCollateral));
+        // Declare which side of the session denomination we will occupy so the masternode can
+        // tell whether the session can still cover both sides (rebalance sessions only)
+        const uint8_t nDsaFlags = fPromotion ? CCoinJoinAccept::FLAG_PROMOTION
+                                             : fDemotion ? CCoinJoinAccept::FLAG_DEMOTION : uint8_t{0};
+        pendingDsaRequest = CPendingDsaRequest(dmn->proTxHash,
+                                               CCoinJoinAccept(nSessionDenom, txMyCollateral, nDsaFlags));
         connman.AddPendingMasternode(dmn->proTxHash);
         SetState(POOL_STATE_QUEUE);
         nTimeLastSuccessfulStep = GetTime();
-        WalletCJLogPrint(m_wallet, /* Continued */
-                         "CCoinJoinClientSession::JoinExistingQueue -- pending connection, masternode=%s, "
-                         "nSessionDenom=%d (%s)\n",
-                         dmn->proTxHash.ToString(), nSessionDenom.load(), CoinJoin::DenominationToString(nSessionDenom));
+        // Set promotion/demotion session state; the rebalance inputs (if any) were already
+        // selected, locked and recorded by SelectRebalanceInputs above
+        m_fPromotion = fPromotion;
+        m_fDemotion = fDemotion;
+        if (!fRebalance) m_vecRebalanceInputs.clear();
+
+        WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::JoinExistingQueue -- pending %s connection, masternode=%s, nSessionDenom=%d (%s), %d inputs\n",
+                         fPromotion ? "PROMOTION" : fDemotion ? "DEMOTION" : "mixing",
+                         dmn->proTxHash.ToString(), nSessionDenom.load(), CoinJoin::DenominationToString(nSessionDenom),
+                         vecTxDSInTmp.size() + m_vecRebalanceInputs.size());
         strAutoDenomResult = _("Trying to connect…");
         return true;
     }
     strAutoDenomResult = _("Failed to find mixing queue to join");
+    UnlockRebalanceInputs();
     return false;
 }
 
@@ -1323,6 +1553,95 @@ bool CCoinJoinClientSession::StartNewQueue(CAmount nBalanceNeedsAnonymized, CCon
     return false;
 }
 
+bool CCoinJoinClientSession::StartNewQueue(CAmount nBalanceNeedsAnonymized, CConnman& connman,
+                                           int nTargetDenom, bool fPromotion, bool fDemotion)
+{
+    assert(m_mn_metaman.IsValid());
+
+    if (!CCoinJoinClientOptions::IsEnabled()) return false;
+    if (nTargetDenom == 0) return false;
+
+    // Promotion and demotion are mutually exclusive, and this overload needs one of them
+    assert(!(fPromotion && fDemotion));
+    if (!fPromotion && !fDemotion) return false;
+
+    // For promotion/demotion, verify we have the required coins before starting a queue.
+    // SelectRebalanceInputs locks them and records them in vecOutPointLocked/m_vecRebalanceInputs.
+    std::vector<CTxDSIn> vecTxDSInTmp;
+    if (!SelectRebalanceInputs(nTargetDenom, fPromotion, vecTxDSInTmp)) {
+        return false;
+    }
+
+    int nTries = 0;
+    const auto mnList = m_dmnman.GetListAtChainTip();
+    const auto mnCounts = mnList.GetCounts();
+    const int nMnCount = mnCounts.enabled();
+    const int nWeightedMnCount = mnCounts.m_valid_weighted;
+
+    while (nTries < 10) {
+        auto dmn = GetRandomNotUsedMasternode();
+        if (!dmn) {
+            strAutoDenomResult = _("Can't find random Masternode.");
+            WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::StartNewQueue -- %s\n", strAutoDenomResult.original);
+            UnlockRebalanceInputs();
+            return false;
+        }
+
+        m_mn_metaman.AddUsedMasternode(dmn->proTxHash);
+
+        // skip next mn payments winners
+        if (dmn->pdmnState->nLastPaidHeight + nWeightedMnCount < mnList.GetHeight() + WinnersToSkip()) {
+            WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::StartNewQueue -- skipping winner, masternode=%s\n", dmn->proTxHash.ToString());
+            nTries++;
+            continue;
+        }
+
+        if (m_mn_metaman.IsMixingThresholdExceeded(dmn->proTxHash, nMnCount)) {
+            WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::StartNewQueue -- too early to mix with node masternode=%s\n",
+                             dmn->proTxHash.ToString());
+            nTries++;
+            continue;
+        }
+
+        if (connman.IsMasternodeOrDisconnectRequested(dmn->pdmnState->netInfo->GetPrimary())) {
+            WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::StartNewQueue -- skipping connection, masternode=%s\n",
+                             dmn->proTxHash.ToString());
+            nTries++;
+            continue;
+        }
+
+        WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::StartNewQueue -- attempting %s connection, masternode=%s, tries=%d\n",
+                         fPromotion ? "PROMOTION" : "DEMOTION", dmn->proTxHash.ToString(), nTries);
+
+        nSessionDenom = nTargetDenom;
+        mixingMasternode = dmn;
+        connman.AddPendingMasternode(dmn->proTxHash);
+        // This overload always starts a promotion/demotion session - declare which side of the
+        // session denomination we will occupy so the masternode can track session coverage
+        pendingDsaRequest = CPendingDsaRequest(dmn->proTxHash,
+                                               CCoinJoinAccept(nSessionDenom, txMyCollateral,
+                                                               fPromotion ? CCoinJoinAccept::FLAG_PROMOTION
+                                                                          : CCoinJoinAccept::FLAG_DEMOTION));
+        SetState(POOL_STATE_QUEUE);
+        nTimeLastSuccessfulStep = GetTime();
+
+        // Store promotion/demotion state; the inputs were already selected, locked and
+        // recorded in m_vecRebalanceInputs by SelectRebalanceInputs above
+        m_fPromotion = fPromotion;
+        m_fDemotion = fDemotion;
+
+        WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::StartNewQueue -- pending %s connection, masternode=%s, nSessionDenom=%d (%s), %zu inputs\n",
+                         fPromotion ? "PROMOTION" : "DEMOTION",
+                         dmn->proTxHash.ToString(), nSessionDenom.load(), CoinJoin::DenominationToString(nSessionDenom),
+                         m_vecRebalanceInputs.size());
+        strAutoDenomResult = _("Trying to connect…");
+        return true;
+    }
+    strAutoDenomResult = _("Failed to start a new mixing queue");
+    UnlockRebalanceInputs();
+    return false;
+}
+
 bool CCoinJoinClientSession::ProcessPendingDsaRequest(CConnman& connman)
 {
     if (!pendingDsaRequest) return false;
@@ -1333,11 +1652,21 @@ bool CCoinJoinClientSession::ProcessPendingDsaRequest(CConnman& connman)
     } else {
         WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::%s -- cannot find address to connect, masternode=%s\n", __func__,
             pendingDsaRequest.GetProTxHash().ToString());
+        UnlockCoins();
         WITH_LOCK(cs_coinjoin, SetNull());
         return false;
     }
 
-    bool fDone = connman.ForNode(mn_addr, [this, &connman](CNode* pnode) {
+    bool fMnTooOldForRebalance{false};
+    bool fDone = connman.ForNode(mn_addr, [this, &connman, &fMnTooOldForRebalance](CNode* pnode) {
+        // Post-V24: a rebalance dsa carries a version-gated flags field the masternode must
+        // understand - and the masternode must be able to host a rebalance-capable session.
+        // If it negotiated an older protocol, abort and let DoAutomaticDenominating retry
+        // with another masternode instead of silently mixing without a reserved slot.
+        if (pendingDsaRequest.GetDSA().IsRebalance() && pnode->GetCommonVersion() < COINJOIN_REBALANCE_VERSION) {
+            fMnTooOldForRebalance = true;
+            return false;
+        }
         WalletCJLogPrint(m_wallet, "-- processing dsa queue for addr=%s\n", pnode->addr.ToStringAddrPort());
         nTimeLastSuccessfulStep = GetTime();
         CNetMsgMaker msgMaker(pnode->GetCommonVersion());
@@ -1345,11 +1674,20 @@ bool CCoinJoinClientSession::ProcessPendingDsaRequest(CConnman& connman)
         return true;
     });
 
+    if (fMnTooOldForRebalance) {
+        WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::%s -- masternode too old for a rebalance session, masternode=%s\n",
+                         __func__, pendingDsaRequest.GetProTxHash().ToString());
+        UnlockCoins();
+        WITH_LOCK(cs_coinjoin, SetNull());
+        return false;
+    }
+
     if (fDone) {
         pendingDsaRequest = CPendingDsaRequest();
     } else if (pendingDsaRequest.IsExpired()) {
         WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::%s -- failed to connect, masternode=%s\n", __func__,
                          pendingDsaRequest.GetProTxHash().ToString());
+        UnlockCoins();
         WITH_LOCK(cs_coinjoin, SetNull());
     }
 
@@ -1393,9 +1731,9 @@ bool CCoinJoinClientManager::MarkAlreadyJoinedQueueAsTried(CCoinJoinQueue& dsq) 
     return false;
 }
 
-bool CCoinJoinClientManager::GetQueueItemAndTry(CCoinJoinQueue& dsq) const
+bool CCoinJoinClientManager::GetQueueItemAndTry(CCoinJoinQueue& dsq, int nDenomFilter) const
 {
-    return m_queueman && m_queueman->GetQueueItemAndTry(dsq);
+    return m_queueman && m_queueman->GetQueueItemAndTry(dsq, nDenomFilter);
 }
 
 bool CCoinJoinClientSession::SubmitDenominate(CConnman& connman)
@@ -1403,8 +1741,30 @@ bool CCoinJoinClientSession::SubmitDenominate(CConnman& connman)
     LOCK(m_wallet->cs_wallet);
 
     std::string strError;
-    std::vector<CTxDSIn> vecTxDSIn;
     std::vector<std::pair<CTxDSIn, CTxOut> > vecPSInOutPairsTmp;
+
+    // Post-V24: Handle promotion/demotion entries
+    if (m_fPromotion || m_fDemotion) {
+        const bool fPrepared = m_fPromotion ? PreparePromotionEntry(strError, vecPSInOutPairsTmp)
+                                            : PrepareDemotionEntry(strError, vecPSInOutPairsTmp);
+        if (fPrepared) {
+            WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::SubmitDenominate -- %s entry prepared, sending\n",
+                             m_fPromotion ? "Promotion" : "Demotion");
+            return SendDenominate(vecPSInOutPairsTmp, connman);
+        }
+        WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::SubmitDenominate -- Prepare%sEntry failed: %s\n",
+                         m_fPromotion ? "Promotion" : "Demotion", strError);
+        strAutoDenomResult = Untranslated(strError);
+        // The rebalance inputs were locked back when the session was queued; release them and
+        // reset the session right away instead of keeping them locked until CheckTimeout()
+        UnlockCoins();
+        keyHolderStorage.ReturnAll();
+        WITH_LOCK(cs_coinjoin, SetNull());
+        return false;
+    }
+
+    // Standard 1:1 mixing
+    std::vector<CTxDSIn> vecTxDSIn;
 
     if (!SelectDenominate(strError, vecTxDSIn)) {
         WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::SubmitDenominate -- SelectDenominate failed, error: %s\n", strError);
@@ -1528,6 +1888,131 @@ bool CCoinJoinClientSession::PrepareDenominate(int nMinRounds, int nMaxRounds, s
         m_wallet->LockCoin(txDsIn.prevout);
         vecOutPointLocked.push_back(txDsIn.prevout);
     }
+
+    return true;
+}
+
+bool CCoinJoinClientSession::PreparePromotionEntry(std::string& strErrorRet, std::vector<std::pair<CTxDSIn, CTxOut>>& vecPSInOutPairsRet)
+{
+    AssertLockHeld(m_wallet->cs_wallet);
+
+    vecPSInOutPairsRet.clear();
+
+    if (m_vecRebalanceInputs.size() != static_cast<size_t>(CoinJoin::PROMOTION_RATIO)) {
+        strErrorRet = strprintf("Invalid promotion input count: %d (expected %d)", m_vecRebalanceInputs.size(), CoinJoin::PROMOTION_RATIO);
+        return false;
+    }
+
+    // Session denom is the smaller denom (inputs), get the larger adjacent denom for output
+    const int nLargerDenom = CoinJoin::GetLargerAdjacentDenom(nSessionDenom);
+    if (nLargerDenom == 0) {
+        strErrorRet = "No larger adjacent denomination for promotion";
+        return false;
+    }
+    const CAmount nLargerAmount = CoinJoin::DenominationToAmount(nLargerDenom);
+
+    // Create 10 inputs from stored promotion inputs
+    for (const auto& outpoint : m_vecRebalanceInputs) {
+        const auto it = m_wallet->mapWallet.find(outpoint.hash);
+        if (it == m_wallet->mapWallet.end()) {
+            strErrorRet = "Promotion input not found in wallet";
+            return false;
+        }
+        const wallet::CWalletTx& wtx = it->second;
+        if (outpoint.n >= wtx.tx->vout.size()) {
+            strErrorRet = "Invalid promotion input index";
+            return false;
+        }
+
+        // Validate the UTXO is still spendable
+        if (m_wallet->IsSpent(outpoint)) {
+            strErrorRet = "Promotion input has been spent";
+            return false;
+        }
+
+        CTxDSIn txdsin(CTxIn(outpoint), wtx.tx->vout[outpoint.n].scriptPubKey,
+                       m_wallet->GetRealOutpointCoinJoinRounds(outpoint));
+
+        // Pair every input with an empty placeholder output - SendDenominate filters
+        // empty outputs, so only the real larger-denom output set below is submitted
+        vecPSInOutPairsRet.emplace_back(txdsin, CTxOut());
+    }
+
+    // Set the single real output (larger denomination) on the last pair
+    CScript scriptDenom = keyHolderStorage.AddKey(m_wallet.get());
+    if (!vecPSInOutPairsRet.empty()) {
+        vecPSInOutPairsRet.back().second = CTxOut(nLargerAmount, scriptDenom);
+    }
+
+    // NOTE: all inputs were locked and recorded in vecOutPointLocked by SelectRebalanceInputs
+
+    WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::PreparePromotionEntry -- Prepared %d inputs for promotion to %s\n",
+                     vecPSInOutPairsRet.size(), CoinJoin::DenominationToString(nLargerDenom));
+
+    return true;
+}
+
+bool CCoinJoinClientSession::PrepareDemotionEntry(std::string& strErrorRet, std::vector<std::pair<CTxDSIn, CTxOut>>& vecPSInOutPairsRet)
+{
+    AssertLockHeld(m_wallet->cs_wallet);
+
+    vecPSInOutPairsRet.clear();
+
+    if (m_vecRebalanceInputs.size() != 1) {
+        strErrorRet = strprintf("Invalid demotion input count: %d (expected 1)", m_vecRebalanceInputs.size());
+        return false;
+    }
+
+    // Session denom is the smaller denom (outputs)
+    const CAmount nSmallerAmount = CoinJoin::DenominationToAmount(nSessionDenom);
+    const int nLargerDenom = CoinJoin::GetLargerAdjacentDenom(nSessionDenom);
+    if (nLargerDenom == 0) {
+        strErrorRet = "No larger adjacent denomination for demotion";
+        return false;
+    }
+
+    // Get the single input (larger denom)
+    const COutPoint& outpoint = m_vecRebalanceInputs[0];
+    const auto it = m_wallet->mapWallet.find(outpoint.hash);
+    if (it == m_wallet->mapWallet.end()) {
+        strErrorRet = "Demotion input not found in wallet";
+        return false;
+    }
+    const wallet::CWalletTx& wtx = it->second;
+    if (outpoint.n >= wtx.tx->vout.size()) {
+        strErrorRet = "Invalid demotion input index";
+        return false;
+    }
+
+    // Validate the UTXO is still spendable
+    if (m_wallet->IsSpent(outpoint)) {
+        strErrorRet = "Demotion input has been spent";
+        return false;
+    }
+
+    CTxDSIn txdsin(CTxIn(outpoint), wtx.tx->vout[outpoint.n].scriptPubKey,
+                   m_wallet->GetRealOutpointCoinJoinRounds(outpoint));
+
+    // Create 10 outputs of smaller denomination
+    // For demotion: 1 input, 10 outputs
+    // The first pair has the real input, subsequent pairs have empty inputs
+    for (int i = 0; i < CoinJoin::PROMOTION_RATIO; ++i) {
+        CScript scriptDenom = keyHolderStorage.AddKey(m_wallet.get());
+        CTxOut txout(nSmallerAmount, scriptDenom);
+
+        if (i == 0) {
+            // First entry has the real input
+            vecPSInOutPairsRet.emplace_back(txdsin, txout);
+        } else {
+            // Subsequent entries have empty inputs (will be filtered out when building entry)
+            vecPSInOutPairsRet.emplace_back(CTxDSIn(), txout);
+        }
+    }
+
+    // NOTE: the input was locked and recorded in vecOutPointLocked by SelectRebalanceInputs
+
+    WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::PrepareDemotionEntry -- Prepared 1 input for demotion to %d x %s\n",
+                     CoinJoin::PROMOTION_RATIO, CoinJoin::DenominationToString(nSessionDenom));
 
     return true;
 }
@@ -1792,7 +2277,7 @@ bool CCoinJoinClientSession::CreateDenominated(CAmount nBalanceToDenominate, con
                     if (fAddFinal && nBalanceToDenominate > 0 && nBalanceToDenominate < nDenomValue) {
                         fAddFinal = false; // add final denom only once, only the smalest possible one
                         WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::%s -- 1 - FINAL - nDenomValue: %f, nBalanceToDenominate: %f, nOutputs: %d, %s\n",
-                                                     strFunc, (float) nDenomValue / COIN, (float) nBalanceToDenominate / COIN, nOutputs, txBuilder.ToString());
+                                                     strFunc, static_cast<float>(nDenomValue) / COIN, static_cast<float>(nBalanceToDenominate) / COIN, nOutputs, txBuilder.ToString());
                         return true;
                     } else if (nBalanceToDenominate >= nDenomValue) {
                         return true;
@@ -1809,10 +2294,10 @@ bool CCoinJoinClientSession::CreateDenominated(CAmount nBalanceToDenominate, con
                     ++currentDenomIt->second;
                     nBalanceToDenominate -= nDenomValue;
                     WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::%s -- 1 - nDenomValue: %f, nBalanceToDenominate: %f, nOutputs: %d, %s\n",
-                                                 __func__, (float) nDenomValue / COIN, (float) nBalanceToDenominate / COIN, nOutputs, txBuilder.ToString());
+                                                 __func__, static_cast<float>(nDenomValue) / COIN, static_cast<float>(nBalanceToDenominate) / COIN, nOutputs, txBuilder.ToString());
                 } else {
                     WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::%s -- 1 - Error: AddOutput failed for nDenomValue: %f, nBalanceToDenominate: %f, nOutputs: %d, %s\n",
-                                                 __func__, (float) nDenomValue / COIN, (float) nBalanceToDenominate / COIN, nOutputs, txBuilder.ToString());
+                                                 __func__, static_cast<float>(nDenomValue) / COIN, static_cast<float>(nBalanceToDenominate) / COIN, nOutputs, txBuilder.ToString());
                     return false;
                 }
 
@@ -1828,11 +2313,11 @@ bool CCoinJoinClientSession::CreateDenominated(CAmount nBalanceToDenominate, con
             if (count < CCoinJoinClientOptions::GetDenomsGoal() && txBuilder.CouldAddOutput(denom) && nBalanceToDenominate > 0) {
                 finished = false;
                 WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::%s -- 1 - NOT finished - nDenomValue: %f, count: %d, nBalanceToDenominate: %f, %s\n",
-                                             __func__, (float) denom / COIN, count, (float) nBalanceToDenominate / COIN, txBuilder.ToString());
+                                             __func__, static_cast<float>(denom) / COIN, count, static_cast<float>(nBalanceToDenominate) / COIN, txBuilder.ToString());
                 break;
             }
             WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::%s -- 1 - FINISHED - nDenomValue: %f, count: %d, nBalanceToDenominate: %f, %s\n",
-                                         __func__, (float) denom / COIN, count, (float) nBalanceToDenominate / COIN, txBuilder.ToString());
+                                         __func__, static_cast<float>(denom) / COIN, count, static_cast<float>(nBalanceToDenominate) / COIN, txBuilder.ToString());
         }
 
         if (finished) break;
@@ -1877,7 +2362,7 @@ bool CCoinJoinClientSession::CreateDenominated(CAmount nBalanceToDenominate, con
             // Use the smaller value
             int denomsToCreate = denomsToCreateValue > denomsToCreateBal ? denomsToCreateBal : denomsToCreateValue;
             WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::%s -- 2 - nBalanceToDenominate: %f, nDenomValue: %f, denomsToCreateValue: %d, denomsToCreateBal: %d\n",
-                                         __func__, (float) nBalanceToDenominate / COIN, (float) nDenomValue / COIN, denomsToCreateValue, denomsToCreateBal);
+                                         __func__, static_cast<float>(nBalanceToDenominate) / COIN, static_cast<float>(nDenomValue) / COIN, denomsToCreateValue, denomsToCreateBal);
             auto it = mapDenomCount.find(nDenomValue);
             for (const auto i : util::irange(denomsToCreate)) {
                 // Never go above the cap unless it's the largest denom
@@ -1893,17 +2378,17 @@ bool CCoinJoinClientSession::CreateDenominated(CAmount nBalanceToDenominate, con
                     break;
                 }
                 WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::%s -- 2 - nDenomValue: %f, nBalanceToDenominate: %f, nOutputs: %d, %s\n",
-                                             __func__, (float) nDenomValue / COIN, (float) nBalanceToDenominate / COIN, nOutputs, txBuilder.ToString());
+                                             __func__, static_cast<float>(nDenomValue) / COIN, static_cast<float>(nBalanceToDenominate) / COIN, nOutputs, txBuilder.ToString());
                 if (txBuilder.CountOutputs() >= COINJOIN_DENOM_OUTPUTS_THRESHOLD) break;
             }
             if (txBuilder.CountOutputs() >= COINJOIN_DENOM_OUTPUTS_THRESHOLD) break;
         }
     }
 
-    WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::%s -- 3 - nBalanceToDenominate: %f, %s\n", __func__, (float) nBalanceToDenominate / COIN, txBuilder.ToString());
+    WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::%s -- 3 - nBalanceToDenominate: %f, %s\n", __func__, static_cast<float>(nBalanceToDenominate) / COIN, txBuilder.ToString());
 
     for (const auto& [denom, count] : mapDenomCount) {
-        WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::%s -- 3 - DONE - nDenomValue: %f, count: %d\n", __func__, (float) denom / COIN, count);
+        WalletCJLogPrint(m_wallet, "CCoinJoinClientSession::%s -- 3 - DONE - nDenomValue: %f, count: %d\n", __func__, static_cast<float>(denom) / COIN, count);
     }
 
     // No reasons to create mixing collaterals if we can't create denoms to mix
@@ -2003,5 +2488,33 @@ UniValue CCoinJoinClientManager::getJsonInfo() const
     }
     obj.pushKV("sessions", arrSessions);
     return obj;
+}
+
+bool CCoinJoinClientManager::ShouldPromote(int nSmallerDenom, int nLargerDenom, const wallet::CoinJoinDenomCounts& counts)
+{
+    // Validate denominations are adjacent
+    if (!CoinJoin::AreAdjacentDenominations(nSmallerDenom, nLargerDenom)) {
+        return false;
+    }
+
+    const int idxSmaller = CoinJoin::GetDenominationIndex(nSmallerDenom);
+    const int idxLarger = CoinJoin::GetDenominationIndex(nLargerDenom);
+
+    return CoinJoin::ShouldPromoteDenoms(counts.total[idxSmaller], counts.total[idxLarger],
+                                         counts.fully_mixed[idxSmaller], CCoinJoinClientOptions::GetDenomsGoal());
+}
+
+bool CCoinJoinClientManager::ShouldDemote(int nLargerDenom, int nSmallerDenom, const wallet::CoinJoinDenomCounts& counts)
+{
+    // Validate denominations are adjacent
+    if (!CoinJoin::AreAdjacentDenominations(nLargerDenom, nSmallerDenom)) {
+        return false;
+    }
+
+    const int idxLarger = CoinJoin::GetDenominationIndex(nLargerDenom);
+    const int idxSmaller = CoinJoin::GetDenominationIndex(nSmallerDenom);
+
+    return CoinJoin::ShouldDemoteDenoms(counts.total[idxLarger], counts.total[idxSmaller],
+                                        counts.fully_mixed[idxLarger], CCoinJoinClientOptions::GetDenomsGoal());
 }
 

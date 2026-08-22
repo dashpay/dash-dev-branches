@@ -15,6 +15,7 @@
 #include <evo/chainhelper.h>
 #include <evo/creditpool.h>
 #include <evo/deterministicmns.h>
+#include <evo/providertx_service.h>
 #include <evo/specialtxman.h>
 #include <external_signer.h>
 #include <governance/governance.h>
@@ -23,11 +24,13 @@
 #include <governance/vote.h>
 #include <index/blockfilterindex.h>
 #include <init.h>
+#include <instantsend/instantsend.h>
 #include <interfaces/chain.h>
 #include <interfaces/coinjoin.h>
 #include <interfaces/handler.h>
 #include <interfaces/wallet.h>
-#include <instantsend/instantsend.h>
+#include <kernel/chain.h>
+#include <llmq/blockprocessor.h>
 #include <llmq/commitment.h>
 #include <llmq/context.h>
 #include <llmq/options.h>
@@ -40,7 +43,6 @@
 #include <netaddress.h>
 #include <netbase.h>
 #include <node/blockstorage.h>
-#include <kernel/chain.h>
 #include <node/coin.h>
 #include <node/context.h>
 #include <node/interface_ui.h>
@@ -99,6 +101,17 @@ using interfaces::MnEntryCPtr;
 using interfaces::MnList;
 using interfaces::MnListPtr;
 using interfaces::Node;
+using interfaces::PreparedProviderRegistration;
+using interfaces::ProviderNetInfo;
+using interfaces::ProviderRegistrationRequest;
+using interfaces::ProviderRevokeRequest;
+using interfaces::ProviderTxCapabilities;
+using interfaces::ProviderTxError;
+using interfaces::ProviderTxResult;
+using interfaces::ProviderTxSubmission;
+using interfaces::ProviderUpdateRegistrarRequest;
+using interfaces::ProviderUpdateServiceRequest;
+using interfaces::Wallet;
 using interfaces::WalletLoader;
 
 namespace node {
@@ -134,6 +147,27 @@ public:
     bool isBanned() const override { return m_dmn->pdmnState->IsBanned(); }
 
     CService getNetInfoPrimary() const override { return m_dmn->pdmnState->netInfo->GetPrimary(); }
+    std::vector<CService> getPlatformHTTPSAddrs() const override
+    {
+        std::vector<CService> ret;
+        if (m_dmn->pdmnState->nVersion < ProTxVersion::ExtAddr) {
+            // Before ExtAddr the Platform ports are scalar fields paired with
+            // the primary address instead of netInfo entries, so an evonode
+            // that has not submitted an extended-address update would
+            // otherwise contribute no gateway at all.
+            if (m_dmn->nType == MnType::Evo && m_dmn->pdmnState->platformHTTPPort != 0) {
+                ret.emplace_back(m_dmn->pdmnState->netInfo->GetPrimary(),
+                                 m_dmn->pdmnState->platformHTTPPort);
+            }
+            return ret;
+        }
+        for (const auto& entry : m_dmn->pdmnState->netInfo->GetEntries(NetInfoPurpose::PLATFORM_HTTPS)) {
+            if (const auto service_opt{entry.GetAddrPort()}) {
+                ret.push_back(*service_opt);
+            }
+        }
+        return ret;
+    }
     MnType getType() const override { return m_dmn->nType; }
     UniValue toJson() const override { return m_dmn->ToJson(); }
     const CKeyID& getKeyIdOwner() const override { return m_dmn->pdmnState->keyIDOwner; }
@@ -223,6 +257,40 @@ public:
             }
         }
         return {nullptr, nullptr};
+    }
+    ProviderTxCapabilities getProviderTxCapabilities() override { return evo::provider::GetCapabilities(context()); }
+    std::optional<ProviderTxError> validateProviderNetInfo(const ProviderNetInfo& net_info, MnType type,
+                                                           uint16_t version, bool optional) override
+    {
+        return evo::provider::ValidateNetInfo(net_info, type, version, optional);
+    }
+    ProviderTxResult<ProviderTxSubmission> registerMasternode(Wallet& wallet, const ProviderRegistrationRequest& request) override
+    {
+        return evo::provider::Register(context(), wallet, request);
+    }
+    ProviderTxResult<PreparedProviderRegistration> prepareMasternodeRegistration(
+        Wallet& wallet, const ProviderRegistrationRequest& request) override
+    {
+        return evo::provider::PrepareRegistration(context(), wallet, request);
+    }
+    ProviderTxResult<ProviderTxSubmission> submitMasternodeRegistration(
+        Wallet& wallet, const CTransactionRef& tx, const std::vector<unsigned char>& collateral_signature) override
+    {
+        return evo::provider::SubmitRegistration(context(), wallet, tx, collateral_signature);
+    }
+    ProviderTxResult<ProviderTxSubmission> updateMasternodeService(Wallet& wallet,
+                                                                   const ProviderUpdateServiceRequest& request) override
+    {
+        return evo::provider::UpdateService(context(), wallet, request);
+    }
+    ProviderTxResult<ProviderTxSubmission> updateMasternodeRegistrar(Wallet& wallet,
+                                                                     const ProviderUpdateRegistrarRequest& request) override
+    {
+        return evo::provider::UpdateRegistrar(context(), wallet, request);
+    }
+    ProviderTxResult<ProviderTxSubmission> revokeMasternode(Wallet& wallet, const ProviderRevokeRequest& request) override
+    {
+        return evo::provider::Revoke(context(), wallet, request);
     }
     void setContext(NodeContext* context) override
     {
@@ -478,10 +546,10 @@ public:
     }
     InstantSendCounts getInstantSendCounts() override
     {
-        if (!context().llmq_ctx || !context().llmq_ctx->isman) {
+        if (!context().isman) {
             return {};
         }
-        const auto counts{context().llmq_ctx->isman->GetCounts()};
+        const auto counts{context().isman->GetCounts()};
         return {
             .m_verified = counts.m_verified,
             .m_unverified = counts.m_unverified,
@@ -538,6 +606,58 @@ public:
             });
         }
         return stats;
+    }
+    std::vector<PlatformQuorum> getPlatformQuorums(uint8_t llmq_type) override
+    {
+        std::vector<PlatformQuorum> ret;
+        if (!context().llmq_ctx || !context().llmq_ctx->quorum_block_processor || !context().chainman) {
+            return ret;
+        }
+        const auto* pindex{WITH_LOCK(::cs_main, return context().chainman->ActiveChain().Tip())};
+        if (!pindex) {
+            return ret;
+        }
+        const auto type{static_cast<Consensus::LLMQType>(llmq_type)};
+        const auto llmq_params{Params().GetLLMQ(type)};
+        if (!llmq_params.has_value()) {
+            return ret;
+        }
+        // Drive proofs may be signed by an older Platform quorum while they
+        // are still consensus-valid and retained locally. Export the full
+        // retained-key window, not only the current signing-active set.
+        const auto quorum_count{static_cast<size_t>(std::max(llmq_params->signingActiveQuorumCount,
+                                                             llmq_params->keepOldKeys))};
+        // Read mined final commitments directly: they already carry the quorum
+        // hash and public key, so there is no need to materialize full CQuorum
+        // objects (member lists, vvec/contribution reads, quorum cache inserts)
+        // via ScanQuorums. Newest-first, matching ScanQuorums' ordering.
+        const auto& qbp{*context().llmq_ctx->quorum_block_processor};
+        const auto quorum_base_block_indexes{llmq_params->useRotation
+            ? qbp.GetMinedCommitmentsIndexedUntilBlock(type, pindex, quorum_count)
+            : qbp.GetMinedCommitmentsUntilBlock(type, pindex, quorum_count)};
+        for (const auto* pQuorumBaseBlockIndex : quorum_base_block_indexes) {
+            const auto qc{qbp.GetMinedCommitment(type, pQuorumBaseBlockIndex->GetBlockHash()).first};
+            if (!qc.quorumPublicKey.IsValid()) continue;
+            ret.emplace_back(PlatformQuorum{
+                .m_quorum_hash = qc.quorumHash,
+                .m_pubkey = qc.quorumPublicKey.ToByteVector(/*specificLegacyScheme=*/false),
+                .m_height = pQuorumBaseBlockIndex->nHeight,
+            });
+        }
+        return ret;
+    }
+    std::vector<uint8_t> getInstantSendLock(const uint256& txid) override
+    {
+        if (!context().isman) {
+            return {};
+        }
+        const auto islock{context().isman->GetInstantSendLockByTxid(txid)};
+        if (!islock) {
+            return {};
+        }
+        CDataStream ds(SER_NETWORK, PROTOCOL_VERSION);
+        ds << *islock;
+        return {UCharCast(ds.data()), UCharCast(ds.data()) + ds.size()};
     }
     void setContext(NodeContext* context) override
     {
@@ -1263,8 +1383,8 @@ public:
     }
     bool isInstantSendLockedTx(const uint256& hash) override
     {
-        if (m_node.llmq_ctx == nullptr || m_node.llmq_ctx->isman == nullptr) return false;
-        return m_node.llmq_ctx->isman->IsLocked(hash);
+        if (m_node.isman == nullptr) return false;
+        return m_node.isman->IsLocked(hash);
     }
     bool hasChainLock(int height, const uint256& hash) override
     {

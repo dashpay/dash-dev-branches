@@ -9,7 +9,7 @@
 #include <evo/deterministicmns.h>
 #include <governance/superblock.h>
 #include <masternode/payments.h>
-#include <rpc/evo_util.h>
+#include <rpc/json_help.h>
 
 #include <chainparams.h>
 #include <core_io.h>
@@ -639,12 +639,12 @@ static RPCHelpMan masternodelist_helper(bool is_composite)
     };
     const auto dmnToLastPaidTime = [&](const auto& dmn) {
         if (dmn.pdmnState->nLastPaidHeight == 0) {
-            return (int)0;
+            return 0;
         }
 
         LOCK(::cs_main);
         const CBlockIndex* pindex = chainman.ActiveChain()[dmn.pdmnState->nLastPaidHeight];
-        return (int)pindex->nTime;
+        return static_cast<int>(pindex->nTime);
     };
 
     const bool showRecentMnsOnly = strMode == "recent";

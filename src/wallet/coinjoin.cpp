@@ -47,6 +47,11 @@ bool CWallet::SetCoinJoinSalt(const uint256& cj_salt)
 
 bool CWallet::SelectTxDSInsByDenomination(int nDenom, CAmount nValueMax, std::vector<CTxDSIn>& vecTxDSInRet)
 {
+    return SelectTxDSInsByDenomination(nDenom, nValueMax, vecTxDSInRet, CoinType::ONLY_READY_TO_MIX);
+}
+
+bool CWallet::SelectTxDSInsByDenomination(int nDenom, CAmount nValueMax, std::vector<CTxDSIn>& vecTxDSInRet, CoinType nCoinType)
+{
     LOCK(cs_wallet);
 
     vecTxDSInRet.clear();
@@ -56,11 +61,11 @@ bool CWallet::SelectTxDSInsByDenomination(int nDenom, CAmount nValueMax, std::ve
 
     CAmount nDenomAmount{CoinJoin::DenominationToAmount(nDenom)};
     CAmount nValueTotal{0};
-    CCoinControl coin_control(CoinType::ONLY_READY_TO_MIX);
+    CCoinControl coin_control(nCoinType);
     std::set<uint256> setRecentTxIds;
     std::vector<COutput> vCoins{AvailableCoinsListUnspent(*this, &coin_control).all()};
 
-    WalletCJLogPrint(this, "CWallet::%s -- vCoins.size(): %d\n", __func__, vCoins.size());
+    WalletCJLogPrint(this, "CWallet::%s -- vCoins.size(): %d, CoinType: %d\n", __func__, vCoins.size(), static_cast<int>(nCoinType));
 
     Shuffle(vCoins.rbegin(), vCoins.rend(), FastRandomContext());
 
@@ -326,9 +331,24 @@ int CWallet::GetRealOutpointCoinJoinRounds(const COutPoint& outpoint, int nRound
 
     int nShortest = -10; // an initial value, should be no way to get this by calculations
     bool fDenomFound = false;
+    const int nOutputDenom = CoinJoin::AmountToDenomination(txOutRef->nValue);
     // only denoms here so let's look up
     for (const auto& txinNext : wtx->tx->vin) {
         if (InputIsMine(*this, txinNext)) {
+            // Post-V24: if our own inputs to this mixing tx are at a different denomination,
+            // this output was created by a promotion/demotion. The conversion's 10:1 shape
+            // publicly clusters the participant's coins, so the new coin starts mixing over
+            // instead of inheriting its inputs' rounds. Deciding on the first mismatch is
+            // safe because a wallet contributes at most one entry per mixing transaction
+            // (concurrent sessions never share a masternode), so all of its inputs in one
+            // tx share a single denomination.
+            const CWalletTx* wtxPrev{GetWalletTx(txinNext.prevout.hash)};
+            if (wtxPrev != nullptr && wtxPrev->tx != nullptr && txinNext.prevout.n < wtxPrev->tx->vout.size() &&
+                CoinJoin::AmountToDenomination(wtxPrev->tx->vout[txinNext.prevout.n].nValue) != nOutputDenom) {
+                *nRoundsRef = 0;
+                WalletCJLogPrint(this, "%s UPDATED   %-70s %3d (rebalance output)\n", __func__, outpoint.ToStringShort(), *nRoundsRef);
+                return *nRoundsRef;
+            }
             int n = GetRealOutpointCoinJoinRounds(txinNext.prevout, nRounds + 1);
             // denom found, find the shortest chain or initially assign nShortest with the first found value
             if (n >= 0 && (n < nShortest || nShortest == -10)) {
@@ -406,6 +426,67 @@ bool CWallet::IsFullyMixed(const COutPoint& outpoint) const
     return true;
 }
 
+CoinJoinDenomCounts CWallet::GetDenominationCounts() const
+{
+    CoinJoinDenomCounts counts;
+    if (!CCoinJoinClientOptions::IsEnabled()) return counts;
+
+    const auto& denoms = CoinJoin::GetStandardDenominations();
+
+    LOCK(cs_wallet);
+    for (const auto& outpoint : setWalletUTXO) {
+        const auto it{mapWallet.find(outpoint.hash)};
+        if (it == mapWallet.end()) continue;
+
+        if (IsSpent(outpoint) || IsLockedCoin(outpoint)) continue;
+
+        const CAmount nValue = it->second.tx->vout[outpoint.n].nValue;
+        const auto denom_it = std::find(denoms.begin(), denoms.end(), nValue);
+        if (denom_it == denoms.end()) continue;
+
+        // Skip unconfirmed or conflicted
+        if (GetTxDepthInMainChain(it->second) < 1) continue;
+
+        const size_t idx = static_cast<size_t>(denom_it - denoms.begin());
+        counts.total[idx]++;
+        if (IsFullyMixed(outpoint)) counts.fully_mixed[idx]++;
+    }
+
+    return counts;
+}
+
+std::vector<COutPoint> CWallet::SelectFullyMixedForPromotion(int nDenom, int nCount) const
+{
+    std::vector<COutPoint> vecRet;
+    if (!CCoinJoinClientOptions::IsEnabled()) return vecRet;
+
+    const CAmount nDenomAmount = CoinJoin::DenominationToAmount(nDenom);
+    if (nDenomAmount <= 0) return vecRet;
+
+    LOCK(cs_wallet);
+
+    // Mirror SelectTxDSInsByDenomination: spendable coins only, shuffled, and at most one
+    // coin per transaction. Inputs sharing a parent tx are publicly linked on-chain, and a
+    // demotion in particular leaves 10 sibling outputs of the target denomination that must
+    // never be promoted together - they would be identifiable as one group in the final tx.
+    CCoinControl coin_control(CoinType::ONLY_FULLY_MIXED);
+    std::set<uint256> setRecentTxIds;
+    std::vector<COutput> vCoins{AvailableCoinsListUnspent(*this, &coin_control).all()};
+
+    WalletCJLogPrint(this, "CWallet::%s -- vCoins.size(): %d\n", __func__, vCoins.size());
+
+    Shuffle(vCoins.rbegin(), vCoins.rend(), FastRandomContext());
+
+    for (const auto& out : vCoins) {
+        if (static_cast<int>(vecRet.size()) >= nCount) break;
+        if (out.txout.nValue != nDenomAmount) continue;
+        if (!setRecentTxIds.insert(out.outpoint.hash).second) continue; // no duplicate txids
+        vecRet.push_back(out.outpoint);
+    }
+
+    return vecRet;
+}
+
 void CWallet::RecalculateMixedCredit(const uint256 hash)
 {
     AssertLockHeld(cs_wallet);
@@ -469,7 +550,7 @@ float CWallet::GetAverageAnonymizedRounds() const
 
     if (nCount == 0) return 0;
 
-    return (float)nTotal / nCount;
+    return static_cast<float>(nTotal) / nCount;
 }
 
 // Note: calculated including unconfirmed,

@@ -12,6 +12,7 @@
 #include <QByteArray>
 #include <QIcon>
 #include <QString>
+#include <QStringList>
 
 #include <memory>
 #include <optional>
@@ -33,8 +34,10 @@ private:
     QString m_collateral_outpoint{};
     QString m_json{};
     QString m_operator_reward{};
+    QString m_operator_payout_address{};
     QString m_owner_address{};
     QString m_payout_address{};
+    QStringList m_payout_addresses{};
     QString m_protx_hash{};
     QString m_service{};
     QString m_type_description{};
@@ -49,10 +52,12 @@ private:
     std::optional<QString> m_platform_node_id{};
     std::optional<QString> m_platform_p2p_addresses{};
     std::optional<QString> m_pub_key_operator{};
+    bool m_operator_legacy_scheme{false};
     uint16_t m_operator_reward_pct{0};
 
 public:
-    explicit MasternodeEntry(const interfaces::MnEntryCPtr& dmn, const QString& collateral_address, int next_payment_height);
+    explicit MasternodeEntry(const interfaces::MnEntryCPtr& dmn, const QString& collateral_address,
+                             int next_payment_height);
     ~MasternodeEntry();
 
     bool isBanned() const { return m_banned; }
@@ -75,18 +80,34 @@ public:
     const QString& collateralAddress() const { return m_collateral_address; }
     const QString& collateralOutpoint() const { return m_collateral_outpoint; }
     const QString& operatorReward() const { return m_operator_reward; }
+    const QString& operatorPayoutAddress() const { return m_operator_payout_address; }
     const QString& ownerAddress() const { return m_owner_address; }
     const QString& payoutAddress() const { return m_payout_address; }
+    const QStringList& payoutAddresses() const { return m_payout_addresses; }
     const QString& proTxHash() const { return m_protx_hash; }
     const QString& service() const { return m_service; }
     const QString& toJson() const { return m_json; }
     const QString& typeDescription() const { return m_type_description; }
     const QString& votingAddress() const { return m_voting_address; }
     const uint256& proTxHashRaw() const { return m_dmn->getProTxHash(); }
+    std::vector<unsigned char> operatorPubKeyBytes() const;
+    QString operatorPubKey(bool legacy_scheme = false) const;
+    QString coreP2PAddresses() const { return m_network_addresses.value_or(m_service); }
+    QString platformP2PAddresses() const { return m_platform_p2p_addresses.value_or(QString{}); }
+    QString platformHTTPSAddresses() const { return m_platform_https_addresses.value_or(QString{}); }
+    QString platformNodeID() const { return m_platform_node_id.value_or(QString{}); }
 
     auto toTie() const
     {
-        return std::tie(m_banned, m_last_paid_height, m_next_payment_height, m_pose_penalty, m_service, m_operator_reward_pct);
+        // Cover every mutable field rendered by the table/details dialogs or
+        // consumed by an action dialog. Otherwise reconcile() retains an old
+        // MnEntry after a provider update and subsequent edits can overwrite
+        // newer network, payout, voting, or Platform state.
+        return std::tie(m_banned, m_last_paid_height, m_next_payment_height, m_pose_penalty, m_consecutive_payments,
+                        m_pose_ban_height, m_pose_revived_height, m_service_key, m_service, m_operator_reward_pct,
+                        m_operator_reward, m_operator_payout_address, m_payout_address, m_payout_addresses,
+                        m_voting_address, m_pub_key_operator, m_operator_legacy_scheme, m_network_addresses,
+                        m_platform_node_id, m_platform_p2p_addresses, m_platform_https_addresses);
     }
     QString toHtml() const;
 };

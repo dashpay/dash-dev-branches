@@ -145,7 +145,7 @@ public:
             // multiple objects with the same timestamp => infinite rate
             return 1.0e10;
         }
-        return double(nCount) / double(nMax - nMin);
+        return static_cast<double>(nCount) / static_cast<double>(nMax - nMin);
     }
 
     SERIALIZE_METHODS(CRateCheckBuffer, obj)

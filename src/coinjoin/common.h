@@ -10,7 +10,9 @@
 #include <consensus/amount.h>
 #include <primitives/transaction.h>
 
+#include <algorithm>
 #include <array>
+#include <cstdint>
 #include <string>
 
 /** Holds a mixing input
@@ -47,6 +49,21 @@ constexpr std::array<CAmount, 5> vecStandardDenominations{
 constexpr std::array<CAmount, 5> GetStandardDenominations() { return vecStandardDenominations; }
 constexpr CAmount GetSmallestDenomination() { return vecStandardDenominations.back(); }
 
+/**
+ * Get the index of a denomination in vecStandardDenominations (0=largest, 4=smallest)
+ * Returns -1 if not a valid denomination
+ */
+constexpr int GetDenominationIndex(int nDenom)
+{
+    if (nDenom <= 0) return -1;
+    for (size_t i = 0; i < vecStandardDenominations.size(); ++i) {
+        if (nDenom == (1 << i)) {
+            return static_cast<int>(i);
+        }
+    }
+    return -1;
+}
+
 /*
     Return a bitshifted integer representing a denomination in vecStandardDenominations
     or 0 if none was found
@@ -74,9 +91,7 @@ constexpr CAmount DenominationToAmount(int nDenom)
         return 0;
     }
 
-    size_t nMaxDenoms = vecStandardDenominations.size();
-
-    if (nDenom >= (1 << nMaxDenoms) || nDenom < 0) {
+    if (nDenom >= (1 << vecStandardDenominations.size()) || nDenom < 0) {
         // out of bounds
         return -1;
     }
@@ -86,16 +101,8 @@ constexpr CAmount DenominationToAmount(int nDenom)
         return -2;
     }
 
-    CAmount nDenomAmount{-3};
-
-    for (size_t i = 0; i < nMaxDenoms; ++i) {
-        if (nDenom & (1 << i)) {
-            nDenomAmount = vecStandardDenominations[i];
-            break;
-        }
-    }
-
-    return nDenomAmount;
+    const int idx = GetDenominationIndex(nDenom);
+    return idx >= 0 ? vecStandardDenominations[idx] : -3;
 }
 
 
@@ -110,6 +117,139 @@ std::string DenominationToString(int nDenom);
 constexpr CAmount GetCollateralAmount() { return GetSmallestDenomination() / 10; }
 constexpr CAmount GetMaxCollateralAmount() { return GetCollateralAmount() * 4; }
 
+// Promotion/demotion constants (post-V24 feature)
+constexpr int PROMOTION_RATIO = 10;   // 10 smaller denomination coins = 1 larger denomination coin
+constexpr int GAP_DIVISOR = 5;        // Deficit gap required to trigger promotion/demotion, as 1/N of the goal
+
+/**
+ * How far behind the other denomination a denomination has to be before converting is worth it;
+ * the gap is what keeps promotion and demotion from oscillating. It is a fraction of the goal
+ * rather than a constant because the largest gap two denominations can show is the goal itself:
+ * a constant of 10 was unsatisfiable at MIN_COINJOIN_DENOMS_GOAL (also 10) and silently
+ * disabled the feature there. At the default goal of 50 this still yields 10.
+ */
+constexpr int GetGapThreshold(int nGoal) { return std::max(nGoal / GAP_DIVISOR, 1); }
+
+/**
+ * Which side(s) of the session denomination a participant occupies. A standard entry mixes at
+ * the session denomination on both sides. A promotion spends PROMOTION_RATIO session-denom
+ * inputs for one larger-denom output, so it only occupies the input side; a demotion is the
+ * mirror image. UNKNOWN is for empty or malformed entries, which occupy neither.
+ */
+enum class MixShape : uint8_t { UNKNOWN, STANDARD, PROMOTION, DEMOTION };
+
+/**
+ * How many participants occupy each side of the session denomination.
+ *
+ * Mixing only conceals a participant when someone else holds coins of the same size on the
+ * same side: a group of session-denom coins is hidden by the other session-denom coins it
+ * could be confused with. A participant holding a single coin at the larger denomination has
+ * no group to hide, which is why only the session denomination is counted here.
+ */
+struct MixSideCounts {
+    int inputs{0};  //!< participants contributing session-denom inputs (standard + promotions)
+    int outputs{0}; //!< participants receiving session-denom outputs (standard + demotions)
+
+    constexpr void Add(MixShape shape)
+    {
+        switch (shape) {
+        case MixShape::STANDARD:
+            ++inputs;
+            ++outputs;
+            break;
+        case MixShape::PROMOTION:
+            ++inputs;
+            break;
+        case MixShape::DEMOTION:
+            ++outputs;
+            break;
+        case MixShape::UNKNOWN:
+            break;
+        }
+    }
+
+    /**
+     * Each side must be occupied by nobody or by at least two participants. Exactly one is the
+     * only forbidden count: that participant's session-denom coins would be the only ones of
+     * their size on that side and so would be trivially identifiable on-chain.
+     */
+    [[nodiscard]] constexpr bool IsCovered() const { return inputs != 1 && outputs != 1; }
+};
+
+/// How many coins of a final transaction sit at the session denomination on each side
+struct SessionDenomCounts {
+    size_t inputs{0};
+    size_t outputs{0};
+};
+
+/**
+ * Check if two denominations are adjacent (one step apart in the denom list)
+ * Used for validating promotion/demotion entries post-V24
+ */
+constexpr bool AreAdjacentDenominations(int nDenom1, int nDenom2)
+{
+    int idx1 = GetDenominationIndex(nDenom1);
+    int idx2 = GetDenominationIndex(nDenom2);
+    if (idx1 < 0 || idx2 < 0) return false;
+    return (idx1 == idx2 + 1) || (idx1 == idx2 - 1);
+}
+
+/**
+ * Get the larger adjacent denomination (returns 0 if none exists or invalid)
+ */
+constexpr int GetLargerAdjacentDenom(int nDenom)
+{
+    int idx = GetDenominationIndex(nDenom);
+    if (idx <= 0) return 0;  // Already largest or invalid
+    return 1 << (idx - 1);
+}
+
+/**
+ * Get the smaller adjacent denomination (returns 0 if none exists or invalid)
+ */
+constexpr int GetSmallerAdjacentDenom(int nDenom)
+{
+    int idx = GetDenominationIndex(nDenom);
+    if (idx < 0 || idx >= static_cast<int>(vecStandardDenominations.size()) - 1) return 0;
+    return 1 << (idx + 1);
+}
+
+/**
+ * Core promotion decision (post-V24): combine PROMOTION_RATIO fully-mixed coins of the
+ * smaller denomination into one coin of the larger adjacent denomination when the larger
+ * denomination is further from the per-denom goal by more than the gap threshold (which
+ * prevents promote/demote oscillation). Callers resolve wallet counts and validate that
+ * the denominations are adjacent.
+ */
+constexpr bool ShouldPromoteDenoms(int nSmallerCount, int nLargerCount, int nSmallerFullyMixedCount, int nGoal)
+{
+    // Don't sacrifice a denomination that's still being built up
+    if (nSmallerCount < nGoal / 2) return false;
+    // A promotion consumes PROMOTION_RATIO fully-mixed coins
+    if (nSmallerFullyMixedCount < PROMOTION_RATIO) return false;
+    const int nSmallerDeficit = nSmallerCount < nGoal ? nGoal - nSmallerCount : 0;
+    const int nLargerDeficit = nLargerCount < nGoal ? nGoal - nLargerCount : 0;
+    return nLargerDeficit > nSmallerDeficit + GetGapThreshold(nGoal);
+}
+
+/**
+ * Core demotion decision (post-V24): split one coin of the larger denomination into
+ * PROMOTION_RATIO coins of the smaller adjacent denomination when the smaller denomination
+ * is further from the per-denom goal by more than the gap threshold. Like promotion, demotion
+ * only spends a fully-mixed coin: the conversion's public 1:10 shape clusters its outputs,
+ * which start mixing over, so only an input with a protected history is worth converting.
+ */
+constexpr bool ShouldDemoteDenoms(int nLargerCount, int nSmallerCount, int nLargerFullyMixedCount, int nGoal)
+{
+    // Don't sacrifice a denomination that's still being built up
+    if (nLargerCount < nGoal / 2) return false;
+    // A demotion consumes one fully-mixed coin
+    if (nLargerFullyMixedCount < 1) return false;
+    const int nSmallerDeficit = nSmallerCount < nGoal ? nGoal - nSmallerCount : 0;
+    const int nLargerDeficit = nLargerCount < nGoal ? nGoal - nLargerCount : 0;
+    return nSmallerDeficit > nLargerDeficit + GetGapThreshold(nGoal);
+}
+
 constexpr bool IsCollateralAmount(CAmount nInputAmount)
 {
     // collateral input can be anything between 1x and "max" (including both)
@@ -121,7 +261,7 @@ constexpr int CalculateAmountPriority(CAmount nInputAmount)
     if (nInputAmount < 0 || nInputAmount > MAX_MONEY) return 0;
     if (auto optDenom = util::find_if_opt(GetStandardDenominations(),
                                           [&nInputAmount](const auto& denom) { return nInputAmount == denom; })) {
-        return (float)COIN / *optDenom * 10000;
+        return static_cast<float>(COIN) / *optDenom * 10000;
     }
     if (nInputAmount < COIN) {
         return 20000;

@@ -22,6 +22,7 @@
 #include <evo/deterministicmns.h>
 #include <evo/evodb.h>
 #include <init/common.h>
+#include <instantsend/instantsend.h>
 #include <llmq/context.h>
 #include <masternode/meta.h>
 #include <masternode/sync.h>
@@ -93,11 +94,13 @@ int main(int argc, char* argv[])
     ChainstateManager chainman{chainman_opts};
 
     CMasternodeMetaMan metaman;
-    std::unique_ptr<CEvoDB> evodb;
-    std::unique_ptr<CDeterministicMNManager> dmnman;
+    CEvoDB evodb{util::DbWrapperParams{.path = gArgs.GetDataDirNet(), .memory = false, .wipe = false}};
+    CDeterministicMNManager dmnman{evodb, metaman};
     CMasternodeSync mn_sync{std::make_unique<NullNodeSyncNotifier>()};
     CSporkManager sporkman;
     chainlock::Chainlocks chainlocks(sporkman);
+    // TODO: remove isman from bitcoin-chainstate and make it nullable for node::ChainstateLoadOptions same as mempool
+    llmq::CInstantSendManager isman{sporkman, util::DbWrapperParams{.path = gArgs.GetDataDirNet(), .memory = false, .wipe = false}};
 
     std::unique_ptr<LLMQContext> llmq_ctx;
     std::unique_ptr<CChainstateHelper> chain_helper;
@@ -107,8 +110,7 @@ int main(int argc, char* argv[])
     cache_sizes.coins_db = 2 << 22;
     cache_sizes.coins = (450 << 20) - (2 << 20) - (2 << 22);
     node::ChainstateLoadOptions options;
-    options.mn_metaman = &metaman;
-    options.sporkman = &sporkman;
+    options.isman = &isman;
     options.chainlocks = &chainlocks;
     options.mn_sync = &mn_sync;
     options.data_dir = gArgs.GetDataDirNet();
@@ -119,7 +121,7 @@ int main(int argc, char* argv[])
         std::cerr << "Failed to load Chain state from your datadir." << std::endl;
         goto epilogue;
     } else {
-        std::tie(status, error) = node::VerifyLoadedChainstate(chainman, options, *evodb);
+        std::tie(status, error) = node::VerifyLoadedChainstate(chainman, options, evodb);
         if (status != node::ChainstateLoadStatus::SUCCESS) {
             std::cerr << "Failed to verify loaded Chain state from your datadir." << std::endl;
             goto epilogue;
@@ -278,6 +280,4 @@ epilogue:
     // Tear down Dash kernel objects before kernel::~Context().
     chain_helper.reset();
     llmq_ctx.reset();
-    dmnman.reset();
-    evodb.reset();
 }

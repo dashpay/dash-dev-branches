@@ -144,11 +144,11 @@ void CRecoveredSigsDb::WriteRecoveredSig(const llmq::CRecoveredSig& recSig)
     // store by signHash
     auto signHash = recSig.buildSignHash();
     auto k4 = std::make_tuple(std::string("rs_s"), signHash.Get());
-    batch.Write(k4, (uint8_t)1);
+    batch.Write(k4, static_cast<uint8_t>(1));
 
     // store by current time. Allows fast cleanup of old recSigs
-    auto k5 = std::make_tuple(std::string("rs_t"), (uint32_t)htobe32_internal(curTime), recSig.getLlmqType(), recSig.getId());
-    batch.Write(k5, (uint8_t)1);
+    auto k5 = std::make_tuple(std::string("rs_t"), htobe32_internal(curTime), recSig.getLlmqType(), recSig.getId());
+    batch.Write(k5, static_cast<uint8_t>(1));
 
     db->WriteBatch(batch);
 
@@ -185,7 +185,7 @@ void CRecoveredSigsDb::RemoveRecoveredSig(CDBBatch& batch, Consensus::LLMQType l
         if (db->ReadDataStream(k2, writeTimeDs)) {
             uint32_t writeTime;
             writeTimeDs >> writeTime;
-            auto k5 = std::make_tuple(std::string("rs_t"), (uint32_t) htobe32_internal(writeTime), recSig.getLlmqType(), recSig.getId());
+            auto k5 = std::make_tuple(std::string("rs_t"), htobe32_internal(writeTime), recSig.getLlmqType(), recSig.getId());
             batch.Erase(k5);
         }
     }
@@ -212,8 +212,8 @@ void CRecoveredSigsDb::CleanupOldRecoveredSigs(int64_t maxAge)
 {
     std::unique_ptr<CDBIterator> pcursor(db->NewIterator());
 
-    auto start = std::make_tuple(std::string("rs_t"), (uint32_t)0, (Consensus::LLMQType)0, uint256());
-    uint32_t endTime = (uint32_t)(GetTime<std::chrono::seconds>().count() - maxAge);
+    auto start = std::make_tuple(std::string("rs_t"), static_cast<uint32_t>(0), static_cast<Consensus::LLMQType>(0), uint256());
+    uint32_t endTime = static_cast<uint32_t>(GetTime<std::chrono::seconds>().count() - maxAge);
     pcursor->Seek(start);
 
     std::vector<std::pair<Consensus::LLMQType, uint256>> toDelete;
@@ -274,11 +274,11 @@ bool CRecoveredSigsDb::GetVoteForId(Consensus::LLMQType llmqType, const uint256&
 void CRecoveredSigsDb::WriteVoteForId(Consensus::LLMQType llmqType, const uint256& id, const uint256& msgHash)
 {
     auto k1 = std::make_tuple(std::string("rs_v"), llmqType, id);
-    auto k2 = std::make_tuple(std::string("rs_vt"), (uint32_t)htobe32_internal(GetTime<std::chrono::seconds>().count()), llmqType, id);
+    auto k2 = std::make_tuple(std::string("rs_vt"), htobe32_internal(GetTime<std::chrono::seconds>().count()), llmqType, id);
 
     CDBBatch batch(*db);
     batch.Write(k1, msgHash);
-    batch.Write(k2, (uint8_t)1);
+    batch.Write(k2, static_cast<uint8_t>(1));
 
     db->WriteBatch(batch);
 }
@@ -287,8 +287,8 @@ void CRecoveredSigsDb::CleanupOldVotes(int64_t maxAge)
 {
     std::unique_ptr<CDBIterator> pcursor(db->NewIterator());
 
-    auto start = std::make_tuple(std::string("rs_vt"), (uint32_t)0, (Consensus::LLMQType)0, uint256());
-    uint32_t endTime = (uint32_t)(GetTime<std::chrono::seconds>().count() - maxAge);
+    auto start = std::make_tuple(std::string("rs_vt"), static_cast<uint32_t>(0), static_cast<Consensus::LLMQType>(0), uint256());
+    uint32_t endTime = static_cast<uint32_t>(GetTime<std::chrono::seconds>().count() - maxAge);
     pcursor->Seek(start);
 
     CDBBatch batch(*db);

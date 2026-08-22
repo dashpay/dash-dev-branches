@@ -5,6 +5,8 @@
 #include <test/util/setup_common.h>
 
 #include <evo/netinfo.h>
+#include <evo/types.h>
+#include <interfaces/node.h>
 #include <util/helpers.h>
 
 #include <chainparams.h>
@@ -133,6 +135,47 @@ BOOST_AUTO_TEST_CASE(mnnetinfo_rules_main)
 }
 
 BOOST_AUTO_TEST_CASE(extnetinfo_rules_main) { TestExtNetInfo(addr_vals_main); }
+
+BOOST_AUTO_TEST_CASE(provider_network_fields_main)
+{
+    auto node{interfaces::MakeNode(m_node)};
+    interfaces::ProviderNetInfo net_info{
+        .core_p2p = {strprintf("1.1.1.1:%d", MainParams().GetDefaultPort())},
+        .platform_p2p = MainParams().GetDefaultPlatformP2PPort(),
+        .platform_https = MainParams().GetDefaultPlatformHTTPPort(),
+    };
+    BOOST_CHECK(!node->evo().validateProviderNetInfo(net_info, MnType::Evo, ProTxVersion::BasicBLS, /*optional=*/false));
+
+    net_info.platform_p2p = static_cast<uint16_t>(MainParams().GetDefaultPlatformP2PPort() + 1);
+    auto validation_error{
+        node->evo().validateProviderNetInfo(net_info, MnType::Evo, ProTxVersion::BasicBLS, /*optional=*/false)};
+    BOOST_REQUIRE(validation_error);
+    BOOST_CHECK_EQUAL(validation_error->reject_reason, "bad-protx-platform-p2p-port");
+
+    net_info.platform_p2p = MainParams().GetDefaultPlatformP2PPort();
+    net_info.platform_https = static_cast<uint16_t>(MainParams().GetDefaultPlatformHTTPPort() + 1);
+    validation_error = node->evo().validateProviderNetInfo(net_info, MnType::Evo, ProTxVersion::BasicBLS,
+                                                           /*optional=*/false);
+    BOOST_REQUIRE(validation_error);
+    BOOST_CHECK_EQUAL(validation_error->reject_reason, "bad-protx-platform-http-port");
+
+    net_info.platform_p2p = MainParams().GetDefaultPort();
+    net_info.platform_https = MainParams().GetDefaultPlatformHTTPPort();
+    validation_error = node->evo().validateProviderNetInfo(net_info, MnType::Evo, ProTxVersion::BasicBLS,
+                                                           /*optional=*/false);
+    BOOST_REQUIRE(validation_error);
+    BOOST_CHECK_EQUAL(validation_error->reject_reason, "bad-protx-platform-p2p-port");
+
+    net_info = {
+        .core_p2p = {"127.0.0.1:9999"},
+        .platform_p2p = std::vector<std::string>{"1.1.1.2:22200"},
+        .platform_https = std::vector<std::string>{"server.example.com:443"},
+    };
+    validation_error = node->evo().validateProviderNetInfo(net_info, MnType::Evo, ProTxVersion::ExtAddr,
+                                                           /*optional=*/false);
+    BOOST_REQUIRE(validation_error);
+    BOOST_CHECK(validation_error->message.original.find("unroutable address") != std::string::npos);
+}
 
 static const std::vector<TestEntry> addr_vals_reg{
     // - MnNetInfo doesn't mind using port 0

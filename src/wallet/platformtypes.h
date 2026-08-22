@@ -1,0 +1,74 @@
+// Copyright (c) 2026 The Dash Core developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
+#ifndef BITCOIN_WALLET_PLATFORMTYPES_H
+#define BITCOIN_WALLET_PLATFORMTYPES_H
+
+#include <pubkey.h>
+#include <script/standard.h>
+#include <support/allocators/secure.h>
+#include <uint256.h>
+
+#include <cstdint>
+#include <variant>
+
+namespace wallet {
+
+enum class PlatformKeyStatus : uint8_t {
+    SUCCESS,
+    NOT_SUPPORTED,
+    WALLET_LOCKED,
+    AMBIGUOUS_SOURCE,
+    INVALID_SOURCE,
+    INVALID_ARGUMENT,
+    IMPORT_ERROR,
+    DERIVATION_ERROR,
+};
+
+template <typename T>
+struct PlatformKeyResult {
+    PlatformKeyStatus status{PlatformKeyStatus::DERIVATION_ERROR};
+    T value{};
+
+    explicit operator bool() const { return status == PlatformKeyStatus::SUCCESS; }
+};
+
+struct IdentityAuthKey {
+    uint32_t identity_index{0};
+    uint32_t key_index{0};
+};
+
+struct RegistrationFundingKey {
+    uint32_t identity_index{0};
+};
+
+struct TopupFundingKey {
+    uint32_t funding_index{0};
+};
+
+struct InvitationFundingKey {
+    uint32_t invitation_index{0};
+};
+
+using PlatformKeyRequest = std::variant<IdentityAuthKey, RegistrationFundingKey, TopupFundingKey, InvitationFundingKey>;
+
+struct FriendshipKeychainRequest {
+    uint32_t account{0};
+    uint256 local_id;
+    uint256 remote_id;
+    int64_t birth_time{0}; //!< 0 means unknown/genesis.
+};
+
+struct FriendshipXpub {
+    CPubKey pubkey;
+    ChainCode chaincode;
+};
+
+//! Derive one contact payment destination from a DIP-15 friendship xpub.
+//! This is public-only key math and does not require a wallet instance.
+bool DeriveFriendshipPaymentDestination(const FriendshipXpub& xpub, uint32_t index, CTxDestination& destination_out);
+
+} // namespace wallet
+
+#endif // BITCOIN_WALLET_PLATFORMTYPES_H

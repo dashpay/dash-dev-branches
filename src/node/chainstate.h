@@ -21,12 +21,11 @@ class CDeterministicMNManager;
 class CEvoDB;
 class ChainstateManager;
 class CMasternodeSync;
-class CMasternodeMetaMan;
-class CSporkManager;
 class CTxMemPool;
 struct LLMQContext;
 
 namespace chainlock { class Chainlocks; }
+namespace llmq { class CInstantSendManager; }
 
 namespace node {
 
@@ -34,8 +33,7 @@ struct CacheSizes;
 
 struct ChainstateLoadOptions {
     CTxMemPool* mempool{nullptr};
-    CMasternodeMetaMan* mn_metaman{nullptr};
-    CSporkManager* sporkman{nullptr};
+    llmq::CInstantSendManager* isman{nullptr};
     chainlock::Chainlocks* chainlocks{nullptr};
     const CMasternodeSync* mn_sync{nullptr};
     fs::path data_dir;
@@ -83,12 +81,12 @@ using ChainstateLoadResult = std::tuple<ChainstateLoadStatus, bilingual_str>;
  *
  *  LoadChainstate returns a (status code, error string) tuple.
  *
- *  The evodb, dmnman, llmq_ctx and chain_helper arguments are outputs: any
- *  instance they hold is destroyed and replaced with a freshly constructed one.
+ *  The llmq_ctx and chain_helper arguments are outputs: any instance they hold
+ *  is destroyed and replaced with a freshly constructed one.
  */
 ChainstateLoadResult LoadChainstate(ChainstateManager& chainman, const CacheSizes& cache_sizes,
-                                    const ChainstateLoadOptions& options, std::unique_ptr<CEvoDB>& evodb,
-                                    std::unique_ptr<CDeterministicMNManager>& dmnman, std::unique_ptr<LLMQContext>& llmq_ctx,
+                                    const ChainstateLoadOptions& options, CEvoDB& evodb,
+                                    CDeterministicMNManager& dmnman, std::unique_ptr<LLMQContext>& llmq_ctx,
                                     std::unique_ptr<CChainstateHelper>& chain_helper);
 ChainstateLoadResult VerifyLoadedChainstate(ChainstateManager& chainman, const ChainstateLoadOptions& options, CEvoDB& evodb,
                                             std::function<void(bool)> notify_bls_state = nullptr);

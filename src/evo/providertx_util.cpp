@@ -3,7 +3,6 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <evo/providertx.h>
-#include <evo/dmnstate.h>
 
 #include <key_io.h>
 #include <script/standard.h>
@@ -20,16 +19,6 @@ MasternodePayoutShares LegacyPayoutAsList(const CScript& script_payout)
 {
     return {{script_payout, MasternodePayoutShare::MAX_REWARD}};
 }
-
-template<class T>
-MasternodePayoutShares GetOwnerPayouts(const T& protx)
-{
-    return protx.nVersion >= ProTxVersion::ExtAddr ? protx.payouts : LegacyPayoutAsList(protx.scriptPayout);
-}
-
-template MasternodePayoutShares GetOwnerPayouts(const CProRegTx& protx);
-template MasternodePayoutShares GetOwnerPayouts(const CProUpRegTx& protx);
-template MasternodePayoutShares GetOwnerPayouts(const CDeterministicMNState& protx);
 
 std::string PayoutListToString(const MasternodePayoutShares& payouts)
 {

@@ -4,7 +4,7 @@
 
 #include <evo/assetlocktx.h>
 #include <evo/cbtx.h>
-#include <evo/deterministicmns.h>
+#include <evo/dmn_types.h>
 #include <evo/dmnstate.h>
 #include <evo/mnhftx.h>
 #include <evo/netinfo.h>
@@ -12,80 +12,21 @@
 #include <evo/simplifiedmns.h>
 #include <evo/smldiff.h>
 #include <llmq/commitment.h>
-#include <rpc/evo_util.h>
 #include <util/std23.h>
 
 #include <core_io.h>
 #include <key_io.h>
-#include <rpc/util.h>
+#include <netaddress.h>
 #include <script/standard.h>
 #include <util/check.h>
 
 #include <univalue.h>
 
-#include <map>
+#include <cstdint>
 #include <string>
+#include <type_traits>
 
 namespace {
-#define RESULT_MAP_ENTRY(name, type, desc) {name, {type, name, desc}}
-const std::map<std::string, RPCResult> RPCRESULT_MAP{{
-    {"addresses",
-        {RPCResult::Type::OBJ, "addresses", "Network addresses of the masternode",
-    {
-        {RPCResult::Type::ARR, "core_p2p", /*optional=*/true, "Addresses used for protocol P2P",
-            {{RPCResult::Type::STR, "address", ""}}},
-        {RPCResult::Type::ARR, "platform_p2p", /*optional=*/true, "Addresses used for Platform P2P",
-            {{RPCResult::Type::STR, "address", ""}}},
-        {RPCResult::Type::ARR, "platform_https", /*optional=*/true, "Addresses used for Platform HTTPS API",
-            {{RPCResult::Type::STR, "address", ""}}},
-    }}},
-    RESULT_MAP_ENTRY("collateralAddress", RPCResult::Type::STR, "Dash address used for collateral"),
-    RESULT_MAP_ENTRY("collateralHash", RPCResult::Type::STR_HEX, "Collateral transaction hash"),
-    RESULT_MAP_ENTRY("collateralIndex", RPCResult::Type::NUM, "Collateral transaction output index"),
-    RESULT_MAP_ENTRY("consecutivePayments", RPCResult::Type::NUM, "Consecutive payments masternode has received in payment cycle"),
-    RESULT_MAP_ENTRY("height", RPCResult::Type::NUM, "Block height"),
-    RESULT_MAP_ENTRY("inputsHash", RPCResult::Type::STR_HEX, "Hash of all the outpoints of the transaction inputs"),
-    RESULT_MAP_ENTRY("lastPaidHeight", RPCResult::Type::NUM, "Height masternode was last paid"),
-    RESULT_MAP_ENTRY("llmqType", RPCResult::Type::NUM, "Quorum type"),
-    RESULT_MAP_ENTRY("memberIndex", RPCResult::Type::NUM, "Quorum member index"),
-    RESULT_MAP_ENTRY("merkleRootMNList", RPCResult::Type::STR_HEX, "Merkle root of the masternode list"),
-    RESULT_MAP_ENTRY("merkleRootQuorums", RPCResult::Type::STR_HEX, "Merkle root of the quorum list"),
-    RESULT_MAP_ENTRY("operatorPayoutAddress", RPCResult::Type::STR, "Dash address used for operator reward payments"),
-    RESULT_MAP_ENTRY("operatorReward", RPCResult::Type::NUM, "Fraction in %% of reward shared with the operator between 0 and 10000"),
-    RESULT_MAP_ENTRY("outpoint", RPCResult::Type::STR_HEX,"The outpoint of the masternode"),
-    RESULT_MAP_ENTRY("ownerAddress", RPCResult::Type::STR, "Dash address used for payee updates and proposal voting"),
-    RESULT_MAP_ENTRY("payoutAddress", RPCResult::Type::STR, "Dash address used for masternode reward payments"),
-    {"payouts",
-        {RPCResult::Type::ARR, "payouts", "Owner masternode reward payout shares",
-    {
-        {RPCResult::Type::OBJ, "", "",
-        {
-            {RPCResult::Type::STR, "address", "Dash address used for this owner payout"},
-            {RPCResult::Type::STR_HEX, "script", "Owner payout scriptPubKey"},
-            {RPCResult::Type::NUM, "reward", "Owner payout share in basis points"},
-        }},
-    }}},
-    RESULT_MAP_ENTRY("platformHTTPPort", RPCResult::Type::NUM, "TCP port of Platform HTTP API (DEPRECATED, returned only if config option -deprecatedrpc=service is passed)"),
-    RESULT_MAP_ENTRY("platformNodeID", RPCResult::Type::STR_HEX, "Node ID derived from P2P public key for Platform P2P"),
-    RESULT_MAP_ENTRY("platformP2PPort", RPCResult::Type::NUM, "TCP port of Platform P2P (DEPRECATED, returned only if config option -deprecatedrpc=service is passed)"),
-    RESULT_MAP_ENTRY("PoSeBanHeight", RPCResult::Type::NUM, "Height masternode was banned for Proof of Service violations"),
-    RESULT_MAP_ENTRY("PoSePenalty", RPCResult::Type::NUM, "Proof of Service penalty score"),
-    RESULT_MAP_ENTRY("PoSeRevivedHeight", RPCResult::Type::NUM, "Height masternode recovered from Proof of Service violations"),
-    RESULT_MAP_ENTRY("proTxHash", RPCResult::Type::STR_HEX, "Hash of the masternode's initial ProRegTx"),
-    RESULT_MAP_ENTRY("pubKeyOperator", RPCResult::Type::STR, "BLS public key used for operator signing"),
-    RESULT_MAP_ENTRY("quorumIndex", RPCResult::Type::NUM, "Quorum index. Relevant for rotation quorums only, 0 for non-rotating quorums"),
-    RESULT_MAP_ENTRY("quorumHash", RPCResult::Type::STR_HEX, "Hash of the quorum"),
-    RESULT_MAP_ENTRY("quorumSig", RPCResult::Type::STR_HEX, "BLS recovered threshold signature of quorum"),
-    RESULT_MAP_ENTRY("registeredHeight", RPCResult::Type::NUM, "Height masternode was registered"),
-    RESULT_MAP_ENTRY("revocationReason", RPCResult::Type::NUM, "Reason for ProUpRegTx revocation"),
-    RESULT_MAP_ENTRY("service", RPCResult::Type::STR, "IP address and port of the masternode (DEPRECATED, returned only if config option -deprecatedrpc=service is passed)"),
-    RESULT_MAP_ENTRY("type", RPCResult::Type::NUM, "Masternode type"),
-    RESULT_MAP_ENTRY("type_str", RPCResult::Type::STR, "Masternode type (human-readable string)"),
-    RESULT_MAP_ENTRY("version", RPCResult::Type::NUM, "Special transaction version"),
-    RESULT_MAP_ENTRY("votingAddress", RPCResult::Type::STR, "Dash address used for voting"),
-}};
-#undef RESULT_MAP_ENTRY
-
 template <typename Obj>
 std::string GetDeprecatedServiceField(const Obj& obj)
 {
@@ -93,34 +34,65 @@ std::string GetDeprecatedServiceField(const Obj& obj)
 }
 } // anonymous namespace
 
-RPCResult GetRpcResult(const std::string& key, bool optional, const std::string& override_name)
+template <typename Obj>
+UniValue GetNetInfoWithLegacyFields(const Obj& obj, const MnType& type)
 {
-    if (const auto it = RPCRESULT_MAP.find(key); it != RPCRESULT_MAP.end()) {
-        const auto& ret{it->second};
-        return RPCResult{ret.m_type, override_name.empty() ? ret.m_key_name : override_name, optional, ret.m_description, ret.m_inner};
-    }
-    throw NonFatalCheckError(strprintf("Requested invalid RPCResult for nonexistent key \"%s\"", key).c_str(),
-                             __FILE__, __LINE__, __func__);
-}
+    UniValue ret{CHECK_NONFATAL(obj.netInfo)->ToJson()};
 
-RPCResult CAssetLockPayload::GetJsonHelp(const std::string& key, bool optional)
-{
-    return {RPCResult::Type::OBJ, key, optional, key.empty() ? "" : "The asset lock special transaction",
-    {
-        GetRpcResult("version"),
-        {RPCResult::Type::ARR, "creditOutputs", "", {
-            {RPCResult::Type::OBJ, "", "", {
-                {RPCResult::Type::NUM, "value", "The value in Dash"},
-                {RPCResult::Type::NUM, "valueSat", "The value in duffs"},
-                {RPCResult::Type::OBJ, "scriptPubKey", "", {
-                    {RPCResult::Type::STR, "asm", "The asm"},
-                    {RPCResult::Type::STR_HEX, "hex", "The hex"},
-                    {RPCResult::Type::STR, "type", "The type, eg 'pubkeyhash'"},
-                }},
-                {RPCResult::Type::STR, "address", /*optional=*/true, "DIP-18 Platform address (version >= 2 only)"},
-        }}}}
-    }};
+    // Nothing to do here if not EvoNode, netInfo is empty or netInfo is capable of natively
+    // storing Platform fields
+    if (type != MnType::Evo || obj.netInfo->IsEmpty() || obj.netInfo->CanStorePlatform()) return ret;
+
+    CNetAddr addr{obj.netInfo->GetPrimary()};
+    ret.pushKV(PurposeToString(NetInfoPurpose::PLATFORM_HTTPS).data(),
+               ArrFromService(CService(addr, obj.platformHTTPPort)));
+
+    if constexpr (!std::is_same_v<std::decay_t<Obj>, CSimplifiedMNListEntry>) {
+        // CSimplifiedMNListEntry doesn't store platformP2PPort
+        ret.pushKV(PurposeToString(NetInfoPurpose::PLATFORM_P2P).data(),
+                   ArrFromService(CService(addr, obj.platformP2PPort)));
+    }
+
+    return ret;
 }
+template UniValue GetNetInfoWithLegacyFields(const CDeterministicMNState& obj, const MnType& type);
+
+template <bool is_p2p, typename Obj>
+int32_t GetPlatformPort(const Obj& obj)
+{
+    // Currently, there is nothing that prevents PLATFORM_{HTTPS,P2P} to be registered to
+    // an addr *different* from the primary addr for CORE_P2P. This breaks the assumptions
+    // under which platform{HTTP,P2P}Port operate under (i.e. all three are hosted with the
+    // same addr).
+    //
+    // TODO: Introduce restrictions that enforce this assumption *until* we remove legacy
+    //       fields for good.
+    //
+    bool is_legacy{!(CHECK_NONFATAL(obj.netInfo)->CanStorePlatform())};
+    if constexpr (is_p2p) {
+        static_assert(!std::is_same_v<std::decay_t<Obj>, CSimplifiedMNListEntry>,
+                      "CSimplifiedMNListEntry doesn't have platformP2PPort");
+        if (is_legacy) {
+            return obj.platformP2PPort;
+        }
+        if (obj.netInfo->IsEmpty()) {
+            return -1; // Blank entry, nothing to report
+        }
+        CHECK_NONFATAL(obj.netInfo->HasEntries(NetInfoPurpose::PLATFORM_P2P));
+        return obj.netInfo->GetEntries(NetInfoPurpose::PLATFORM_P2P)[0].GetPort();
+    } else {
+        if (is_legacy) {
+            return obj.platformHTTPPort;
+        }
+        if (obj.netInfo->IsEmpty()) {
+            return -1; // Blank entry, nothing to report
+        }
+        CHECK_NONFATAL(obj.netInfo->HasEntries(NetInfoPurpose::PLATFORM_HTTPS));
+        return obj.netInfo->GetEntries(NetInfoPurpose::PLATFORM_HTTPS)[0].GetPort();
+    }
+}
+template int32_t GetPlatformPort<true>(const CDeterministicMNState& obj);
+template int32_t GetPlatformPort<false>(const CDeterministicMNState& obj);
 
 UniValue CAssetLockPayload::ToJson() const
 {
@@ -147,19 +119,6 @@ UniValue CAssetLockPayload::ToJson() const
     return ret;
 }
 
-RPCResult CAssetUnlockPayload::GetJsonHelp(const std::string& key, bool optional)
-{
-    return {RPCResult::Type::OBJ, key, optional, key.empty() ? "" : "The asset unlock special transaction",
-    {
-        GetRpcResult("version"),
-        {RPCResult::Type::NUM, "index", "Index of the transaction"},
-        {RPCResult::Type::NUM, "fee", "Transaction fee in duffs awarded to the miner"},
-        {RPCResult::Type::NUM, "requestedHeight", "Payment chain block height known by Platform when signing the withdrawal"},
-        GetRpcResult("quorumHash"),
-        GetRpcResult("quorumSig"),
-    }};
-}
-
 UniValue CAssetUnlockPayload::ToJson() const
 {
     UniValue ret(UniValue::VOBJ);
@@ -170,20 +129,6 @@ UniValue CAssetUnlockPayload::ToJson() const
     ret.pushKV("quorumHash", quorumHash.ToString());
     ret.pushKV("quorumSig", quorumSig.ToString());
     return ret;
-}
-
-RPCResult CCbTx::GetJsonHelp(const std::string& key, bool optional)
-{
-    return {RPCResult::Type::OBJ, key, optional, key.empty() ? "" : "The coinbase special transaction",
-    {
-        GetRpcResult("version"),
-        GetRpcResult("height"),
-        GetRpcResult("merkleRootMNList"),
-        GetRpcResult("merkleRootQuorums", /*optional=*/true),
-        {RPCResult::Type::NUM, "bestCLHeightDiff", /*optional=*/true, "Blocks between the current block and the last known block with a ChainLock"},
-        {RPCResult::Type::STR_HEX, "bestCLSignature", /*optional=*/true, "Best ChainLock signature known by the miner"},
-        {RPCResult::Type::NUM, "creditPoolBalance", /*optional=*/true, "Balance in the Platform credit pool"},
-    }};
 }
 
 UniValue CCbTx::ToJson() const
@@ -201,47 +146,6 @@ UniValue CCbTx::ToJson() const
         }
     }
     return ret;
-}
-
-// CDeterministicMN::ToJson() defined in evo/deterministicmns.cpp
-RPCResult CDeterministicMN::GetJsonHelp(const std::string& key, bool optional)
-{
-    return {RPCResult::Type::OBJ, key, optional, key.empty() ? "" : "The masternode's details",
-    {
-        GetRpcResult("type_str", /*optional=*/false, /*override_name=*/"type"),
-        GetRpcResult("proTxHash"),
-        GetRpcResult("collateralHash"),
-        GetRpcResult("collateralIndex"),
-        GetRpcResult("collateralAddress", /*optional=*/true),
-        GetRpcResult("operatorReward"),
-        CDeterministicMNState::GetJsonHelp(/*key=*/"state", /*optional=*/false),
-    }};
-}
-
-RPCResult CDeterministicMNState::GetJsonHelp(const std::string& key, bool optional)
-{
-    return {RPCResult::Type::OBJ, key, optional, key.empty() ? "" : "The masternode state",
-    {
-        {RPCResult::Type::NUM, "version", "Version of the masternode state"},
-        GetRpcResult("service", /*optional=*/true),
-        GetRpcResult("addresses"),
-        GetRpcResult("registeredHeight"),
-        GetRpcResult("lastPaidHeight"),
-        GetRpcResult("consecutivePayments"),
-        GetRpcResult("PoSePenalty"),
-        GetRpcResult("PoSeRevivedHeight"),
-        GetRpcResult("PoSeBanHeight"),
-        GetRpcResult("revocationReason"),
-        GetRpcResult("ownerAddress"),
-        GetRpcResult("votingAddress"),
-        GetRpcResult("platformNodeID", /*optional=*/true),
-        GetRpcResult("platformP2PPort", /*optional=*/true),
-        GetRpcResult("platformHTTPPort", /*optional=*/true),
-        GetRpcResult("payoutAddress", /*optional=*/true),
-        GetRpcResult("payouts", /*optional=*/true),
-        GetRpcResult("pubKeyOperator"),
-        GetRpcResult("operatorPayoutAddress", /*optional=*/true),
-    }};
 }
 
 UniValue CDeterministicMNState::ToJson(MnType nType) const
@@ -282,57 +186,6 @@ UniValue CDeterministicMNState::ToJson(MnType nType) const
     return obj;
 }
 
-// CDeterministicMNStateDiff::ToJson() defined in evo/dmnstate.cpp
-RPCResult CDeterministicMNStateDiff::GetJsonHelp(const std::string& key, bool optional)
-{
-    // Every field is emitted only when the diff actually carries it, version included.
-    return {RPCResult::Type::OBJ, key, optional, key.empty() ? "" : "The masternode state diff",
-    {
-        {RPCResult::Type::NUM, "version", /*optional=*/true, "Version of the masternode state diff"},
-        GetRpcResult("service", /*optional=*/true),
-        GetRpcResult("registeredHeight", /*optional=*/true),
-        GetRpcResult("lastPaidHeight", /*optional=*/true),
-        GetRpcResult("consecutivePayments", /*optional=*/true),
-        GetRpcResult("PoSePenalty", /*optional=*/true),
-        GetRpcResult("PoSeRevivedHeight", /*optional=*/true),
-        GetRpcResult("PoSeBanHeight", /*optional=*/true),
-        GetRpcResult("revocationReason", /*optional=*/true),
-        GetRpcResult("ownerAddress", /*optional=*/true),
-        GetRpcResult("votingAddress", /*optional=*/true),
-        GetRpcResult("payoutAddress", /*optional=*/true),
-        GetRpcResult("payouts", /*optional=*/true),
-        GetRpcResult("operatorPayoutAddress", /*optional=*/true),
-        GetRpcResult("pubKeyOperator", /*optional=*/true),
-        GetRpcResult("platformNodeID", /*optional=*/true),
-        GetRpcResult("platformP2PPort", /*optional=*/true),
-        GetRpcResult("platformHTTPPort", /*optional=*/true),
-        GetRpcResult("addresses", /*optional=*/true),
-    }};
-}
-
-RPCResult CProRegTx::GetJsonHelp(const std::string& key, bool optional)
-{
-    return {RPCResult::Type::OBJ, key, optional, key.empty() ? "" : "The masternode registration special transaction",
-    {
-        GetRpcResult("version"),
-        GetRpcResult("type"),
-        GetRpcResult("collateralHash"),
-        GetRpcResult("collateralIndex"),
-        GetRpcResult("service", /*optional=*/true),
-        GetRpcResult("addresses"),
-        GetRpcResult("ownerAddress"),
-        GetRpcResult("votingAddress"),
-        GetRpcResult("payoutAddress", /*optional=*/true),
-        GetRpcResult("payouts", /*optional=*/true),
-        GetRpcResult("pubKeyOperator"),
-        GetRpcResult("operatorReward"),
-        GetRpcResult("platformNodeID", /*optional=*/true),
-        GetRpcResult("platformP2PPort", /*optional=*/true),
-        GetRpcResult("platformHTTPPort", /*optional=*/true),
-        GetRpcResult("inputsHash"),
-    }};
-}
-
 UniValue CProRegTx::ToJson() const
 {
     UniValue ret(UniValue::VOBJ);
@@ -352,7 +205,7 @@ UniValue CProRegTx::ToJson() const
         ret.pushKV("payoutAddress", EncodeDestination(dest));
     }
     ret.pushKV("pubKeyOperator", pubKeyOperator.ToString());
-    ret.pushKV("operatorReward", (double)nOperatorReward / 100);
+    ret.pushKV("operatorReward", static_cast<double>(nOperatorReward) / 100);
     if (nType == MnType::Evo) {
         ret.pushKV("platformNodeID", platformNodeID.ToString());
         if (IsServiceDeprecatedRPCEnabled()) {
@@ -362,20 +215,6 @@ UniValue CProRegTx::ToJson() const
     }
     ret.pushKV("inputsHash", inputsHash.ToString());
     return ret;
-}
-
-RPCResult CProUpRegTx::GetJsonHelp(const std::string& key, bool optional)
-{
-    return {RPCResult::Type::OBJ, key, optional, key.empty() ? "" : "The masternode update registrar special transaction",
-    {
-        GetRpcResult("version"),
-        GetRpcResult("proTxHash"),
-        GetRpcResult("votingAddress"),
-        GetRpcResult("payoutAddress", /*optional=*/true),
-        GetRpcResult("payouts", /*optional=*/true),
-        GetRpcResult("pubKeyOperator"),
-        GetRpcResult("inputsHash"),
-    }};
 }
 
 UniValue CProUpRegTx::ToJson() const
@@ -394,17 +233,6 @@ UniValue CProUpRegTx::ToJson() const
     return ret;
 }
 
-RPCResult CProUpRevTx::GetJsonHelp(const std::string& key, bool optional)
-{
-    return {RPCResult::Type::OBJ, key, optional, key.empty() ? "" : "The masternode operator revocation special transaction",
-    {
-        GetRpcResult("version"),
-        GetRpcResult("proTxHash"),
-        {RPCResult::Type::NUM, "reason", "Reason for masternode service revocation"},
-        GetRpcResult("inputsHash", /*optional=*/true),
-    }};
-}
-
 UniValue CProUpRevTx::ToJson() const
 {
     UniValue ret(UniValue::VOBJ);
@@ -413,23 +241,6 @@ UniValue CProUpRevTx::ToJson() const
     ret.pushKV("reason", nReason);
     ret.pushKV("inputsHash", inputsHash.ToString());
     return ret;
-}
-
-RPCResult CProUpServTx::GetJsonHelp(const std::string& key, bool optional)
-{
-    return {RPCResult::Type::OBJ, key, optional, key.empty() ? "" : "The masternode update service special transaction",
-    {
-        GetRpcResult("version"),
-        GetRpcResult("type"),
-        GetRpcResult("proTxHash"),
-        GetRpcResult("service", /*optional=*/true),
-        GetRpcResult("addresses"),
-        GetRpcResult("operatorPayoutAddress", /*optional=*/true),
-        GetRpcResult("platformNodeID", /*optional=*/true),
-        GetRpcResult("platformP2PPort", /*optional=*/true),
-        GetRpcResult("platformHTTPPort", /*optional=*/true),
-        GetRpcResult("inputsHash"),
-    }};
 }
 
 UniValue CProUpServTx::ToJson() const
@@ -454,36 +265,6 @@ UniValue CProUpServTx::ToJson() const
     }
     ret.pushKV("inputsHash", inputsHash.ToString());
     return ret;
-}
-
-RPCResult CSimplifiedMNListDiff::GetJsonHelp(const std::string& key, bool optional)
-{
-    return {RPCResult::Type::OBJ, key, optional, key.empty() ? "" : "The simplified masternode list diff",
-    {
-        {RPCResult::Type::NUM, "nVersion", "Version of the diff"},
-        {RPCResult::Type::STR_HEX, "baseBlockHash", "Hash of the base block"},
-        {RPCResult::Type::STR_HEX, "blockHash", "Hash of the ending block"},
-        {RPCResult::Type::STR_HEX, "cbTxMerkleTree", "Coinbase transaction merkle tree"},
-        {RPCResult::Type::STR_HEX, "cbTx", "Coinbase raw transaction"},
-        {RPCResult::Type::ARR, "deletedMNs", "ProRegTx hashes of deleted masternodes",
-            {{RPCResult::Type::STR_HEX, "hash", ""}}},
-        {RPCResult::Type::ARR, "mnList", "Masternode list details",
-            {CSimplifiedMNListEntry::GetJsonHelp(/*key=*/"", /*optional=*/false)}},
-        {RPCResult::Type::ARR, "deletedQuorums", "Deleted quorums",
-            {{RPCResult::Type::OBJ, "", "", {
-                GetRpcResult("llmqType"),
-                GetRpcResult("quorumHash"),
-        }}}},
-        {RPCResult::Type::ARR, "newQuorums", "New quorums",
-            {llmq::CFinalCommitment::GetJsonHelp(/*key=*/"", /*optional=*/false)}},
-        GetRpcResult("merkleRootMNList", /*optional=*/true),
-        GetRpcResult("merkleRootQuorums", /*optional=*/true),
-        {RPCResult::Type::ARR, "quorumsCLSigs", "ChainLock signature details", {
-            {RPCResult::Type::OBJ_DYN, "", "json object with the BLS signature as key", {
-                {RPCResult::Type::ARR, "<sig_hex>", "Array of quorum indices signed by this BLS signature", {
-                    {RPCResult::Type::NUM, "", "Quorum index"}
-        }}}}}},
-    }};
 }
 
 UniValue CSimplifiedMNListDiff::ToJson(bool extended) const
@@ -549,27 +330,6 @@ UniValue CSimplifiedMNListDiff::ToJson(bool extended) const
     return obj;
 }
 
-RPCResult CSimplifiedMNListEntry::GetJsonHelp(const std::string& key, bool optional)
-{
-    return {RPCResult::Type::OBJ, key, optional, key.empty() ? "" : "The simplified masternode list entry",
-    {
-        {RPCResult::Type::NUM, "nVersion", "Version of the entry"},
-        GetRpcResult("type", /*optional=*/false, /*override_name=*/"nType"),
-        {RPCResult::Type::STR_HEX, "proRegTxHash", "Hash of the ProRegTx identifying the masternode"},
-        {RPCResult::Type::STR_HEX, "confirmedHash", "Hash of the block where the masternode was confirmed"},
-        GetRpcResult("service", /*optional=*/true),
-        GetRpcResult("addresses"),
-        GetRpcResult("pubKeyOperator"),
-        GetRpcResult("votingAddress"),
-        {RPCResult::Type::BOOL, "isValid", "Returns true if the masternode is not Proof-of-Service banned"},
-        GetRpcResult("platformHTTPPort", /*optional=*/true),
-        GetRpcResult("platformNodeID", /*optional=*/true),
-        GetRpcResult("payoutAddress", /*optional=*/true),
-        GetRpcResult("payouts", /*optional=*/true),
-        GetRpcResult("operatorPayoutAddress", /*optional=*/true),
-    }};
-}
-
 UniValue CSimplifiedMNListEntry::ToJson(bool extended) const
 {
     UniValue obj(UniValue::VOBJ);
@@ -605,16 +365,6 @@ UniValue CSimplifiedMNListEntry::ToJson(bool extended) const
     return obj;
 }
 
-RPCResult MNHFTx::GetJsonHelp(const std::string& key, bool optional)
-{
-    return {RPCResult::Type::OBJ, key, optional, key.empty() ? "" : "The masternode hard fork payload",
-    {
-        {RPCResult::Type::NUM, "versionBit", "Version bit associated with the hard fork"},
-        GetRpcResult("quorumHash"),
-        {RPCResult::Type::STR_HEX, "sig", "BLS signature by a quorum public key"},
-    }};
-}
-
 UniValue MNHFTx::ToJson() const
 {
     UniValue obj(UniValue::VOBJ);
@@ -622,15 +372,6 @@ UniValue MNHFTx::ToJson() const
     obj.pushKV("quorumHash", quorumHash.ToString());
     obj.pushKV("sig", sig.ToString());
     return obj;
-}
-
-RPCResult MNHFTxPayload::GetJsonHelp(const std::string& key, bool optional)
-{
-    return {RPCResult::Type::OBJ, key, optional, key.empty() ? "" : "The masternode hard fork signal special transaction",
-    {
-        GetRpcResult("version"),
-        MNHFTx::GetJsonHelp(/*key=*/"signal", /*optional=*/false),
-    }};
 }
 
 UniValue MNHFTxPayload::ToJson() const

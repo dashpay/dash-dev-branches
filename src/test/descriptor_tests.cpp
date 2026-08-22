@@ -2,6 +2,7 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
+#include <key_io.h>
 #include <pubkey.h>
 #include <script/descriptor.h>
 #include <script/sign.h>
@@ -11,6 +12,7 @@
 
 #include <boost/test/unit_test.hpp>
 
+#include <array>
 #include <optional>
 #include <string>
 #include <vector>
@@ -279,6 +281,33 @@ void Check(const std::string& prv, const std::string& pub, const std::string& no
 }
 
 BOOST_FIXTURE_TEST_SUITE(descriptor_tests, BasicTestingSetup)
+
+BOOST_AUTO_TEST_CASE(descriptor_root_extended_key)
+{
+    const std::array<std::byte, 32> seed{std::byte{1}};
+    CExtKey root;
+    root.SetSeed(seed);
+
+    FlatSigningProvider keys;
+    std::string error;
+    auto descriptor{Parse("sh(pkh(" + EncodeExtKey(root) + "/0/*))", keys, error)};
+    BOOST_REQUIRE_MESSAGE(descriptor, error);
+
+    CExtPubKey root_pub;
+    BOOST_REQUIRE(descriptor->GetRootExtPubKey(root_pub));
+    BOOST_CHECK(root_pub == root.Neuter());
+
+    CExtKey root_priv;
+    BOOST_CHECK(!descriptor->GetRootExtKey(DUMMY_SIGNING_PROVIDER, root_priv));
+    BOOST_REQUIRE(descriptor->GetRootExtKey(keys, root_priv));
+    BOOST_CHECK(root_priv == root);
+
+    FlatSigningProvider constant_keys;
+    auto constant{Parse("pk(" + HexStr(root.key.GetPubKey()) + ")", constant_keys, error)};
+    BOOST_REQUIRE_MESSAGE(constant, error);
+    BOOST_CHECK(!constant->GetRootExtPubKey(root_pub));
+    BOOST_CHECK(!constant->GetRootExtKey(keys, root_priv));
+}
 
 BOOST_AUTO_TEST_CASE(descriptor_test)
 {

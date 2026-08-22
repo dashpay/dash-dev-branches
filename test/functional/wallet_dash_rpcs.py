@@ -27,7 +27,7 @@ from test_framework.test_framework import (
     DashTestFramework,
     MasternodeInfo,
 )
-from test_framework.util import assert_equal, p2p_port, softfork_active
+from test_framework.util import assert_equal, assert_raises_rpc_error, p2p_port, softfork_active
 
 
 class WalletDashRPCsTest(DashTestFramework):
@@ -58,6 +58,7 @@ class WalletDashRPCsTest(DashTestFramework):
 
         self.test_gobject_wallet_paths()
         funded_mn = self.test_protx_register_fund()
+        self.test_protx_collateral_lock_errors()
         self.test_protx_register_own_collateral()
         self.test_protx_register_external()
         self.test_protx_update_service(funded_mn)
@@ -130,13 +131,48 @@ class WalletDashRPCsTest(DashTestFramework):
         mn.set_params(collateral_txid=collateral_txid, collateral_vout=collateral_vout)
         # Unlike register_prepare, this proves ownership of the collateral by signing the
         # payload with the wallet itself (CWallet::SignMessage -> SPKM dispatch)
-        protx_hash = mn.register(node, submit=True)
-        assert protx_hash is not None
+        raw_tx = mn.register(node, submit=False)
+        assert raw_tx is not None
+        collateral_outpoint = {"txid": collateral_txid, "vout": collateral_vout}
+        assert collateral_outpoint in node.listlockunspent()
+        protx_hash = node.sendrawtransaction(raw_tx)
         mn.set_params(proTxHash=protx_hash)
         self.confirm_tx(protx_hash)
         assert protx_hash in node.protx("list", "registered")
         assert_equal(node.protx("info", protx_hash)["collateralHash"], collateral_txid)
         assert "%s-%d" % (collateral_txid, collateral_vout) in node.masternode("list")
+
+    def test_protx_collateral_lock_errors(self):
+        node = self.nodes[0]
+        self.log.info("Test protx collateral lock ownership on errors")
+        mn = self.prepare_unstarted_mn(len(self.nodes) + 4)
+        collateral_txid = node.sendtoaddress(mn.collateral_address, mn.get_collateral_value())
+        self.bump_mocktime(1)
+        self.generate(node, 1)
+        collateral_vout = mn.get_collateral_vout(node, collateral_txid)
+        mn.set_params(collateral_txid=collateral_txid, collateral_vout=collateral_vout)
+        collateral_outpoint = {"txid": collateral_txid, "vout": collateral_vout}
+        unfunded_address = node.getnewaddress()
+
+        # A failing call releases only a lock that it acquired itself.
+        mn.register(node, submit=False, fundsAddr=unfunded_address,
+                    expected_assert_code=-32603, expected_assert_msg="No funds at specified address")
+        assert collateral_outpoint not in node.listlockunspent()
+
+        command = "register_prepare_legacy" if mn.legacy else "register_prepare"
+        prepare_args = [collateral_txid, collateral_vout, f'127.0.0.1:{mn.nodePort}',
+                        mn.ownerAddr, mn.pubKeyOperator, mn.votingAddr, 0,
+                        mn.rewards_address, unfunded_address]
+        assert_raises_rpc_error(-32603, "No funds at specified address", node.protx, command, *prepare_args)
+        assert collateral_outpoint not in node.listlockunspent()
+
+        node.lockunspent(False, [collateral_outpoint])
+        mn.register(node, submit=False, fundsAddr=unfunded_address,
+                    expected_assert_code=-32603, expected_assert_msg="No funds at specified address")
+        assert collateral_outpoint in node.listlockunspent()
+        assert_raises_rpc_error(-32603, "No funds at specified address", node.protx, command, *prepare_args)
+        assert collateral_outpoint in node.listlockunspent()
+        node.lockunspent(True, [collateral_outpoint])
 
     def test_protx_register_external(self):
         node = self.nodes[0]
@@ -153,8 +189,19 @@ class WalletDashRPCsTest(DashTestFramework):
         prepared = node.protx(command, collateral_txid, collateral_vout, f'127.0.0.1:{mn.nodePort}',
                               mn.ownerAddr, mn.pubKeyOperator, mn.votingAddr, 0, mn.rewards_address, mn.fundsAddr)
         assert_equal(prepared["collateralAddress"], mn.collateral_address)
+        collateral_outpoint = {"txid": collateral_txid, "vout": collateral_vout}
+        assert collateral_outpoint in node.listlockunspent()
         signature = node.signmessage(prepared["collateralAddress"], prepared["signMessage"])
+
+        assert_raises_rpc_error(-1, "bad-protx-sig", node.protx, "register_submit", prepared["tx"], "AA==")
+        assert collateral_outpoint in node.listlockunspent()
+        node.createwallet("empty_signing_wallet")
+        empty_wallet = node.get_wallet_rpc("empty_signing_wallet")
+        assert_raises_rpc_error(-4, "transaction inputs could not be fully signed", empty_wallet.protx,
+                                "register_submit", prepared["tx"], signature)
+        node.unloadwallet("empty_signing_wallet")
         protx_hash = node.protx("register_submit", prepared["tx"], signature)
+        assert collateral_outpoint in node.listlockunspent()
         mn.set_params(proTxHash=protx_hash)
         self.confirm_tx(protx_hash)
         assert protx_hash in node.protx("list", "registered")

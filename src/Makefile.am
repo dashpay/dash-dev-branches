@@ -232,6 +232,7 @@ BITCOIN_CORE_H = \
   evo/mnhftx.h \
   evo/netinfo.h \
   evo/providertx.h \
+  evo/providertx_service.h \
   evo/simplifiedmns.h \
   evo/smldiff.h \
   evo/specialtx.h \
@@ -281,6 +282,7 @@ BITCOIN_CORE_H = \
   interfaces/init.h \
   interfaces/ipc.h \
   interfaces/node.h \
+  interfaces/providertx.h \
   interfaces/wallet.h \
   kernel/blockmanager_opts.h \
   kernel/chain.h \
@@ -370,7 +372,7 @@ BITCOIN_CORE_H = \
   rest.h \
   rpc/blockchain.h \
   rpc/client.h \
-  rpc/evo_util.h \
+  rpc/json_help.h \
   rpc/mempool.h \
   rpc/mining.h \
   rpc/protocol.h \
@@ -476,6 +478,8 @@ BITCOIN_CORE_H = \
   wallet/hdchain.h \
   wallet/ismine.h \
   wallet/load.h \
+  wallet/platformkeys.h \
+  wallet/platformtypes.h \
   wallet/receive.h \
   wallet/rpc/util.h \
   wallet/rpc/wallet.h \
@@ -539,6 +543,7 @@ libbitcoin_node_a_SOURCES = \
   evo/mnauth.cpp \
   evo/mnhftx.cpp \
   evo/providertx.cpp \
+  evo/providertx_service.cpp \
   evo/simplifiedmns.cpp \
   evo/smldiff.cpp \
   evo/specialtx.cpp \
@@ -635,6 +640,7 @@ libbitcoin_node_a_SOURCES = \
   rpc/evo.cpp \
   rpc/fees.cpp \
   rpc/governance.cpp \
+  rpc/json_help.cpp \
   rpc/masternode.cpp \
   rpc/mempool.cpp \
   rpc/mining.cpp \
@@ -706,6 +712,7 @@ libbitcoin_wallet_a_SOURCES = \
   wallet/hdchain.cpp \
   wallet/interfaces.cpp \
   wallet/load.cpp \
+  wallet/platformkeys.cpp \
   wallet/receive.cpp \
   wallet/rpc/addresses.cpp \
   wallet/rpc/backup.cpp \
@@ -966,7 +973,6 @@ libbitcoin_common_a_SOURCES = \
   evo/providertx_util.cpp \
   external_signer.cpp \
   governance/common.cpp \
-  governance/core_write.cpp \
   init/common.cpp \
   key.cpp \
   key_io.cpp \
@@ -981,7 +987,6 @@ libbitcoin_common_a_SOURCES = \
   policy/policy.cpp \
   protocol.cpp \
   psbt.cpp \
-  rpc/evo_util.cpp \
   rpc/external_signer.cpp \
   rpc/rawtransaction_util.cpp \
   rpc/request.cpp \

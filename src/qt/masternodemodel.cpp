@@ -4,7 +4,9 @@
 
 #include <qt/masternodemodel.h>
 
+#include <bls/bls.h>
 #include <chainparams.h>
+#include <evo/types.h>
 #include <interfaces/node.h>
 #include <key_io.h>
 #include <pubkey.h>
@@ -25,14 +27,14 @@
 namespace {
 std::optional<QString> JoinArray(const UniValue& arr)
 {
-    if (!arr.isArray() || arr.empty()) return std::nullopt;
+    if (!arr.isArray()) return std::nullopt;
     QStringList list;
     for (size_t i = 0; i < arr.size(); ++i) {
         if (arr[i].isStr()) {
             list << QString::fromStdString(arr[i].get_str());
         }
     }
-    return list.isEmpty() ? std::nullopt : std::optional<QString>(list.join(", "));
+    return list.join(", ");
 }
 } // anonymous namespace
 
@@ -48,13 +50,16 @@ MasternodeEntry::MasternodeEntry(const interfaces::MnEntryCPtr& dmn, const QStri
     m_collateral_outpoint{QString::fromStdString(dmn->getCollateralOutpoint().ToStringShort())},
     m_owner_address{QString::fromStdString(EncodeDestination(PKHash(dmn->getKeyIdOwner())))},
     m_protx_hash{QString::fromStdString(dmn->getProTxHash().ToString())},
-    m_service{QString::fromStdString(dmn->getNetInfoPrimary().ToStringAddrPort())},
     m_type_description{QString::fromStdString(std::string(GetMnType(dmn->getType()).description))},
     m_voting_address{QString::fromStdString(EncodeDestination(PKHash(dmn->getKeyIdVoting())))},
     m_operator_reward_pct{dmn->getOperatorReward()}
 {
-    auto addr_key = dmn->getNetInfoPrimary().GetKey();
-    m_service_key = QByteArray(reinterpret_cast<const char*>(addr_key.data()), addr_key.size());
+    const CService primary_service{dmn->getNetInfoPrimary()};
+    if (primary_service.IsValid()) {
+        m_service = QString::fromStdString(primary_service.ToStringAddrPort());
+        const auto addr_key{primary_service.GetKey()};
+        m_service_key = QByteArray(reinterpret_cast<const char*>(addr_key.data()), addr_key.size());
+    }
 
     QStringList payout_addresses;
     for (const auto& script_payout : dmn->getScriptPayouts()) {
@@ -62,14 +67,18 @@ MasternodeEntry::MasternodeEntry(const interfaces::MnEntryCPtr& dmn, const QStri
             payout_addresses << QString::fromStdString(EncodeDestination(dest));
         }
     }
+    m_payout_addresses = payout_addresses;
     m_payout_address = payout_addresses.isEmpty() ? QObject::tr("UNKNOWN") : payout_addresses.join(", ");
+
+    if (CTxDestination operator_destination; ExtractDestination(dmn->getScriptOperatorPayout(), operator_destination)) {
+        m_operator_payout_address = QString::fromStdString(EncodeDestination(operator_destination));
+    }
 
     if (m_operator_reward_pct) {
         m_operator_reward = QString::number(m_operator_reward_pct / 100.0, 'f', 2) + "%";
         if (dmn->getScriptOperatorPayout() != CScript()) {
-            CTxDestination operatorDest;
-            if (ExtractDestination(dmn->getScriptOperatorPayout(), operatorDest)) {
-                m_operator_reward += " " + QObject::tr("to %1").arg(QString::fromStdString(EncodeDestination(operatorDest)));
+            if (!m_operator_payout_address.isEmpty()) {
+                m_operator_reward += " " + QObject::tr("to %1").arg(m_operator_payout_address);
             } else {
                 m_operator_reward += " " + QObject::tr("to UNKNOWN");
             }
@@ -90,6 +99,9 @@ MasternodeEntry::MasternodeEntry(const interfaces::MnEntryCPtr& dmn, const QStri
         m_collateral_index = val.getInt<int32_t>();
     }
     if (const auto& state = json.find_value("state"); state.isObject()) {
+        if (const auto& val = state.find_value("version"); val.isNum()) {
+            m_operator_legacy_scheme = val.getInt<int>() == ProTxVersion::LegacyBLS;
+        }
         if (const auto& val = state.find_value("consecutivePayments"); val.isNum()) {
             m_consecutive_payments = val.getInt<int32_t>();
         }
@@ -114,6 +126,26 @@ MasternodeEntry::MasternodeEntry(const interfaces::MnEntryCPtr& dmn, const QStri
 }
 
 MasternodeEntry::~MasternodeEntry() = default;
+
+QString MasternodeEntry::operatorPubKey(bool legacy_scheme) const
+{
+    CBLSPublicKey key;
+    if (!m_pub_key_operator ||
+        !key.SetHexStr(m_pub_key_operator->toStdString(), /*specificLegacyScheme=*/m_operator_legacy_scheme)) {
+        return {};
+    }
+    return key.IsValid() ? QString::fromStdString(key.ToString(legacy_scheme)) : QString{};
+}
+
+std::vector<unsigned char> MasternodeEntry::operatorPubKeyBytes() const
+{
+    CBLSPublicKey key;
+    if (!m_pub_key_operator ||
+        !key.SetHexStr(m_pub_key_operator->toStdString(), /*specificLegacyScheme=*/m_operator_legacy_scheme)) {
+        return {};
+    }
+    return key.ToByteVector(/*specificLegacyScheme=*/false);
+}
 
 QString MasternodeEntry::toHtml() const
 {
@@ -144,14 +176,14 @@ QString MasternodeEntry::toHtml() const
         ret += "<b>" + QObject::tr("Consecutive Payments") + ":</b> " + QString::number(*m_consecutive_payments) + "<br>";
     }
     ret += "<b>" + QObject::tr("Operator Reward") + ":</b> " + QString::number(m_operator_reward_pct / 100.0, 'f', 2) + "%<br>";
-    if (m_network_addresses) {
+    if (m_network_addresses && !m_network_addresses->isEmpty()) {
         ret += "<b>" + QObject::tr("Network Addresses") + ":</b> " + m_network_addresses->toHtmlEscaped() + "<br>";
     }
 
-    if (m_platform_https_addresses) {
+    if (m_platform_https_addresses && !m_platform_https_addresses->isEmpty()) {
         ret += "<b>" + QObject::tr("Platform HTTPS Addresses") + ":</b> " + m_platform_https_addresses->toHtmlEscaped() + "<br>";
     }
-    if (m_platform_p2p_addresses) {
+    if (m_platform_p2p_addresses && !m_platform_p2p_addresses->isEmpty()) {
         ret += "<b>" + QObject::tr("Platform P2P Addresses") + ":</b> " + m_platform_p2p_addresses->toHtmlEscaped() + "<br>";
     }
     if (m_platform_node_id) {

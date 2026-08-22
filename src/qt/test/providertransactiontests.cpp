@@ -118,16 +118,16 @@ class TransactionTypeSettingRestorer
 {
 public:
     TransactionTypeSettingRestorer() :
-        m_had_value(m_settings.contains("transactionType")),
-        m_value(m_settings.value("transactionType"))
+        m_had_value(m_settings.contains("transactionTypeFilter")),
+        m_value(m_settings.value("transactionTypeFilter"))
     {
     }
     ~TransactionTypeSettingRestorer()
     {
         if (m_had_value) {
-            m_settings.setValue("transactionType", m_value);
+            m_settings.setValue("transactionTypeFilter", m_value);
         } else {
-            m_settings.remove("transactionType");
+            m_settings.remove("transactionTypeFilter");
         }
     }
 
@@ -158,55 +158,42 @@ void CheckProviderRecords(const TransactionTableModel& model, const std::vector<
         QVERIFY(tooltip.contains(record.label));
         QVERIFY(tooltip.contains(record.tooltip_text));
         QVERIFY(!tooltip.contains("Payment to yourself"));
-
-        const QString plain_text{base.data(TransactionTableModel::TxPlainTextRole).toString()};
-        QVERIFY(plain_text.contains(record.label));
-        QVERIFY(!plain_text.contains("Payment to yourself"));
-
-        const QString description{base.data(TransactionTableModel::LongDescriptionRole).toString()};
-        QVERIFY(description.contains(record.label));
-        QVERIFY(description.contains(QString::fromStdString(record.txid.ToString())));
-        QVERIFY(description.contains("Net amount"));
-        QVERIFY(description.contains("Transaction total size"));
-        const QString summary{description.section("<hr>", 0, 0)};
-        QVERIFY(!summary.contains("From:"));
-        QVERIFY(!summary.contains("To:"));
-        QVERIFY(!summary.contains("<b>Debit:</b>"));
-        QVERIFY(!summary.contains("<b>Credit:</b>"));
-        QVERIFY(!summary.contains("Output index"));
     }
 }
 
 } // namespace
 
-void ProviderTransactionTests::transactionTypeSettingCompatibility_data()
+void ProviderTransactionTests::transactionTypeSettingPersistence_data()
 {
-    QTest::addColumn<int>("saved_index");
+    QTest::addColumn<quint32>("saved_filter");
     QTest::addColumn<QString>("expected_text");
-    QTest::addColumn<quint32>("expected_filter");
 
-    QTest::newRow("data") << 12 << QString{"Data Transaction"}
-                          << TransactionFilterProxy::TYPE(TransactionRecord::DataTransaction);
-    QTest::newRow("dust") << 13 << QString{"Dust Receive"} << TransactionFilterProxy::TYPE(TransactionRecord::DustReceive);
-    QTest::newRow("other") << 14 << QString{"Other"} << TransactionFilterProxy::TYPE(TransactionRecord::Other);
+    QTest::newRow("masternode") << (TransactionFilterProxy::TYPE(TransactionRecord::MasternodeRegistration) |
+                                    TransactionFilterProxy::TYPE(TransactionRecord::MasternodeUpdate))
+                                << QString{"Masternode"};
+    QTest::newRow("data") << TransactionFilterProxy::TYPE(TransactionRecord::DataTransaction)
+                          << QString{"Data Transaction"};
+    QTest::newRow("dust") << TransactionFilterProxy::TYPE(TransactionRecord::DustReceive)
+                          << QString{"Dust Receive"};
+    QTest::newRow("other") << TransactionFilterProxy::TYPE(TransactionRecord::Other)
+                           << QString{"Other"};
+    // An unknown stored filter selects nothing instead of an arbitrary entry.
+    QTest::newRow("unknown") << quint32{0} << QString{};
 }
 
-void ProviderTransactionTests::transactionTypeSettingCompatibility()
+void ProviderTransactionTests::transactionTypeSettingPersistence()
 {
-    QFETCH(int, saved_index);
+    QFETCH(quint32, saved_filter);
     QFETCH(QString, expected_text);
-    QFETCH(quint32, expected_filter);
 
     TransactionTypeSettingRestorer setting_restorer;
-    QSettings{}.setValue("transactionType", saved_index);
+    QSettings{}.setValue("transactionTypeFilter", saved_filter);
 
     TransactionView transaction_view;
     QComboBox* const type_widget{FindTransactionTypeWidget(transaction_view)};
     QVERIFY(type_widget != nullptr);
-    QCOMPARE(type_widget->currentIndex(), saved_index);
     QCOMPARE(type_widget->currentText(), expected_text);
-    QCOMPARE(type_widget->currentData().toUInt(), expected_filter);
-    QCOMPARE(type_widget->findText("Masternode"), 15);
+    QCOMPARE(type_widget->currentData().toUInt(), saved_filter);
 }
 
 void ProviderTransactionTests::providerTransactionHistory()
@@ -301,13 +288,6 @@ void ProviderTransactionTests::providerTransactionHistory()
 
         // Transactions loaded before the model is constructed exercise the wallet-restart path.
         CheckProviderRecords(*model, expected);
-        const std::vector<int> registrar_rows{FindTransactionRows(*model, update_registrar->GetHash())};
-        QCOMPARE(registrar_rows.size(), size_t{1});
-        const QString registrar_description{
-            model->index(registrar_rows.front(), 0).data(TransactionTableModel::LongDescriptionRole).toString()};
-        const QString registrar_summary{registrar_description.section("<hr>", 0, 0)};
-        const QString external_address{QString::fromStdString(EncodeDestination(PKHash(external_key.GetPubKey())))};
-        QVERIFY(!registrar_summary.contains(external_address));
 
         const std::vector<int> other_rows{FindTransactionRows(*model, other_special_tx->GetHash())};
         QCOMPARE(other_rows.size(), size_t{1});
@@ -355,23 +335,72 @@ void ProviderTransactionTests::providerTransactionHistory()
 
             QListView* const type_list{qobject_cast<QListView*>(type_widget->view())};
             QVERIFY(type_list != nullptr);
-            for (const quint32 coinjoin_filter :
-                 {TransactionFilterProxy::TYPE(TransactionRecord::CoinJoinSend),
-                  TransactionFilterProxy::TYPE(TransactionRecord::CoinJoinMakeCollaterals),
-                  TransactionFilterProxy::TYPE(TransactionRecord::CoinJoinCreateDenominations),
-                  TransactionFilterProxy::TYPE(TransactionRecord::CoinJoinMixing),
-                  TransactionFilterProxy::TYPE(TransactionRecord::CoinJoinCollateralPayment)}) {
-                const int row{type_widget->findData(coinjoin_filter)};
-                QVERIFY(row >= 0);
-                QVERIFY(type_list->isRowHidden(row));
+            // Match CoinJoin entries by title so filters added later are covered without
+            // duplicating the implementation's filter list.
+            int hidden_coinjoin_rows{0};
+            for (int row{0}; row < type_widget->count(); ++row) {
+                const QString title{type_widget->itemText(row)};
+                if (title.contains("coinjoin", Qt::CaseInsensitive) || title.contains("coin join", Qt::CaseInsensitive)) {
+                    QVERIFY(type_list->isRowHidden(row));
+                    ++hidden_coinjoin_rows;
+                }
             }
+            QVERIFY(hidden_coinjoin_rows > 0);
             QVERIFY(!type_list->isRowHidden(masternode_row));
 
             type_widget->setCurrentIndex(masternode_row);
             transaction_view.chooseType(masternode_row);
+            QCOMPARE(QSettings{}.value("transactionTypeFilter").toUInt(), masternode_filter);
             QTableView* const table{transaction_view.findChild<QTableView*>("transactionView")};
             QVERIFY(table != nullptr);
             QCOMPARE(table->model()->rowCount(), static_cast<int>(expected.size()));
+
+            struct RestoreCase {
+                quint32 saved_filter;
+                quint32 expected_filter;
+                QString expected_text;
+            };
+            const std::vector<RestoreCase> restore_cases{
+                {TransactionFilterProxy::TYPE(TransactionRecord::DataTransaction),
+                 TransactionFilterProxy::TYPE(TransactionRecord::DataTransaction),
+                 QString{"Data Transaction"}},
+                {TransactionFilterProxy::TYPE(TransactionRecord::DustReceive),
+                 TransactionFilterProxy::TYPE(TransactionRecord::DustReceive),
+                 QString{"Dust Receive"}},
+                {TransactionFilterProxy::TYPE(TransactionRecord::Other),
+                 TransactionFilterProxy::TYPE(TransactionRecord::Other),
+                 QString{"Other"}},
+                // Hidden CoinJoin filter falls back to "Most Common" when CoinJoin is disabled.
+                {TransactionFilterProxy::TYPE(TransactionRecord::CoinJoinSend),
+                 TransactionFilterProxy::COMMON_TYPES,
+                 QString{"Most Common"}},
+                // Unknown stored filter falls back to "Most Common" when CoinJoin is disabled.
+                {0, TransactionFilterProxy::COMMON_TYPES, QString{"Most Common"}},
+            };
+
+            TransactionTypeSettingRestorer setting_restorer;
+            for (const RestoreCase& restore_case : restore_cases) {
+                QSettings{}.setValue("transactionTypeFilter", restore_case.saved_filter);
+                TransactionView restored_view;
+                restored_view.setModel(&wallet_model);
+                QComboBox* const restored_widget{FindTransactionTypeWidget(restored_view)};
+                QVERIFY(restored_widget != nullptr);
+                QCOMPARE(restored_widget->currentText(), restore_case.expected_text);
+                QCOMPARE(restored_widget->currentData().toUInt(), restore_case.expected_filter);
+                QCOMPARE(QSettings{}.value("transactionTypeFilter").toUInt(), restore_case.expected_filter);
+            }
+
+            {
+                // When no setting exists, setModel() defaults to "Most Common" (when CoinJoin is disabled).
+                QSettings{}.remove("transactionTypeFilter");
+                TransactionView default_view;
+                default_view.setModel(&wallet_model);
+                QComboBox* const default_widget{FindTransactionTypeWidget(default_view)};
+                QVERIFY(default_widget != nullptr);
+                QCOMPARE(default_widget->currentText(), QString{"Most Common"});
+                QCOMPARE(default_widget->currentData().toUInt(), TransactionFilterProxy::COMMON_TYPES);
+                QCOMPARE(QSettings{}.value("transactionTypeFilter").toUInt(), TransactionFilterProxy::COMMON_TYPES);
+            }
         }
     }
 

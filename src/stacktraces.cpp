@@ -81,11 +81,11 @@ static ssize_t GetExeFileNameImpl(char* buf, size_t bufSize)
         return len;
     }
     for (size_t i = 0; i < len; i++) {
-        buf[i] = (char)tmp[i];
+        buf[i] = static_cast<char>(tmp[i]);
     }
     return len;
 #elif defined(__APPLE__)
-    uint32_t bufSize2 = (uint32_t)bufSize;
+    uint32_t bufSize2 = static_cast<uint32_t>(bufSize);
     if (_NSGetExecutablePath(buf, &bufSize2) != 0) {
         // it's not entirely clear if the value returned by _NSGetExecutablePath includes the null character
         return bufSize2 + 1;
@@ -109,7 +109,7 @@ static std::string GetExeFileName()
         if (len < 0) {
             return "";
         }
-        if (len < int64_t(buf.size())) {
+        if (len < static_cast<int64_t>(buf.size())) {
             return std::string(buf.begin(), buf.begin() + len);
         }
         buf.resize(buf.size() * 2);
@@ -158,7 +158,7 @@ static uint64_t ConvertAddress(uint64_t addr)
     if (!VirtualQuery((PVOID)addr, &mbi, sizeof(mbi)))
         return 0;
 
-    uint64_t hMod = (uint64_t)mbi.AllocationBase;
+    uint64_t hMod = reinterpret_cast<uint64_t>(mbi.AllocationBase);
     uint64_t offset = addr - hMod;
     return 0x400000 + offset;
 }
@@ -258,7 +258,7 @@ static uint64_t GetBaseAddress()
         return 0;
     }
 
-    kr = mach_vm_region_recurse(target_task, &vmoffset, &vmsize, &nesting_depth, (vm_region_recurse_info_t)&vbr, &vbrcount);
+    kr = mach_vm_region_recurse(target_task, &vmoffset, &vmsize, &nesting_depth, reinterpret_cast<vm_region_recurse_info_t>(&vbr), &vbrcount);
     if (kr != KERN_SUCCESS) {
         return 0;
     }
@@ -288,16 +288,16 @@ static __attribute__((noinline)) std::vector<uint64_t> GetStackFrames(size_t ski
 #ifdef ENABLE_STACKTRACES
     // FYI, this is not using libbacktrace, but "backtrace()" from <execinfo.h>
     std::vector<void*> buf(max_frames);
-    int count = backtrace(buf.data(), (int)buf.size());
+    int count = backtrace(buf.data(), static_cast<int>(buf.size()));
     if (count == 0) {
         return {};
     }
-    buf.resize((size_t)count);
+    buf.resize(static_cast<size_t>(count));
 
     std::vector<uint64_t> ret;
     ret.reserve(count);
     for (size_t i = skip + 1; i < buf.size(); i++) {
-        ret.emplace_back((uint64_t) buf[i]);
+        ret.emplace_back(reinterpret_cast<uint64_t>(buf[i]));
     }
     return ret;
 #else
@@ -321,7 +321,7 @@ struct stackframe_info {
 #ifdef ENABLE_STACKTRACES
 static int my_backtrace_full_callback (void *data, uintptr_t pc, const char *filename, int lineno, const char *function)
 {
-    auto sis = (std::vector<stackframe_info>*)data;
+    auto sis = static_cast<std::vector<stackframe_info>*>(data);
     stackframe_info si;
     si.pc = pc;
     si.lineno = lineno;
@@ -412,7 +412,7 @@ static std::string GetCrashInfoStrNoDebugInfo(crash_info ci)
     hdr.exeFileName = g_exeFileBaseName;
     ds << hdr;
 
-    ci.ConvertAddresses(-(int64_t)basePtr);
+    ci.ConvertAddresses(-static_cast<int64_t>(basePtr));
     ds << ci;
 
     auto ciStr = EncodeBase32(ds.str());
@@ -556,18 +556,18 @@ extern "C" void __real___assert_fail(const char *assertion, const char *file, un
 // This is ok because at the same time Clang only supports dynamic linking to libc/libc++
 extern "C" void* __real___cxa_allocate_exception(size_t thrown_size)
 {
-    static auto f = (void*(*)(size_t))dlsym(RTLD_NEXT, "__cxa_allocate_exception");
+    static auto f = reinterpret_cast<decltype(&__real___cxa_allocate_exception)>(dlsym(RTLD_NEXT, "__cxa_allocate_exception"));
     return f(thrown_size);
 }
 extern "C" void __real___cxa_free_exception(void * thrown_exception)
 {
-    static auto f = (void(*)(void*))dlsym(RTLD_NEXT, "__cxa_free_exception");
+    static auto f = reinterpret_cast<decltype(&__real___cxa_free_exception)>(dlsym(RTLD_NEXT, "__cxa_free_exception"));
     return f(thrown_exception);
 }
 #if defined(__clang__) && defined(__APPLE__)
 extern "C" void __attribute__((noreturn)) __real___assert_rtn(const char *function, const char *file, int line, const char *assertion)
 {
-    static auto f = (void(__attribute__((noreturn)) *) (const char*, const char*, int, const char*))dlsym(RTLD_NEXT, "__assert_rtn");
+    static auto f = reinterpret_cast<decltype(&__real___assert_rtn)>(dlsym(RTLD_NEXT, "__assert_rtn"));
     f(function, file, line, assertion);
 }
 #elif defined(WIN32)
@@ -575,7 +575,7 @@ extern "C" void __attribute__((noreturn)) __real___assert_rtn(const char *functi
 #else
 extern "C" void __real___assert_fail(const char *assertion, const char *file, unsigned int line, const char *function)
 {
-    static auto f = (void(*)(const char*, const char*, unsigned int, const char*))dlsym(RTLD_NEXT, "__assert_fail");
+    static auto f = reinterpret_cast<decltype(&__real___assert_fail)>(dlsym(RTLD_NEXT, "__assert_fail"));
     f(assertion, file, line, function);
 }
 #endif
@@ -669,7 +669,7 @@ extern "C" void __attribute__((noinline)) WRAPPED_NAME(__assert_fail)(const char
 static std::shared_ptr<std::vector<uint64_t>> GetExceptionStacktrace(const std::exception_ptr& e)
 {
 #ifdef ENABLE_CRASH_HOOKS
-    void* p = *(void**)&e;
+    void* p = *reinterpret_cast<void* const*>(&e);
 
     StdLockGuard l(g_stacktraces_mutex);
     auto it = g_stacktraces.find(p);

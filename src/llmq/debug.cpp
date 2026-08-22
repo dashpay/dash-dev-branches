@@ -176,11 +176,11 @@ void CDKGDebugManager::InitLocalSessionStatus(const Consensus::LLMQParams& llmqP
     auto& session = it->second;
     session.llmqType = llmqParams.type;
     session.quorumHash = quorumHash;
-    session.quorumHeight = (uint32_t)quorumHeight;
+    session.quorumHeight = static_cast<uint32_t>(quorumHeight);
     session.phase = QuorumPhase{0};
     session.statusBitset = 0;
     session.members.clear();
-    session.members.resize((size_t)llmqParams.size);
+    session.members.resize(static_cast<size_t>(llmqParams.size));
 }
 
 void CDKGDebugManager::UpdateLocalSessionStatus(Consensus::LLMQType llmqType, int quorumIndex, std::function<bool(CDKGDebugSessionStatus& status)>&& func)

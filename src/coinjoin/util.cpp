@@ -262,7 +262,7 @@ int CTransactionBuilder::GetSizeOfCompactSizeDiff(size_t nAdd) const
     size_t nSize = WITH_LOCK(cs_outputs, return vecOutputs.size());
     unsigned int ret = ::GetSizeOfCompactSizeDiff(nSize, nSize + nAdd);
     assert(ret <= std::numeric_limits<int>::max());
-    return int(ret);
+    return static_cast<int>(ret);
 }
 
 bool CTransactionBuilder::IsDust(CAmount nAmount) const

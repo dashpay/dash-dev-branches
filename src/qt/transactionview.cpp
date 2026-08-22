@@ -95,13 +95,13 @@ TransactionView::TransactionView(QWidget* parent) :
     typeWidget->addItem(tr("%1 Collateral Payment").arg(strCoinJoinName), TransactionFilterProxy::TYPE(TransactionRecord::CoinJoinCollateralPayment));
     typeWidget->addItem(tr("To yourself"), TransactionFilterProxy::TYPE(TransactionRecord::SendToSelf));
     typeWidget->addItem(tr("Mined"), TransactionFilterProxy::TYPE(TransactionRecord::Generated));
+    typeWidget->addItem(tr("Masternode"), TransactionFilterProxy::TYPE(TransactionRecord::MasternodeRegistration) |
+                                              TransactionFilterProxy::TYPE(TransactionRecord::MasternodeUpdate));
     typeWidget->addItem(tr("Platform Transfer"), TransactionFilterProxy::TYPE(TransactionRecord::PlatformTransfer));
     typeWidget->addItem(tr("Data Transaction"), TransactionFilterProxy::TYPE(TransactionRecord::DataTransaction));
     typeWidget->addItem(tr("Dust Receive"), TransactionFilterProxy::TYPE(TransactionRecord::DustReceive));
     typeWidget->addItem(tr("Other"), TransactionFilterProxy::TYPE(TransactionRecord::Other));
-    typeWidget->addItem(tr("Masternode"), TransactionFilterProxy::TYPE(TransactionRecord::MasternodeRegistration) |
-                                              TransactionFilterProxy::TYPE(TransactionRecord::MasternodeUpdate));
-    typeWidget->setCurrentIndex(settings.value("transactionType").toInt());
+    typeWidget->setCurrentIndex(typeWidget->findData(settings.value("transactionTypeFilter").toUInt()));
 
     hlayout->addWidget(typeWidget);
 
@@ -261,7 +261,6 @@ void TransactionView::setModel(WalletModel *_model)
         connect(_model, &WalletModel::notifyWatchonlyChanged, this, &TransactionView::updateWatchOnlyColumn);
 
         // Update transaction list with persisted settings
-        chooseType(settings.value("transactionType").toInt());
         chooseDate(settings.value("transactionDate").toInt());
 
         updateCoinJoinVisibility();
@@ -331,7 +330,7 @@ void TransactionView::chooseType(int idx)
         typeWidget->itemData(idx).toUInt());
     // Persist settings
     QSettings settings;
-    settings.setValue("transactionType", idx);
+    settings.setValue("transactionTypeFilter", typeWidget->itemData(idx).toUInt());
 }
 
 void TransactionView::chooseWatchonly(int idx)
@@ -788,10 +787,6 @@ void TransactionView::updateCoinJoinVisibility()
         return;
     }
     bool fEnabled = model->node().coinJoinOptions().isEnabled();
-    // If CoinJoin gets enabled use "All" else "Most common"
-    int idx = fEnabled ? 0 : 1;
-    chooseType(idx);
-    typeWidget->setCurrentIndex(idx);
     // Hide all CoinJoin related filters by value so this stays correct when entries are reordered.
     QListView* typeList = qobject_cast<QListView*>(typeWidget->view());
     for (const quint32 type_filter : {TransactionFilterProxy::TYPE(TransactionRecord::CoinJoinSend),
@@ -802,4 +797,11 @@ void TransactionView::updateCoinJoinVisibility()
         const int row = typeWidget->findData(type_filter);
         if (row >= 0) typeList->setRowHidden(row, !fEnabled);
     }
+
+    int idx = typeWidget->currentIndex();
+    if (idx < 0 || typeList->isRowHidden(idx)) {
+        idx = typeWidget->findData(fEnabled ? TransactionFilterProxy::ALL_TYPES : TransactionFilterProxy::COMMON_TYPES);
+        typeWidget->setCurrentIndex(idx);
+    }
+    chooseType(idx);
 }

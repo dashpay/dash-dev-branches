@@ -10,7 +10,6 @@
 #include <chainparams.h>
 #include <core_io.h>
 #include <instantsend/instantsend.h>
-#include <llmq/context.h>
 #include <node/mempool_persist_args.h>
 #include <policy/settings.h>
 #include <primitives/transaction.h>
@@ -402,9 +401,9 @@ static RPCHelpMan getrawmempool()
 
     const NodeContext& node = EnsureAnyNodeContext(request.context);
     const CTxMemPool& mempool = EnsureMemPool(node);
-    const LLMQContext& llmq_ctx = EnsureLLMQContext(node);
+    const llmq::CInstantSendManager& isman = EnsureInstantSendManager(node);
 
-    return MempoolToJSON(mempool, llmq_ctx.isman.get(), fVerbose, include_mempool_sequence);
+    return MempoolToJSON(mempool, &isman, fVerbose, include_mempool_sequence);
 },
     };
 }
@@ -461,12 +460,12 @@ static RPCHelpMan getmempoolancestors()
         return o;
     } else {
         UniValue o(UniValue::VOBJ);
-        const LLMQContext& llmq_ctx = EnsureLLMQContext(node);
+        const llmq::CInstantSendManager& isman = EnsureInstantSendManager(node);
         for (CTxMemPool::txiter ancestorIt : setAncestors) {
             const CTxMemPoolEntry &e = *ancestorIt;
             const uint256& _hash = e.GetTx().GetHash();
             UniValue info(UniValue::VOBJ);
-            entryToJSON(mempool, info, e, llmq_ctx.isman.get());
+            entryToJSON(mempool, info, e, &isman);
             o.pushKV(_hash.ToString(), info);
         }
         return o;
@@ -529,12 +528,12 @@ static RPCHelpMan getmempooldescendants()
         return o;
     } else {
         UniValue o(UniValue::VOBJ);
-        const LLMQContext& llmq_ctx = EnsureLLMQContext(node);
+        const llmq::CInstantSendManager& isman = EnsureInstantSendManager(node);
         for (CTxMemPool::txiter descendantIt : setDescendants) {
             const CTxMemPoolEntry &e = *descendantIt;
             const uint256& _hash = e.GetTx().GetHash();
             UniValue info(UniValue::VOBJ);
-            entryToJSON(mempool, info, e, llmq_ctx.isman.get());
+            entryToJSON(mempool, info, e, &isman);
             o.pushKV(_hash.ToString(), info);
         }
         return o;
@@ -573,8 +572,8 @@ static RPCHelpMan getmempoolentry()
 
     const CTxMemPoolEntry &e = *it;
     UniValue info(UniValue::VOBJ);
-    const LLMQContext& llmq_ctx = EnsureLLMQContext(node);
-    entryToJSON(mempool, info, e, llmq_ctx.isman.get());
+    const llmq::CInstantSendManager& isman = EnsureInstantSendManager(node);
+    entryToJSON(mempool, info, e, &isman);
     return info;
 },
     };
@@ -707,8 +706,8 @@ static RPCHelpMan getmempoolinfo()
 {
     const NodeContext& node = EnsureAnyNodeContext(request.context);
     const CTxMemPool& mempool = EnsureMemPool(node);
-    const LLMQContext& llmq_ctx = EnsureLLMQContext(node);
-    return MempoolInfoToJSON(mempool, *llmq_ctx.isman);
+    const llmq::CInstantSendManager& isman = EnsureInstantSendManager(node);
+    return MempoolInfoToJSON(mempool, isman);
 },
     };
 }

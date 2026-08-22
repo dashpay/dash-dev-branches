@@ -84,6 +84,10 @@ std::optional<std::pair</*islock_hash=*/uint256, /*txid=*/uint256>> CChainstateH
     return std::make_pair(::SerializeHash(*islock), islock->txid);
 }
 
+bool CChainstateHelper::IsInstantSendEnabled() const { return isman.IsInstantSendEnabled(); }
+
+bool CChainstateHelper::IsInstantSendLocked(const uint256& hash) const { return isman.IsLocked(hash); }
+
 bool CChainstateHelper::IsInstantSendWaitingForTx(const uint256& hash) const { return isman.IsWaitingForTx(hash); }
 
 bool CChainstateHelper::RemoveConflictingISLockByTx(const CTransaction& tx)

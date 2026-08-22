@@ -17,6 +17,7 @@
 #include <util/translation.h>
 
 #include <evo/types.h>
+#include <interfaces/providertx.h>
 
 #include <functional>
 #include <memory>
@@ -74,6 +75,11 @@ public:
 
     virtual bool isBanned() const = 0;
     virtual CService getNetInfoPrimary() const = 0;
+    //! Platform HTTPS (DAPI gateway) endpoints from the extended address
+    //! list; empty for non-evo masternodes. Domain-based entries are
+    //! skipped rather than resolved here — the first entry is always a
+    //! CService, so an evonode never contributes an empty set.
+    virtual std::vector<CService> getPlatformHTTPSAddrs() const = 0;
     virtual MnType getType() const = 0;
     virtual UniValue toJson() const = 0;
     virtual const CKeyID& getKeyIdOwner() const = 0;
@@ -129,6 +135,27 @@ class EVO
 public:
     virtual ~EVO() {}
     virtual std::pair<MnListPtr, const CBlockIndex*> getListAtChainTip() = 0;
+    virtual ProviderTxCapabilities getProviderTxCapabilities() = 0;
+    //! Validate provider endpoints against a capability snapshot without changing node or wallet state.
+    //! Transaction creation validates them again against the then-active rules.
+    virtual std::optional<ProviderTxError> validateProviderNetInfo(const ProviderNetInfo& net_info, MnType type,
+                                                                   uint16_t version, bool optional) = 0;
+    //! Successful registration with an existing collateral leaves that coin locked,
+    //! including when the signed transaction is returned without submission.
+    virtual ProviderTxResult<ProviderTxSubmission> registerMasternode(Wallet& wallet,
+                                                                      const ProviderRegistrationRequest& request) = 0;
+    //! Successful preparation leaves existing collateral locked. The result identifies
+    //! whether this call acquired the lock so a discarded flow cannot unlock an older lock.
+    virtual ProviderTxResult<PreparedProviderRegistration> prepareMasternodeRegistration(
+        Wallet& wallet, const ProviderRegistrationRequest& request) = 0;
+    virtual ProviderTxResult<ProviderTxSubmission> submitMasternodeRegistration(
+        Wallet& wallet, const CTransactionRef& tx, const std::vector<unsigned char>& collateral_signature) = 0;
+    virtual ProviderTxResult<ProviderTxSubmission> updateMasternodeService(Wallet& wallet,
+                                                                           const ProviderUpdateServiceRequest& request) = 0;
+    virtual ProviderTxResult<ProviderTxSubmission> updateMasternodeRegistrar(
+        Wallet& wallet, const ProviderUpdateRegistrarRequest& request) = 0;
+    virtual ProviderTxResult<ProviderTxSubmission> revokeMasternode(Wallet& wallet,
+                                                                    const ProviderRevokeRequest& request) = 0;
     virtual void setContext(node::NodeContext* context) {}
 };
 
@@ -213,6 +240,19 @@ public:
         int32_t m_expiry_height{0};
     };
     virtual std::vector<QuorumInfo> getQuorumStats() = 0;
+    struct PlatformQuorum {
+        uint256 m_quorum_hash{};
+        std::vector<uint8_t> m_pubkey{}; //!< serialized BLS public key (basic scheme)
+        int32_t m_height{0};
+    };
+    //! Locally retained quorums of the given LLMQ type with their public
+    //! keys. Used by the GUI Platform client to verify Platform state-root
+    //! quorum signatures against locally synced quorum data. This includes
+    //! retained signing quorums that are no longer in the active signing set.
+    virtual std::vector<PlatformQuorum> getPlatformQuorums(uint8_t llmq_type) = 0;
+    //! Serialized InstantSend lock for the given txid, or empty if the
+    //! transaction has no islock (used to build asset lock proofs).
+    virtual std::vector<uint8_t> getInstantSendLock(const uint256& txid) = 0;
     virtual void setContext(node::NodeContext* context) {}
 };
 

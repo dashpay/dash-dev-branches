@@ -228,7 +228,7 @@ static RPCHelpMan gobject_prepare()
         if (collateralHash.IsNull() || collateralIndex < 0) {
             throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, strprintf("invalid hash or index: %s-%d", collateralHash.ToString(), collateralIndex));
         }
-        outpoint = COutPoint(collateralHash, (uint32_t)collateralIndex);
+        outpoint = COutPoint(collateralHash, static_cast<uint32_t>(collateralIndex));
     }
 
     CTransactionRef tx;

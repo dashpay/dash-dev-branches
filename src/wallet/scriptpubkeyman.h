@@ -17,6 +17,7 @@
 #include <wallet/crypter.h>
 #include <wallet/hdchain.h>
 #include <wallet/ismine.h>
+#include <wallet/platformkeys.h>
 #include <wallet/walletdb.h>
 #include <wallet/walletutil.h>
 
@@ -234,6 +235,16 @@ public:
     /** Sign a message with the given script */
     virtual SigningResult SignMessage(const std::string& message, const PKHash& pkhash, std::string& str_sig) const { return SigningResult::SIGNING_FAILED; };
     virtual bool SignSpecialTxPayload(const uint256& hash, const CKeyID& keyid, std::vector<unsigned char>& vchSig) const { return false; }
+    //! Return an unlock-free identifier for this manager's root extended key.
+    virtual PlatformKeyStatus GetPlatformKeySource(std::vector<unsigned char>& identifier) const
+    {
+        return PlatformKeyStatus::NOT_SUPPORTED;
+    }
+    //! Derive one Platform child without exposing the root extended key.
+    virtual PlatformKeyStatus DerivePlatformKey(const platformkeys::Path& path, platformkeys::ExtKey256& out) const
+    {
+        return PlatformKeyStatus::NOT_SUPPORTED;
+    }
     /** Adds script and derivation path information to a PSBT, and optionally signs it. */
     virtual TransactionError FillPSBT(PartiallySignedTransaction& psbt, const PrecomputedTransactionData& txdata, int sighash_type = 1 /* SIGHASH_ALL */, bool sign = true, bool bip32derivs = false, int* n_signed = nullptr, bool finalize = true) const { return TransactionError::INVALID_PSBT; }
 
@@ -643,6 +654,8 @@ public:
     bool SignTransaction(CMutableTransaction& tx, const std::map<COutPoint, Coin>& coins, int sighash, std::map<int, bilingual_str>& input_errors) const override;
     SigningResult SignMessage(const std::string& message, const PKHash& pkhash, std::string& str_sig) const override;
     bool SignSpecialTxPayload(const uint256& hash, const CKeyID& keyid, std::vector<unsigned char>& vchSig) const override;
+    PlatformKeyStatus GetPlatformKeySource(std::vector<unsigned char>& identifier) const override;
+    PlatformKeyStatus DerivePlatformKey(const platformkeys::Path& path, platformkeys::ExtKey256& out) const override;
     TransactionError FillPSBT(PartiallySignedTransaction& psbt, const PrecomputedTransactionData& txdata, int sighash_type = 1 /* SIGHASH_ALL */, bool sign = true, bool bip32derivs = false, int* n_signed = nullptr, bool finalize = true) const override;
 
     uint256 GetID() const override;

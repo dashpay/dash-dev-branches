@@ -33,6 +33,9 @@ namespace chainlock {
 class Chainlocks;
 class ChainlockHandler;
 } // namespace chainlock
+namespace llmq {
+class CInstantSendManager;
+} // namespace llmq
 
 /** Default for -maxorphantxsize, maximum size in megabytes the orphan map can grow before entries are removed */
 static const unsigned int DEFAULT_MAX_ORPHAN_TRANSACTIONS_SIZE = 10; // this allows around 100 TXs of max size (and many more of normal size)
@@ -156,9 +159,10 @@ public:
                                              const chainlock::Chainlocks& chainlocks,
                                              chainlock::ChainlockHandler& clhandler,
                                              CActiveMasternodeManager* nodeman,
-                                             const std::unique_ptr<CDeterministicMNManager>& dmnman,
-                                             const std::unique_ptr<CJWalletManager>& cj_walletman,
-                                             const std::unique_ptr<LLMQContext>& llmq_ctx, bool ignore_incoming_txs);
+                                             CDeterministicMNManager& dmnman,
+                                             CJWalletManager* cj_walletman,
+                                             llmq::CInstantSendManager& isman,
+                                             LLMQContext& llmq_ctx, bool ignore_incoming_txs);
     virtual ~PeerManager() { }
 
     /**

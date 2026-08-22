@@ -2,8 +2,8 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include <key_io.h>
 #include <chainparams.h>
+#include <key_io.h>
 #include <logging.h>
 #include <messagesigner.h>
 #include <script/descriptor.h>
@@ -15,6 +15,8 @@
 #include <util/translation.h>
 #include <wallet/bip39.h>
 #include <wallet/scriptpubkeyman.h>
+
+#include <array>
 
 namespace wallet {
 util::Result<CTxDestination> LegacyScriptPubKeyMan::GetNewDestination()
@@ -2714,6 +2716,69 @@ bool DescriptorScriptPubKeyMan::SignSpecialTxPayload(const uint256& hash, const 
     }
 
     return CHashSigner::SignHash(hash, key, vchSig);
+}
+
+namespace {
+
+bool IsRootExtPubKey(const CExtPubKey& key)
+{
+    return key.nDepth == 0 && key.nChild == 0 &&
+           std::all_of(std::begin(key.vchFingerprint), std::end(key.vchFingerprint),
+                       [](unsigned char byte) { return byte == 0; }) &&
+           key.pubkey.IsFullyValid();
+}
+
+} // namespace
+
+PlatformKeyStatus DescriptorScriptPubKeyMan::GetPlatformKeySource(std::vector<unsigned char>& identifier) const
+{
+    LOCK(cs_desc_man);
+
+    if (!m_wallet_descriptor.descriptor) return PlatformKeyStatus::NOT_SUPPORTED;
+    CExtPubKey root;
+    if (!m_wallet_descriptor.descriptor->GetRootExtPubKey(root) || !IsRootExtPubKey(root)) {
+        return PlatformKeyStatus::NOT_SUPPORTED;
+    }
+    const CKeyID source_id{root.pubkey.GetID()};
+    if (m_map_keys.count(source_id) == 0 && m_map_crypted_keys.count(source_id) == 0) {
+        return PlatformKeyStatus::NOT_SUPPORTED;
+    }
+
+    // Prefix descriptor sources so identifiers from future key-manager
+    // implementations cannot accidentally compare equal.
+    std::array<unsigned char, BIP32_EXTKEY_SIZE> encoded;
+    root.Encode(encoded.data());
+    identifier.assign(1, 1);
+    identifier.insert(identifier.end(), encoded.begin(), encoded.end());
+    return PlatformKeyStatus::SUCCESS;
+}
+
+PlatformKeyStatus DescriptorScriptPubKeyMan::DerivePlatformKey(const platformkeys::Path& path,
+                                                               platformkeys::ExtKey256& out) const
+{
+    out = {};
+    if (path.empty()) return PlatformKeyStatus::INVALID_ARGUMENT;
+
+    std::vector<unsigned char> identifier;
+    const auto source_status{GetPlatformKeySource(identifier)};
+    if (source_status != PlatformKeyStatus::SUCCESS) return source_status;
+    if (m_storage.IsLocked(false)) return PlatformKeyStatus::WALLET_LOCKED;
+
+    LOCK(cs_desc_man);
+    FlatSigningProvider provider;
+    provider.keys = GetKeys();
+    CExtPubKey root_pub;
+    CExtKey root;
+    if (!m_wallet_descriptor.descriptor ||
+        !m_wallet_descriptor.descriptor->GetRootExtPubKey(root_pub) ||
+        !m_wallet_descriptor.descriptor->GetRootExtKey(provider, root)) {
+        return PlatformKeyStatus::INVALID_SOURCE;
+    }
+
+    if (!IsRootExtPubKey(root_pub) || !root.key.IsValid() || root.Neuter() != root_pub) {
+        return PlatformKeyStatus::INVALID_SOURCE;
+    }
+    return platformkeys::DeriveExtKey(root, path, out) ? PlatformKeyStatus::SUCCESS : PlatformKeyStatus::DERIVATION_ERROR;
 }
 
 TransactionError DescriptorScriptPubKeyMan::FillPSBT(PartiallySignedTransaction& psbtx, const PrecomputedTransactionData& txdata, int sighash_type, bool sign, bool bip32derivs, int* n_signed, bool finalize) const

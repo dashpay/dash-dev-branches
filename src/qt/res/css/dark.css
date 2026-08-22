@@ -17,7 +17,7 @@ Loaded in GUIUtil::loadStyleSheet() in guitil.cpp.
 /* do not modify! section updated by update-css-files.py
 <colors>
 
-# Used colors in dark.css for commit 44de8a93f2
+# Used colors in dark.css for commit f645c6e71615
 
 #00000000
 #333
@@ -27,6 +27,7 @@ Loaded in GUIUtil::loadStyleSheet() in guitil.cpp.
 #323233
 #363637
 #39393b
+#3c3c3c
 #4a4a4b
 #585858
 #818181
@@ -51,6 +52,11 @@ WalletFrame {
 QWidget { /* override text selection background color for all text widgets */
     selection-color: #363637;
     selection-background-color: #c7c7c7;
+}
+
+QFrame#mnCard {
+    border: 1px solid #4a4a4b;
+    border-radius: 3px;
 }
 
 QCheckBox,

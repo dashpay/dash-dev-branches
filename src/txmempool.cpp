@@ -423,6 +423,8 @@ void CTxMemPoolEntry::UpdateAncestorState(int64_t modifySize, CAmount modifyFee,
 CTxMemPool::CTxMemPool(const Options& opts)
     : m_check_ratio{opts.check_ratio},
       minerPolicyEstimator{opts.estimator},
+      m_dmnman{*Assert(opts.dmnman)},
+      m_isman{*Assert(opts.isman)},
       m_max_size_bytes{opts.max_size_bytes},
       m_expiry{opts.expiry},
       m_incremental_relay_feerate{opts.incremental_relay_feerate},
@@ -436,21 +438,6 @@ CTxMemPool::CTxMemPool(const Options& opts)
       m_limits{opts.limits}
 {
     _clear(); //lock free clear
-}
-
-void CTxMemPool::ConnectManagers(gsl::not_null<CDeterministicMNManager*> dmnman, gsl::not_null<llmq::CInstantSendManager*> isman)
-{
-    // Do not allow double-initialization
-    assert(m_dmnman.load(std::memory_order_acquire) == nullptr);
-    m_dmnman.store(dmnman, std::memory_order_release);
-    assert(m_isman.load(std::memory_order_acquire) == nullptr);
-    m_isman.store(isman, std::memory_order_release);
-}
-
-void CTxMemPool::DisconnectManagers()
-{
-    m_dmnman.store(nullptr, std::memory_order_release);
-    m_isman.store(nullptr, std::memory_order_release);
 }
 
 bool CTxMemPool::isSpent(const COutPoint& outpoint) const
@@ -523,9 +510,7 @@ void CTxMemPool::addUnchecked(const CTxMemPoolEntry &entry, setEntries &setAnces
     // Invalid ProTxes should never get this far because transactions should be
     // fully checked by AcceptToMemoryPool() at this point, so we just assume that
     // everything is fine here.
-    if (auto dmnman = m_dmnman.load(std::memory_order_acquire); dmnman) {
-        addUncheckedProTx(*dmnman, newit, tx);
-    }
+    addUncheckedProTx(newit, tx);
 }
 
 void CTxMemPool::addAddressIndex(const CTxMemPoolEntry& entry, const CCoinsViewCache& view)
@@ -651,8 +636,7 @@ void CTxMemPool::removeSpentIndex(const uint256 txhash)
     }
 }
 
-void CTxMemPool::addUncheckedProTx(CDeterministicMNManager& dmnman, indexed_transaction_set::iterator& newit,
-                                   const CTransaction& tx)
+void CTxMemPool::addUncheckedProTx(indexed_transaction_set::iterator& newit, const CTransaction& tx)
 {
     const uint256 tx_hash{tx.GetHash()};
     if (tx.nType == TRANSACTION_PROVIDER_REGISTER) {
@@ -686,7 +670,7 @@ void CTxMemPool::addUncheckedProTx(CDeterministicMNManager& dmnman, indexed_tran
         auto proTx = *Assert(GetTxPayload<CProUpRegTx>(tx));
         mapProTxRefs.emplace(proTx.proTxHash, tx_hash);
         mapProTxBlsPubKeyHashes.emplace(proTx.pubKeyOperator.GetHash(), tx_hash);
-        auto dmn = Assert(dmnman.GetListAtChainTip().GetMN(proTx.proTxHash));
+        auto dmn = Assert(m_dmnman.GetListAtChainTip().GetMN(proTx.proTxHash));
         newit->validForProTxKey = ::SerializeHash(dmn->pdmnState->pubKeyOperator);
         if (dmn->pdmnState->pubKeyOperator != proTx.pubKeyOperator) {
             newit->isKeyChangeProTx = true;
@@ -694,7 +678,7 @@ void CTxMemPool::addUncheckedProTx(CDeterministicMNManager& dmnman, indexed_tran
     } else if (tx.nType == TRANSACTION_PROVIDER_UPDATE_REVOKE) {
         auto proTx = *Assert(GetTxPayload<CProUpRevTx>(tx));
         mapProTxRefs.emplace(proTx.proTxHash, tx_hash);
-        auto dmn = Assert(dmnman.GetListAtChainTip().GetMN(proTx.proTxHash));
+        auto dmn = Assert(m_dmnman.GetListAtChainTip().GetMN(proTx.proTxHash));
         newit->validForProTxKey = ::SerializeHash(dmn->pdmnState->pubKeyOperator);
         if (dmn->pdmnState->pubKeyOperator.Get() != CBLSPublicKey()) {
             newit->isKeyChangeProTx = true;
@@ -736,9 +720,7 @@ void CTxMemPool::removeUnchecked(txiter it, MemPoolRemovalReason reason)
     } else
         vTxHashes.clear();
 
-    if (m_dmnman.load(std::memory_order_acquire)) {
-        removeUncheckedProTx(it->GetTx());
-    }
+    removeUncheckedProTx(it->GetTx());
 
     totalTxSize -= it->GetTxSize();
     m_total_fee -= it->GetFee();
@@ -957,8 +939,6 @@ void CTxMemPool::removeProTxCollateralConflicts(const CTransaction &tx, const CO
 
 void CTxMemPool::removeProTxSpentCollateralConflicts(const CTransaction &tx)
 {
-    auto dmnman = Assert(m_dmnman.load(std::memory_order_acquire));
-
     // Remove TXs that refer to a MN for which the collateral was spent
     auto removeSpentCollateralConflict = [&](const uint256& proTxHash) EXCLUSIVE_LOCKS_REQUIRED(cs) {
         // Can't use equal_range here as every call to removeRecursive might invalidate iterators
@@ -979,7 +959,7 @@ void CTxMemPool::removeProTxSpentCollateralConflicts(const CTransaction &tx)
             }
         }
     };
-    auto mnList = dmnman->GetListAtChainTip();
+    auto mnList = m_dmnman.GetListAtChainTip();
     for (const auto& in : tx.vin) {
         auto collateralIt = mapProTxCollaterals.find(in.prevout);
         if (collateralIt != mapProTxCollaterals.end()) {
@@ -1114,9 +1094,7 @@ void CTxMemPool::removeForBlock(const std::vector<CTransactionRef>& vtx, unsigne
             RemoveStaged(stage, true, MemPoolRemovalReason::BLOCK);
         }
         removeConflicts(*tx);
-        if (m_dmnman.load(std::memory_order_acquire)) {
-            removeProTxConflicts(*tx);
-        }
+        removeProTxConflicts(*tx);
         ClearPrioritisation(tx->GetHash());
     }
     lastRollingFeeUpdate = GetTime();
@@ -1418,8 +1396,7 @@ bool CTxMemPool::existsProviderTxCrossSchemeConflict(const CTransaction& tx) con
         // encoding the masternode already holds in the list fails CheckSpecialTx
         // before reaching the mempool. Probing here would wrongly block updates
         // for one member of a pre-activation cross-scheme pair.
-        auto dmnman = Assert(m_dmnman.load(std::memory_order_acquire));
-        if (auto dmn = dmnman->GetListAtChainTip().GetMN(opt_proTx->proTxHash);
+        if (auto dmn = m_dmnman.GetListAtChainTip().GetMN(opt_proTx->proTxHash);
             dmn && opt_proTx->pubKeyOperator == dmn->pdmnState->pubKeyOperator) {
             return false;
         }
@@ -1429,8 +1406,6 @@ bool CTxMemPool::existsProviderTxCrossSchemeConflict(const CTransaction& tx) con
 }
 
 bool CTxMemPool::existsProviderTxConflict(const CTransaction &tx) const {
-    auto dmnman = Assert(m_dmnman.load(std::memory_order_acquire));
-
     LOCK(cs);
 
     auto hasKeyChangeInMempool = [&](const uint256& proTxHash) EXCLUSIVE_LOCKS_REQUIRED(cs) {
@@ -1504,7 +1479,7 @@ bool CTxMemPool::existsProviderTxConflict(const CTransaction &tx) const {
         auto& proTx = *opt_proTx;
 
         // this method should only be called with validated ProTxs
-        auto dmn = dmnman->GetListAtChainTip().GetMN(proTx.proTxHash);
+        auto dmn = m_dmnman.GetListAtChainTip().GetMN(proTx.proTxHash);
         if (!dmn) {
             LogPrint(BCLog::MEMPOOL, "%s: ERROR: Masternode is not in the list, proTxHash: %s\n", __func__, proTx.proTxHash.ToString());
             return true; // i.e. failed to find validated ProTx == conflict
@@ -1526,7 +1501,7 @@ bool CTxMemPool::existsProviderTxConflict(const CTransaction &tx) const {
         }
         auto& proTx = *opt_proTx;
         // this method should only be called with validated ProTxs
-        auto dmn = dmnman->GetListAtChainTip().GetMN(proTx.proTxHash);
+        auto dmn = m_dmnman.GetListAtChainTip().GetMN(proTx.proTxHash);
         if (!dmn) {
             LogPrint(BCLog::MEMPOOL, "%s: ERROR: Masternode is not in the list, proTxHash: %s\n", __func__, proTx.proTxHash.ToString());
             return true; // i.e. failed to find validated ProTx == conflict
@@ -1675,12 +1650,11 @@ void CTxMemPool::RemoveStaged(setEntries &stage, bool updateDescendants, MemPool
 int CTxMemPool::Expire(std::chrono::seconds time)
 {
     AssertLockHeld(cs);
-    auto isman = Assert(m_isman.load(std::memory_order_acquire));
     indexed_transaction_set::index<entry_time>::type::iterator it = mapTx.get<entry_time>().begin();
     setEntries toremove;
     while (it != mapTx.get<entry_time>().end() && it->GetTime() < time) {
         // locked txes do not expire until mined and have sufficient confirmations
-        if (isman->IsLocked(it->GetTx().GetHash())) {
+        if (m_isman.IsLocked(it->GetTx().GetHash())) {
             it++;
             continue;
         }

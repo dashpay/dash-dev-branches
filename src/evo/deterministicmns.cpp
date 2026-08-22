@@ -52,7 +52,7 @@ CSimplifiedMNListEntry CDeterministicMN::to_sml_entry() const
 
 std::string CDeterministicMN::ToString() const
 {
-    return strprintf("CDeterministicMN(proTxHash=%s, collateralOutpoint=%s, nOperatorReward=%f, state=%s", proTxHash.ToString(), collateralOutpoint.ToStringShort(), (double)nOperatorReward / 100, pdmnState->ToString());
+    return strprintf("CDeterministicMN(proTxHash=%s, collateralOutpoint=%s, nOperatorReward=%f, state=%s", proTxHash.ToString(), collateralOutpoint.ToStringShort(), static_cast<double>(nOperatorReward) / 100, pdmnState->ToString());
 }
 
 bool CDeterministicMNList::IsMNValid(const uint256& proTxHash) const
@@ -270,7 +270,7 @@ int CDeterministicMNList::CalcMaxPoSePenalty() const
     // Maximum PoSe penalty is dynamic and equals the number of registered MNs
     // It's however at least 100.
     // This means that the max penalty is usually equal to a full payment cycle
-    return std::max(100, (int)GetCounts().total());
+    return std::max(100, static_cast<int>(GetCounts().total()));
 }
 
 int CDeterministicMNList::CalcPenalty(int percent) const
@@ -456,7 +456,7 @@ void CDeterministicMNList::AddMN(const CDeterministicMNCPtr& dmn, bool fBumpTota
     InvalidateSMLCache();
     if (fBumpTotalCount) {
         // nTotalRegisteredCount acts more like a checkpoint, not as a limit,
-        nTotalRegisteredCount = std::max(dmn->GetInternalId() + 1, (uint64_t)nTotalRegisteredCount);
+        nTotalRegisteredCount = std::max(dmn->GetInternalId() + 1, static_cast<uint64_t>(nTotalRegisteredCount));
     }
 }
 
@@ -669,7 +669,7 @@ bool CDeterministicMNManager::ProcessBlock(const CBlock& block, gsl::not_null<co
 
         // apply platform unban for platform revive too, after all persistent
         // payload checks have succeeded
-        for (int i = 1; i < (int)block.vtx.size(); i++) {
+        for (int i = 1; i < static_cast<int>(block.vtx.size()); i++) {
             const CTransaction& tx = *block.vtx[i];
             if (!tx.IsSpecialTxVersion() || tx.nType != TRANSACTION_PROVIDER_UPDATE_SERVICE) {
                 // only interested in revive transactions

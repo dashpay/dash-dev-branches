@@ -283,7 +283,7 @@ bool NetQuorum::ProcessContribQDATA(const CNode& pfrom, CDataStream& vRecv,
     }
 
     auto vvec = quorum.GetVerificationVector();
-    if (!vvec || vvec->size() != size_t(quorum.params.threshold)) {
+    if (!vvec || vvec->size() != static_cast<size_t>(quorum.params.threshold)) {
         LogPrint(BCLog::LLMQ, "NetQuorum::%s -- %s: No valid quorum verification vector available, from peer=%d\n",
                  __func__, NetMsgType::QDATA, pfrom.GetId());
         return false;
@@ -409,7 +409,7 @@ void NetQuorum::CheckQuorumConnections(const Consensus::LLMQParams& llmqParams,
     const bool is_masternode = m_role->IsMasternode();
     const uint256 proTxHash = is_masternode ? m_role->GetProTxHash() : uint256{};
 
-    auto lastQuorums = m_qman.ScanQuorums(llmqParams.type, pindexNew, (size_t)llmqParams.keepOldConnections);
+    auto lastQuorums = m_qman.ScanQuorums(llmqParams.type, pindexNew, static_cast<size_t>(llmqParams.keepOldConnections));
     auto deletableQuorums = GetQuorumsToDelete(llmqParams, pindexNew);
 
     const bool watchOtherISQuorums = is_masternode &&

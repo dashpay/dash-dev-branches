@@ -172,6 +172,39 @@ BOOST_AUTO_TEST_CASE(queuemanager_getqueueitem_marks_tried_once)
     BOOST_CHECK(!man.GetQueueItemAndTry(picked2));
 }
 
+BOOST_AUTO_TEST_CASE(queuemanager_getqueueitem_denom_filter_leaves_others_untried)
+{
+    CoinJoinQueueManager man;
+    const int denom_small = CoinJoin::AmountToDenomination(CoinJoin::GetSmallestDenomination());
+    const int denom_other = CoinJoin::AmountToDenomination(CoinJoin::GetSmallestDenomination() * 10);
+    BOOST_REQUIRE(CoinJoin::IsValidDenomination(denom_small));
+    BOOST_REQUIRE(CoinJoin::IsValidDenomination(denom_other));
+
+    const auto now{GetAdjustedTime()};
+    man.AddQueue(MakeQueue(denom_other, now, /*fReady=*/false, COutPoint(uint256S("51"), 0)));
+    man.AddQueue(MakeQueue(denom_small, now, /*fReady=*/false, COutPoint(uint256S("52"), 0)));
+
+    // A filtered search returns a queue of the requested denomination
+    CCoinJoinQueue picked;
+    BOOST_REQUIRE(man.GetQueueItemAndTry(picked, denom_small));
+    BOOST_CHECK_EQUAL(picked.nDenom, denom_small);
+
+    // ...which is now tried, so asking again for it finds nothing
+    CCoinJoinQueue picked_again;
+    BOOST_CHECK(!man.GetQueueItemAndTry(picked_again, denom_small));
+
+    // The queue the filter skipped was left untried, so an unfiltered search still finds it.
+    // Marking it tried here would starve standard mixing of every announcement a rebalance
+    // attempt looked past.
+    CCoinJoinQueue picked_unfiltered;
+    BOOST_REQUIRE(man.GetQueueItemAndTry(picked_unfiltered));
+    BOOST_CHECK_EQUAL(picked_unfiltered.nDenom, denom_other);
+
+    // Both have been tried by now
+    CCoinJoinQueue picked_none;
+    BOOST_CHECK(!man.GetQueueItemAndTry(picked_none));
+}
+
 BOOST_AUTO_TEST_CASE(queuemanager_has_queue_from_masternode_readiness)
 {
     CoinJoinQueueManager man;

@@ -7,7 +7,9 @@
 
 #include <bls/bls.h>
 #include <crypto/sha256.h>
+#include <evo/netinfo.h>
 #include <evo/providertx.h>
+#include <evo/types.h>
 #include <netaddress.h>
 #include <pubkey.h>
 #include <script/script.h>

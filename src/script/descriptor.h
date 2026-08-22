@@ -108,6 +108,14 @@ struct Descriptor {
     /** Convert the descriptor back to a string, undoing parsing. */
     virtual std::string ToString() const = 0;
 
+    /** Return the single extended public key at the root of this descriptor's
+     * key expression, if it has one. */
+    virtual bool GetRootExtPubKey(CExtPubKey& out) const { return false; }
+
+    /** Return the corresponding single extended private key when it is
+     * available from `provider`. */
+    virtual bool GetRootExtKey(const SigningProvider& provider, CExtKey& out) const { return false; }
+
     /** Whether this descriptor will return one scriptPubKey or multiple (aka is or is not combo) */
     virtual bool IsSingleType() const = 0;
 

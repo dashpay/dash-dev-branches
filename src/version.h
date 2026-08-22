@@ -11,7 +11,7 @@
  */
 
 
-static const int PROTOCOL_VERSION = 70240;
+static const int PROTOCOL_VERSION = 70241;
 
 //! initial proto version, to be increased after version/verack negotiation
 static const int INIT_PROTO_VERSION = 209;
@@ -66,6 +66,11 @@ static const int QFCOMMIT_STALE_REPROP_BAN_VERSION = 70239;
 
 //! PLATFORMBAN added to v2 short IDs (short ID 168)
 static const int PLATFORMBAN_V2_SHORT_ID_VERSION = 70240;
+
+//! CoinJoin denomination promotion/demotion (rebalance) sessions introduced in this version;
+//! dsa messages gained a version-gated flags field and only peers at or above this version
+//! may join rebalance-capable mixing sessions
+static const int COINJOIN_REBALANCE_VERSION = 70241;
 
 // Make sure that none of the values above collide with `ADDRV2_FORMAT`.
 

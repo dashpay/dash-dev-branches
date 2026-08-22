@@ -153,7 +153,7 @@ MessageProcessingResult CQuorumBlockProcessor::ProcessMessage(const CNode& peer,
             // same, can't punish
             return ret;
         }
-        if (int quorumHeight = pQuorumBaseBlockIndex->nHeight - (pQuorumBaseBlockIndex->nHeight % llmq_params_opt->dkgInterval) + int(qc.quorumIndex);
+        if (int quorumHeight = pQuorumBaseBlockIndex->nHeight - (pQuorumBaseBlockIndex->nHeight % llmq_params_opt->dkgInterval) + int{qc.quorumIndex};
                 quorumHeight != pQuorumBaseBlockIndex->nHeight) {
             LogPrint(BCLog::LLMQ, "CQuorumBlockProcessor::%s -- block %s is not the first block in the DKG interval, peer=%d\n", __func__,
                      qc.quorumHash.ToString(), peer.GetId());
@@ -421,7 +421,7 @@ bool CQuorumBlockProcessor::ProcessCommitment(Chainstate& chainstate, int nHeigh
     }
 
     if (rotation_enabled) {
-        m_evoDb.Write(BuildInversedHeightKeyIndexed(llmq_params.type, nHeight, int(qc.quorumIndex)), pQuorumBaseBlockIndex->nHeight);
+        m_evoDb.Write(BuildInversedHeightKeyIndexed(llmq_params.type, nHeight, int{qc.quorumIndex}), pQuorumBaseBlockIndex->nHeight);
     } else {
         m_evoDb.Write(BuildInversedHeightKey(llmq_params.type, nHeight), pQuorumBaseBlockIndex->nHeight);
     }
@@ -531,7 +531,7 @@ bool CQuorumBlockProcessor::UndoBlock(const Chainstate& chainstate, const CBlock
             assert(llmq_params_opt.has_value());
 
             if (IsQuorumRotationEnabled(llmq_params_opt.value(), pindex)) {
-                m_evoDb.Erase(BuildInversedHeightKeyIndexed(qc.llmqType, pindex->nHeight, int(qc.quorumIndex)));
+                m_evoDb.Erase(BuildInversedHeightKeyIndexed(qc.llmqType, pindex->nHeight, int{qc.quorumIndex}));
             } else {
                 m_evoDb.Erase(BuildInversedHeightKey(qc.llmqType, pindex->nHeight));
             }

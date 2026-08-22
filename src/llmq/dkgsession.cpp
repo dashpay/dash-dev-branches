@@ -127,7 +127,7 @@ bool CDKGSession::Init(const uint256& _myProTxHash, int _quorumIndex)
         logger.Batch("DKGComposition h[%d] i[%d] DKG:[%s]", pCycleQuorumBaseBlockIndex->nHeight, quorumIndex, ss.str());
     }
 
-    if (mns.size() < size_t(params.minSize)) {
+    if (mns.size() < static_cast<size_t>(params.minSize)) {
         logger.Batch("not enough members (%d < %d), aborting init", mns.size(), params.minSize);
         return false;
     }
@@ -187,7 +187,7 @@ bool CDKGSession::PreVerifyMessage(const CDKGContribution& qc, bool& retBan) con
         retBan = true;
         return false;
     }
-    if (qc.vvec->size() != size_t(params.threshold)) {
+    if (qc.vvec->size() != static_cast<size_t>(params.threshold)) {
         logger.Batch("invalid verification vector length");
         retBan = true;
         return false;
@@ -291,13 +291,13 @@ bool CDKGSession::PreVerifyMessage(const CDKGComplaint& qc, bool& retBan) const
         return false;
     }
 
-    if (qc.badMembers.size() != (size_t)params.size) {
+    if (qc.badMembers.size() != static_cast<size_t>(params.size)) {
         logger.Batch("invalid badMembers bitset size");
         retBan = true;
         return false;
     }
 
-    if (qc.complainForMembers.size() != (size_t)params.size) {
+    if (qc.complainForMembers.size() != static_cast<size_t>(params.size)) {
         logger.Batch("invalid complainForMembers bitset size");
         retBan = true;
         return false;
@@ -509,7 +509,7 @@ bool CDKGSession::PreVerifyMessage(const CDKGPrematureCommitment& qc, bool& retB
         return false;
     }
 
-    if (qc.validMembers.size() != (size_t)params.size) {
+    if (qc.validMembers.size() != static_cast<size_t>(params.size)) {
         logger.Batch("invalid validMembers bitset size");
         retBan = true;
         return false;

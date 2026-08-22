@@ -139,7 +139,7 @@ Uint256HashMap<InstantSendLockPtr> CInstantSendDb::RemoveConfirmedInstantSendLoc
             break;
         }
         uint32_t nHeight = std::numeric_limits<uint32_t>::max() - be32toh_internal(std::get<1>(curKey));
-        if (nHeight > uint32_t(nUntilHeight)) {
+        if (nHeight > static_cast<uint32_t>(nUntilHeight)) {
             break;
         }
 
@@ -183,7 +183,7 @@ void CInstantSendDb::RemoveArchivedInstantSendLocks(int nUntilHeight)
             break;
         }
         uint32_t nHeight = std::numeric_limits<uint32_t>::max() - be32toh_internal(std::get<1>(curKey));
-        if (nHeight > uint32_t(nUntilHeight)) {
+        if (nHeight > static_cast<uint32_t>(nUntilHeight)) {
             break;
         }
 

@@ -57,7 +57,6 @@
 #include <instantsend/instantsend.h>
 #include <instantsend/lock.h>
 #include <llmq/commitment.h>
-#include <llmq/context.h>
 #include <util/helpers.h>
 
 #include <cstdint>
@@ -434,13 +433,13 @@ static RPCHelpMan getrawtransaction()
         return EncodeHexTx(*tx);
     }
 
-    const LLMQContext& llmq_ctx = EnsureLLMQContext(node);
+    const llmq::CInstantSendManager& isman = EnsureInstantSendManager(node);
     const CTxMemPool& mempool = EnsureMemPool(node);
     CHECK_NONFATAL(node.chainlocks);
 
     UniValue result(UniValue::VOBJ);
     if (blockindex) result.pushKV("in_active_chain", in_active_chain);
-    TxToJSON(*tx, hash_block, mempool, chainman.ActiveChainstate(), *node.chainlocks, *llmq_ctx.isman, node.spent_index.get(), result);
+    TxToJSON(*tx, hash_block, mempool, chainman.ActiveChainstate(), *node.chainlocks, isman, node.spent_index.get(), result);
     return result;
 },
     };
@@ -495,7 +494,7 @@ static RPCHelpMan getrawtransactionmulti() {
 
     const NodeContext& node{EnsureAnyNodeContext(request.context)};
     const ChainstateManager& chainman{EnsureChainman(node)};
-    const LLMQContext& llmq_ctx{EnsureLLMQContext(node)};
+    const llmq::CInstantSendManager& isman{EnsureInstantSendManager(node)};
     CHECK_NONFATAL(node.chainlocks);
     CTxMemPool& mempool{EnsureMemPool(node)};
 
@@ -531,7 +530,7 @@ static RPCHelpMan getrawtransactionmulti() {
                 result.pushKV(txid_str, "None");
             } else if (fVerbose) {
                 UniValue tx_data{UniValue::VOBJ};
-                TxToJSON(*tx, hash_block, mempool, chainman.ActiveChainstate(), *node.chainlocks, *llmq_ctx.isman, node.spent_index.get(), tx_data);
+                TxToJSON(*tx, hash_block, mempool, chainman.ActiveChainstate(), *node.chainlocks, isman, node.spent_index.get(), tx_data);
                 result.pushKV(txid_str, tx_data);
             } else {
                 result.pushKV(txid_str, EncodeHexTx(*tx));
@@ -591,11 +590,11 @@ static RPCHelpMan getislocks()
         throw JSONRPCError(RPC_INVALID_PARAMETER, "Up to 100 txids only");
     }
 
-    const LLMQContext& llmq_ctx = EnsureLLMQContext(node);
+    const llmq::CInstantSendManager& isman = EnsureInstantSendManager(node);
     for (const auto idx : util::irange(txids.size())) {
         const uint256 txid(ParseHashV(txids[idx], "txid"));
 
-        if (const instantsend::InstantSendLockPtr islock = llmq_ctx.isman->GetInstantSendLockByTxid(txid); islock != nullptr) {
+        if (const instantsend::InstantSendLockPtr islock = isman.GetInstantSendLockByTxid(txid); islock != nullptr) {
             UniValue objIS(UniValue::VOBJ);
             objIS.pushKV("txid", islock->txid.ToString());
             UniValue inputs(UniValue::VARR);

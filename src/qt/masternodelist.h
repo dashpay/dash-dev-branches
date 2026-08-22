@@ -89,11 +89,16 @@ private:
     MasternodeListSortFilterProxyModel* m_proxy_model{nullptr};
     MasternodeModel* m_model{nullptr};
     QMenu* contextMenuDIP3{nullptr};
+    QAction* m_action_update_service{nullptr};
+    QAction* m_action_update_registrar{nullptr};
+    QAction* m_action_revoke{nullptr};
     WalletModel* walletModel{nullptr};
 
     void setMasternodeList(MasternodeData&& data, QSet<QString>&& owned_mns);
+    void updateRegistrationAvailability();
 
     const MasternodeEntry* GetSelectedEntry();
+    const MasternodeEntry* selectedEntryForDialog();
 
 Q_SIGNALS:
     void doubleClicked(const QModelIndex&);
@@ -101,6 +106,7 @@ Q_SIGNALS:
 private Q_SLOTS:
     void copyCollateralOutpoint_clicked();
     void copyProTxHash_clicked();
+    void showRegisterWizard();
     void extraInfoDIP3_clicked();
     void filterByCollateralAddress();
     void filterByOwnerAddress();
@@ -110,6 +116,9 @@ private Q_SLOTS:
     void on_checkBoxOwned_stateChanged(int state);
     void on_comboBoxType_currentIndexChanged(int index);
     void on_filterText_textChanged(const QString& strFilterIn);
+    void onRevoke();
+    void onUpdateRegistrar();
+    void onUpdateService();
     void showContextMenuDIP3(const QPoint&);
     void updateFilteredCount();
     void updateMasternodeList();

@@ -116,7 +116,7 @@ bool CQuorumManager::BuildQuorumContributions(const CFinalCommitmentPtr& fqc, co
     std::vector<BLSVerificationVectorPtr> vvecs;
     std::vector<CBLSSecretKey> skContributions;
     if (!m_qdkgsman ||
-        !m_qdkgsman->GetVerifiedContributions((Consensus::LLMQType)fqc->llmqType, quorum->m_quorum_base_block_index,
+        !m_qdkgsman->GetVerifiedContributions(fqc->llmqType, quorum->m_quorum_base_block_index,
                                             fqc->validMembers, memberIndexes, vvecs, skContributions)) {
         return false;
     }

@@ -329,7 +329,7 @@ bool CSpecialTxProcessor::RebuildListFromBlock(const CBlock& block, gsl::not_nul
     const bool is_v24_deployed{DeploymentActiveAfter(pindexPrev, m_chainman, Consensus::DEPLOYMENT_V24)};
 
     // we skip the coinbase
-    for (int i = 1; i < (int)block.vtx.size(); i++) {
+    for (int i = 1; i < static_cast<int>(block.vtx.size()); i++) {
         const CTransaction& tx = *block.vtx[i];
 
         if (!tx.IsSpecialTxVersion()) {
@@ -634,7 +634,7 @@ bool CSpecialTxProcessor::RebuildListFromBlock(const CBlock& block, gsl::not_nul
     }
 
     // we skip the coinbase
-    for (int i = 1; i < (int)block.vtx.size(); i++) {
+    for (int i = 1; i < static_cast<int>(block.vtx.size()); i++) {
         const CTransaction& tx = *block.vtx[i];
 
         // check if any existing MN collateral is spent by this transaction
@@ -962,75 +962,6 @@ bool CSpecialTxProcessor::CheckCreditPoolDiffForBlock(const CBlock& block, const
 }
 
 template <typename ProTx>
-static bool CheckService(const ProTx& proTx, TxValidationState& state)
-{
-    switch (proTx.netInfo->Validate()) {
-    case NetInfoStatus::BadAddress:
-        return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-netinfo-addr");
-    case NetInfoStatus::BadPort:
-        return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-netinfo-port");
-    case NetInfoStatus::BadType:
-        return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-netinfo-addr-type");
-    case NetInfoStatus::NotRoutable:
-        return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-netinfo-addr-unroutable");
-    case NetInfoStatus::Malformed:
-        return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-netinfo-bad");
-    case NetInfoStatus::Success:
-        return true;
-    // Reachable through a serialized netInfo that bypasses the in-memory builder's checks
-    case NetInfoStatus::BadInput:
-        return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-netinfo-entry");
-    case NetInfoStatus::Duplicate:
-        return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-dup-netinfo-entry");
-    case NetInfoStatus::MaxLimit:
-        return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-netinfo-maxlimit");
-    } // no default case, so the compiler can warn about missing cases
-    assert(false);
-}
-
-template <typename ProTx>
-static bool CheckPlatformFields(const ProTx& proTx, bool is_extended_addr, TxValidationState& state)
-{
-    if (proTx.platformNodeID.IsNull()) {
-        return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-platform-nodeid");
-    }
-
-    if (is_extended_addr) {
-        // platformHTTPPort and platformP2PPort have been subsumed by netInfo. They should always be zero.
-        if (proTx.platformP2PPort != 0) {
-            return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-platform-p2p-port");
-        }
-        if (proTx.platformHTTPPort != 0) {
-            return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-platform-http-port");
-        }
-        return true;
-    }
-
-    if (::IsNodeOnMainnet()) {
-        if (proTx.platformP2PPort != ::MainParams().GetDefaultPlatformP2PPort()) {
-            return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-platform-p2p-port");
-        }
-        if (proTx.platformHTTPPort != ::MainParams().GetDefaultPlatformHTTPPort()) {
-            return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-platform-http-port");
-        }
-    }
-    if (proTx.platformP2PPort == ::MainParams().GetDefaultPort()) {
-        return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-platform-p2p-port");
-    }
-    if (proTx.platformHTTPPort == ::MainParams().GetDefaultPort()) {
-        return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-platform-http-port");
-    }
-
-    const uint16_t core_port{proTx.netInfo->GetPrimary().GetPort()};
-    if (proTx.platformP2PPort == proTx.platformHTTPPort || proTx.platformP2PPort == core_port ||
-        proTx.platformHTTPPort == core_port) {
-        return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-platform-dup-ports");
-    }
-
-    return true;
-}
-
-template <typename ProTx>
 static bool CheckHashSig(const ProTx& proTx, const PKHash& pkhash, TxValidationState& state)
 {
     if (std::string strError; !CHashSigner::VerifyHash(::SerializeHash(proTx), ToKeyID(pkhash), proTx.vchSig, strError)) {
@@ -1126,15 +1057,9 @@ bool CheckProRegTx(const CTransaction& tx, gsl::not_null<const CBlockIndex*> pin
 
     // It's allowed to set addr to 0, which will put the MN into PoSe-banned state and require a ProUpServTx to be
     // issues later. If any of both is set, it must be valid however
-    if (!opt_ptx->netInfo->IsEmpty() && !CheckService(*opt_ptx, state)) {
-        // pass the state returned by the function above
+    if (!CheckProviderNetworkFields(opt_ptx->netInfo, opt_ptx->nType, opt_ptx->nVersion, &opt_ptx->platformNodeID,
+                                    opt_ptx->platformP2PPort, opt_ptx->platformHTTPPort, /*allow_empty=*/true, state)) {
         return false;
-    }
-
-    if (opt_ptx->nType == MnType::Evo) {
-        if (!CheckPlatformFields(*opt_ptx, opt_ptx->nVersion >= ProTxVersion::ExtAddr, state)) {
-            return false;
-        }
     }
 
     CTxDestination collateralTxDest;
@@ -1260,15 +1185,9 @@ bool CheckProUpServTx(const CTransaction& tx, gsl::not_null<const CBlockIndex*> 
         return false;
     }
 
-    if (!CheckService(*opt_ptx, state)) {
-        // pass the state returned by the function above
+    if (!CheckProviderNetworkFields(opt_ptx->netInfo, opt_ptx->nType, opt_ptx->nVersion, &opt_ptx->platformNodeID,
+                                    opt_ptx->platformP2PPort, opt_ptx->platformHTTPPort, /*allow_empty=*/false, state)) {
         return false;
-    }
-
-    if (opt_ptx->nType == MnType::Evo) {
-        if (!CheckPlatformFields(*opt_ptx, opt_ptx->nVersion >= ProTxVersion::ExtAddr, state)) {
-            return false;
-        }
     }
 
     auto mnList = dmnman.GetListForBlock(pindexPrev);

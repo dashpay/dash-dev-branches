@@ -21,7 +21,7 @@ struct SaltedHasherImpl<std::pair<uint256, N>>
 {
     static std::size_t CalcHash(const std::pair<uint256, N>& v, uint64_t k0, uint64_t k1)
     {
-        return SipHashUint256Extra(k0, k1, v.first, (uint32_t) v.second);
+        return SipHashUint256Extra(k0, k1, v.first, static_cast<uint32_t>(v.second));
     }
 };
 
@@ -30,7 +30,7 @@ struct SaltedHasherImpl<std::pair<N, uint256>>
 {
     static std::size_t CalcHash(const std::pair<N, uint256>& v, uint64_t k0, uint64_t k1)
     {
-        return SipHashUint256Extra(k0, k1, v.second, (uint32_t) v.first);
+        return SipHashUint256Extra(k0, k1, v.second, static_cast<uint32_t>(v.first));
     }
 };
 

@@ -60,7 +60,7 @@ int GetMinPoolParticipants();
 int GetMaxPoolParticipants();
 
 /// Maximum number of inputs or outputs across a full pool
-inline size_t GetMaxPoolInputOutputCount() { return size_t(GetMaxPoolParticipants()) * COINJOIN_ENTRY_MAX_SIZE; }
+inline size_t GetMaxPoolInputOutputCount() { return static_cast<size_t>(GetMaxPoolParticipants()) * COINJOIN_ENTRY_MAX_SIZE; }
 } // namespace CoinJoin
 
 // pool responses
@@ -139,23 +139,43 @@ public:
 class CCoinJoinAccept
 {
 public:
+    //! dsa flags (post-V24): which kind of rebalance entry this participant intends to submit.
+    //! The direction matters to the masternode because a promotion only ever adds coins at the
+    //! session denomination to the input side and a demotion only to the output side, and each
+    //! side needs either nobody or at least two participants (see CoinJoin::MixSideCounts).
+    static constexpr uint8_t FLAG_PROMOTION{1 << 0};
+    static constexpr uint8_t FLAG_DEMOTION{1 << 1};
+
     int nDenom{0};
     CMutableTransaction txCollateral;
+    //! Only serialized between peers at or above COINJOIN_REBALANCE_VERSION; old peers
+    //! neither send nor receive it, so their wire format is unchanged
+    uint8_t nFlags{0};
 
     CCoinJoinAccept() = default;
 
-    CCoinJoinAccept(int nDenom, CMutableTransaction txCollateral) :
+    CCoinJoinAccept(int nDenom, CMutableTransaction txCollateral, uint8_t nFlags = 0) :
         nDenom(nDenom),
-        txCollateral(std::move(txCollateral)){};
+        txCollateral(std::move(txCollateral)),
+        nFlags(nFlags){};
 
     SERIALIZE_METHODS(CCoinJoinAccept, obj)
     {
         READWRITE(obj.nDenom, obj.txCollateral);
+        if (s.GetVersion() >= COINJOIN_REBALANCE_VERSION) {
+            READWRITE(obj.nFlags);
+        }
     }
+
+    [[nodiscard]] bool IsPromotion() const { return (nFlags & FLAG_PROMOTION) != 0; }
+    [[nodiscard]] bool IsDemotion() const { return (nFlags & FLAG_DEMOTION) != 0; }
+    [[nodiscard]] bool IsRebalance() const { return IsPromotion() || IsDemotion(); }
+    //! A participant mixes in exactly one direction; anything else is malformed
+    [[nodiscard]] bool HasValidFlags() const { return !(IsPromotion() && IsDemotion()); }
 
     friend bool operator==(const CCoinJoinAccept& a, const CCoinJoinAccept& b)
     {
-        return a.nDenom == b.nDenom && CTransaction(a.txCollateral) == CTransaction(b.txCollateral);
+        return a.nDenom == b.nDenom && a.nFlags == b.nFlags && CTransaction(a.txCollateral) == CTransaction(b.txCollateral);
     }
 };
 
@@ -203,6 +223,21 @@ public:
     }
 
     bool AddScriptSig(const CTxIn& txin);
+
+    /// Which side(s) of the session denomination this entry occupies, derived from its shape.
+    /// Empty and malformed entries are UNKNOWN; they occupy neither side and are rejected
+    /// before they reach the pool.
+    [[nodiscard]] CoinJoin::MixShape GetMixShape() const
+    {
+        using CoinJoin::MixShape;
+        if (vecTxDSIn.empty() || vecTxOut.empty()) return MixShape::UNKNOWN;
+        if (vecTxDSIn.size() == vecTxOut.size()) return MixShape::STANDARD;
+        if (vecTxDSIn.size() == static_cast<size_t>(CoinJoin::PROMOTION_RATIO) && vecTxOut.size() == 1) return MixShape::PROMOTION;
+        if (vecTxDSIn.size() == 1 && vecTxOut.size() == static_cast<size_t>(CoinJoin::PROMOTION_RATIO)) return MixShape::DEMOTION;
+        return MixShape::UNKNOWN;
+    }
+
+    [[nodiscard]] bool IsStandardMixingEntry() const { return GetMixShape() == CoinJoin::MixShape::STANDARD; }
 };
 
 
@@ -317,7 +352,15 @@ public:
 
     [[nodiscard]] const std::optional<int>& GetConfirmedHeight() const { return nConfirmedHeight; }
     void SetConfirmedHeight(std::optional<int> nConfirmedHeightIn) { assert(nConfirmedHeightIn == std::nullopt || *nConfirmedHeightIn > 0); nConfirmedHeight = nConfirmedHeightIn; }
-    [[nodiscard]] bool IsValidStructure() const;
+    [[nodiscard]] bool IsExpired(const CBlockIndex* pindex, const chainlock::Chainlocks& clhandler) const;
+    /**
+     * Trivial structural checks against the V24-dependent rules at pindex. When the tx fails
+     * only because V24 is not active at pindex but would be structurally valid on a post-V24
+     * tip, fPossiblyValidPostV24Ret (if provided) is set to true so callers can tolerate tip
+     * skew around the activation boundary.
+     */
+    [[nodiscard]] bool IsValidStructure(const CBlockIndex* pindex, const ChainstateManager& chainman,
+                                        bool* fPossiblyValidPostV24Ret = nullptr) const;
 };
 
 // base class
@@ -337,9 +380,24 @@ protected:
 
     virtual void SetNull() EXCLUSIVE_LOCKS_REQUIRED(cs_coinjoin);
 
-    bool IsValidInOuts(Chainstate& active_chainstate, const llmq::CInstantSendManager& isman,
-                       const CTxMemPool& mempool, const std::vector<CTxIn>& vin, const std::vector<CTxOut>& vout,
-                       PoolMessage& nMessageIDRet, bool* fConsumeCollateralRet) const;
+    /**
+     * Validate inputs/outputs of a single mixing entry or, with fFinalTx=true, of the
+     * aggregated final transaction. Post-V24 a final transaction concatenates standard (N:N),
+     * promotion (10:1) and demotion (1:10) entries, so per-entry shape rules don't apply to it;
+     * aggregate rules (allowed denominations, value balance, input/output consistency) are
+     * checked instead. session_denom is the caller's snapshot of the session denomination.
+     *
+     * fAllowRebalanceShapes tells us whether promotion/demotion shapes are permitted here. It is
+     * passed in rather than derived from the tip so that it stays fixed for the lifetime of a
+     * session: the masternode passes the session's own capability and the client the
+     * boundary-tolerant tip check, and neither can be flipped mid-session by a reorg across the
+     * V24 boundary.
+     */
+    static bool IsValidInOuts(Chainstate& active_chainstate, const llmq::CInstantSendManager& isman,
+                              const CTxMemPool& mempool, const std::vector<CTxIn>& vin, const std::vector<CTxOut>& vout,
+                              int session_denom, bool fAllowRebalanceShapes, PoolMessage& nMessageIDRet,
+                              bool* fConsumeCollateralRet, bool fFinalTx = false,
+                              CoinJoin::SessionDenomCounts* pDenomCountsRet = nullptr);
 
 public:
     // Atomic because the message-handling and scheduler threads write it while those threads and
@@ -354,6 +412,21 @@ public:
 
     int GetEntriesCount() const EXCLUSIVE_LOCKS_REQUIRED(!cs_coinjoin) { LOCK(cs_coinjoin); return vecEntries.size(); }
     int GetEntriesCountLocked() const EXCLUSIVE_LOCKS_REQUIRED(cs_coinjoin) { return vecEntries.size(); }
+
+    /// Participants occupying each side of the session denomination among the entries received
+    CoinJoin::MixSideCounts GetMixSideCounts() const EXCLUSIVE_LOCKS_REQUIRED(!cs_coinjoin)
+    {
+        LOCK(cs_coinjoin);
+        return GetMixSideCountsLocked();
+    }
+    CoinJoin::MixSideCounts GetMixSideCountsLocked() const EXCLUSIVE_LOCKS_REQUIRED(cs_coinjoin)
+    {
+        CoinJoin::MixSideCounts counts;
+        for (const auto& entry : vecEntries) {
+            counts.Add(entry.GetMixShape());
+        }
+        return counts;
+    }
 };
 
 class CoinJoinQueueManager
@@ -371,7 +444,9 @@ public:
     void CheckQueue() EXCLUSIVE_LOCKS_REQUIRED(!cs_vecqueue);
 
     int GetQueueSize() const EXCLUSIVE_LOCKS_REQUIRED(!cs_vecqueue) { LOCK(cs_vecqueue); return vecCoinJoinQueue.size(); }
-    bool GetQueueItemAndTry(CCoinJoinQueue& dsqRet) EXCLUSIVE_LOCKS_REQUIRED(!cs_vecqueue);
+    //! nDenomFilter != 0 restricts the search to that denomination. Queues it skips are left
+    //! untried, so a rebalance attempt doesn't consume the announcements standard mixing needs.
+    bool GetQueueItemAndTry(CCoinJoinQueue& dsqRet, int nDenomFilter = 0) EXCLUSIVE_LOCKS_REQUIRED(!cs_vecqueue);
 
     bool HasQueue(const uint256& queueHash) EXCLUSIVE_LOCKS_REQUIRED(!cs_vecqueue)
     {
@@ -417,9 +492,52 @@ namespace CoinJoin
 
     constexpr CAmount GetMaxPoolAmount() { return COINJOIN_ENTRY_MAX_SIZE * vecStandardDenominations.front(); }
 
+    /// Whether denomination promotion/demotion (post-V24) is active at the current chain tip.
+    /// With fNextBlock, also counts a deployment that activates in the block following the tip:
+    /// the peer that sent us a rebalance-shaped transaction may be one block ahead of us at the
+    /// activation boundary, and treating its transaction as malformed would cost us either a
+    /// discouraged peer or, when signing, our collateral.
+    bool IsPromotionDemotionActive(const ChainstateManager& chainman, bool fNextBlock = false);
+
     /// If the collateral is valid given by a client
     bool IsCollateralValid(ChainstateManager& chainman, const llmq::CInstantSendManager& isman,
                            const CTxMemPool& mempool, const CTransaction& txCollateral);
+
+    /**
+     * Validate a promotion entry: 10 inputs of smaller denom → 1 output of larger denom
+     * @param vecTxIn The inputs for this entry
+     * @param vecTxOut The outputs for this entry
+     * @param nSessionDenom The session denomination (the smaller denom for promotion)
+     * @param nMessageIDRet Error message if validation fails
+     * @return true if valid promotion entry
+     */
+    bool ValidatePromotionEntry(const std::vector<CTxIn>& vecTxIn, const std::vector<CTxOut>& vecTxOut,
+                                int nSessionDenom, PoolMessage& nMessageIDRet);
+
+    /**
+     * Validate a demotion entry: 1 input of larger denom → 10 outputs of smaller denom
+     * @param vecTxIn The inputs for this entry
+     * @param vecTxOut The outputs for this entry
+     * @param nSessionDenom The session denomination (the smaller denom for demotion outputs)
+     * @param nMessageIDRet Error message if validation fails
+     * @return true if valid demotion entry
+     */
+    bool ValidateDemotionEntry(const std::vector<CTxIn>& vecTxIn, const std::vector<CTxOut>& vecTxOut,
+                               int nSessionDenom, PoolMessage& nMessageIDRet);
+
+    /**
+     * Check that a final transaction's aggregate input/output counts are composable from valid
+     * standard (N:N), promotion (PROMOTION_RATIO:1) and demotion (1:PROMOTION_RATIO) entries.
+     * Inputs/outputs at the larger adjacent denomination are counted separately from the
+     * session-denomination remainder; value balance is checked by the caller.
+     * @param nTotalInputs Total number of inputs in the final tx
+     * @param nTotalOutputs Total number of outputs in the final tx
+     * @param nLargerInputs Number of inputs at the larger adjacent denomination (demotions)
+     * @param nLargerOutputs Number of outputs at the larger adjacent denomination (promotions)
+     * @return true if the counts are consistent with a mix of valid entries
+     */
+    bool ValidateFinalTxComposition(size_t nTotalInputs, size_t nTotalOutputs,
+                                    size_t nLargerInputs, size_t nLargerOutputs);
 }
 
 class CDSTXManager

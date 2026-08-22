@@ -89,6 +89,11 @@ private:
 
     CKeyHolderStorage keyHolderStorage; // storage for keys used in PrepareDenominate
 
+    // Post-V24: Promotion/demotion session state
+    bool m_fPromotion{false};  // True if this session is promoting smaller -> larger denom
+    bool m_fDemotion{false};   // True if this session is demoting larger -> smaller denom
+    std::vector<COutPoint> m_vecRebalanceInputs;  // Selected inputs for promotion/demotion rebalancing
+
     /// Create denominations
     bool CreateDenominated(CAmount nBalanceToDenominate);
     bool CreateDenominated(CAmount nBalanceToDenominate, const wallet::CompactTallyItem& tallyItem, bool fCreateMixingCollaterals)
@@ -102,9 +107,19 @@ private:
     bool CreateCollateralTransaction(CMutableTransaction& txCollateral, std::string& strReason)
         EXCLUSIVE_LOCKS_REQUIRED(m_wallet->cs_wallet);
 
-    bool JoinExistingQueue(CAmount nBalanceNeedsAnonymized, CConnman& connman);
+    bool JoinExistingQueue(CAmount nBalanceNeedsAnonymized, CConnman& connman,
+                           int nTargetDenom = 0, bool fPromotion = false, bool fDemotion = false);
     bool StartNewQueue(CAmount nBalanceNeedsAnonymized, CConnman& connman);
+    bool StartNewQueue(CAmount nBalanceNeedsAnonymized, CConnman& connman,
+                       int nTargetDenom, bool fPromotion, bool fDemotion);
     CDeterministicMNCPtr GetRandomNotUsedMasternode();
+
+    /// Post-V24: select and lock inputs for a promotion/demotion session. Locked outpoints are
+    /// recorded in m_vecRebalanceInputs and vecOutPointLocked so UnlockCoins() releases them on
+    /// any failure path.
+    bool SelectRebalanceInputs(int nTargetDenom, bool fPromotion, std::vector<CTxDSIn>& vecTxDSInRet);
+    /// Post-V24: unlock and forget the inputs selected by SelectRebalanceInputs (session setup failed)
+    void UnlockRebalanceInputs();
 
     /// step 0: select denominated inputs and txouts
     bool SelectDenominate(std::string& strErrorRet, std::vector<CTxDSIn>& vecTxDSInRet);
@@ -112,6 +127,15 @@ private:
     bool PrepareDenominate(int nMinRounds, int nMaxRounds, std::string& strErrorRet, const std::vector<CTxDSIn>& vecTxDSIn,
                            std::vector<std::pair<CTxDSIn, CTxOut>>& vecPSInOutPairsRet, bool fDryRun = false)
         EXCLUSIVE_LOCKS_REQUIRED(m_wallet->cs_wallet);
+
+    /// Post-V24: prepare promotion entry (10 inputs of smaller denom -> 1 output of larger denom)
+    bool PreparePromotionEntry(std::string& strErrorRet, std::vector<std::pair<CTxDSIn, CTxOut>>& vecPSInOutPairsRet)
+        EXCLUSIVE_LOCKS_REQUIRED(m_wallet->cs_wallet);
+
+    /// Post-V24: prepare demotion entry (1 input of larger denom -> 10 outputs of smaller denom)
+    bool PrepareDemotionEntry(std::string& strErrorRet, std::vector<std::pair<CTxDSIn, CTxOut>>& vecPSInOutPairsRet)
+        EXCLUSIVE_LOCKS_REQUIRED(m_wallet->cs_wallet);
+
     /// step 2: send denominated inputs and outputs prepared in step 1
     bool SendDenominate(const std::vector<std::pair<CTxDSIn, CTxOut> >& vecPSInOutPairsIn, CConnman& connman) EXCLUSIVE_LOCKS_REQUIRED(!cs_coinjoin);
 
@@ -226,7 +250,7 @@ public:
 
     bool TrySubmitDenominate(const uint256& proTxHash, CConnman& connman) EXCLUSIVE_LOCKS_REQUIRED(!cs_deqsessions);
     bool MarkAlreadyJoinedQueueAsTried(CCoinJoinQueue& dsq) const EXCLUSIVE_LOCKS_REQUIRED(!cs_deqsessions);
-    bool GetQueueItemAndTry(CCoinJoinQueue& dsq) const;
+    bool GetQueueItemAndTry(CCoinJoinQueue& dsq, int nDenomFilter = 0) const;
 
     void CheckTimeout() EXCLUSIVE_LOCKS_REQUIRED(!cs_deqsessions);
 
@@ -256,6 +280,24 @@ public:
     bool isMixing() const override;
     bool startMixing() override;
     void stopMixing() override;
+
+    /**
+     * Post-V24: Check if we should promote smaller denominations into larger ones
+     * @param nSmallerDenom The smaller denomination to promote from
+     * @param nLargerDenom The larger denomination to promote into
+     * @param counts Wallet denomination counts, e.g. from CWallet::GetDenominationCounts()
+     * @return true if promotion is recommended
+     */
+    static bool ShouldPromote(int nSmallerDenom, int nLargerDenom, const wallet::CoinJoinDenomCounts& counts);
+
+    /**
+     * Post-V24: Check if we should demote larger denominations into smaller ones
+     * @param nLargerDenom The larger denomination to demote from
+     * @param nSmallerDenom The smaller denomination to demote into
+     * @param counts Wallet denomination counts, e.g. from CWallet::GetDenominationCounts()
+     * @return true if demotion is recommended
+     */
+    static bool ShouldDemote(int nLargerDenom, int nSmallerDenom, const wallet::CoinJoinDenomCounts& counts);
 };
 
 #endif // BITCOIN_COINJOIN_CLIENT_H

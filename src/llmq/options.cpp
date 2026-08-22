@@ -90,10 +90,10 @@ QvvecSyncModeMap GetEnabledQuorumVvecSyncEntries(const ArgsManager& args)
         int32_t nMode;
         if (ParseInt32(strMode, &nMode)) {
             switch (nMode) {
-            case (int32_t)QvvecSyncMode::Always:
+            case static_cast<int32_t>(QvvecSyncMode::Always):
                 mode = QvvecSyncMode::Always;
                 break;
-            case (int32_t)QvvecSyncMode::OnlyIfTypeMember:
+            case static_cast<int32_t>(QvvecSyncMode::OnlyIfTypeMember):
                 mode = QvvecSyncMode::OnlyIfTypeMember;
                 break;
             default:

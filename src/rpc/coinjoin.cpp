@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <node/context.h>
+#include <rpc/json_help.h>
 #include <rpc/server.h>
 #include <rpc/server_util.h>
 #include <rpc/util.h>

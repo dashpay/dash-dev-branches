@@ -34,7 +34,6 @@ class ChainlockHandler;
 } // namespace chainlock
 namespace Consensus { struct Params; };
 namespace llmq {
-class CInstantSendManager;
 class CQuorumBlockProcessor;
 class CQuorumManager;
 } // namespace llmq
@@ -174,7 +173,6 @@ private:
     CEvoDB& m_evoDb;
     const chainlock::Chainlocks& m_chainlocks;
     chainlock::ChainlockHandler& m_clhandler;
-    llmq::CInstantSendManager& m_isman;
     const CChainParams& chainparams;
     const CTxMemPool* const m_mempool;
     const llmq::CQuorumBlockProcessor& m_quorum_block_processor;

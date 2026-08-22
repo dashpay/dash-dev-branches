@@ -123,6 +123,14 @@ LLMQContext& EnsureAnyLLMQContext(const CoreContext& context)
     return EnsureLLMQContext(EnsureAnyNodeContext(context));
 }
 
+llmq::CInstantSendManager& EnsureInstantSendManager(const NodeContext& node)
+{
+    if (!node.isman) {
+        throw JSONRPCError(RPC_INTERNAL_ERROR, "Node InstantSend manager not found");
+    }
+    return *node.isman;
+}
+
 CConnman& EnsureConnman(const NodeContext& node)
 {
     if (!node.connman) {

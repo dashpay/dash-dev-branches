@@ -7,6 +7,7 @@
 
 #include <consensus/amount.h>
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -18,7 +19,7 @@ class CTxUndo;
 class uint256;
 struct CMutableTransaction;
 struct CSpentIndexTxInfo;
-struct RPCResult;
+enum class MnType : uint16_t;
 
 class UniValue;
 
@@ -58,6 +59,11 @@ void ScriptToUniv(const CScript& script, UniValue& out, bool include_hex = true,
 void TxToUniv(const CTransaction& tx, const uint256& block_hash, UniValue& entry, bool include_hex = true, int serialize_flags = 0, const CTxUndo* txundo = nullptr, TxVerbosity verbosity = TxVerbosity::SHOW_DETAILS, const CSpentIndexTxInfo* ptxSpentInfo = nullptr);
 
 // evo/core_write.cpp
-RPCResult GetRpcResult(const std::string& key, bool optional = false, const std::string& override_name = "");
+/** Reads network info reporting and appends data from legacy fields if applicable */
+template <typename Obj>
+UniValue GetNetInfoWithLegacyFields(const Obj& obj, const MnType& type);
+/** Returns platform port based on purpose and network info version */
+template <bool is_p2p, typename Obj>
+int32_t GetPlatformPort(const Obj& obj);
 
 #endif // BITCOIN_CORE_IO_H

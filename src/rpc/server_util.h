@@ -15,6 +15,9 @@ class ChainstateManager;
 class PeerManager;
 class BanMan;
 struct LLMQContext;
+namespace llmq {
+class CInstantSendManager;
+} // namespace llmq
 namespace node {
 struct NodeContext;
 } // namespace node
@@ -32,6 +35,7 @@ CBlockPolicyEstimator& EnsureFeeEstimator(const node::NodeContext& node);
 CBlockPolicyEstimator& EnsureAnyFeeEstimator(const CoreContext& context);
 LLMQContext& EnsureLLMQContext(const node::NodeContext& node);
 LLMQContext& EnsureAnyLLMQContext(const CoreContext& context);
+llmq::CInstantSendManager& EnsureInstantSendManager(const node::NodeContext& node);
 CConnman& EnsureConnman(const node::NodeContext& node);
 PeerManager& EnsurePeerman(const node::NodeContext& node);
 

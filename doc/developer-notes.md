@@ -17,6 +17,7 @@ Developer Notes
         - [Devnet, testnet, and regtest modes](#devnet-testnet-and-regtest-modes)
         - [DEBUG_LOCKORDER](#debug_lockorder)
         - [DEBUG_LOCKCONTENTION](#debug_lockcontention)
+        - [Assertions and Checks](#assertions-and-checks)
         - [Valgrind suppressions file](#valgrind-suppressions-file)
         - [Compiling for test coverage](#compiling-for-test-coverage)
         - [Performance profiling with perf](#performance-profiling-with-perf)
@@ -108,6 +109,7 @@ code.
   - `++i` is preferred over `i++`.
   - `nullptr` is preferred over `NULL` or `(void*)0`.
   - `static_assert` is preferred over `assert` where possible. Generally; compile-time checking is preferred over run-time checking.
+    For run-time checks, see [Assertions and Checks](#assertions-and-checks) on choosing between `assert`/`Assert`, `Assume` and `CHECK_NONFATAL`.
   - Align pointers and references to the left i.e. use `type& var` and not `type &var`.
   - Use a named cast or functional cast, not a C-Style cast. When casting
     between integer types, use functional casts such as `int(x)` or `int{x}`
@@ -432,30 +434,73 @@ It can be toggled off again with `dash-cli logging [] '["lock"]'`.
 
 ### Assertions and Checks
 
-The util file `src/util/check.h` offers helpers to protect against coding and
-internal logic bugs. They must never be used to validate user, network or any
-other input.
+The util file [`src/util/check.h`](../src/util/check.h) offers helpers to
+protect against coding and internal logic bugs. They document invariants the
+code itself is responsible for maintaining, and must never be used to validate
+user, network, RPC, disk or any other input: untrusted data that does not
+match expectations is an ordinary error to be handled, not a bug to be
+reported.
 
-* `assert` or `Assert` should be used to document assumptions when any
-  violation would mean that it is not safe to continue program execution. The
-  code is always compiled with assertions enabled.
-   - For example, a nullptr dereference or any other logic bug in validation
-     code means the program code is faulty and must terminate immediately.
-* `CHECK_NONFATAL` should be used for recoverable internal logic bugs. On
-  failure, it will throw an exception, which can be caught to recover from the
-  error.
-   - For example, a nullptr dereference or any other logic bug in RPC code
-     means that the RPC code is faulty and cannot be executed. However, the
-     logic bug can be shown to the user and the program can continue to run.
-* `Assume` should be used to document assumptions when program execution can
-  safely continue even if the assumption is violated. In debug builds it
-  behaves like `Assert`/`assert` to notify developers and testers about
-  nonfatal errors. In production it doesn't warn or log anything, though the
-  expression is always evaluated.
-   - For example it can be assumed that a variable is only initialized once,
-     but a failed assumption does not result in a fatal bug. A failed
-     assumption may or may not result in a slightly degraded user experience,
-     but it is safe to continue program execution.
+Pick the helper by the cost of continuing with the invariant violated:
+
+| Cost of continuing | Use |
+| --- | --- |
+| Undefined behavior, memory corruption, or corrupt persisted/consensus state | `assert` / `Assert` |
+| A bug worth investigating, but execution stays well-defined | `Assume` |
+| Same, but there is a caller who can be told (RPC/CLI) | `CHECK_NONFATAL` / `NONFATAL_UNREACHABLE` |
+| Nothing is broken in-process; the environment failed (disk full, failed DB write) | Not a check: return an error, `AbortNode()`, or `InitError()` |
+
+**`Assume` is the default.** Reach for `Assert`/`assert` only when you can name
+the undefined behavior or corruption that continuing would cause.
+
+* `Assume` documents "this is how things are supposed to be": a violation means
+  someone has a bug to chase, but execution stays well-defined. The archetype:
+
+  ```cpp
+  // Somebody decremented twice if this trips. Nothing is corrupt, but the
+  // rate limiter is not limiting anything, so it is worth finding out about.
+  Assume(m_request_count >= 0);
+  ```
+
+  A bugged rate limiter may expose us to extra DoS pressure; aborting would
+  turn that into a guaranteed outage for every user running the release. Never
+  let an `Assume` be the thing that kills a production node. The expression is
+  always evaluated, in every build; failures abort only where
+  `-DABORT_ON_FAILED_ASSUME` is defined — `--enable-debug` and `--enable-fuzz`
+  builds, i.e. CI's `linux64_multiprocess` and fuzz jobs — and are silent in
+  release. That coverage is partial: an invariant you actually care about also
+  needs a test, and code downstream must still cope with the violated case.
+
+* `assert` / `Assert` is for "continuing is unsafe": a nullptr dereference,
+  out-of-bounds access, or an invariant whose violation would corrupt data on
+  disk or consensus state. Aborting must be the safer outcome; such cases
+  should be rare and obvious to a reader. It is still the right tool where a
+  precondition genuinely keeps the code below it safe:
+  `Chainstate::ConnectBlock()` dereferences `pindex` unconditionally, so its
+  `assert(pindex);` just makes a guaranteed crash diagnosable. Plain `assert()`
+  is always active — the build never defines `NDEBUG` (`check.h` refuses to
+  compile with it). `Assert` returns its argument, so a check followed by a
+  use of the checked value collapses into one expression:
+  `assert(ptr != nullptr); obj = *ptr;` becomes `obj = *Assert(ptr);`
+  (`Assume` is an identity function too). Prefer `static_assert` when the
+  condition is known at compile time.
+
+* `CHECK_NONFATAL` / `NONFATAL_UNREACHABLE` report internal logic bugs to a
+  caller: they throw `NonFatalCheckError`, which RPC code catches and turns
+  into an error message asking the user to file a bug report, and the node
+  keeps running. Mandatory in RPC code, enforced (best-effort) by
+  `test/lint/lint-assertions.py` for `src/rpc/` and `src/wallet/rpc*`; use
+  `NONFATAL_UNREACHABLE()` instead of `assert(false)` there.
+
+An assertion reachable from P2P messages, RPC arguments, wallet files, or
+on-disk data is a remote crash. This cuts especially deep in Dash-specific
+code: masternode, LLMQ, InstantSend, ChainLocks, governance and CoinJoin paths
+process peer-chosen message contents and read state (EvoDB, quorum caches, DKG
+sessions) possibly written by an older or buggy version. There, validate and
+reject (misbehaving peer, `state.Invalid(...)`, early return) rather than
+assert; use `Assume` for our *own* bookkeeping while still handling the
+violated case; and reserve `assert` for the narrow spot where continuing would
+corrupt EvoDB, the block index, or the wallet.
 
 ### Valgrind suppressions file
 

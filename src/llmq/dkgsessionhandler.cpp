@@ -14,10 +14,10 @@ namespace llmq {
 CDKGSessionHandler::CDKGSessionHandler(const Consensus::LLMQParams& _params) :
     params{_params},
     // we allow size*2 messages per proTx as we need to make sure we see bad behavior (double messages)
-    pendingContributions{(size_t)_params.size * 2},
-    pendingComplaints{(size_t)_params.size * 2},
-    pendingJustifications{(size_t)_params.size * 2},
-    pendingPrematureCommitments{(size_t)_params.size * 2}
+    pendingContributions{static_cast<size_t>(_params.size) * 2},
+    pendingComplaints{static_cast<size_t>(_params.size) * 2},
+    pendingJustifications{static_cast<size_t>(_params.size) * 2},
+    pendingPrematureCommitments{static_cast<size_t>(_params.size) * 2}
 {
     if (params.type == Consensus::LLMQType::LLMQ_NONE) {
         throw std::runtime_error("Can't initialize CDKGSessionHandler with LLMQ_NONE type.");

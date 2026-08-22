@@ -35,7 +35,6 @@
 #include <evo/simplifiedmns.h>
 #include <evo/specialtxman.h>
 #include <governance/governance.h>
-#include <instantsend/instantsend.h>
 #include <llmq/blockprocessor.h>
 #include <llmq/context.h>
 #include <llmq/options.h>
@@ -76,7 +75,6 @@ BlockAssembler::BlockAssembler(Chainstate& chainstate, const NodeContext& node, 
       m_evoDb(*Assert(node.evodb)),
       m_chainlocks(*Assert(node.chainlocks)),
       m_clhandler(*Assert(node.clhandler)),
-      m_isman(*Assert(Assert(node.llmq_ctx)->isman)),
       chainparams(chainstate.m_chainman.GetParams()),
       m_mempool(mempool),
       m_quorum_block_processor(*Assert(Assert(node.llmq_ctx)->quorum_block_processor)),
@@ -396,7 +394,7 @@ bool BlockAssembler::TestPackageTransactions(const CTxMemPool::setEntries& packa
         }
 
         const auto& txid = it->GetTx().GetHash();
-        if (!m_isman.IsInstantSendEnabled() || m_isman.IsLocked(txid)) {
+        if (!m_chain_helper.IsInstantSendEnabled() || m_chain_helper.IsInstantSendLocked(txid)) {
             continue;
         }
 

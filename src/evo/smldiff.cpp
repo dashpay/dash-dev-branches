@@ -13,7 +13,6 @@
 
 #include <chainparams.h>
 #include <consensus/merkle.h>
-#include <core_io.h>
 #include <deploymentstatus.h>
 #include <node/blockstorage.h>
 #include <serialize.h>
@@ -50,7 +49,7 @@ bool CSimplifiedMNListDiff::BuildQuorumsDiff(const CBlockIndex* baseBlockIndex, 
 
     for (const auto& p : baseQuorumHashes) {
         if (!quorumHashes.count(p)) {
-            deletedQuorums.emplace_back((uint8_t)p.first, p.second);
+            deletedQuorums.emplace_back(static_cast<uint8_t>(p.first), p.second);
         }
     }
     for (const auto& p : quorumHashes) {

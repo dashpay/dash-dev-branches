@@ -44,6 +44,7 @@
 #include <wallet/coincontrol.h>
 #include <wallet/context.h>
 #include <wallet/external_signer_scriptpubkeyman.h>
+#include <wallet/platformkeys.h>
 #include <warnings.h>
 
 #include <coinjoin/options.h>
@@ -3809,6 +3810,162 @@ bool CWallet::WriteGovernanceObject(const Governance::Object& obj)
     AssertLockHeld(cs_wallet);
     WalletBatch batch(GetDatabase());
     return batch.WriteGovernanceObject(obj) && LoadGovernanceObject(obj);
+}
+
+void CWallet::LoadPlatformData(const std::string& key, const std::vector<unsigned char>& value)
+{
+    AssertLockHeld(cs_wallet);
+    m_platform_data[key] = value;
+}
+
+bool CWallet::WritePlatformData(const std::string& key, const std::vector<unsigned char>& value)
+{
+    AssertLockHeld(cs_wallet);
+    WalletBatch batch(GetDatabase());
+    if (value.empty()) {
+        if (!batch.ErasePlatformData(key)) return false;
+        m_platform_data.erase(key);
+        return true;
+    }
+    if (!batch.WritePlatformData(key, value)) return false;
+    m_platform_data[key] = value;
+    return true;
+}
+
+std::map<std::string, std::vector<unsigned char>> CWallet::GetPlatformData(const std::string& prefix) const
+{
+    AssertLockHeld(cs_wallet);
+    std::map<std::string, std::vector<unsigned char>> ret;
+    for (auto it = m_platform_data.lower_bound(prefix); it != m_platform_data.end(); ++it) {
+        if (it->first.compare(0, prefix.size(), prefix) != 0) break;
+        ret.emplace(it->first, it->second);
+    }
+    return ret;
+}
+
+PlatformKeyStatus CWallet::GetPlatformKeySource(const ScriptPubKeyMan*& source) const
+{
+    AssertLockHeld(cs_wallet);
+    source = nullptr;
+    if (!IsWalletFlagSet(WALLET_FLAG_DESCRIPTORS) || IsWalletFlagSet(WALLET_FLAG_DISABLE_PRIVATE_KEYS) ||
+        IsWalletFlagSet(WALLET_FLAG_EXTERNAL_SIGNER)) {
+        return PlatformKeyStatus::NOT_SUPPORTED;
+    }
+
+    std::vector<unsigned char> selected_id;
+    for (const auto* spk_man : GetActiveScriptPubKeyMans()) {
+        std::vector<unsigned char> candidate_id;
+        const auto status{spk_man->GetPlatformKeySource(candidate_id)};
+        if (status == PlatformKeyStatus::NOT_SUPPORTED) continue;
+        if (status != PlatformKeyStatus::SUCCESS) return status;
+        if (source && candidate_id != selected_id) return PlatformKeyStatus::AMBIGUOUS_SOURCE;
+        if (!source) {
+            source = spk_man;
+            selected_id = std::move(candidate_id);
+        }
+    }
+    return source ? PlatformKeyStatus::SUCCESS : PlatformKeyStatus::NOT_SUPPORTED;
+}
+
+PlatformKeyStatus CWallet::DerivePlatformKey(const platformkeys::Path& path, platformkeys::ExtKey256& out) const
+{
+    AssertLockHeld(cs_wallet);
+    const ScriptPubKeyMan* source{nullptr};
+    const auto status{GetPlatformKeySource(source)};
+    if (status != PlatformKeyStatus::SUCCESS) return status;
+    return source->DerivePlatformKey(path, out);
+}
+
+PlatformKeyStatus CWallet::DerivePlatformKey(const PlatformKeyRequest& request, platformkeys::ExtKey256& out) const
+{
+    AssertLockHeld(cs_wallet);
+    return DerivePlatformKey(platformkeys::PlatformKeyPath(static_cast<uint32_t>(Params().ExtCoinType()), request), out);
+}
+
+PlatformKeyResult<CPubKey> CWallet::GetPlatformPubKey(const PlatformKeyRequest& request) const
+{
+    LOCK(cs_wallet);
+    platformkeys::ExtKey256 key;
+    PlatformKeyResult<CPubKey> result;
+    result.status = DerivePlatformKey(request, key);
+    if (result.status == PlatformKeyStatus::SUCCESS) result.value = key.key.GetPubKey();
+    return result;
+}
+
+PlatformKeyResult<std::vector<unsigned char>> CWallet::SignPlatformDigest(const PlatformKeyRequest& request,
+                                                                          const uint256& digest) const
+{
+    LOCK(cs_wallet);
+    platformkeys::ExtKey256 key;
+    PlatformKeyResult<std::vector<unsigned char>> result;
+    result.status = DerivePlatformKey(request, key);
+    if (result.status == PlatformKeyStatus::SUCCESS && !key.key.SignCompact(digest, result.value)) {
+        result.status = PlatformKeyStatus::DERIVATION_ERROR;
+        result.value.clear();
+    }
+    return result;
+}
+
+PlatformKeyResult<SecureVector> CWallet::PlatformECDHSecret(const IdentityAuthKey& request, const CPubKey& counterparty) const
+{
+    LOCK(cs_wallet);
+    PlatformKeyResult<SecureVector> result;
+    if (!counterparty.IsFullyValid()) {
+        result.status = PlatformKeyStatus::INVALID_ARGUMENT;
+        return result;
+    }
+    platformkeys::ExtKey256 key;
+    result.status = DerivePlatformKey(PlatformKeyRequest{request}, key);
+    if (result.status == PlatformKeyStatus::SUCCESS &&
+        !platformkeys::ComputeECDHSecret(key.key, counterparty, result.value)) {
+        result.status = PlatformKeyStatus::DERIVATION_ERROR;
+        result.value.clear();
+    }
+    return result;
+}
+
+PlatformKeyResult<FriendshipXpub> CWallet::EnsureFriendshipReceivingKeychain(const FriendshipKeychainRequest& request)
+{
+    LOCK(cs_wallet);
+    PlatformKeyResult<FriendshipXpub> result;
+    const auto path{platformkeys::FriendshipPath(static_cast<uint32_t>(Params().ExtCoinType()), request.account,
+                                                 Span{request.local_id.begin(), uint256::size()},
+                                                 Span{request.remote_id.begin(), uint256::size()})};
+    platformkeys::ExtKey256 key;
+    result.status = DerivePlatformKey(path, key);
+    if (result.status != PlatformKeyStatus::SUCCESS) return result;
+
+    CExtKey xprv{};
+    xprv.chaincode = key.chaincode;
+    xprv.key = key.key;
+    const CExtPubKey xpub{xprv.Neuter()};
+    FlatSigningProvider provider;
+    provider.keys.emplace(xpub.pubkey.GetID(), xprv.key);
+    std::string parse_error;
+    auto parsed{Parse("pkh(" + EncodeExtPubKey(xpub) + "/*)", provider, parse_error, /*require_checksum=*/false)};
+    if (!parsed) {
+        result.status = PlatformKeyStatus::DERIVATION_ERROR;
+        return result;
+    }
+
+    const int64_t birth_time{std::max<int64_t>(request.birth_time, 0)};
+    WalletDescriptor descriptor(std::move(parsed), birth_time, /*range_start=*/0,
+                                /*range_end=*/DEFAULT_KEYPOOL_SIZE, /*next_index=*/0);
+    if (auto* existing = GetDescriptorScriptPubKeyMan(descriptor)) {
+        LOCK(existing->cs_desc_man);
+        const WalletDescriptor current{existing->GetWalletDescriptor()};
+        descriptor.range_start = current.range_start;
+        descriptor.range_end = std::max(descriptor.range_end, current.range_end);
+        descriptor.next_index = current.next_index;
+        descriptor.creation_time = std::min(descriptor.creation_time, current.creation_time);
+    }
+    if (!AddWalletDescriptor(descriptor, provider, /*label=*/"", /*internal=*/false)) {
+        result.status = PlatformKeyStatus::IMPORT_ERROR;
+        return result;
+    }
+
+    result.value = {key.key.GetPubKey(), key.chaincode};
+    return result;
 }
 
 std::vector<const Governance::Object*> CWallet::GetGovernanceObjects()

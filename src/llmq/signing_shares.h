@@ -130,7 +130,7 @@ public:
         if (invSize > MAX_MSGS_TOTAL_BATCHED_SIGS) {
             throw std::ios_base::failure("CSigSharesInv::inv size too large");
         }
-        autobitset_t bitset = std::make_pair(obj.inv, (size_t)invSize);
+        autobitset_t bitset = std::make_pair(obj.inv, static_cast<size_t>(invSize));
         READWRITE(AUTOBITSET(bitset));
         SER_READ(obj, obj.inv = bitset.first);
     }

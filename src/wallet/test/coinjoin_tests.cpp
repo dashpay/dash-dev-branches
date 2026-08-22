@@ -494,6 +494,64 @@ BOOST_FIXTURE_TEST_CASE(coinjoin_newkeypool_stops_mixing_tests, CTransactionBuil
     }));
 }
 
+BOOST_FIXTURE_TEST_CASE(coinjoin_rebalance_rounds_reset_tests, CTransactionBuilderTestSetup)
+{
+    // 0.100001 DASH and its larger adjacent denomination 1.00001 DASH; the standard
+    // denominations are constructed so PROMOTION_RATIO smaller coins equal one larger coin
+    constexpr CAmount nSmallerAmount{10000100};
+    constexpr CAmount nLargerAmount{nSmallerAmount * CoinJoin::PROMOTION_RATIO};
+    BOOST_REQUIRE(CoinJoin::IsDenominatedAmount(nSmallerAmount));
+    BOOST_REQUIRE(CoinJoin::IsDenominatedAmount(nLargerAmount));
+
+    // PROMOTION_RATIO coins for the promotion plus one to demonstrate standard mixing
+    CompactTallyItem tallyItem = GetTallyItem(std::vector<CAmount>(CoinJoin::PROMOTION_RATIO + 1, nSmallerAmount));
+    const CScript scriptOurs = GetScriptForRawPubKey(coinbaseKey.GetPubKey());
+
+    // The funding transactions pay fees, so their denominated outputs start at 0 rounds
+    BOOST_CHECK_EQUAL(wallet->GetRealOutpointCoinJoinRounds(tallyItem.outpoints[0]), 0);
+
+    // Standard mixing shape (1 in -> 1 out, same denomination): rounds advance by one
+    CMutableTransaction mtxMix;
+    mtxMix.vin.emplace_back(tallyItem.outpoints[0]);
+    mtxMix.vout.emplace_back(nSmallerAmount, scriptOurs);
+    BOOST_REQUIRE(wallet->AddToWallet(MakeTransactionRef(mtxMix), TxStateInMempool{}));
+    const COutPoint outpointMixed{mtxMix.GetHash(), 0};
+    BOOST_CHECK_EQUAL(wallet->GetRealOutpointCoinJoinRounds(outpointMixed), 1);
+
+    // Promotion shape (PROMOTION_RATIO inputs -> 1 output at the larger adjacent
+    // denomination): the conversion's public 10:1 shape clusters the participant's coins,
+    // so the promoted output starts mixing over instead of inheriting its inputs' rounds
+    CMutableTransaction mtxPromo;
+    for (int i = 1; i <= CoinJoin::PROMOTION_RATIO; ++i) {
+        mtxPromo.vin.emplace_back(tallyItem.outpoints[i]);
+    }
+    mtxPromo.vout.emplace_back(nLargerAmount, scriptOurs);
+    BOOST_REQUIRE(wallet->AddToWallet(MakeTransactionRef(mtxPromo), TxStateInMempool{}));
+    const COutPoint outpointPromoted{mtxPromo.GetHash(), 0};
+    BOOST_CHECK_EQUAL(wallet->GetRealOutpointCoinJoinRounds(outpointPromoted), 0);
+
+    // A promoted coin re-enters mixing normally: one standard round at the new
+    // denomination advances it to 1
+    CMutableTransaction mtxRemix;
+    mtxRemix.vin.emplace_back(outpointPromoted);
+    mtxRemix.vout.emplace_back(nLargerAmount, scriptOurs);
+    BOOST_REQUIRE(wallet->AddToWallet(MakeTransactionRef(mtxRemix), TxStateInMempool{}));
+    const COutPoint outpointRemixed{mtxRemix.GetHash(), 0};
+    BOOST_CHECK_EQUAL(wallet->GetRealOutpointCoinJoinRounds(outpointRemixed), 1);
+
+    // Demotion shape (1 input -> PROMOTION_RATIO outputs at the smaller adjacent
+    // denomination): the mirror image, every demoted output starts mixing over
+    CMutableTransaction mtxDemo;
+    mtxDemo.vin.emplace_back(outpointRemixed);
+    for (int i = 0; i < CoinJoin::PROMOTION_RATIO; ++i) {
+        mtxDemo.vout.emplace_back(nSmallerAmount, scriptOurs);
+    }
+    BOOST_REQUIRE(wallet->AddToWallet(MakeTransactionRef(mtxDemo), TxStateInMempool{}));
+    for (uint32_t n = 0; n < uint32_t(CoinJoin::PROMOTION_RATIO); ++n) {
+        BOOST_CHECK_EQUAL(wallet->GetRealOutpointCoinJoinRounds(COutPoint{mtxDemo.GetHash(), n}), 0);
+    }
+}
+
 BOOST_FIXTURE_TEST_CASE(CTransactionBuilderTest, CTransactionBuilderTestSetup)
 {
     // NOTE: Mock wallet version is FEATURE_BASE which means that it uses uncompressed pubkeys

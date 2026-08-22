@@ -93,6 +93,16 @@
            </property>
           </widget>
          </item>
+         <item>
+          <widget class="QPushButton" name="btnRegisterMasternode">
+           <property name="toolTip">
+            <string>Register a new masternode or evonode using this wallet</string>
+           </property>
+           <property name="text">
+            <string>Register Masternode…</string>
+           </property>
+          </widget>
+         </item>
         </layout>
        </item>
        <item row="1" column="0">

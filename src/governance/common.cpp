@@ -47,4 +47,23 @@ std::string Object::GetDataAsPlainString() const
 {
     return std::string(vchData.begin(), vchData.end());
 }
+
+UniValue Object::ToJson() const
+{
+    UniValue obj(UniValue::VOBJ);
+    obj.pushKV("objectHash", GetHash().ToString());
+    obj.pushKV("parentHash", hashParent.ToString());
+    obj.pushKV("collateralHash", collateralHash.ToString());
+    obj.pushKV("createdAt", time);
+    obj.pushKV("revision", revision);
+    UniValue data;
+    if (!data.read(GetDataAsPlainString())) {
+        data.clear();
+        data.setObject();
+        data.pushKV("plain", GetDataAsPlainString());
+    }
+    data.pushKV("hex", GetDataAsHexString());
+    obj.pushKV("data", data);
+    return obj;
+}
 } // namespace Governance

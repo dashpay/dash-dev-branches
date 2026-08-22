@@ -33,7 +33,7 @@ void CMasternodeUtils::DoMaintenance(CConnman& connman, CDeterministicMNManager&
             nonMasternodeCount++;
         }
     });
-    if (nonMasternodeCount < int(connman.GetMaxOutboundNodeCount())) {
+    if (nonMasternodeCount < static_cast<int>(connman.GetMaxOutboundNodeCount())) {
         return;
     }
 

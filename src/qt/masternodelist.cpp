@@ -11,6 +11,8 @@
 #include <qt/clientmodel.h>
 #include <qt/descriptiondialog.h>
 #include <qt/guiutil.h>
+#include <qt/masternodedialogs.h>
+#include <qt/masternodewizard.h>
 #include <qt/walletmodel.h>
 
 #include <QApplication>
@@ -19,6 +21,7 @@
 #include <QHeaderView>
 #include <QMetaObject>
 #include <QSettings>
+#include <QSignalBlocker>
 #include <QThread>
 
 #include <set>
@@ -116,14 +119,25 @@ MasternodeList::MasternodeList(QWidget* parent) :
     ui->checkBoxOwned->setEnabled(false);
 
     contextMenuDIP3 = new QMenu(this);
+    contextMenuDIP3->setToolTipsVisible(true);
     contextMenuDIP3->addAction(tr("Copy ProTx Hash"), this, &MasternodeList::copyProTxHash_clicked);
     contextMenuDIP3->addAction(tr("Copy Collateral Outpoint"), this, &MasternodeList::copyCollateralOutpoint_clicked);
+    contextMenuDIP3->addSeparator();
+    m_action_update_service = contextMenuDIP3->addAction(tr("Update Service…"), this, &MasternodeList::onUpdateService);
+    m_action_update_registrar = contextMenuDIP3->addAction(tr("Update Registrar…"), this,
+                                                           &MasternodeList::onUpdateRegistrar);
+    m_action_revoke = contextMenuDIP3->addAction(tr("Revoke…"), this, &MasternodeList::onRevoke);
+    contextMenuDIP3->addSeparator();
 
     QMenu* filterMenu = contextMenuDIP3->addMenu(tr("Filter by"));
     filterMenu->addAction(tr("Collateral Address"), this, &MasternodeList::filterByCollateralAddress);
     filterMenu->addAction(tr("Payout Address"), this, &MasternodeList::filterByPayoutAddress);
     filterMenu->addAction(tr("Owner Address"), this, &MasternodeList::filterByOwnerAddress);
     filterMenu->addAction(tr("Voting Address"), this, &MasternodeList::filterByVotingAddress);
+
+    ui->btnRegisterMasternode->setEnabled(false);
+    ui->btnRegisterMasternode->setToolTip(tr("Registering a masternode requires a wallet."));
+    connect(ui->btnRegisterMasternode, &QPushButton::clicked, this, &MasternodeList::showRegisterWizard);
 
     connect(ui->tableViewMasternodes, &QTableView::customContextMenuRequested, this, &MasternodeList::showContextMenuDIP3);
     connect(ui->tableViewMasternodes, &QTableView::doubleClicked, this, &MasternodeList::extraInfoDIP3_clicked);
@@ -157,6 +171,7 @@ void MasternodeList::changeEvent(QEvent* event)
 void MasternodeList::setClientModel(ClientModel* model)
 {
     this->clientModel = model;
+    updateRegistrationAvailability();
     if (!clientModel) {
         return;
     }
@@ -171,17 +186,98 @@ void MasternodeList::setWalletModel(WalletModel* model)
 {
     this->walletModel = model;
     ui->checkBoxOwned->setEnabled(walletModel != nullptr);
+    updateRegistrationAvailability();
     if (walletModel) {
         QSettings settings;
         ui->checkBoxOwned->setChecked(settings.value("mnListOwnedOnly", false).toBool());
+    } else {
+        const QSignalBlocker blocker{ui->checkBoxOwned};
+        ui->checkBoxOwned->setChecked(false);
+        m_proxy_model->setShowOwnedOnly(false);
+        m_proxy_model->setMyMasternodeHashes({});
+        m_proxy_model->forceInvalidateFilter();
+        updateFilteredCount();
     }
+}
+
+void MasternodeList::updateRegistrationAvailability()
+{
+    const bool can_register{clientModel != nullptr && walletModel != nullptr &&
+                            !walletModel->wallet().privateKeysDisabled()};
+    ui->btnRegisterMasternode->setEnabled(can_register);
+    if (walletModel == nullptr) {
+        ui->btnRegisterMasternode->setToolTip(tr("Registering a masternode requires a wallet."));
+    } else if (walletModel->wallet().privateKeysDisabled()) {
+        ui->btnRegisterMasternode->setToolTip(
+            walletModel->wallet().hasExternalSigner() ?
+                tr("Masternode registration does not yet support external-signer wallets.") :
+                tr("Masternode registration requires a wallet with private keys."));
+    } else if (clientModel == nullptr) {
+        ui->btnRegisterMasternode->setToolTip(tr("Masternode registration is unavailable until the node is ready."));
+    } else {
+        ui->btnRegisterMasternode->setToolTip(tr("Register a new masternode or EvoNode using this wallet"));
+    }
+}
+
+void MasternodeList::showRegisterWizard()
+{
+    if (!clientModel || !walletModel || walletModel->wallet().privateKeysDisabled()) return;
+    RegisterMasternodeWizard dlg(clientModel->node(), walletModel, this);
+    dlg.exec();
 }
 
 void MasternodeList::showContextMenuDIP3(const QPoint& point)
 {
     QModelIndex index = ui->tableViewMasternodes->indexAt(point);
-    if (index.isValid()) {
-        contextMenuDIP3->exec(QCursor::pos());
+    if (!index.isValid()) return;
+    ui->tableViewMasternodes->setCurrentIndex(index);
+    ui->tableViewMasternodes->selectRow(index.row());
+
+    const auto* entry{GetSelectedEntry()};
+    const bool can_sign{walletModel != nullptr && !walletModel->wallet().privateKeysDisabled()};
+    const bool owns_owner_key{entry != nullptr && can_sign &&
+                              walletModel->wallet().isSpendable(PKHash(entry->keyIdOwnerRaw()))};
+    const auto availability{MasternodeMaintenance::actionAvailability(can_sign, owns_owner_key)};
+
+    m_action_update_service->setEnabled(availability.update_service);
+    m_action_update_service->setToolTip(
+        availability.update_service ? QString{} : tr("Requires a wallet capable of signing transactions"));
+    m_action_update_registrar->setEnabled(availability.update_registrar);
+    m_action_update_registrar->setToolTip(
+        availability.update_registrar ? QString{} : tr("Requires this masternode's owner key in the wallet"));
+    m_action_revoke->setEnabled(availability.revoke);
+    m_action_revoke->setToolTip(availability.revoke ? QString{} : tr("Requires a wallet capable of signing transactions"));
+    contextMenuDIP3->exec(QCursor::pos());
+}
+
+const MasternodeEntry* MasternodeList::selectedEntryForDialog()
+{
+    const auto* entry{GetSelectedEntry()};
+    return entry != nullptr && clientModel != nullptr && walletModel != nullptr ? entry : nullptr;
+}
+
+void MasternodeList::onUpdateService()
+{
+    if (const auto* entry{selectedEntryForDialog()}) {
+        UpdateServiceDialog dialog(clientModel->node(), walletModel, *entry, this);
+        dialog.exec();
+    }
+}
+
+void MasternodeList::onUpdateRegistrar()
+{
+    if (const auto* entry{selectedEntryForDialog()};
+        entry != nullptr && walletModel->wallet().isSpendable(PKHash(entry->keyIdOwnerRaw()))) {
+        UpdateRegistrarDialog dialog(clientModel->node(), walletModel, *entry, this);
+        dialog.exec();
+    }
+}
+
+void MasternodeList::onRevoke()
+{
+    if (const auto* entry{selectedEntryForDialog()}) {
+        RevokeDialog dialog(clientModel->node(), walletModel, *entry, this);
+        dialog.exec();
     }
 }
 

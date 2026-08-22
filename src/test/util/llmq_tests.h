@@ -10,7 +10,9 @@
 
 #include <arith_uint256.h>
 #include <bls/bls.h>
+#include <compat/endian.h>
 #include <consensus/params.h>
+#include <evo/evodb.h>
 #include <primitives/transaction.h>
 #include <random.h>
 #include <serialize.h>
@@ -21,6 +23,10 @@
 #include <llmq/commitment.h>
 #include <llmq/params.h>
 
+#include <limits>
+#include <string>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 namespace llmq {
@@ -108,6 +114,32 @@ inline bool TestSerializationRoundtrip(const T& obj)
 inline uint256 GetTestQuorumHash(uint32_t n) { return ArithToUint256(arith_uint256(n)); }
 
 inline uint256 GetTestBlockHash(uint32_t n) { return ArithToUint256(arith_uint256(n) << 32); }
+
+// Mirrors private DB keys in llmq/blockprocessor.cpp so tests can install
+// mined-commitment state without a full DKG/mining path.
+inline const std::string DB_MINED_COMMITMENT = "q_mc";
+inline const std::string DB_MINED_COMMITMENT_BY_INVERSED_HEIGHT = "q_mcih";
+
+inline std::tuple<std::string, Consensus::LLMQType, uint32_t> BuildInversedHeightKey(Consensus::LLMQType llmqType,
+                                                                                    int nMinedHeight)
+{
+    return std::make_tuple(DB_MINED_COMMITMENT_BY_INVERSED_HEIGHT, llmqType,
+                           htobe32_internal(std::numeric_limits<uint32_t>::max() - nMinedHeight));
+}
+
+// Store a mined commitment as if it was mined at `mined_height` for the quorum whose base block
+// is the active-chain ancestor at `quorum_height`. GetMinedCommitmentsUntilBlock iterates
+// inverted-height keys in [pindex->nHeight, 0), so scan height must be >= mined_height and
+// mined_height must be > 0 for the entry to be returned. `qc.quorumHash` must be the block hash
+// at `quorum_height` for GetMinedCommitment() to find the commitment again.
+inline void WriteMinedCommitment(CEvoDB& evoDb, const CFinalCommitment& qc, const uint256& mined_block_hash,
+                                 int mined_height, int quorum_height)
+{
+    assert(mined_height > 0);
+    evoDb.Write(std::make_pair(DB_MINED_COMMITMENT, std::make_pair(qc.llmqType, qc.quorumHash)),
+                std::make_pair(qc, mined_block_hash));
+    evoDb.Write(BuildInversedHeightKey(qc.llmqType, mined_height), quorum_height);
+}
 
 } // namespace testutils
 } // namespace llmq

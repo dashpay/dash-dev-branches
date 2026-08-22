@@ -58,6 +58,7 @@ class Loader;
 } // namespace interfaces
 
 namespace llmq {
+class CInstantSendManager;
 struct ObserverContext;
 } // namespace llmq
 
@@ -102,6 +103,7 @@ struct NodeContext {
     std::unique_ptr<CEvoDB> evodb;
     std::unique_ptr<CChainstateHelper> chain_helper;
     std::unique_ptr<CDeterministicMNManager> dmnman;
+    std::unique_ptr<llmq::CInstantSendManager> isman;
     std::unique_ptr<CGovernanceManager> govman;
     std::unique_ptr<CMasternodeMetaMan> mn_metaman;
     std::unique_ptr<CMasternodeSync> mn_sync;

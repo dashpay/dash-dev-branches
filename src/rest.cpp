@@ -15,7 +15,6 @@
 #include <index/blockfilterindex.h>
 #include <index/txindex.h>
 #include <instantsend/instantsend.h>
-#include <llmq/context.h>
 #include <node/blockstorage.h>
 #include <node/context.h>
 #include <primitives/block.h>
@@ -138,21 +137,21 @@ static ChainstateManager* GetChainman(const CoreContext& context, HTTPRequest* r
  * Get the node context LLMQContext.
  *
  * @param[in]  req The HTTP request, whose status code will be set if node
- *                 context LLMQContext is not found.
- * @returns        Pointer to the LLMQContext or nullptr if none found.
+ *                 context InstantSend manager is not found.
+ * @returns        Pointer to the InstantSend manager or nullptr if none found.
  */
-static LLMQContext* GetLLMQContext(const CoreContext& context, HTTPRequest* req)
+static llmq::CInstantSendManager* GetInstantSendManager(const CoreContext& context, HTTPRequest* req)
 {
     auto node_context = GetContext<NodeContext>(context);
-    if (!node_context || !node_context->llmq_ctx) {
+    if (!node_context || !node_context->isman) {
         RESTERR(req, HTTP_INTERNAL_SERVER_ERROR,
                 strprintf("%s:%d (%s)\n"
-                          "Internal bug detected: LLMQ context not found!\n"
+                          "Internal bug detected: InstantSend manager not found!\n"
                           "You may report this issue here: %s\n",
                           __FILE__, __LINE__, __func__, PACKAGE_BUGREPORT));
         return nullptr;
     }
-    return node_context->llmq_ctx.get();
+    return node_context->isman.get();
 }
 
 RESTResponseFormat ParseDataFormat(std::string& param, const std::string& strReq)
@@ -364,10 +363,10 @@ static bool rest_block(const CoreContext& context,
         const NodeContext* const node = GetNodeContext(context, req);
         if (!node || !node->chainlocks) return false;
 
-        const LLMQContext* llmq_ctx = GetLLMQContext(context, req);
-        if (!llmq_ctx) return false;
+        const llmq::CInstantSendManager* isman = GetInstantSendManager(context, req);
+        if (!isman) return false;
 
-        UniValue objBlock = blockToJSON(chainman.m_blockman, block, tip, pblockindex, *node->chainlocks, *llmq_ctx->isman, tx_verbosity);
+        UniValue objBlock = blockToJSON(chainman.m_blockman, block, tip, pblockindex, *node->chainlocks, *isman, tx_verbosity);
         std::string strJSON = objBlock.write() + "\n";
         req->WriteHeader("Content-Type", "application/json");
         req->WriteReply(HTTP_OK, strJSON);
@@ -688,8 +687,8 @@ static bool rest_mempool(const CoreContext& context, HTTPRequest* req, const std
 
     switch (rf) {
     case RESTResponseFormat::JSON: {
-        const LLMQContext* llmq_ctx = GetLLMQContext(context, req);
-        if (!llmq_ctx) return false;
+        const llmq::CInstantSendManager* isman = GetInstantSendManager(context, req);
+        if (!isman) return false;
 
         std::string str_json;
         if (param == "contents") {
@@ -716,9 +715,9 @@ static bool rest_mempool(const CoreContext& context, HTTPRequest* req, const std
             if (verbose && mempool_sequence) {
                 return RESTERR(req, HTTP_BAD_REQUEST, "Verbose results cannot contain mempool sequence values. (hint: set \"verbose=false\")");
             }
-            str_json = MempoolToJSON(*mempool, llmq_ctx->isman.get(), verbose, mempool_sequence).write() + "\n";
+            str_json = MempoolToJSON(*mempool, isman, verbose, mempool_sequence).write() + "\n";
         } else {
-            str_json = MempoolInfoToJSON(*mempool, *llmq_ctx->isman).write() + "\n";
+            str_json = MempoolInfoToJSON(*mempool, *isman).write() + "\n";
         }
 
         req->WriteHeader("Content-Type", "application/json");

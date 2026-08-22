@@ -38,7 +38,7 @@ constexpr size_t MAX_PENDING_SIG_SHARES_TOTAL{10000};
 
 size_t GetMaxSessionsForPeer(const Consensus::LLMQParams& params)
 {
-    return std::max<size_t>(size_t(params.size) * MAX_SESSIONS_PER_PEER_FACTOR, MIN_SESSIONS_PER_PEER);
+    return std::max<size_t>(static_cast<size_t>(params.size) * MAX_SESSIONS_PER_PEER_FACTOR, MIN_SESSIONS_PER_PEER);
 }
 } // namespace
 
@@ -65,7 +65,7 @@ void CSigSharesInv::Merge(const CSigSharesInv& inv2)
 
 size_t CSigSharesInv::CountSet() const
 {
-    return (size_t)std::count(inv.begin(), inv.end(), true);
+    return static_cast<size_t>(std::count(inv.begin(), inv.end(), true));
 }
 
 std::string CSigSharesInv::ToString() const
@@ -125,9 +125,9 @@ static void InitSession(CSigSharesNodeState::Session& s, const llmq::SignHash& s
     s.id = from.getId();
     s.msgHash = from.getMsgHash();
     s.signHash = signHash;
-    s.announced.Init((size_t)llmq_params.size);
-    s.requested.Init((size_t)llmq_params.size);
-    s.knows.Init((size_t)llmq_params.size);
+    s.announced.Init(static_cast<size_t>(llmq_params.size));
+    s.requested.Init(static_cast<size_t>(llmq_params.size));
+    s.knows.Init(static_cast<size_t>(llmq_params.size));
 }
 
 CSigSharesNodeState::Session& CSigSharesNodeState::GetOrCreateSessionFromShare(const llmq::CSigShare& sigShare)
@@ -654,7 +654,7 @@ std::shared_ptr<CRecoveredSig> CSigSharesManager::ProcessSigShare(const CSigShar
         }
 
         size_t sigShareCount = sigShares.CountForSignHash(sigShare.GetSignHash());
-        if (sigShareCount >= size_t(quorum->params.threshold)) {
+        if (sigShareCount >= static_cast<size_t>(quorum->params.threshold)) {
             canTryRecovery = true;
         }
     }
@@ -699,16 +699,16 @@ std::shared_ptr<CRecoveredSig> CSigSharesManager::TryRecoverSig(const CQuorum& q
                                                       recoveredSig);
         }
 
-        sigSharesForRecovery.reserve((size_t) quorum.params.threshold);
-        idsForRecovery.reserve((size_t) quorum.params.threshold);
-        for (auto it = sigSharesForSignHash->begin(); it != sigSharesForSignHash->end() && sigSharesForRecovery.size() < size_t(quorum.params.threshold); ++it) {
+        sigSharesForRecovery.reserve(static_cast<size_t>(quorum.params.threshold));
+        idsForRecovery.reserve(static_cast<size_t>(quorum.params.threshold));
+        for (auto it = sigSharesForSignHash->begin(); it != sigSharesForSignHash->end() && sigSharesForRecovery.size() < static_cast<size_t>(quorum.params.threshold); ++it) {
             const auto& sigShare = it->second;
             sigSharesForRecovery.emplace_back(sigShare.sigShare.Get());
             idsForRecovery.emplace_back(quorum.members[sigShare.getQuorumMember()]->proTxHash);
         }
 
         // check if we can recover the final signature
-        if (sigSharesForRecovery.size() < size_t(quorum.params.threshold)) {
+        if (sigSharesForRecovery.size() < static_cast<size_t>(quorum.params.threshold)) {
             return nullptr;
         }
         if (quorum.params.is_single_member()) {
@@ -897,7 +897,7 @@ void CSigSharesManager::CollectSigSharesToRequest(std::unordered_map<NodeId, Uin
                 if (!session.announced.inv[i]) {
                     continue;
                 }
-                auto k = std::make_pair(signHash, (uint16_t) i);
+                auto k = std::make_pair(signHash, static_cast<uint16_t>(i));
                 if (sigShares.Has(k)) {
                     // we already have it
                     session.announced.inv[i] = false;
@@ -972,7 +972,7 @@ void CSigSharesManager::CollectSigSharesToSend(std::unordered_map<NodeId, Uint25
                 }
                 session.requested.inv[i] = false;
 
-                auto k = std::make_pair(signHash, (uint16_t)i);
+                auto k = std::make_pair(signHash, static_cast<uint16_t>(i));
                 const CSigShare* sigShare = sigShares.Get(k);
                 if (sigShare == nullptr) {
                     // he requested something we don't have
@@ -980,7 +980,7 @@ void CSigSharesManager::CollectSigSharesToSend(std::unordered_map<NodeId, Uint25
                     continue;
                 }
 
-                batchedSigShares.sigShares.emplace_back((uint16_t)i, sigShare->sigShare);
+                batchedSigShares.sigShares.emplace_back(static_cast<uint16_t>(i), sigShare->sigShare);
             }
 
             if (!batchedSigShares.sigShares.empty()) {
@@ -1361,7 +1361,7 @@ void CSigSharesManager::Cleanup()
                     if (const auto quorumIt = quorums.find(std::make_pair(oneSigShare.getLlmqType(), oneSigShare.getQuorumHash())); quorumIt != quorums.end()) {
                         const auto& quorum = quorumIt->second;
                         for (const auto i : util::irange(quorum->members.size())) {
-                            if (m->count((uint16_t)i) == 0) {
+                            if (m->count(static_cast<uint16_t>(i)) == 0) {
                                 const auto& dmn = quorum->members[i];
                                 strMissingMembers += strprintf("\n  %s", dmn->proTxHash.ToString());
                             }
@@ -1532,7 +1532,7 @@ std::optional<CSigShare> CSigSharesManager::CreateSigShareForSingleMember(const 
         return std::nullopt;
     }
 
-    CSigShare sigShare(quorum.params.type, quorum.qc->quorumHash, id, msgHash, uint16_t(memberIdx), {});
+    CSigShare sigShare(quorum.params.type, quorum.qc->quorumHash, id, msgHash, static_cast<uint16_t>(memberIdx), {});
     uint256 signHash = sigShare.buildSignHash().Get();
 
     // TODO: This one should be SIGN by QUORUM key, not by OPERATOR key
@@ -1589,7 +1589,7 @@ std::optional<CSigShare> CSigSharesManager::CreateSigShare(const CQuorum& quorum
         return std::nullopt;
     }
 
-    CSigShare sigShare(quorum.params.type, quorum.qc->quorumHash, id, msgHash, uint16_t(memberIdx), {});
+    CSigShare sigShare(quorum.params.type, quorum.qc->quorumHash, id, msgHash, static_cast<uint16_t>(memberIdx), {});
     uint256 signHash = sigShare.buildSignHash().Get();
 
     auto bls_scheme = bls::bls_legacy_scheme.load();

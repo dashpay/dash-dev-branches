@@ -79,26 +79,101 @@ bool IsPayoutListKeySafe(const MasternodePayoutShares& payouts, const CTxDestina
     return true;
 }
 
-template <typename ProTx>
-bool IsNetInfoTriviallyValid(const ProTx& proTx, TxValidationState& state)
+static bool IsNetInfoTriviallyValid(const std::shared_ptr<NetInfoInterface>& net_info, MnType type, TxValidationState& state)
 {
-    if (!proTx.netInfo->HasEntries(NetInfoPurpose::CORE_P2P)) {
+    if (!net_info->HasEntries(NetInfoPurpose::CORE_P2P)) {
         // Mandatory for all nodes
         return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-netinfo-empty");
     }
-    if (proTx.nType == MnType::Regular) {
+    if (type == MnType::Regular) {
         // Regular nodes shouldn't populate Platform-specific fields
-        if (proTx.netInfo->HasEntries(NetInfoPurpose::PLATFORM_HTTPS) ||
-            proTx.netInfo->HasEntries(NetInfoPurpose::PLATFORM_P2P)) {
+        if (net_info->HasEntries(NetInfoPurpose::PLATFORM_HTTPS) || net_info->HasEntries(NetInfoPurpose::PLATFORM_P2P)) {
             return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-netinfo-bad");
         }
     }
-    if (proTx.netInfo->CanStorePlatform() && proTx.nType == MnType::Evo) {
+    if (net_info->CanStorePlatform() && type == MnType::Evo) {
         // Platform fields are mandatory for EvoNodes
-        if (!proTx.netInfo->HasEntries(NetInfoPurpose::PLATFORM_HTTPS) ||
-            !proTx.netInfo->HasEntries(NetInfoPurpose::PLATFORM_P2P)) {
+        if (!net_info->HasEntries(NetInfoPurpose::PLATFORM_HTTPS) || !net_info->HasEntries(NetInfoPurpose::PLATFORM_P2P)) {
             return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-netinfo-empty");
         }
+    }
+    return true;
+}
+
+static bool CheckNetInfo(const NetInfoInterface& net_info, TxValidationState& state)
+{
+    switch (net_info.Validate()) {
+    case NetInfoStatus::BadAddress:
+        return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-netinfo-addr");
+    case NetInfoStatus::BadPort:
+        return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-netinfo-port");
+    case NetInfoStatus::BadType:
+        return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-netinfo-addr-type");
+    case NetInfoStatus::NotRoutable:
+        return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-netinfo-addr-unroutable");
+    case NetInfoStatus::Malformed:
+        return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-netinfo-bad");
+    case NetInfoStatus::Success:
+        return true;
+    case NetInfoStatus::BadInput:
+        return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-netinfo-entry");
+    case NetInfoStatus::Duplicate:
+        return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-dup-netinfo-entry");
+    case NetInfoStatus::MaxLimit:
+        return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-netinfo-maxlimit");
+    }
+    assert(false);
+}
+
+bool CheckProviderNetworkFields(const std::shared_ptr<NetInfoInterface>& net_info, MnType type, uint16_t version,
+                                const uint160* platform_node_id, uint16_t platform_p2p_port,
+                                uint16_t platform_http_port, bool allow_empty, TxValidationState& state)
+{
+    if (!net_info || net_info->CanStorePlatform() != (version >= ProTxVersion::ExtAddr)) {
+        return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-protx-netinfo-version");
+    }
+    if (net_info->IsEmpty()) {
+        if (!allow_empty) {
+            return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-netinfo-empty");
+        }
+    } else {
+        if (!IsNetInfoTriviallyValid(net_info, type, state) || !CheckNetInfo(*net_info, state)) {
+            return false;
+        }
+    }
+
+    if (type != MnType::Evo) return true;
+    if (platform_node_id && platform_node_id->IsNull()) {
+        return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-platform-nodeid");
+    }
+    if (version >= ProTxVersion::ExtAddr) {
+        if (platform_p2p_port != 0) {
+            return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-platform-p2p-port");
+        }
+        if (platform_http_port != 0) {
+            return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-platform-http-port");
+        }
+        return true;
+    }
+
+    if (::IsNodeOnMainnet()) {
+        if (platform_p2p_port != ::MainParams().GetDefaultPlatformP2PPort()) {
+            return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-platform-p2p-port");
+        }
+        if (platform_http_port != ::MainParams().GetDefaultPlatformHTTPPort()) {
+            return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-platform-http-port");
+        }
+    }
+    if (platform_p2p_port == ::MainParams().GetDefaultPort()) {
+        return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-platform-p2p-port");
+    }
+    if (platform_http_port == ::MainParams().GetDefaultPort()) {
+        return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-platform-http-port");
+    }
+
+    const uint16_t core_port{net_info->GetPrimary().GetPort()};
+    if (platform_p2p_port == platform_http_port || platform_p2p_port == core_port || platform_http_port == core_port) {
+        return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-platform-dup-ports");
     }
     return true;
 }
@@ -129,7 +204,7 @@ bool CProRegTx::IsTriviallyValid(TxValidationState& state) const
     if (netInfo->CanStorePlatform() != (nVersion >= ProTxVersion::ExtAddr)) {
         return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-protx-netinfo-version");
     }
-    if (!netInfo->IsEmpty() && !IsNetInfoTriviallyValid(*this, state)) {
+    if (!netInfo->IsEmpty() && !IsNetInfoTriviallyValid(netInfo, nType, state)) {
         // pass the state returned by the function above
         return false;
     }
@@ -175,7 +250,7 @@ std::string CProRegTx::ToString() const
     return strprintf("CProRegTx(nVersion=%d, nType=%d, collateralOutpoint=%s, netInfo=%s, nOperatorReward=%f, "
                      "ownerAddress=%s, pubKeyOperator=%s, votingAddress=%s, scriptPayout=%s, platformNodeID=%s%s)\n",
                      nVersion, std23::to_underlying(nType), collateralOutpoint.ToStringShort(), netInfo->ToString(),
-                     (double)nOperatorReward / 100, EncodeDestination(PKHash(keyIDOwner)), pubKeyOperator.ToString(),
+                     static_cast<double>(nOperatorReward) / 100, EncodeDestination(PKHash(keyIDOwner)), pubKeyOperator.ToString(),
                      EncodeDestination(PKHash(keyIDVoting)), payee, platformNodeID.ToString(),
                      (nVersion >= ProTxVersion::ExtAddr
                           ? ""
@@ -199,7 +274,7 @@ bool CProUpServTx::IsTriviallyValid(TxValidationState& state) const
     if (netInfo->IsEmpty()) {
         return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-protx-netinfo-empty");
     }
-    if (!IsNetInfoTriviallyValid(*this, state)) {
+    if (!IsNetInfoTriviallyValid(netInfo, nType, state)) {
         // pass the state returned by the function above
         return false;
     }

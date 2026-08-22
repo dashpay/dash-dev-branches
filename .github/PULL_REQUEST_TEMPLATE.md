@@ -2,6 +2,8 @@
 
 _Provide a general summary of your changes in the Title above_
 
+_Do not manually line wrap text; allow the GitHub UI to dynamically wrap lines._
+
 _Pull requests without a rationale and clear improvement may be closed
 immediately._
 

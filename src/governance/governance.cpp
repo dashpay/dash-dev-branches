@@ -24,6 +24,8 @@
 #include <util/time.h>
 #include <validationinterface.h>
 
+#include <univalue.h>
+
 #include <ranges>
 
 const std::string GovernanceStore::SERIALIZATION_VERSION_STRING = "CGovernanceManager-Version-16";
@@ -199,7 +201,7 @@ bool CGovernanceManager::HaveVoteForHash(const uint256& nHash) const
 int CGovernanceManager::GetVoteCount() const
 {
     LOCK(cs_store);
-    return (int)cmapVoteToObject.GetSize();
+    return static_cast<int>(cmapVoteToObject.GetSize());
 }
 
 bool CGovernanceManager::SerializeVoteForHash(const uint256& nHash, CDataStream& ss) const
@@ -567,8 +569,7 @@ std::vector<CGovernanceVote> CGovernanceManager::GetCurrentVotes(const uint256& 
         if (!govobj.GetCurrentMNVotes(outpoint, voteRecord)) continue;
 
         for (const auto& [signal, vote_instance] : voteRecord.mapInstances) {
-            CGovernanceVote vote = CGovernanceVote(outpoint, nParentHash, (vote_signal_enum_t)signal,
-                                                   vote_instance.eOutcome);
+            CGovernanceVote vote{outpoint, nParentHash, static_cast<vote_signal_enum_t>(signal), vote_instance.eOutcome};
             vote.SetTime(vote_instance.nCreationTime);
             vecResult.push_back(vote);
         }
@@ -1053,14 +1054,46 @@ std::string GovernanceStore::ToString() const
     }
 
     return strprintf("Governance Objects: %d (Proposals: %d, Triggers: %d, Other: %d; Erased: %d)",
-        (int)mapObjects.size(),
-        nProposalCount, nTriggerCount, nOtherCount, (int)mapErasedGovernanceObjects.size());
+        static_cast<int>(mapObjects.size()),
+        nProposalCount, nTriggerCount, nOtherCount, static_cast<int>(mapErasedGovernanceObjects.size()));
 }
 
 std::string CGovernanceManager::ToString() const
 {
     AssertLockNotHeld(cs_store);
-    return strprintf("%s, Votes: %d", GovernanceStore::ToString(), (int)cmapVoteToObject.GetSize());
+    return strprintf("%s, Votes: %d", GovernanceStore::ToString(), static_cast<int>(cmapVoteToObject.GetSize()));
+}
+
+UniValue CGovernanceManager::ToJson() const
+{
+    LOCK(cs_store);
+
+    int nProposalCount = 0;
+    int nTriggerCount = 0;
+    int nOtherCount = 0;
+
+    for (const auto& [_, govobj] : mapObjects) {
+        switch (Assert(govobj)->GetObjectType()) {
+        case GovernanceObject::PROPOSAL:
+            nProposalCount++;
+            break;
+        case GovernanceObject::TRIGGER:
+            nTriggerCount++;
+            break;
+        default:
+            nOtherCount++;
+            break;
+        }
+    }
+
+    UniValue jsonObj(UniValue::VOBJ);
+    jsonObj.pushKV("objects_total", mapObjects.size());
+    jsonObj.pushKV("proposals", nProposalCount);
+    jsonObj.pushKV("triggers", nTriggerCount);
+    jsonObj.pushKV("other", nOtherCount);
+    jsonObj.pushKV("erased", mapErasedGovernanceObjects.size());
+    jsonObj.pushKV("votes", cmapVoteToObject.GetSize());
+    return jsonObj;
 }
 
 void CGovernanceManager::UpdatedBlockTip(const CBlockIndex* pindex)

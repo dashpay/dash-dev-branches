@@ -18,6 +18,8 @@ CTxMemPool::Options MemPoolOptionsForTest(const NodeContext& node)
 {
     CTxMemPool::Options mempool_opts{
         .estimator = node.fee_estimator.get(),
+        .dmnman = node.dmnman.get(),
+        .isman = node.isman.get(),
         // Default to always checking mempool regardless of
         // chainparams.DefaultConsistencyChecks for tests
         .check_ratio = 1,

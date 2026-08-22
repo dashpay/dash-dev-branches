@@ -66,8 +66,20 @@ python3 "${CLANG_TIDY_CACHE_PY}" --zero-stats 2>&1 || true
 
 cd "${BASE_ROOT_DIR}/build-ci/dashcore-${BUILD_TARGET}/src"
 
-if ! ( run-clang-tidy -clang-tidy-binary="${CLANG_TIDY_CACHE}" -quiet "${MAKEJOBS}" | tee tmp.tidy-out.txt ); then
-  grep -C5 "error: " tmp.tidy-out.txt
+CAST_LINT_DB="${PWD}/../cstyle-cast-compile-db"
+python3 "${BASE_ROOT_DIR}/ci/dash/lint-cstyle-casts.py" prepare \
+  --input "${PWD}/../compile_commands.json" \
+  --output-dir "${CAST_LINT_DB}" \
+  --source-root "${BASE_ROOT_DIR}"
+
+if ! ( run-clang-tidy \
+  -checks=clang-diagnostic-old-style-cast,google-readability-casting \
+  -clang-tidy-binary="${CLANG_TIDY_CACHE}" \
+  -p "${CAST_LINT_DB}" \
+  -quiet "${MAKEJOBS}" | \
+  python3 "${BASE_ROOT_DIR}/ci/dash/lint-cstyle-casts.py" filter --source-root "${BASE_ROOT_DIR}" | \
+  tee tmp.tidy-out.txt ); then
+  grep -E -C5 "error: |warning: use of old-style cast|google-readability-casting" tmp.tidy-out.txt
   echo "^^^ ⚠️ Failure generated from clang-tidy"
   false
 fi

@@ -24,6 +24,37 @@ changes, update the other in the same commit.
   code; reserve them for things that genuinely need explaining (non-obvious
   invariants, workaround rationale, non-local side effects).
 
+## Assertions and Checks
+
+Full guidance lives in `doc/developer-notes.md` under "Assertions and Checks".
+Short version, in order of preference:
+
+- `Assume(cond)` is the default. Use it for "this is how things are supposed to
+  be": a violation means someone has a bug worth investigating, but execution
+  stays well-defined. A negative rate-limit counter is the archetype - somebody
+  decremented twice, we may be more DoS-exposed than intended, but nothing is
+  corrupt. It aborts in `--enable-debug` and `--enable-fuzz` builds (CI's
+  `linux64_multiprocess` and fuzz jobs) while a failure is silent in release,
+  so it must never take down a production node. The expression is always
+  evaluated.
+- `assert(cond)` / `Assert(cond)` is the "we must crash now" case. Use it only
+  when continuing would be undefined behavior, memory corruption, or corrupt
+  persisted/consensus state - aborting has to be the safer outcome. It should
+  be rare and obviously justified, but do use it where it is genuinely needed
+  to document and enforce a precondition that keeps the code below it safe.
+  `Assert` returns its argument: `assert(ptr != nullptr); obj = *ptr;` becomes
+  `obj = *Assert(ptr);`
+- `CHECK_NONFATAL(cond)` / `NONFATAL_UNREACHABLE()` for internal logic bugs on
+  a path with a caller to report to. Required in RPC code, enforced
+  (best-effort) by `test/lint/lint-assertions.py` for `src/rpc/` and
+  `src/wallet/rpc*`.
+
+None of these validate input. Data from peers, RPC arguments, wallet files, or
+on-disk state must be checked and rejected through normal error handling -
+asserting on it turns a peer-triggered inconsistency into a remote crash.
+Environment failures (disk full, corrupt block on disk, failed DB write) are
+not checks at all: return an error, `AbortNode()`, or `InitError()`.
+
 ## Repository Map
 
 - `src/` - C++ implementation.

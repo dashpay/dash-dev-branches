@@ -16,6 +16,7 @@
 #include <evo/simplifiedmns.h>
 #include <evo/specialtx.h>
 #include <evo/specialtxman.h>
+#include <interfaces/node.h>
 #include <llmq/context.h>
 #include <node/mempool_args.h>
 #include <messagesigner.h>
@@ -1284,9 +1285,6 @@ void FuncTestMempoolReorg(TestChainSetup& setup)
     auto tx_reg = CreateProRegTxExternalCollateral(chainman, utxos, 1, collateralOutpoint, scriptPayout, ownerKey, operatorKey, collateralKey, setup.coinbaseKey);
 
     CTxMemPool testPool{MemPoolOptionsForTest(setup.m_node)};
-    if (setup.m_node.dmnman) {
-        testPool.ConnectManagers(setup.m_node.dmnman.get(), setup.m_node.llmq_ctx->isman.get());
-    }
     TestMemPoolEntryHelper entry;
     LOCK2(cs_main, testPool.cs);
 
@@ -1371,8 +1369,6 @@ void FuncTestMempoolProTxKeyChangedConflictChain(TestChainSetup& setup)
     auto tx_revoke = CreateProUpRevTx(chainman, utxos, proTxHash, operatorKey, setup.coinbaseKey);
 
     CTxMemPool testPool{MemPoolOptionsForTest(setup.m_node)};
-    BOOST_REQUIRE(setup.m_node.dmnman);
-    testPool.ConnectManagers(setup.m_node.dmnman.get(), setup.m_node.llmq_ctx->isman.get());
     TestMemPoolEntryHelper entry;
     LOCK2(cs_main, testPool.cs);
 
@@ -1414,9 +1410,6 @@ void FuncTestMempoolDualProregtx(TestChainSetup& setup)
     auto tx_reg2 = CreateProRegTxExternalCollateral(chainman, utxos, 2, collateralOutpoint, scriptPayout, ownerKey, operatorKey, collateralKey, setup.coinbaseKey);
 
     CTxMemPool testPool{MemPoolOptionsForTest(setup.m_node)};
-    if (setup.m_node.dmnman) {
-        testPool.ConnectManagers(setup.m_node.dmnman.get(), setup.m_node.llmq_ctx->isman.get());
-    }
     TestMemPoolEntryHelper entry;
     LOCK2(cs_main, testPool.cs);
 
@@ -1893,6 +1886,159 @@ BOOST_AUTO_TEST_CASE(proupserv_migrates_legacy)
 {
     TestChainV24SignalBeforeV19Setup setup;
     FuncProUpServTxMigratesLegacy(setup);
+}
+
+// The Platform GUI consumes DAPI gateway endpoints through the node interface
+// (MnEntry::getPlatformHTTPSAddrs). Both EvoNode generations must export a gateway: a pre-ExtAddr
+// registration carries the Platform HTTPS port as a scalar paired with the primary core address,
+// while an ExtAddr registration carries explicit PLATFORM_HTTPS netInfo entries where domain
+// entries are skipped (unresolvable without DNS lookups the interface must not perform) and the
+// leading CService entry keeps the EvoNode reachable. Regular masternodes export nothing.
+void FuncPlatformHTTPSAddrsViaNodeInterface(TestChainV24SignalBeforeV19Setup& setup)
+{
+    auto& chainman = setup.chainman;
+    auto& dmnman = setup.dmnman;
+    auto& utxos = setup.utxos;
+
+    setup.MineToV19();
+    BOOST_REQUIRE(!setup.IsV24Active());
+    BOOST_REQUIRE(!bls::bls_legacy_scheme.load());
+
+    // Regular masternode: no Platform endpoints to export.
+    CKey regular_owner_key;
+    CBLSSecretKey regular_operator_key;
+    auto tx_reg_regular = CreateProRegTx(chainman, utxos, 20000, GenerateRandomAddress(), setup.coinbaseKey,
+                                         regular_owner_key, regular_operator_key);
+    const auto regular_protx_hash = tx_reg_regular.GetHash();
+    setup.ProcessBlock({tx_reg_regular});
+    BOOST_REQUIRE(dmnman.GetListAtChainTip().HasMN(regular_protx_hash));
+
+    // Legacy (pre-ExtAddr) EvoNode: the Platform HTTPS port is a scalar field, the gateway address
+    // is the primary core address paired with it.
+    CKey evo_owner_key;
+    evo_owner_key.MakeNewKey(true);
+    CBLSSecretKey evo_operator_key;
+    evo_operator_key.MakeNewKey();
+    CProRegTx pro_reg;
+    pro_reg.nVersion = ProTxVersion::BasicBLS;
+    pro_reg.nType = MnType::Evo;
+    pro_reg.netInfo = NetInfoInterface::MakeNetInfo(pro_reg.nVersion);
+    pro_reg.collateralOutpoint.n = 0;
+    BOOST_REQUIRE_EQUAL(pro_reg.netInfo->AddEntry(NetInfoPurpose::CORE_P2P, "1.1.1.2:20100"), NetInfoStatus::Success);
+    pro_reg.platformNodeID.SetHex("00112233445566778899aabbccddeeff00112233");
+    pro_reg.platformP2PPort = 20101;
+    pro_reg.platformHTTPPort = 20102;
+    pro_reg.keyIDOwner = evo_owner_key.GetPubKey().GetID();
+    pro_reg.pubKeyOperator.Set(evo_operator_key.GetPublicKey(), bls::bls_legacy_scheme.load());
+    pro_reg.keyIDVoting = evo_owner_key.GetPubKey().GetID();
+    pro_reg.scriptPayout = GenerateRandomAddress();
+    CMutableTransaction tx_reg_evo;
+    tx_reg_evo.nVersion = 3;
+    tx_reg_evo.nType = TRANSACTION_PROVIDER_REGISTER;
+    {
+        const auto spent = FundTransaction(chainman, tx_reg_evo, utxos, pro_reg.scriptPayout,
+                                           dmn_types::Evo.collat_amount);
+        pro_reg.inputsHash = CalcTxInputsHash(CTransaction(tx_reg_evo));
+        SetTxPayload(tx_reg_evo, pro_reg);
+        SignTransaction(tx_reg_evo, spent, setup.coinbaseKey);
+    }
+    const auto evo_protx_hash = tx_reg_evo.GetHash();
+    setup.ProcessBlock({tx_reg_evo});
+    BOOST_REQUIRE(dmnman.GetListAtChainTip().HasMN(evo_protx_hash));
+
+    setup.MineToV24();
+    // Not upgraded to ExtAddr by activation alone: the state keeps the scalar-port layout.
+    BOOST_REQUIRE_EQUAL(dmnman.GetListAtChainTip().GetMN(evo_protx_hash)->pdmnState->nVersion,
+                        ProTxVersion::BasicBLS);
+
+    // ExtAddr EvoNode: explicit PLATFORM_HTTPS entries, a CService first and a domain second.
+    CKey evo2_owner_key;
+    evo2_owner_key.MakeNewKey(true);
+    CBLSSecretKey evo2_operator_key;
+    evo2_operator_key.MakeNewKey();
+    CProRegTx pro_reg2;
+    pro_reg2.nVersion = ProTxVersion::ExtAddr;
+    pro_reg2.nType = MnType::Evo;
+    pro_reg2.netInfo = NetInfoInterface::MakeNetInfo(pro_reg2.nVersion);
+    pro_reg2.collateralOutpoint.n = 0;
+    BOOST_REQUIRE_EQUAL(pro_reg2.netInfo->AddEntry(NetInfoPurpose::CORE_P2P, "1.1.1.3:20200"), NetInfoStatus::Success);
+    BOOST_REQUIRE_EQUAL(pro_reg2.netInfo->AddEntry(NetInfoPurpose::PLATFORM_P2P, "1.1.1.3:20201"),
+                        NetInfoStatus::Success);
+    BOOST_REQUIRE_EQUAL(pro_reg2.netInfo->AddEntry(NetInfoPurpose::PLATFORM_HTTPS, "1.1.1.3:20202"),
+                        NetInfoStatus::Success);
+    BOOST_REQUIRE_EQUAL(pro_reg2.netInfo->AddEntry(NetInfoPurpose::PLATFORM_HTTPS, "platform.example.com:443"),
+                        NetInfoStatus::Success);
+    pro_reg2.platformNodeID.SetHex("445566778899aabbccddeeff0011223344556677");
+    pro_reg2.keyIDOwner = evo2_owner_key.GetPubKey().GetID();
+    pro_reg2.pubKeyOperator.Set(evo2_operator_key.GetPublicKey(), /*specificLegacyScheme=*/false);
+    pro_reg2.keyIDVoting = evo2_owner_key.GetPubKey().GetID();
+    pro_reg2.payouts = {{GenerateRandomAddress(), MasternodePayoutShare::MAX_REWARD}};
+    CMutableTransaction tx_reg_evo2;
+    tx_reg_evo2.nVersion = 3;
+    tx_reg_evo2.nType = TRANSACTION_PROVIDER_REGISTER;
+    {
+        // The collateral must not pay to a payout script from ExtAddr onwards, so fund it from and
+        // change back to the coinbase key's script.
+        const auto spent = FundTransaction(chainman, tx_reg_evo2, utxos,
+                                           GetScriptForDestination(PKHash(setup.coinbaseKey.GetPubKey())),
+                                           dmn_types::Evo.collat_amount);
+        pro_reg2.inputsHash = CalcTxInputsHash(CTransaction(tx_reg_evo2));
+        SetTxPayload(tx_reg_evo2, pro_reg2);
+        SignTransaction(tx_reg_evo2, spent, setup.coinbaseKey);
+    }
+    const auto evo2_protx_hash = tx_reg_evo2.GetHash();
+    setup.ProcessBlock({tx_reg_evo2});
+    BOOST_REQUIRE(dmnman.GetListAtChainTip().HasMN(evo2_protx_hash));
+
+    auto node{interfaces::MakeNode(setup.m_node)};
+    auto [mn_list, tip] = node->evo().getListAtChainTip();
+    BOOST_REQUIRE(mn_list != nullptr);
+    BOOST_REQUIRE(tip != nullptr);
+
+    std::map<uint256, interfaces::MnEntryCPtr> entries;
+    mn_list->forEachMN(/*only_valid=*/false,
+                       [&entries](const interfaces::MnEntryCPtr& mn) { entries.emplace(mn->getProTxHash(), mn); });
+    BOOST_REQUIRE_EQUAL(entries.size(), 3U);
+
+    // Regular masternode contributes nothing.
+    BOOST_CHECK(entries.at(regular_protx_hash)->getType() == MnType::Regular);
+    BOOST_CHECK(entries.at(regular_protx_hash)->getPlatformHTTPSAddrs().empty());
+
+    // Legacy EvoNode: primary core address paired with the scalar HTTPS port.
+    {
+        const auto& entry = entries.at(evo_protx_hash);
+        BOOST_CHECK(entry->getType() == MnType::Evo);
+        const auto addrs = entry->getPlatformHTTPSAddrs();
+        BOOST_REQUIRE_EQUAL(addrs.size(), 1U);
+        BOOST_CHECK(addrs[0] == LookupNumeric("1.1.1.2", 20102));
+        BOOST_CHECK(static_cast<CNetAddr>(addrs[0]) == static_cast<CNetAddr>(entry->getNetInfoPrimary()));
+    }
+
+    // ExtAddr EvoNode: the CService entry is exported, the domain entry is skipped.
+    {
+        const auto& entry = entries.at(evo2_protx_hash);
+        BOOST_CHECK(entry->getType() == MnType::Evo);
+        const auto addrs = entry->getPlatformHTTPSAddrs();
+        BOOST_REQUIRE_EQUAL(addrs.size(), 1U);
+        BOOST_CHECK(addrs[0] == LookupNumeric("1.1.1.3", 20202));
+
+        // Pin the shape the interface relies on: the first stored PLATFORM_HTTPS entry is a
+        // CService, so an EvoNode never contributes an empty gateway set even though domain
+        // entries are skipped.
+        const auto dmn = dmnman.GetListAtChainTip().GetMN(evo2_protx_hash);
+        BOOST_REQUIRE(dmn != nullptr);
+        const auto https_entries = dmn->pdmnState->netInfo->GetEntries(NetInfoPurpose::PLATFORM_HTTPS);
+        BOOST_REQUIRE_EQUAL(https_entries.size(), 2U);
+        BOOST_REQUIRE(https_entries[0].GetAddrPort().has_value());
+        BOOST_CHECK(addrs[0] == *https_entries[0].GetAddrPort());
+        BOOST_CHECK(https_entries[1].GetDomainPort().has_value());
+    }
+}
+
+BOOST_AUTO_TEST_CASE(platform_https_addrs_via_node_interface)
+{
+    TestChainV24SignalBeforeV19Setup setup;
+    FuncPlatformHTTPSAddrsViaNodeInterface(setup);
 }
 
 // The SAME masternode, two registrar updates in one block, version-crossing. tx1 rotates a

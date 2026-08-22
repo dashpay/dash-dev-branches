@@ -412,7 +412,7 @@ bool CGovernanceObject::ProcessVote(CMasternodeMetaMan& mn_metaman, bool fRateCh
         exception = CGovernanceException(msg, GOVERNANCE_EXCEPTION_PERMANENT_ERROR, 20);
         return false;
     }
-    auto it2 = voteRecordRef.mapInstances.emplace(vote_instance_m_t::value_type(int(eSignal), vote_instance_t())).first;
+    auto it2 = voteRecordRef.mapInstances.emplace(vote_instance_m_t::value_type(static_cast<int>(eSignal), vote_instance_t())).first;
     vote_instance_t& voteInstanceRef = it2->second;
 
     // Reject obsolete votes
@@ -509,7 +509,7 @@ std::set<uint256> CGovernanceObject::RemoveInvalidVotes(const CDeterministicMNLi
 
     auto nParentHash = GetHash();
     for (auto jt = it->second.mapInstances.begin(); jt != it->second.mapInstances.end(); ) {
-        CGovernanceVote tmpVote(mnOutpoint, nParentHash, (vote_signal_enum_t)jt->first, jt->second.eOutcome);
+        CGovernanceVote tmpVote{mnOutpoint, nParentHash, static_cast<vote_signal_enum_t>(jt->first), jt->second.eOutcome};
         tmpVote.SetTime(jt->second.nCreationTime);
         if (removedVotes.count(tmpVote.GetHash())) {
             jt = it->second.mapInstances.erase(jt);
@@ -664,6 +664,21 @@ void CGovernanceObject::GetData(UniValue& objResult) const
     std::string s = GetDataAsPlainString();
     o.read(s);
     objResult = o;
+}
+
+UniValue CGovernanceObject::GetInnerJson() const
+{
+    return m_obj.ToJson();
+}
+
+UniValue CGovernanceObject::GetVotesJson(const CDeterministicMNList& tip_mn_list, vote_signal_enum_t signal) const
+{
+    UniValue obj(UniValue::VOBJ);
+    obj.pushKV("AbsoluteYesCount", GetAbsoluteYesCount(tip_mn_list, signal));
+    obj.pushKV("YesCount", GetYesCount(tip_mn_list, signal));
+    obj.pushKV("NoCount", GetNoCount(tip_mn_list, signal));
+    obj.pushKV("AbstainCount", GetAbstainCount(tip_mn_list, signal));
+    return obj;
 }
 
 /**
@@ -947,7 +962,7 @@ void CGovernanceObject::UpdateSentinelVariables(const CDeterministicMNList& tip_
 
     // CALCULATE MINIMUM SUPPORT LEVELS REQUIRED
 
-    int nWeightedMnCount = (int)tip_mn_list.GetCounts().m_valid_weighted;
+    int nWeightedMnCount = static_cast<int>(tip_mn_list.GetCounts().m_valid_weighted);
     if (nWeightedMnCount == 0) return;
 
     // CALCULATE THE MINIMUM VOTE COUNT REQUIRED FOR FULL SIGNAL

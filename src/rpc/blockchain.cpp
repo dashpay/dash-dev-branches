@@ -57,7 +57,6 @@
 #include <evo/mnhftx.h>
 #include <evo/specialtx.h>
 #include <instantsend/instantsend.h>
-#include <llmq/context.h>
 
 #include <stdint.h>
 
@@ -1061,7 +1060,7 @@ static RPCHelpMan getblock()
         return strHex;
     }
 
-    const LLMQContext& llmq_ctx = EnsureLLMQContext(node);
+    const llmq::CInstantSendManager& isman = EnsureInstantSendManager(node);
     CHECK_NONFATAL(node.chainlocks);
     TxVerbosity tx_verbosity;
     if (verbosity == 1) {
@@ -1072,7 +1071,7 @@ static RPCHelpMan getblock()
         tx_verbosity = TxVerbosity::SHOW_DETAILS_AND_PREVOUT;
     }
 
-    return blockToJSON(chainman.m_blockman, block, tip, pblockindex, *node.chainlocks, *llmq_ctx.isman, tx_verbosity);
+    return blockToJSON(chainman.m_blockman, block, tip, pblockindex, *node.chainlocks, isman, tx_verbosity);
 },
     };
 }
@@ -2414,7 +2413,7 @@ static RPCHelpMan getspecialtxes()
     LOCK(cs_main);
 
     const CTxMemPool& mempool = EnsureMemPool(node);
-    const LLMQContext& llmq_ctx = EnsureLLMQContext(node);
+    const llmq::CInstantSendManager& isman = EnsureInstantSendManager(node);
     CHECK_NONFATAL(node.chainlocks);
 
     const uint256 blockhash(ParseHashV(request.params[0], "blockhash"));
@@ -2474,7 +2473,7 @@ static RPCHelpMan getspecialtxes()
             case 2 :
                 {
                     UniValue objTx(UniValue::VOBJ);
-                    TxToJSON(*tx, blockhash, mempool, chainman.ActiveChainstate(), *node.chainlocks, *llmq_ctx.isman, node.spent_index.get(), objTx);
+                    TxToJSON(*tx, blockhash, mempool, chainman.ActiveChainstate(), *node.chainlocks, isman, node.spent_index.get(), objTx);
                     result.push_back(objTx);
                     break;
                 }

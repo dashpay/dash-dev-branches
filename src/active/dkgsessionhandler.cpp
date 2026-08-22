@@ -193,7 +193,7 @@ void ActiveDKGSessionHandler::SleepBeforePhase(QuorumPhase curPhase, const uint2
     // Don't expect perfect block times and thus reduce the phase time to be on the secure side (caller chooses factor)
     double adjustedPhaseSleepTimePerMember = phaseSleepTimePerMember * randomSleepFactor;
 
-    int64_t sleepTime = (int64_t)(adjustedPhaseSleepTimePerMember * curSession->GetMyMemberIndex().value_or(0));
+    int64_t sleepTime = static_cast<int64_t>(adjustedPhaseSleepTimePerMember * curSession->GetMyMemberIndex().value_or(0));
     const auto endTime = SteadyClock::now() + std::chrono::milliseconds{sleepTime};
     int heightTmp{currentHeight.load()};
     int heightStart{heightTmp};

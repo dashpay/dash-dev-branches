@@ -9,7 +9,6 @@
 #include <chain.h>
 #include <chainlock/chainlock.h>
 #include <chainparams.h>
-#include <compat/endian.h>
 #include <consensus/merkle.h>
 #include <consensus/validation.h>
 #include <evo/cbtx.h>
@@ -28,8 +27,6 @@
 
 #include <cstdint>
 #include <limits>
-#include <string>
-#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -85,29 +82,6 @@ BOOST_FIXTURE_TEST_CASE(check_cbtx_best_chainlock_rejects_excessive_height_diff,
 }
 
 namespace {
-// Mirrors private DB keys in llmq/blockprocessor.cpp so tests can install
-// mined-commitment state without a full DKG/mining path.
-static const std::string DB_MINED_COMMITMENT = "q_mc";
-static const std::string DB_MINED_COMMITMENT_BY_INVERSED_HEIGHT = "q_mcih";
-
-std::tuple<std::string, Consensus::LLMQType, uint32_t> BuildInversedHeightKey(Consensus::LLMQType llmqType, int nMinedHeight)
-{
-    return std::make_tuple(DB_MINED_COMMITMENT_BY_INVERSED_HEIGHT, llmqType,
-                           htobe32_internal(std::numeric_limits<uint32_t>::max() - nMinedHeight));
-}
-
-// Store a mined commitment as if it was mined at `mined_height` for the genesis
-// quorum base (quorumHeight 0). GetMinedCommitmentsUntilBlock iterates inverted-
-// height keys in [pindex->nHeight, 0), so scan height must be >= mined_height
-// and mined_height must be > 0 for the entry to be returned.
-void WriteMinedCommitment(CEvoDB& evoDb, const CFinalCommitment& qc, const uint256& mined_block_hash, int mined_height)
-{
-    assert(mined_height > 0);
-    evoDb.Write(std::make_pair(DB_MINED_COMMITMENT, std::make_pair(qc.llmqType, qc.quorumHash)),
-                std::make_pair(qc, mined_block_hash));
-    evoDb.Write(BuildInversedHeightKey(qc.llmqType, mined_height), /*quorumHeight=*/0);
-}
-
 CTransactionRef MakeCommitmentTx(const CFinalCommitment& qc, int height)
 {
     CFinalCommitmentTxPayload payload;
@@ -191,7 +165,7 @@ BOOST_FIXTURE_TEST_CASE(qc_hash_cache_invalidated_by_undoblock, Dip3ActiveSetup)
 
     {
         auto dbTx = evoDb.BeginTransaction();
-        WriteMinedCommitment(evoDb, qc_a, mined_hash_a, mined_height);
+        WriteMinedCommitment(evoDb, qc_a, mined_hash_a, mined_height, /*quorum_height=*/0);
         dbTx->Commit();
     }
 
@@ -211,7 +185,7 @@ BOOST_FIXTURE_TEST_CASE(qc_hash_cache_invalidated_by_undoblock, Dip3ActiveSetup)
         auto dbTx = evoDb.BeginTransaction();
         BOOST_REQUIRE(qblockman.UndoBlock(m_node.chainman->ActiveChainstate(), block_with_qc, &pindex_mined));
         // Install the replacement while the disconnect transaction is still open.
-        WriteMinedCommitment(evoDb, qc_b, mined_hash_b, mined_height);
+        WriteMinedCommitment(evoDb, qc_b, mined_hash_b, mined_height, /*quorum_height=*/0);
         dbTx->Commit();
     }
 

@@ -792,7 +792,7 @@ Uint256HashSet GetQuorumRelayMembers(const Consensus::LLMQParams& llmqParams, co
             return r;
         }
         int gap = 1;
-        int gap_max = (int)mns.size() - 1;
+        int gap_max = static_cast<int>(mns.size()) - 1;
         int k = 0;
         while ((gap_max >>= 1) || k <= 1) {
             size_t idx = (i + gap) % mns.size();

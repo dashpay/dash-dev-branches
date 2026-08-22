@@ -3,92 +3,15 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <llmq/commitment.h>
-#include <llmq/debug.h>
 #include <llmq/signing.h>
 #include <llmq/snapshot.h>
 
-#include <core_io.h>
-#include <rpc/util.h>
+#include <util/check.h>
+#include <util/std23.h>
 
 #include <univalue.h>
 
-#include <map>
-#include <string>
-
 namespace llmq {
-// CDKGDebugSessionStatus::ToJson() defined in llmq/debug.cpp
-RPCResult CDKGDebugSessionStatus::GetJsonHelp(const std::string& key, bool optional)
-{
-    // A member tally is a count for detail_level = 0, an array of member indexes for
-    // detail_level = 1, and an array of {memberIndex, proTxHash} objects for
-    // detail_level = 2. RPCResult can only express such a union as ANY: conditional
-    // variants are only resolved for top-level results, so listing one variant per
-    // detail level here would make every level fail the runtime doc check.
-    const auto member_tally{[](const std::string& name, const std::string& what) {
-        return RPCResult{RPCResult::Type::ANY, name,
-                         strprintf("Number of %s (detail_level = 0), array of quorum member indexes "
-                                   "(detail_level = 1), or array of {memberIndex, proTxHash} objects "
-                                   "(detail_level = 2)",
-                                   what)};
-    }};
-    return {RPCResult::Type::OBJ, key, optional, key.empty() ? "" : "The state of a DKG session. Empty for an unknown LLMQ type or quorum hash",
-    {
-        GetRpcResult("llmqType", /*optional=*/true),
-        GetRpcResult("quorumHash", /*optional=*/true),
-        {RPCResult::Type::NUM, "quorumHeight", /*optional=*/true, "Block height of the quorum"},
-        {RPCResult::Type::NUM, "phase", /*optional=*/true, "Active DKG phase"},
-        {RPCResult::Type::BOOL, "sentContributions", /*optional=*/true, "Returns true if contributions sent"},
-        {RPCResult::Type::BOOL, "sentComplaint", /*optional=*/true, "Returns true if complaints sent"},
-        {RPCResult::Type::BOOL, "sentJustification", /*optional=*/true, "Returns true if justifications sent"},
-        {RPCResult::Type::BOOL, "sentPrematureCommitment", /*optional=*/true, "Returns true if premature commitments sent"},
-        {RPCResult::Type::BOOL, "aborted", /*optional=*/true, "Returns true if DKG session aborted"},
-        member_tally("badMembers", "bad members"),
-        member_tally("weComplain", "complaints sent"),
-        member_tally("receivedContributions", "contributions received"),
-        member_tally("receivedComplaints", "complaints received"),
-        member_tally("receivedJustifications", "justifications received"),
-        member_tally("receivedPrematureCommitments", "premature commitments received"),
-        {RPCResult::Type::ARR, "allMembers", /*optional=*/true, "Provider registration transaction hash for all quorum members. Only present for detail_level = 2", {
-            GetRpcResult("proTxHash")}},
-    }};
-}
-
-// CDKGDebugManager::ToJson() defined in llmq/debug.cpp
-RPCResult CDKGDebugManager::GetJsonHelp(const std::string& key, bool optional, bool inner_optional)
-{
-    return {RPCResult::Type::OBJ, key, optional, key.empty() ? "" : "The state of the node's DKG sessions",
-    {
-        {RPCResult::Type::NUM, "time", inner_optional, "Adjusted time for the last update, timestamp"},
-        {RPCResult::Type::STR, "timeStr", inner_optional, "Adjusted time for the last update, human friendly"},
-        {RPCResult::Type::ARR, "session", inner_optional, "", {
-            {RPCResult::Type::OBJ, "", "", {
-                {RPCResult::Type::STR, "llmqType", "Name of quorum"},
-                GetRpcResult("quorumIndex"),
-                CDKGDebugSessionStatus::GetJsonHelp(/*key=*/"status", /*optional=*/false)
-            }},
-        }}
-    }};
-}
-
-RPCResult CFinalCommitment::GetJsonHelp(const std::string& key, bool optional)
-{
-    return {RPCResult::Type::OBJ, key, optional, key.empty() ? "" : "The quorum commitment payload",
-    {
-        {RPCResult::Type::NUM, "version", "Quorum commitment payload version"},
-        GetRpcResult("llmqType"),
-        GetRpcResult("quorumHash"),
-        {RPCResult::Type::NUM, "quorumIndex", "Index of the quorum"},
-        {RPCResult::Type::NUM, "signersCount", "Number of signers for the quorum"},
-        {RPCResult::Type::STR_HEX, "signers", "Bitset representing the aggregated signers"},
-        {RPCResult::Type::NUM, "validMembersCount", "Number of valid members in the quorum"},
-        {RPCResult::Type::STR_HEX, "validMembers", "Bitset of valid members"},
-        {RPCResult::Type::STR_HEX, "quorumPublicKey", "BLS public key of the quorum"},
-        {RPCResult::Type::STR_HEX, "quorumVvecHash", "Hash of the quorum verification vector"},
-        GetRpcResult("quorumSig"),
-        {RPCResult::Type::STR_HEX, "membersSig", "BLS signature from all included commitments"},
-    }};
-}
-
 UniValue CFinalCommitment::ToJson() const
 {
     UniValue obj(UniValue::VOBJ);
@@ -107,16 +30,6 @@ UniValue CFinalCommitment::ToJson() const
     return obj;
 }
 
-RPCResult CFinalCommitmentTxPayload::GetJsonHelp(const std::string& key, bool optional)
-{
-    return {RPCResult::Type::OBJ, key, optional, key.empty() ? "" : "The quorum commitment special transaction",
-    {
-        GetRpcResult("version"),
-        GetRpcResult("height"),
-        CFinalCommitment::GetJsonHelp(/*key=*/"commitment", /*optional=*/false),
-    }};
-}
-
 UniValue CFinalCommitmentTxPayload::ToJson() const
 {
     UniValue ret(UniValue::VOBJ);
@@ -124,33 +37,6 @@ UniValue CFinalCommitmentTxPayload::ToJson() const
     ret.pushKV("height", nHeight);
     ret.pushKV("commitment", commitment.ToJson());
     return ret;
-}
-
-RPCResult CQuorumRotationInfo::GetJsonHelp(const std::string& key, bool optional)
-{
-    return {RPCResult::Type::OBJ, key, optional, key.empty() ? "" : "The quorum rotation",
-    {
-        {RPCResult::Type::BOOL, "extraShare", "Returns true if an extra share is returned"},
-        CQuorumSnapshot::GetJsonHelp(/*key=*/"quorumSnapshotAtHMinusC", /*optional=*/false),
-        CQuorumSnapshot::GetJsonHelp(/*key=*/"quorumSnapshotAtHMinus2C", /*optional=*/false),
-        CQuorumSnapshot::GetJsonHelp(/*key=*/"quorumSnapshotAtHMinus3C", /*optional=*/false),
-        CQuorumSnapshot::GetJsonHelp(/*key=*/"quorumSnapshotAtHMinus4C", /*optional=*/true),
-        CSimplifiedMNListDiff::GetJsonHelp(/*key=*/"mnListDiffTip", /*optional=*/false),
-        CSimplifiedMNListDiff::GetJsonHelp(/*key=*/"mnListDiffH", /*optional=*/false),
-        CSimplifiedMNListDiff::GetJsonHelp(/*key=*/"mnListDiffAtHMinusC", /*optional=*/false),
-        CSimplifiedMNListDiff::GetJsonHelp(/*key=*/"mnListDiffAtHMinus2C", /*optional=*/false),
-        CSimplifiedMNListDiff::GetJsonHelp(/*key=*/"mnListDiffAtHMinus3C", /*optional=*/false),
-        CSimplifiedMNListDiff::GetJsonHelp(/*key=*/"mnListDiffAtHMinus4C", /*optional=*/true),
-        {RPCResult::Type::ARR, "lastCommitmentPerIndex", "Most recent commitment for each quorumIndex", {
-            CFinalCommitment::GetJsonHelp(/*key=*/"", /*optional=*/false),
-        }},
-        {RPCResult::Type::ARR, "quorumSnapshotList", "Snapshots required to reconstruct the quorums built at h' in lastCommitmentPerIndex", {
-            CQuorumSnapshot::GetJsonHelp(/*key=*/"", /*optional=*/false),
-        }},
-        {RPCResult::Type::ARR, "mnListDiffList", "MnListDiffs required to calculate older quorums", {
-            CSimplifiedMNListDiff::GetJsonHelp(/*key=*/"", /*optional=*/false),
-        }},
-    }};
 }
 
 UniValue CQuorumRotationInfo::ToJson() const
@@ -195,20 +81,6 @@ UniValue CQuorumRotationInfo::ToJson() const
     return obj;
 }
 
-RPCResult CQuorumSnapshot::GetJsonHelp(const std::string& key, bool optional)
-{
-    return {RPCResult::Type::OBJ, key, optional, key.empty() ? "" : "The quorum snapshot",
-    {
-        {RPCResult::Type::ARR, "activeQuorumMembers", "Bitset of nodes already in quarters at the start of cycle", {
-            {RPCResult::Type::BOOL, "bit", ""}
-        }},
-        {RPCResult::Type::NUM, "mnSkipListMode", "Mode of the skip list"},
-        {RPCResult::Type::ARR, "mnSkipList", "Skiplist at height", {
-            {RPCResult::Type::NUM, "height", ""}
-        }},
-    }};
-}
-
 UniValue CQuorumSnapshot::ToJson() const
 {
     UniValue obj(UniValue::VOBJ);
@@ -226,19 +98,6 @@ UniValue CQuorumSnapshot::ToJson() const
     }
     obj.pushKV("mnSkipList", skipList);
     return obj;
-}
-
-RPCResult CRecoveredSig::GetJsonHelp(const std::string& key, bool optional)
-{
-    return {RPCResult::Type::OBJ, key, optional, key.empty() ? "" : "The recovered signature",
-    {
-        GetRpcResult("llmqType"),
-        GetRpcResult("quorumHash"),
-        {RPCResult::Type::STR_HEX, "id", "Signing session ID"},
-        {RPCResult::Type::STR_HEX, "msgHash", "Hash of message"},
-        {RPCResult::Type::STR_HEX, "sig", "BLS signature recovered"},
-        {RPCResult::Type::STR_HEX, "hash", "Hash of the BLS signature recovered"},
-    }};
 }
 
 UniValue CRecoveredSig::ToJson() const

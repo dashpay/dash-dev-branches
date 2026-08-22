@@ -87,6 +87,7 @@ extern const std::string MINVERSION;
 extern const std::string NAME;
 extern const std::string OLD_KEY;
 extern const std::string ORDERPOSNEXT;
+extern const std::string PLATFORM_DATA;
 extern const std::string POOL;
 extern const std::string PURPOSE;
 extern const std::string PRIVATESEND_SALT;
@@ -229,6 +230,11 @@ public:
 
     /** Write a CGovernanceObject to the database */
     bool WriteGovernanceObject(const Governance::Object& obj);
+
+    //! Generic per-wallet key/value records used by Dash Platform
+    //! integration (flow state, identity metadata). Opaque to the wallet.
+    bool WritePlatformData(const std::string& key, const std::vector<unsigned char>& value);
+    bool ErasePlatformData(const std::string& key);
 
     bool WriteDescriptorKey(const uint256& desc_id, const CPubKey& pubkey, const CPrivKey& privkey, const SecureString& mnemonic, const SecureString& mnemonic_passphrase);
     bool WriteCryptedDescriptorKey(const uint256& desc_id, const CPubKey& pubkey, const std::vector<unsigned char>& secret, const std::vector<unsigned char>& crypted_mnemonic, const std::vector<unsigned char>& crypted_mnemonic_passphrase);

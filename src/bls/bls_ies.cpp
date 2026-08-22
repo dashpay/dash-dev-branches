@@ -14,8 +14,8 @@ static bool EncryptBlob(const void* in, size_t inSize, std::vector<unsigned char
     out.resize(inSize);
 
     AES256CBCEncrypt enc(reinterpret_cast<const unsigned char*>(symKey), reinterpret_cast<const unsigned char*>(iv), false);
-    int w = enc.Encrypt(reinterpret_cast<const unsigned char*>(in), int(inSize), reinterpret_cast<unsigned char*>(out.data()));
-    return w == int(inSize);
+    int w = enc.Encrypt(reinterpret_cast<const unsigned char*>(in), static_cast<int>(inSize), reinterpret_cast<unsigned char*>(out.data()));
+    return w == static_cast<int>(inSize);
 }
 
 template <typename Out>
@@ -24,8 +24,8 @@ static bool DecryptBlob(const void* in, size_t inSize, Out& out, const void* sym
     out.resize(inSize);
 
     AES256CBCDecrypt enc(reinterpret_cast<const unsigned char*>(symKey), reinterpret_cast<const unsigned char*>(iv), false);
-    int w = enc.Decrypt(reinterpret_cast<const unsigned char*>(in), int(inSize), reinterpret_cast<unsigned char*>(out.data()));
-    return w == (int)inSize;
+    int w = enc.Decrypt(reinterpret_cast<const unsigned char*>(in), static_cast<int>(inSize), reinterpret_cast<unsigned char*>(out.data()));
+    return w == static_cast<int>(inSize);
 }
 
 uint256 CBLSIESEncryptedBlob::GetIV(size_t idx) const

@@ -2,12 +2,29 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
+#include <bls/bls.h>
 #include <chainparams.h>
 #include <consensus/validation.h>
+#include <evo/evodb.h>
+#include <evo/providertx.h>
+#include <instantsend/instantsend.h>
+#include <instantsend/lock.h>
 #include <interfaces/chain.h>
+#include <interfaces/node.h>
+#include <llmq/commitment.h>
+#include <llmq/context.h>
 #include <script/standard.h>
+#include <spork.h>
+#include <streams.h>
+#include <test/util/llmq_tests.h>
 #include <test/util/setup_common.h>
+#include <util/std23.h>
+#include <util/strencodings.h>
 #include <validation.h>
+#include <version.h>
+
+#include <algorithm>
+#include <array>
 
 #include <boost/test/unit_test.hpp>
 
@@ -58,6 +75,107 @@ BOOST_AUTO_TEST_CASE(findBlock)
     BOOST_CHECK(!next_active);
 
     BOOST_CHECK(!chain->findBlock({}, FoundBlock()));
+}
+
+BOOST_AUTO_TEST_CASE(providerTxCapabilities)
+{
+    auto node{interfaces::MakeNode(m_node)};
+    const auto capabilities{node->evo().getProviderTxCapabilities()};
+    const uint16_t expected_version{
+        WITH_LOCK(::cs_main, return DeploymentToProtxVersion(Assert(m_node.chainman)->ActiveChain().Tip(),
+                                                             *Assert(m_node.chainman)))};
+    BOOST_CHECK_EQUAL(capabilities.version, expected_version);
+    BOOST_CHECK_EQUAL(capabilities.extended_addresses, expected_version >= ProTxVersion::ExtAddr);
+}
+
+BOOST_AUTO_TEST_CASE(providerNetInfoValidation)
+{
+    auto node{interfaces::MakeNode(m_node)};
+    interfaces::ProviderNetInfo net_info{
+        .core_p2p = {"1.1.1.1:9998"},
+        .platform_p2p = std::vector<std::string>{"1.1.1.2:22200"},
+        .platform_https = std::vector<std::string>{"server.example.com:443"},
+    };
+
+    BOOST_CHECK(!node->evo().validateProviderNetInfo(net_info, MnType::Evo, ProTxVersion::ExtAddr, /*optional=*/false));
+
+    net_info.platform_p2p = std::vector<std::string>{"server.example.com:22200"};
+    auto error{node->evo().validateProviderNetInfo(net_info, MnType::Evo, ProTxVersion::ExtAddr, /*optional=*/false)};
+    BOOST_REQUIRE(error);
+    BOOST_CHECK_EQUAL(error->code, interfaces::ProviderTxErrorCode::INVALID_PARAMETER);
+    BOOST_CHECK_EQUAL(error->message.original,
+                      "Error setting platformP2PAddrs[0] to 'server.example.com:22200' (invalid input)");
+
+    net_info.platform_p2p = std::vector<std::string>{"1.1.1.1:9998"};
+    error = node->evo().validateProviderNetInfo(net_info, MnType::Evo, ProTxVersion::ExtAddr, /*optional=*/false);
+    BOOST_REQUIRE(error);
+    BOOST_CHECK_EQUAL(error->message.original, "Error setting platformP2PAddrs[0] to '1.1.1.1:9998' (duplicate)");
+
+    net_info.platform_p2p = std::vector<std::string>{"1.1.1.2:22200", "1.1.1.3:22200", "1.1.1.4:22200", "1.1.1.5:22200",
+                                                     "1.1.1.6:22200"};
+    error = node->evo().validateProviderNetInfo(net_info, MnType::Evo, ProTxVersion::ExtAddr, /*optional=*/false);
+    BOOST_REQUIRE(error);
+    BOOST_CHECK_EQUAL(error->message.original,
+                      "Error setting platformP2PAddrs[4] to '1.1.1.6:22200' (too many entries)");
+
+    net_info.platform_p2p = uint16_t{22200};
+    net_info.platform_https = uint16_t{22201};
+    BOOST_CHECK(!node->evo().validateProviderNetInfo(net_info, MnType::Evo, ProTxVersion::BasicBLS, /*optional=*/false));
+
+    net_info.platform_p2p = std::vector<std::string>{"1.1.1.2:22200"};
+    error = node->evo().validateProviderNetInfo(net_info, MnType::Evo, ProTxVersion::BasicBLS, /*optional=*/false);
+    BOOST_REQUIRE(error);
+    BOOST_CHECK(error->message.original.find("only accepts a bare port number") != std::string::npos);
+
+    net_info = {
+        .core_p2p = {},
+        .platform_p2p = std::vector<std::string>{"1.1.1.2:22200"},
+        .platform_https = std::vector<std::string>{"server.example.com:443"},
+    };
+    error = node->evo().validateProviderNetInfo(net_info, MnType::Evo, ProTxVersion::ExtAddr, /*optional=*/true);
+    BOOST_REQUIRE(error);
+    BOOST_CHECK_EQUAL(error->reject_reason, "bad-protx-netinfo-empty");
+
+    net_info = {
+        .core_p2p = {"1.1.1.1:9998"},
+        .platform_p2p = std::monostate{},
+        .platform_https = std::monostate{},
+    };
+    error = node->evo().validateProviderNetInfo(net_info, MnType::Evo, ProTxVersion::ExtAddr, /*optional=*/true);
+    BOOST_REQUIRE(error);
+    BOOST_CHECK(error->message.original.find("platformP2PAddrs, cannot be empty if other fields populated") !=
+                std::string::npos);
+    BOOST_CHECK(!node->evo().validateProviderNetInfo(net_info, MnType::Regular, ProTxVersion::ExtAddr, /*optional=*/true));
+
+    net_info.platform_p2p = std::vector<std::string>{"1.1.1.2:22200"};
+    error = node->evo().validateProviderNetInfo(net_info, MnType::Regular, ProTxVersion::ExtAddr, /*optional=*/true);
+    BOOST_REQUIRE(error);
+    BOOST_CHECK_EQUAL(error->message.original, "Platform endpoints are only valid for an EvoNode");
+
+    net_info = {
+        .core_p2p = {"1.1.1.1:9998"},
+        .platform_p2p = std::vector<std::string>{"1.1.1.2:22200"},
+        .platform_https = std::monostate{},
+    };
+    error = node->evo().validateProviderNetInfo(net_info, MnType::Evo, ProTxVersion::ExtAddr, /*optional=*/true);
+    BOOST_REQUIRE(error);
+    BOOST_CHECK(error->message.original.find("platformHTTPSAddrs, cannot be empty if other fields populated") !=
+                std::string::npos);
+
+    net_info = {
+        .core_p2p = {"1.1.1.1:9998"},
+        .platform_p2p = uint16_t{22200},
+        .platform_https = uint16_t{22200},
+    };
+    error = node->evo().validateProviderNetInfo(net_info, MnType::Evo, ProTxVersion::BasicBLS, /*optional=*/false);
+    BOOST_REQUIRE(error);
+    BOOST_CHECK_EQUAL(error->reject_reason, "bad-protx-platform-dup-ports");
+
+    net_info.platform_p2p = uint16_t{MainParams().GetDefaultPort()};
+    net_info.platform_https = uint16_t{22201};
+    error = node->evo().validateProviderNetInfo(net_info, MnType::Evo, ProTxVersion::BasicBLS, /*optional=*/false);
+    BOOST_REQUIRE(error);
+    BOOST_CHECK_EQUAL(error->reject_reason, "bad-protx-platform-p2p-port");
 }
 
 BOOST_AUTO_TEST_CASE(findFirstBlockWithTimeAndHeight)
@@ -160,6 +278,123 @@ BOOST_AUTO_TEST_CASE(hasBlocks)
     BOOST_CHECK(chain->hasBlocks(active.Tip()->GetBlockHash(), 6, 49));
     BOOST_CHECK(!chain->hasBlocks(active.Tip()->GetBlockHash(), 5, 49));
     BOOST_CHECK(!chain->hasBlocks(active.Tip()->GetBlockHash(), 6, 50));
+}
+
+// getPlatformQuorums exports the retained-key window of mined commitments with basic-scheme
+// serialized public keys, newest-first. Mined commitments are installed directly in EvoDB (the
+// same shortcut evo_cbtx_tests uses) since a real DKG cannot run in a unit test.
+BOOST_AUTO_TEST_CASE(getPlatformQuorums)
+{
+    auto node{interfaces::MakeNode(m_node)};
+    constexpr auto llmq_type{Consensus::LLMQType::LLMQ_TEST};
+    const auto llmq_params{Params().GetLLMQ(llmq_type)};
+    BOOST_REQUIRE(llmq_params.has_value());
+
+    // The exported window is the retained-key window, which on LLMQ_TEST is strictly larger than
+    // the active signing set: older quorums may still have signed consensus-valid Platform state
+    // roots, so exporting only the active set would be a regression.
+    const auto window{static_cast<size_t>(std::max(llmq_params->signingActiveQuorumCount, llmq_params->keepOldKeys))};
+    BOOST_REQUIRE_EQUAL(window, 4U);
+    BOOST_REQUIRE(window > static_cast<size_t>(llmq_params->signingActiveQuorumCount));
+
+    // No commitments yet.
+    BOOST_CHECK(node->llmq().getPlatformQuorums(std23::to_underlying(llmq_type)).empty());
+    // Unconfigured LLMQ type.
+    BOOST_CHECK(node->llmq().getPlatformQuorums(0xEE).empty());
+
+    // One more valid commitment than the window can hold, quorum bases at heights 10..50.
+    constexpr std::array<int, 5> base_heights{10, 20, 30, 40, 50};
+    std::vector<llmq::CFinalCommitment> qcs;
+    {
+        LOCK(Assert(m_node.chainman)->GetMutex());
+        const CChain& active{m_node.chainman->ActiveChain()};
+        auto db_tx{m_node.evodb->BeginTransaction()};
+        for (const int base : base_heights) {
+            auto qc{llmq::testutils::CreateValidCommitment(*llmq_params, active[base]->GetBlockHash())};
+            llmq::testutils::WriteMinedCommitment(*m_node.evodb, qc, active[base + 1]->GetBlockHash(),
+                                                  /*mined_height=*/base + 1, /*quorum_height=*/base);
+            qcs.push_back(qc);
+        }
+        db_tx->Commit();
+    }
+
+    const auto check_quorums = [&](const std::vector<interfaces::LLMQ::PlatformQuorum>& quorums,
+                                   const std::vector<size_t>& expected_qc_indexes) {
+        BOOST_REQUIRE_EQUAL(quorums.size(), expected_qc_indexes.size());
+        for (size_t i{0}; i < quorums.size(); ++i) {
+            const auto& qc{qcs[expected_qc_indexes[i]]};
+            BOOST_CHECK_EQUAL(quorums[i].m_quorum_hash, qc.quorumHash);
+            BOOST_CHECK_EQUAL(quorums[i].m_height, base_heights[expected_qc_indexes[i]]);
+            // Exact basic-scheme serialization, regardless of the active global BLS scheme.
+            BOOST_CHECK(quorums[i].m_pubkey == qc.quorumPublicKey.ToByteVector(/*specificLegacyScheme=*/false));
+            CBLSPublicKey roundtrip;
+            roundtrip.SetBytes(quorums[i].m_pubkey, /*specificLegacyScheme=*/false);
+            BOOST_CHECK(roundtrip.IsValid());
+            BOOST_CHECK(roundtrip == qc.quorumPublicKey);
+        }
+    };
+
+    // Newest-first and truncated to the window: bases 50, 40, 30, 20; base 10 falls out.
+    check_quorums(node->llmq().getPlatformQuorums(std23::to_underlying(llmq_type)), {4, 3, 2, 1});
+
+    // A commitment whose public key is invalid consumes its window slot but exports nothing.
+    {
+        LOCK(Assert(m_node.chainman)->GetMutex());
+        const CChain& active{m_node.chainman->ActiveChain()};
+        auto qc{llmq::testutils::CreateValidCommitment(*llmq_params, active[60]->GetBlockHash())};
+        qc.quorumPublicKey = CBLSPublicKey{};
+        auto db_tx{m_node.evodb->BeginTransaction()};
+        llmq::testutils::WriteMinedCommitment(*m_node.evodb, qc, active[61]->GetBlockHash(),
+                                              /*mined_height=*/61, /*quorum_height=*/60);
+        db_tx->Commit();
+    }
+    check_quorums(node->llmq().getPlatformQuorums(std23::to_underlying(llmq_type)), {4, 3, 2});
+}
+
+// getInstantSendLock returns the network-serialized islock for a locked txid, and an empty vector
+// both for unknown txids and while InstantSend is disabled (spork gate inside the manager).
+BOOST_AUTO_TEST_CASE(getInstantSendLock)
+{
+    constexpr const char* REGTEST_SPORK_PRIVKEY{"cP4EKFyJsHT39LDqgdcB43Y3YXjNyjb5Fuas1GQSeAtjnZWmZEQK"};
+
+    auto node{interfaces::MakeNode(m_node)};
+    auto& isman{*Assert(m_node.isman)};
+
+    auto islock{std::make_shared<instantsend::InstantSendLock>()};
+    islock->inputs.emplace_back(uint256::ONE, 0);
+    islock->txid = uint256::TWO;
+    islock->cycleHash = InsecureRand256();
+    const bool legacy{bls::bls_legacy_scheme.load()};
+    CBLSSecretKey sk;
+    sk.MakeNewKey();
+    islock->sig.Set(sk.Sign(islock->GetRequestId(), legacy), legacy);
+
+    isman.WriteNewISLock(::SerializeHash(*islock), islock, /*minedHeight=*/std::nullopt);
+
+    // SPORK_2 defaults to OFF: the stored lock must not leak through the interface.
+    BOOST_CHECK(node->llmq().getInstantSendLock(islock->txid).empty());
+
+    // The fixture builds a bare CSporkManager, so wire up the regtest signer before setting the spork.
+    BOOST_REQUIRE(m_node.sporkman->SetSporkAddress(Params().SporkAddress()));
+    BOOST_REQUIRE(m_node.sporkman->SetPrivKey(REGTEST_SPORK_PRIVKEY));
+    BOOST_REQUIRE(m_node.sporkman->UpdateSpork(SPORK_2_INSTANTSEND_ENABLED, 0).has_value());
+
+    CDataStream expected{SER_NETWORK, PROTOCOL_VERSION};
+    expected << *islock;
+    const auto ret{node->llmq().getInstantSendLock(islock->txid)};
+    BOOST_REQUIRE(!ret.empty());
+    BOOST_CHECK_EQUAL(HexStr(ret), HexStr(expected));
+
+    // The exported bytes deserialize back into the same lock.
+    CDataStream ds{Span<const uint8_t>{ret}, SER_NETWORK, PROTOCOL_VERSION};
+    instantsend::InstantSendLock roundtrip;
+    ds >> roundtrip;
+    BOOST_CHECK_EQUAL(roundtrip.txid, islock->txid);
+    BOOST_CHECK(roundtrip.inputs == islock->inputs);
+    BOOST_CHECK_EQUAL(roundtrip.GetRequestId(), islock->GetRequestId());
+
+    // Unknown txid.
+    BOOST_CHECK(node->llmq().getInstantSendLock(uint256::ONE).empty());
 }
 
 BOOST_AUTO_TEST_SUITE_END()

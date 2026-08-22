@@ -187,6 +187,12 @@ public:
 
     /** Derive a private key, if private data is available in arg. */
     virtual bool GetPrivKey(int pos, const SigningProvider& arg, CKey& key) const = 0;
+
+    /** Return this key expression's root extended public key, if any. */
+    virtual bool GetRootExtPubKey(CExtPubKey& key) const { return false; }
+
+    /** Return this key expression's root extended private key, if available. */
+    virtual bool GetRootExtKey(const SigningProvider& arg, CExtKey& key) const { return false; }
 };
 
 class OriginPubkeyProvider final : public PubkeyProvider
@@ -237,6 +243,14 @@ public:
     bool GetPrivKey(int pos, const SigningProvider& arg, CKey& key) const override
     {
         return m_provider->GetPrivKey(pos, arg, key);
+    }
+    bool GetRootExtPubKey(CExtPubKey& key) const override
+    {
+        return m_provider->GetRootExtPubKey(key);
+    }
+    bool GetRootExtKey(const SigningProvider& arg, CExtKey& key) const override
+    {
+        return m_provider->GetRootExtKey(arg, key);
     }
 };
 
@@ -488,6 +502,15 @@ public:
         key = extkey.key;
         return true;
     }
+    bool GetRootExtPubKey(CExtPubKey& key) const override
+    {
+        key = m_root_extkey;
+        return true;
+    }
+    bool GetRootExtKey(const SigningProvider& arg, CExtKey& key) const override
+    {
+        return GetExtKey(arg, key);
+    }
 };
 
 /** Base class for all Descriptor implementations. */
@@ -595,6 +618,28 @@ public:
         std::string ret;
         ToStringHelper(nullptr, ret, StringType::PUBLIC);
         return AddChecksum(ret);
+    }
+
+    bool GetRootExtPubKey(CExtPubKey& out) const final
+    {
+        if (m_pubkey_args.size() == 1 && m_subdescriptor_args.empty()) {
+            return m_pubkey_args.front()->GetRootExtPubKey(out);
+        }
+        if (m_pubkey_args.empty() && m_subdescriptor_args.size() == 1) {
+            return m_subdescriptor_args.front()->GetRootExtPubKey(out);
+        }
+        return false;
+    }
+
+    bool GetRootExtKey(const SigningProvider& provider, CExtKey& out) const final
+    {
+        if (m_pubkey_args.size() == 1 && m_subdescriptor_args.empty()) {
+            return m_pubkey_args.front()->GetRootExtKey(provider, out);
+        }
+        if (m_pubkey_args.empty() && m_subdescriptor_args.size() == 1) {
+            return m_subdescriptor_args.front()->GetRootExtKey(provider, out);
+        }
+        return false;
     }
 
     bool ToPrivateString(const SigningProvider& arg, std::string& out) const override

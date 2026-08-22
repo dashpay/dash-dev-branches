@@ -197,7 +197,7 @@ CCreditPool CCreditPoolManager::ConstructCreditPool(const gsl::not_null<const CB
     CAmount currentLimit = blockData.credit_pool;
     const CAmount latelyUnlocked = prev.latelyUnlocked + blockData.unlocked - distantUnlocked;
     if (DeploymentActiveAt(*block_index, m_chainman, Consensus::DEPLOYMENT_V24)) {
-        currentLimit = std::max(CAmount(0), std::min(currentLimit, LimitAmountV24 - latelyUnlocked));
+        currentLimit = std::max(CAmount{0}, std::min(currentLimit, LimitAmountV24 - latelyUnlocked));
     } else if (DeploymentActiveAt(*block_index, m_chainman.GetConsensus(), Consensus::DEPLOYMENT_WITHDRAWALS)) {
         currentLimit = std::min(currentLimit, LimitAmountV22);
     } else {
