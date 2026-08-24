@@ -2,8 +2,11 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or https://www.opensource.org/licenses/mit-license.php.
 
+#include <coinjoin/coinjoin.h>
+#include <txmempool.h>
 #include <validation.h>
 #include <wallet/coincontrol.h>
+#include <wallet/coinjoin.h>
 #include <wallet/spend.h>
 #include <wallet/test/util.h>
 #include <wallet/test/wallet_test_fixture.h>
@@ -87,6 +90,68 @@ BOOST_FIXTURE_TEST_CASE(BasicOutputTypesTest, AvailableCoinsTestingSetup)
         available_coins = AvailableCoins(*wallet);
     }
     BOOST_CHECK_EQUAL(available_coins.legacy.size(), 2U);
+}
+
+BOOST_FIXTURE_TEST_CASE(UnconfirmableOutputsAreNotWalletFunds, AvailableCoinsTestingSetup)
+{
+    LOCK(wallet->cs_wallet);
+
+    const auto dest{wallet->GetNewDestination("")};
+    BOOST_ASSERT(dest);
+
+    // Use a real CoinJoin denomination so the denominated-credit paths apply.
+    const CAmount denom{CoinJoin::GetSmallestDenomination()};
+    CMutableTransaction mtx;
+    mtx.vin.emplace_back(COutPoint{uint256::ONE, 0});
+    mtx.vout.emplace_back(denom, GetScriptForDestination(*dest));
+    const CTransactionRef tx{MakeTransactionRef(mtx)};
+
+    // A transaction the wallet knows about but that never reached the mempool cannot
+    // confirm as it stands, so its outputs are not funds the wallet can spend or mix.
+    BOOST_CHECK(wallet->AddToWallet(tx, TxStateInactive{}));
+    BOOST_CHECK_EQUAL(wallet->CountInputsWithAmount(denom), 0);
+
+    // The aggregate CoinJoin balances have to agree: an output that is not wallet funds
+    // is not denominated or anonymized funds either.
+    const CWalletTx& wtx{wallet->mapWallet.at(tx->GetHash())};
+    BOOST_CHECK_EQUAL(CachedTxGetAvailableCoinJoinCredits(*wallet, wtx).m_denominated, 0);
+
+    // Once it is in the mempool they count.
+    BOOST_CHECK(wallet->AddToWallet(tx, TxStateInMempool{}));
+    BOOST_CHECK_EQUAL(wallet->CountInputsWithAmount(denom), 1);
+    BOOST_CHECK_EQUAL(CachedTxGetAvailableCoinJoinCredits(*wallet, wtx).m_denominated, denom);
+}
+
+BOOST_FIXTURE_TEST_CASE(MempoolRemovalInvalidatesAnonymizableTally, AvailableCoinsTestingSetup)
+{
+    LOCK(wallet->cs_wallet);
+
+    const auto dest{wallet->GetNewDestination("")};
+    BOOST_ASSERT(dest);
+
+    // A wallet transaction in the mempool is trusted at depth zero, so its outputs count
+    // towards the anonymizable tally and that tally is cacheable.
+    auto created{CreateTransaction(*wallet, {CRecipient{GetScriptForDestination(*dest), 1 * COIN,
+                                                        /*fSubtractFeeFromAmount=*/false}},
+                                   RANDOM_CHANGE_POSITION, CCoinControl{})};
+    BOOST_REQUIRE(created);
+    const CTransactionRef tx{created->tx};
+    BOOST_CHECK(wallet->AddToWallet(tx, TxStateInMempool{}));
+
+    const auto tallied = [&](const CTxDestination& target) {
+        for (const auto& item : wallet->SelectCoinsGroupedByAddresses()) {
+            if (item.txdest == target) return true;
+        }
+        return false;
+    };
+
+    // Prime the cache, so that the check below cannot pass by recomputing the tally.
+    BOOST_REQUIRE(tallied(*dest));
+
+    // Leaving the mempool makes the transaction unconfirmable as it stands; the cached
+    // tally must not keep handing out its outputs.
+    wallet->transactionRemovedFromMempool(tx, MemPoolRemovalReason::EXPIRY);
+    BOOST_CHECK(!tallied(*dest));
 }
 
 BOOST_AUTO_TEST_SUITE_END()

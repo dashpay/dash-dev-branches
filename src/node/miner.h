@@ -6,6 +6,7 @@
 #ifndef BITCOIN_NODE_MINER_H
 #define BITCOIN_NODE_MINER_H
 
+#include <policy/policy.h>
 #include <primitives/block.h>
 #include <txmempool.h>
 
@@ -19,6 +20,7 @@
 #include <boost/multi_index/tag.hpp>
 #include <boost/multi_index_container.hpp>
 
+class ArgsManager;
 class CBlockIndex;
 class CChainParams;
 class CChainstateHelper;
@@ -35,11 +37,9 @@ class ChainlockHandler;
 namespace Consensus { struct Params; };
 namespace llmq {
 class CQuorumBlockProcessor;
-class CQuorumManager;
 } // namespace llmq
 
 namespace node {
-class BlockManager;
 struct NodeContext;
 
 static const bool DEFAULT_PRINTPRIORITY = false;
@@ -151,11 +151,6 @@ private:
     // The constructed block template
     std::unique_ptr<CBlockTemplate> pblocktemplate;
 
-    // Configuration parameters for the block size
-    unsigned int nBlockMaxSize;
-    unsigned int nBlockMaxSigOps;
-    CFeeRate blockMinFeeRate;
-
     // Information on the current status of the block
     uint64_t nBlockSize;
     uint64_t nBlockTx;
@@ -167,7 +162,6 @@ private:
     int nHeight;
     int64_t m_lock_time_cutoff;
 
-    BlockManager& m_blockman;
     CChainstateHelper& m_chain_helper;
     Chainstate& m_chainstate;
     CEvoDB& m_evoDb;
@@ -176,13 +170,15 @@ private:
     const CChainParams& chainparams;
     const CTxMemPool* const m_mempool;
     const llmq::CQuorumBlockProcessor& m_quorum_block_processor;
-    const llmq::CQuorumManager& m_qman;
 
 public:
     struct Options {
-        Options();
-        size_t nBlockMaxSize;
-        CFeeRate blockMinFeeRate;
+        // Configuration parameters for the block size
+        mutable size_t nBlockMaxSize{DEFAULT_BLOCK_MAX_SIZE};
+        mutable size_t nBlockMaxSigOps{0};
+        CFeeRate blockMinFeeRate{DEFAULT_BLOCK_MIN_TX_FEE};
+        // Whether to call TestBlockValidity() at the end of CreateNewBlock().
+        bool test_block_validity{true};
     };
 
     explicit BlockAssembler(Chainstate& chainstate, const node::NodeContext& node, const CTxMemPool* mempool);
@@ -195,6 +191,8 @@ public:
     inline static std::optional<int64_t> m_last_block_size{};
 
 private:
+    const Options m_options;
+
     // utility functions
     /** Clear the block's state and prepare for assembling a new block */
     void resetBlock();
@@ -223,6 +221,9 @@ private:
 };
 
 int64_t UpdateTime(CBlockHeader* pblock, const Consensus::Params& consensusParams, const CBlockIndex* pindexPrev);
+
+/** Apply -blockmintxfee and -blockmaxsize options from ArgsManager to BlockAssembler options. */
+void ApplyArgsManOptions(const ArgsManager& gArgs, BlockAssembler::Options& options);
 } // namespace node
 
 #endif // BITCOIN_NODE_MINER_H

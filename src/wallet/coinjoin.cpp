@@ -162,7 +162,7 @@ std::vector<CompactTallyItem> CWallet::SelectCoinsGroupedByAddresses(bool fSkipD
 
         if (wtx.IsCoinBase() && GetTxBlocksToMaturity(wtx) > 0) continue;
         if (fSkipUnconfirmed && !CachedTxIsTrusted(*this, wtx)) continue;
-        if (GetTxDepthInMainChain(wtx) < 0) continue;
+        if (!IsWalletUTXOSpendable(wtx)) continue;
 
         for (unsigned int i = 0; i < wtx.tx->vout.size(); i++) {
             CTxDestination txdest;
@@ -253,7 +253,7 @@ int CWallet::CountInputsWithAmount(CAmount nInputAmount) const
         const auto it{mapWallet.find(outpoint.hash)};
         if (it == mapWallet.end()) continue;
         if (it->second.tx->vout[outpoint.n].nValue != nInputAmount) continue;
-        if (GetTxDepthInMainChain(it->second) < 0) continue;
+        if (!IsWalletUTXOSpendable(it->second)) continue;
 
         nTotal++;
     }
@@ -542,6 +542,9 @@ float CWallet::GetAverageAnonymizedRounds() const
 
     LOCK(cs_wallet);
     for (const auto& outpoint : setWalletUTXO) {
+        const auto it{mapWallet.find(outpoint.hash)};
+        if (it == mapWallet.end()) continue;
+        if (!IsWalletUTXOSpendable(it->second)) continue;
         if (!IsDenominated(outpoint)) continue;
 
         nTotal += GetCappedOutpointCoinJoinRounds(outpoint);
@@ -568,7 +571,7 @@ CAmount CWallet::GetNormalizedAnonymizedBalance() const
 
         CAmount nValue = it->second.tx->vout[outpoint.n].nValue;
         if (!CoinJoin::IsDenominatedAmount(nValue)) continue;
-        if (GetTxDepthInMainChain(it->second) < 0) continue;
+        if (!IsWalletUTXOSpendable(it->second)) continue;
 
         int nRounds = GetCappedOutpointCoinJoinRounds(outpoint);
         nTotal += nValue * nRounds / CCoinJoinClientOptions::GetRounds();
@@ -581,8 +584,8 @@ CAmount CachedTxGetAnonymizedCredit(const CWallet& wallet, const CWalletTx& wtx,
 {
     AssertLockHeld(wallet.cs_wallet);
 
-    // Exclude coinbase and conflicted txes
-    if (wtx.IsCoinBase() || wallet.GetTxDepthInMainChain(wtx) < 0) return 0;
+    // Exclude coinbase transactions, and any that cannot confirm as they stand
+    if (wtx.IsCoinBase() || !wallet.IsWalletUTXOSpendable(wtx)) return 0;
 
     CAmount nCredit = 0;
     uint256 hashTx = wtx.GetHash();
@@ -620,9 +623,9 @@ CoinJoinCredits CachedTxGetAvailableCoinJoinCredits(const CWallet& wallet, const
     // Must wait until coinbase is safely deep enough in the chain before valuing it
     if (wtx.IsCoinBase() && wallet.GetTxBlocksToMaturity(wtx) > 0) return ret;
 
-    int nDepth = wallet.GetTxDepthInMainChain(wtx);
-    if (nDepth < 0) return ret;
+    if (!wallet.IsWalletUTXOSpendable(wtx)) return ret;
 
+    const int nDepth{wallet.GetTxDepthInMainChain(wtx)};
     ret.is_unconfirmed = CachedTxIsTrusted(wallet, wtx) && nDepth == 0;
 
     if (wtx.m_amounts[CWalletTx::ANON_CREDIT].m_cached[ISMINE_SPENDABLE]) {

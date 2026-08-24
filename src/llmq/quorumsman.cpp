@@ -15,6 +15,7 @@
 #include <llmq/params.h>
 #include <llmq/signhash.h>
 #include <llmq/utils.h>
+#include <util/check.h>
 #include <util/helpers.h>
 #include <util/std23.h>
 
@@ -339,6 +340,18 @@ void CQuorumManager::CleanupExpiredDataRequests() const
     auto it = mapQuorumDataRequests.begin();
     while (it != mapQuorumDataRequests.end()) {
         if (it->second.IsExpired(/*add_bias=*/true)) {
+            if (!it->first.m_we_requested) {
+                // On counter desync, skip the decrement: over-counting fails toward stricter
+                // limits, while an underflow would disable the caps entirely.
+                auto count_it = m_inbound_request_counts.find(it->first.proRegTx);
+                if (Assume(count_it != m_inbound_request_counts.end() && count_it->second > 0) &&
+                    --count_it->second == 0) {
+                    m_inbound_request_counts.erase(count_it);
+                }
+                if (Assume(m_inbound_request_count > 0)) {
+                    --m_inbound_request_count;
+                }
+            }
             it = mapQuorumDataRequests.erase(it);
         } else {
             ++it;
@@ -433,19 +446,37 @@ CQuorumCPtr CQuorumManager::GetQuorum(Consensus::LLMQType llmqType,
     return BuildQuorumFromCommitment(llmqType, pQuorumBaseBlockIndex, populate_cache);
 }
 
-bool CQuorumManager::RegisterDataRequest(const CQuorumDataRequestKey& key, const CQuorumDataRequest& request,
-                                          bool add_expiry_bias) const
+DataRequestRegistration CQuorumManager::RegisterDataRequest(const CQuorumDataRequestKey& key,
+                                                            const CQuorumDataRequest& request, bool add_expiry_bias) const
 {
     LOCK(cs_data_requests);
-    auto [old_pair, inserted] = mapQuorumDataRequests.emplace(key, request);
-    if (!inserted) {
-        if (old_pair->second.IsExpired(add_expiry_bias)) {
-            old_pair->second = request;
-            return true;
+    if (auto it = mapQuorumDataRequests.find(key); it != mapQuorumDataRequests.end()) {
+        if (!it->second.IsExpired(add_expiry_bias)) {
+            return DataRequestRegistration::RateLimited;
         }
-        return false;
+        it->second = request;
+        return DataRequestRegistration::Accepted;
     }
-    return true;
+
+    if (!key.m_we_requested) {
+        if (m_inbound_request_count >= MAX_INBOUND_DATA_REQUESTS) {
+            return DataRequestRegistration::CapacityExhausted;
+        }
+        const auto count_it = m_inbound_request_counts.find(key.proRegTx);
+        if (count_it != m_inbound_request_counts.end() && count_it->second >= MAX_INBOUND_DATA_REQUESTS_PER_REQUESTER) {
+            // All unauthenticated qwatch peers share the null identity, so exhaustion of that
+            // budget is not attributable to the connection that happened to arrive last.
+            return key.proRegTx.IsNull() ? DataRequestRegistration::CapacityExhausted
+                                         : DataRequestRegistration::RequesterLimitExceeded;
+        }
+    }
+
+    mapQuorumDataRequests.emplace(key, request);
+    if (!key.m_we_requested) {
+        ++m_inbound_request_counts[key.proRegTx];
+        ++m_inbound_request_count;
+    }
+    return DataRequestRegistration::Accepted;
 }
 
 CQuorumManager::DataResponseValidation CQuorumManager::ValidateDataResponse(

@@ -4,8 +4,10 @@
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 import random
+from decimal import Decimal
 
 from test_framework.test_framework import BitcoinTestFramework
+from test_framework.blocktools import COINBASE_MATURITY
 from test_framework.messages import (
     COIN,
     MAX_MONEY,
@@ -19,6 +21,7 @@ from test_framework.util import (
 )
 
 # See coinjoin/options.h
+COINJOIN_RANDOM_ROUNDS = 3
 COINJOIN_ROUNDS_DEFAULT = 4
 COINJOIN_ROUNDS_MAX = 16
 COINJOIN_ROUNDS_MIN = 2
@@ -54,6 +57,13 @@ class CoinJoinTest(BitcoinTestFramework):
         self.test_setcoinjoinrounds(w1)
         self.test_coinjoinsalt(w1)
         w1.unloadwallet()
+
+        node.createwallet(wallet_name='w3')
+        w3 = node.get_wallet_rpc('w3')
+        self.generatetoaddress(node, COINBASE_MATURITY + 1, w3.getnewaddress())
+        self.test_use_cj_option(w3)
+        self.test_use_cj_success(w3)
+        w3.unloadwallet()
 
         if not self.options.descriptors:
             node.createwallet(wallet_name='w_keypool', blank=False, disable_private_keys=False)
@@ -117,6 +127,90 @@ class CoinJoinTest(BitcoinTestFramework):
             assert_equal(node.getcoinjoininfo()['running'], True)
         node.newkeypool()
         assert_equal(node.getcoinjoininfo()['running'], False)
+
+    def simulate_mixing(self, node, inputs, denom, rounds):
+        # A same-denomination, fee-free self-spend advances each output by one
+        # round. Zero-fee transactions are not relayed, so mine them directly.
+        for _ in range(rounds):
+            outputs = [{node.getnewaddress(): denom} for _ in inputs]
+            raw_tx = node.createrawtransaction(inputs, outputs)
+            signed_tx = node.signrawtransactionwithwallet(raw_tx)
+            assert_equal(signed_tx['complete'], True)
+            txid = node.decoderawtransaction(signed_tx['hex'])['txid']
+            self.generateblock(self.nodes[0], output=node.getnewaddress(), transactions=[signed_tx['hex']])
+            inputs = [{'txid': txid, 'vout': n} for n in range(len(inputs))]
+        return inputs
+
+    def test_use_cj_option(self, node):
+        self.log.info('"use_cj" option should spend fully mixed coins only')
+        addr = node.getnewaddress()
+        utxo = node.listunspent()[0]
+        input_ref = {'txid': utxo['txid'], 'vout': utxo['vout']}
+
+        # Automatic coin selection should find no fully mixed coins in this wallet
+        assert_raises_rpc_error(-4, 'Unable to locate enough mixed funds for this transaction.',
+                                node.send, outputs={addr: 1}, options={'use_cj': True})
+        assert_raises_rpc_error(-6, 'Total value of UTXO pool too low to pay for transaction.',
+                                node.sendall, recipients=[addr], options={'use_cj': True})
+
+        # Preset non-mixed inputs should be rejected instead of silently spent
+        not_mixed_error = f"Input not available. UTXO ({utxo['txid']}:{utxo['vout']}) is not fully mixed."
+        raw_tx = node.createrawtransaction([input_ref], {addr: 1})
+        assert_raises_rpc_error(-8, not_mixed_error, node.fundrawtransaction, raw_tx, {'use_cj': True})
+        assert_raises_rpc_error(-8, not_mixed_error, node.walletcreatefundedpsbt,
+                                [input_ref], {addr: 1}, 0, {'use_cj': True})
+        assert_raises_rpc_error(-8, not_mixed_error, node.send,
+                                outputs={addr: 1}, options={'inputs': [input_ref], 'use_cj': True})
+        assert_raises_rpc_error(-8, not_mixed_error, node.sendall,
+                                recipients=[addr], options={'inputs': [input_ref], 'use_cj': True})
+
+        # The same input is spendable once "use_cj" is not requested
+        assert_equal(node.sendall(recipients=[addr], options={'inputs': [input_ref]})['complete'], True)
+
+    def test_use_cj_success(self, node):
+        self.log.info('"use_cj" option should spend fully mixed coins and mark the transaction as CoinJoin')
+        # Node-global setting, restored at the end of this subtest
+        node.setcoinjoinrounds(COINJOIN_ROUNDS_MIN)
+
+        # Fund two denominated outputs. The funding transaction pays a fee and
+        # has non-denominated change, so both outputs start at 0 rounds.
+        denom = Decimal('0.00100001')
+        funding_txid = node.send(outputs=[{node.getnewaddress(): denom}, {node.getnewaddress(): denom}])['txid']
+        self.generate(self.nodes[0], 1)
+        funding_tx = node.gettransaction(txid=funding_txid, verbose=True)['decoded']
+        inputs = [{'txid': funding_txid, 'vout': out['n']} for out in funding_tx['vout'] if out['value'] == denom]
+        assert_equal(len(inputs), 2)
+
+        # COINJOIN_ROUNDS_MIN + COINJOIN_RANDOM_ROUNDS rounds make IsFullyMixed()
+        # deterministic regardless of the wallet's salt.
+        rounds = COINJOIN_ROUNDS_MIN + COINJOIN_RANDOM_ROUNDS
+        inputs = self.simulate_mixing(node, inputs, denom, rounds)
+
+        # Both coins report full rounds and count towards the anonymized balance
+        mixed_utxos = [(u['txid'], u['vout']) for u in node.listunspent()
+                       if u['coinjoin_rounds'] == COINJOIN_ROUNDS_MIN + COINJOIN_RANDOM_ROUNDS]
+        assert_equal(sorted(mixed_utxos), sorted((i['txid'], i['vout']) for i in inputs))
+        assert_equal(node.getbalances()['mine']['coinjoin'], 2 * denom)
+
+        # "send" accepts a fully mixed preset input; the transaction is marked as
+        # CoinJoin and pays the remainder as fee instead of creating change
+        res = node.send(outputs={node.getnewaddress(): Decimal('0.0009')}, options={'inputs': [inputs[0]], 'use_cj': True})
+        assert_equal(res['complete'], True)
+        tx = node.gettransaction(txid=res['txid'], verbose=True)
+        assert_equal(tx['DS'], '1')
+        assert_equal([(txin['txid'], txin['vout']) for txin in tx['decoded']['vin']],
+                     [(inputs[0]['txid'], inputs[0]['vout'])])
+        assert_equal(len(tx['decoded']['vout']), 1)
+
+        # "sendall" with automatic selection sweeps the remaining fully mixed coin
+        res = node.sendall(recipients=[node.getnewaddress()], options={'use_cj': True})
+        assert_equal(res['complete'], True)
+        tx = node.gettransaction(txid=res['txid'], verbose=True)
+        assert_equal(tx['DS'], '1')
+        assert_equal([(txin['txid'], txin['vout']) for txin in tx['decoded']['vin']],
+                     [(inputs[1]['txid'], inputs[1]['vout'])])
+
+        node.setcoinjoinrounds(COINJOIN_ROUNDS_DEFAULT)
 
     def test_setcoinjoinamount(self, node):
         self.log.info('"setcoinjoinamount" should update mixing target')

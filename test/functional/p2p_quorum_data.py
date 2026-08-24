@@ -120,14 +120,13 @@ def wait_for_banscore(node, peer_id, expected_score):
     def get_score():
         for peer in node.getpeerinfo():
             if peer["id"] == peer_id:
-                if (peer["banscore"] == expected_score):
-                    # The score matches the one we expected.
-                    # Wait a bit to make sure it won't change
-                    # to avoid false positives.
-                    time.sleep(0.1)
                 return peer["banscore"]
         return None
     wait_until_helper(lambda: get_score() == expected_score, timeout=6)
+    # Re-read after a settle delay: the first read can race a pending bump,
+    # in particular when the expected score is the peer's current one (e.g. 0).
+    time.sleep(0.1)
+    assert_equal(get_score(), expected_score)
 
 
 def p2p_connection(node, uacomment=None):
@@ -326,9 +325,18 @@ class QuorumDataMessagesTest(DashTestFramework):
             qgetdata_invalid_block = msg_qgetdata(protx_hash_int, 100, 0x01, protx_hash_int)
             qgetdata_invalid_quorum = msg_qgetdata(int(mn2.get_node(self).getblockhash(0), 16), 100, 0x01, protx_hash_int)
             qgetdata_invalid_no_member = msg_qgetdata(quorum_hash_int, 100, 0x02, quorum_hash_int)
+            # Block and commitment misses can be plain chain skew, so they are not scored.
+            # The qdata reply is queued before any scoring would run, so receiving it does
+            # not prove scoring is done: sync with a ping to make the zero reads meaningful.
             p2p_mn2.test_qgetdata(qgetdata_invalid_block, QUORUM_BLOCK_NOT_FOUND)
+            p2p_mn2.sync_with_ping()
+            wait_for_banscore(mn2.get_node(self), id_p2p_mn2, 0)
             p2p_mn2.test_qgetdata(qgetdata_invalid_quorum, QUORUM_NOT_FOUND)
+            p2p_mn2.sync_with_ping()
+            wait_for_banscore(mn2.get_node(self), id_p2p_mn2, 0)
             p2p_mn2.test_qgetdata(qgetdata_invalid_no_member, MASTERNODE_IS_NO_MEMBER)
+            p2p_mn2.sync_with_ping()
+            wait_for_banscore(mn2.get_node(self), id_p2p_mn2, 0)
             # An unregistered LLMQ type is answered like the misses above, but unlike them it
             # cannot be explained by the peer being ahead of us, so it is scored in full too.
             # Kept last: the peer is dropped once it is.

@@ -8,6 +8,7 @@
 #include <consensus/tx_check.h>
 #include <consensus/validation.h>
 #include <evo/assetlocktx.h>
+#include <evo/creditpool.h>
 #include <evo/specialtx.h>
 #include <llmq/context.h>
 #include <policy/policy.h>
@@ -122,6 +123,16 @@ static CMutableTransaction CreateAssetUnlockTx(FillableSigningProvider& keystore
     tx.vout[1].scriptPubKey = GetScriptForDestination(PKHash(key.GetPubKey()));
 
     return tx;
+}
+
+static CTransactionRef CreateCreditPoolUnlockTx(uint64_t index, CAmount amount)
+{
+    CMutableTransaction tx;
+    tx.nVersion = 3;
+    tx.nType = TRANSACTION_ASSET_UNLOCK;
+    tx.vout.emplace_back(amount, CScript{});
+    SetTxPayload(tx, CAssetUnlockPayload{1, index, 0, 0, {}, {}});
+    return MakeTransactionRef(std::move(tx));
 }
 
 BOOST_FIXTURE_TEST_SUITE(evo_assetlocks_tests, TestChain100Setup)
@@ -505,6 +516,43 @@ BOOST_FIXTURE_TEST_CASE(evo_assetunlock, TestChain100Setup)
         BOOST_CHECK(tx_state.GetRejectReason() == "bad-assetunlocktx-too-many-outs");
     }
 
+}
+
+BOOST_FIXTURE_TEST_CASE(credit_pool_package_atomicity, TestChain100Setup)
+{
+    LOCK(cs_main);
+    const auto unlock_seven = CreateCreditPoolUnlockTx(1, 7 * COIN);
+    const auto unlock_four = CreateCreditPoolUnlockTx(2, 4 * COIN);
+    const auto* tip = m_node.chainman->ActiveChain().Tip();
+    CCreditPoolDiff diff{CCreditPool{100 * COIN, 10 * COIN}, tip, m_node.chainman->GetConsensus(), 0};
+
+    TxValidationState package_state;
+    BOOST_CHECK(!diff.ProcessLockUnlockTransactions({unlock_seven, unlock_four}, package_state));
+    BOOST_CHECK_EQUAL(package_state.GetRejectReason(), "failed-creditpool-unlock-too-much");
+    BOOST_CHECK_EQUAL(diff.GetTotalLocked(), 100 * COIN);
+
+    TxValidationState retry_state;
+    BOOST_CHECK(diff.ProcessLockUnlockTransaction(*unlock_seven, retry_state));
+    BOOST_CHECK_EQUAL(diff.GetTotalLocked(), 93 * COIN);
+
+    // A later package's rollback must erase only its own indexes: index 1 was
+    // committed above and must survive the failed package below.
+    const auto unlock_two = CreateCreditPoolUnlockTx(3, 2 * COIN);
+    const auto unlock_dup = CreateCreditPoolUnlockTx(1, COIN);
+    TxValidationState dup_state;
+    BOOST_CHECK(!diff.ProcessLockUnlockTransactions({unlock_two, unlock_dup}, dup_state));
+    BOOST_CHECK_EQUAL(dup_state.GetRejectReason(), "failed-creditpool-unlock-duplicated-index");
+    BOOST_CHECK_EQUAL(diff.GetTotalLocked(), 93 * COIN);
+
+    // index 1 must still be known as used...
+    TxValidationState still_dup_state;
+    BOOST_CHECK(!diff.ProcessLockUnlockTransactions({unlock_dup}, still_dup_state));
+    BOOST_CHECK_EQUAL(still_dup_state.GetRejectReason(), "failed-creditpool-unlock-duplicated-index");
+
+    // ...while index 3 was rolled back and is usable again
+    TxValidationState reuse_state;
+    BOOST_CHECK(diff.ProcessLockUnlockTransactions({unlock_two}, reuse_state));
+    BOOST_CHECK_EQUAL(diff.GetTotalLocked(), 91 * COIN);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

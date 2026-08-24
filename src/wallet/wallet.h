@@ -23,6 +23,7 @@
 #include <util/string.h>
 #include <util/system.h>
 #include <util/strencodings.h>
+#include <util/time.h>
 #include <util/ui_change_type.h>
 #include <validationinterface.h>
 #include <wallet/coincontrol.h>
@@ -315,7 +316,7 @@ private:
     int nWalletVersion GUARDED_BY(cs_wallet){FEATURE_BASE};
 
     /** The next scheduled rebroadcast of wallet transactions. */
-    int64_t m_next_resend{GetDefaultNextResend()};
+    NodeClock::time_point m_next_resend{GetDefaultNextResend()};
     /** Whether this wallet will submit newly created transactions to the node's mempool and
      * prompt rebroadcasts (see ResendWalletTransactions()). */
     bool fBroadcastTransactions = false;
@@ -457,7 +458,7 @@ private:
      */
     static bool AttachChain(const std::shared_ptr<CWallet>& wallet, interfaces::Chain& chain, const bool rescan_required, bilingual_str& error, std::vector<bilingual_str>& warnings);
 
-    static int64_t GetDefaultNextResend();
+    static NodeClock::time_point GetDefaultNextResend();
 
     PlatformKeyStatus GetPlatformKeySource(const ScriptPubKeyMan*& source) const EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
     PlatformKeyStatus DerivePlatformKey(const PlatformKeyRequest& request, platformkeys::ExtKey256& out) const
@@ -638,6 +639,13 @@ public:
     std::vector<COutPoint> SelectFullyMixedForPromotion(int nDenom, int nCount) const;
 
     bool IsSpent(const COutPoint& outpoint) const EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
+    /** May `wtx`'s outputs be counted as wallet funds?
+     *
+     *  The wallet knows about transactions that cannot confirm as they stand: conflicted
+     *  ones, and ones that were abandoned, never broadcast or rejected from the mempool.
+     *  AvailableCoins() filters their outputs out, so anything else that values wallet
+     *  outputs must do the same. */
+    bool IsWalletUTXOSpendable(const CWalletTx& wtx) const EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
 
     // Whether this or any known UTXO with the same single key has been spent.
     bool IsSpentKey(const CScript& scriptPubKey) const EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
@@ -1261,6 +1269,7 @@ bool FillInputToWeight(CTxIn& txin, int64_t target_weight);
 
 struct MigrationResult {
     std::string wallet_name;
+    std::shared_ptr<CWallet> wallet;
     std::shared_ptr<CWallet> watchonly_wallet;
     std::shared_ptr<CWallet> solvables_wallet;
     fs::path backup_path;

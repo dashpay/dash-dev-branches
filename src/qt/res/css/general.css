@@ -811,7 +811,11 @@ QRadioButton::indicator:unchecked:disabled {
 QScrollArea
 ******************************************************/
 
-QScrollArea#mnWizardScroll,
+.QScrollArea {
+    background-color: #00000000;
+    border: 0px;
+}
+
 QScrollArea#mnWizardScroll > QWidget,
 QScrollArea#mnWizardScroll > QWidget > QWidget {
     background-color: #00000000;

@@ -129,7 +129,7 @@ static UniValue FinishTransaction(const std::shared_ptr<CWallet> pwallet, const 
         CTransactionRef tx(MakeTransactionRef(std::move(mtx)));
         result.pushKV("txid", tx->GetHash().GetHex());
         if (add_to_wallet && !psbt_opt_in) {
-            pwallet->CommitTransaction(tx, {}, /*orderForm*/ {});
+            pwallet->CommitTransaction(tx, options["use_cj"].isTrue() ? mapValue_t{{"DS", "1"}} : mapValue_t{}, /*orderForm*/ {});
         } else {
             result.pushKV("hex", hex);
         }
@@ -545,6 +545,7 @@ void FundTransaction(CWallet& wallet, CMutableTransaction& tx, CAmount& fee_out,
                 {"conf_target", UniValueType(UniValue::VNUM)},
                 {"estimate_mode", UniValueType(UniValue::VSTR)},
                 {"input_sizes", UniValueType(UniValue::VARR)},
+                {"use_cj", UniValueType(UniValue::VBOOL)},
             },
             true, true);
 
@@ -594,6 +595,19 @@ void FundTransaction(CWallet& wallet, CMutableTransaction& tx, CAmount& fee_out,
 
         if (options.exists("subtractFeeFromOutputs") || options.exists("subtract_fee_from_outputs") )
             subtractFeeFromOutputs = (options.exists("subtract_fee_from_outputs") ? options["subtract_fee_from_outputs"] : options["subtractFeeFromOutputs"]).get_array();
+
+        if (options.exists("use_cj")) {
+            coinControl.UseCoinJoin(options["use_cj"].get_bool());
+            if (coinControl.IsUsingCoinJoin()) {
+                // Preset inputs stay in the transaction even though coin selection
+                // ignores non-mixed ones, so reject them here instead
+                for (const CTxIn& txin : tx.vin) {
+                    if (!wallet.IsFullyMixed(txin.prevout)) {
+                        throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("Input not available. UTXO (%s:%d) is not fully mixed.", txin.prevout.hash.ToString(), txin.prevout.n));
+                    }
+                }
+            }
+        }
 
         SetFeeEstimateMode(wallet, coinControl, options["conf_target"], options["estimate_mode"], options["fee_rate"], override_min_fee);
       }
@@ -776,6 +790,7 @@ RPCHelpMan fundrawtransaction()
                                     },
                                 },
                              },
+                            {"use_cj", RPCArg::Type::BOOL, RPCArg::Default{false}, "Use CoinJoin funds only"},
                         },
                         FundTxDoc()),
                         RPCArgOptions{.oneline_description="options"}},
@@ -982,6 +997,7 @@ RPCHelpMan send()
                             {"vout_index", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "The zero-based output index, before a change output is added."},
                         },
                     },
+                    {"use_cj", RPCArg::Type::BOOL, RPCArg::Default{false}, "Use CoinJoin funds only"},
                 },
                 FundTxDoc()),
                 RPCArgOptions{.oneline_description="options"}},
@@ -1088,6 +1104,7 @@ RPCHelpMan sendall()
                         {"lock_unspents", RPCArg::Type::BOOL, RPCArg::Default{false}, "Lock selected unspent outputs"},
                         {"psbt", RPCArg::Type::BOOL,  RPCArg::DefaultHint{"automatic"}, "Always return a PSBT, implies add_to_wallet=false."},
                         {"send_max", RPCArg::Type::BOOL, RPCArg::Default{false}, "When true, only use UTXOs that can pay for their own fees to maximize the output amount. When 'false' (default), no UTXO is left behind. send_max is incompatible with providing specific inputs."},
+                        {"use_cj", RPCArg::Type::BOOL, RPCArg::Default{false}, "Use CoinJoin funds only"},
                     },
                     FundTxDoc()
                 ),
@@ -1162,6 +1179,10 @@ RPCHelpMan sendall()
 
             coin_control.fAllowWatchOnly = ParseIncludeWatchonly(options["include_watching"], *pwallet);
 
+            if (options.exists("use_cj")) {
+                coin_control.UseCoinJoin(options["use_cj"].get_bool());
+            }
+
             FeeCalculation fee_calc_out;
             CFeeRate fee_rate{GetMinimumFeeRate(*pwallet, coin_control, &fee_calc_out)};
             // Do not, ever, assume that it's fine to change the fee rate if the user has explicitly
@@ -1189,6 +1210,9 @@ RPCHelpMan sendall()
                     const CWalletTx* tx{pwallet->GetWalletTx(input.prevout.hash)};
                     if (!tx || input.prevout.n >= tx->tx->vout.size() || !(pwallet->IsMine(tx->tx->vout[input.prevout.n]) & (coin_control.fAllowWatchOnly ? ISMINE_ALL : ISMINE_SPENDABLE))) {
                         throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("Input not found. UTXO (%s:%d) is not part of wallet.", input.prevout.hash.ToString(), input.prevout.n));
+                    }
+                    if (coin_control.IsUsingCoinJoin() && !pwallet->IsFullyMixed(input.prevout)) {
+                        throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("Input not available. UTXO (%s:%d) is not fully mixed.", input.prevout.hash.ToString(), input.prevout.n));
                     }
                     total_input_value += tx->tx->vout[input.prevout.n].nValue;
                 }
@@ -1301,6 +1325,7 @@ RPCHelpMan walletprocesspsbt()
                     {
                         {RPCResult::Type::STR, "psbt", "The base64-encoded partially signed transaction"},
                         {RPCResult::Type::BOOL, "complete", "If the transaction has a complete set of signatures"},
+                        {RPCResult::Type::STR_HEX, "hex", /*optional=*/true, "The hex-encoded network transaction if complete"},
                     }
                 },
                 RPCExamples{
@@ -1350,6 +1375,14 @@ RPCHelpMan walletprocesspsbt()
     ssTx << psbtx;
     result.pushKV("psbt", EncodeBase64(ssTx.str()));
     result.pushKV("complete", complete);
+    if (complete) {
+        CMutableTransaction mtx;
+        // Returns true if complete, which we already think it is.
+        CHECK_NONFATAL(FinalizeAndExtractPSBT(psbtx, mtx));
+        CDataStream ssTx_final(SER_NETWORK, PROTOCOL_VERSION);
+        ssTx_final << mtx;
+        result.pushKV("hex", HexStr(ssTx_final));
+    }
 
     return result;
 },
@@ -1418,6 +1451,7 @@ RPCHelpMan walletcreatefundedpsbt()
                                     {"vout_index", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "The zero-based output index, before a change output is added."},
                                 },
                             },
+                            {"use_cj", RPCArg::Type::BOOL, RPCArg::Default{false}, "Use CoinJoin funds only"},
                         },
                         FundTxDoc()),
                         RPCArgOptions{.oneline_description="options"}},

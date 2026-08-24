@@ -181,6 +181,33 @@ void PSBTOutput::Merge(const PSBTOutput& output)
     if (redeem_script.empty() && !output.redeem_script.empty()) redeem_script = output.redeem_script;
 }
 
+bool PSBTInputSignedAndVerified(const PartiallySignedTransaction psbt, unsigned int input_index, const PrecomputedTransactionData* txdata)
+{
+    CTxOut utxo;
+    assert(psbt.inputs.size() >= input_index);
+    const PSBTInput& input = psbt.inputs[input_index];
+
+    if (input.non_witness_utxo) {
+        // If we're taking our information from a non-witness UTXO, verify that it matches the prevout.
+        COutPoint prevout = psbt.tx->vin[input_index].prevout;
+        if (prevout.n >= input.non_witness_utxo->vout.size()) {
+            return false;
+        }
+        if (input.non_witness_utxo->GetHash() != prevout.hash) {
+            return false;
+        }
+        utxo = input.non_witness_utxo->vout[prevout.n];
+    } else {
+        return false;
+    }
+
+    if (txdata) {
+        return VerifyScript(input.final_script_sig, utxo.scriptPubKey, STANDARD_SCRIPT_VERIFY_FLAGS, MutableTransactionSignatureChecker{&(*psbt.tx), input_index, utxo.nValue, *txdata, MissingDataBehavior::FAIL});
+    } else {
+        return VerifyScript(input.final_script_sig, utxo.scriptPubKey, STANDARD_SCRIPT_VERIFY_FLAGS, MutableTransactionSignatureChecker{&(*psbt.tx), input_index, utxo.nValue, MissingDataBehavior::FAIL});
+    }
+}
+
 size_t CountPSBTUnsignedInputs(const PartiallySignedTransaction& psbt) {
     size_t count = 0;
     for (const auto& input : psbt.inputs) {
@@ -211,6 +238,7 @@ void UpdatePSBTOutput(const SigningProvider& provider, PartiallySignedTransactio
     // Put redeem_script, key paths, into PSBTOutput.
     psbt_out.FromSignatureData(sigdata);
 }
+
 bool PSBTInputSigned(const PSBTInput& input)
 {
     return !input.final_script_sig.empty();
@@ -238,7 +266,7 @@ bool SignPSBTInput(const SigningProvider& provider, PartiallySignedTransaction& 
     PSBTInput& input = psbt.inputs.at(index);
     const CMutableTransaction& tx = *psbt.tx;
 
-    if (PSBTInputSigned(input)) {
+    if (PSBTInputSignedAndVerified(psbt, index, txdata)) {
         return true;
     }
 

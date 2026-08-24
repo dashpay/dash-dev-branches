@@ -20,6 +20,7 @@
 
 #include <optional>
 #include <unordered_set>
+#include <vector>
 
 class BlockValidationState;
 class CBlock;
@@ -84,9 +85,17 @@ public:
     /**
      * This function should be called for each Asset Lock/Unlock tx
      * to change amount of credit pool
+     * @param inserted_index if non-null, receives the unlock index recorded for this tx (if any)
      * @return true if transaction can be included in this block
      */
-    bool ProcessLockUnlockTransaction(const CTransaction& tx, TxValidationState& state);
+    bool ProcessLockUnlockTransaction(const CTransaction& tx, TxValidationState& state,
+                                      std::optional<uint64_t>* inserted_index = nullptr);
+
+    /**
+     * Process a package of Asset Lock/Unlock transactions atomically.
+     * @return true if all transactions can be included in this block
+     */
+    bool ProcessLockUnlockTransactions(const std::vector<CTransactionRef>& txs, TxValidationState& state);
 
     /**
      * this function returns total amount of credits for the next block
@@ -101,7 +110,7 @@ public:
 
 private:
     bool Lock(const CTransaction& tx, TxValidationState& state);
-    bool Unlock(const CTransaction& tx, TxValidationState& state);
+    bool Unlock(const CTransaction& tx, TxValidationState& state, std::optional<uint64_t>* inserted_index = nullptr);
 };
 
 class CCreditPoolManager

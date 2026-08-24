@@ -61,6 +61,7 @@ public:
     void Start() override;
     void Stop() override;
     void Interrupt() override { quorumThreadInterrupt(); }
+    void Schedule(CScheduler& scheduler) override;
 
 protected:
     // CValidationInterface

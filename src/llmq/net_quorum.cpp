@@ -15,6 +15,7 @@
 #include <masternode/sync.h>
 #include <net.h>
 #include <netmessagemaker.h>
+#include <scheduler.h>
 #include <util/helpers.h>
 #include <util/std23.h>
 #include <util/thread.h>
@@ -68,6 +69,11 @@ void NetQuorum::Stop()
     workerPool.stop(true);
 }
 
+void NetQuorum::Schedule(CScheduler& scheduler)
+{
+    scheduler.scheduleEvery([this] { m_qman.CleanupExpiredDataRequests(); }, std::chrono::minutes{1});
+}
+
 void NetQuorum::ProcessMessage(CNode& pfrom, const std::string& msg_type, CDataStream& vRecv)
 {
     if (msg_type == NetMsgType::QGETDATA) {
@@ -112,28 +118,51 @@ void NetQuorum::ProcessMessage(CNode& pfrom, const std::string& msg_type, CDataS
             return misbehave;
         };
 
-        const CQuorumDataRequestKey key(pfrom.GetVerifiedProRegTxHash(), false, request.GetQuorumHash(), request.GetLLMQType());
-        const bool request_limit_exceeded = !m_qman.RegisterDataRequest(key, request, /*add_expiry_bias=*/false);
-
+        // Cheap pre-checks before tracking: invalid type / unknown block must not grow
+        // mapQuorumDataRequests — their keyspace is attacker-controlled and unbounded, but
+        // rejecting them costs no storage lookup. Replies are ~request-sized (no amplification).
         if (!Params().GetLLMQ(request.GetLLMQType()).has_value()) {
-            // Unlike the misses below, this one cannot be explained by the peer being ahead of
-            // us: no quorum of an unregistered type can exist on this chain, so there is
-            // nothing to ask about. Answer with the error anyway, then score in full.
-            sendQDATA(CQuorumDataRequest::Errors::QUORUM_TYPE_INVALID, request_limit_exceeded);
+            // Unregistered type cannot exist on this chain — answer, then score in full.
+            sendQDATA(CQuorumDataRequest::Errors::QUORUM_TYPE_INVALID, /*request_limit_exceeded=*/false);
             m_peer_manager->PeerMisbehaving(pfrom.GetId(), 100, "invalid llmqType in QGETDATA");
             return;
         }
 
-        const CBlockIndex* pQuorumBaseBlockIndex = WITH_LOCK(::cs_main, return m_chainman.m_blockman.LookupBlockIndex(request.GetQuorumHash()));
-        if (pQuorumBaseBlockIndex == nullptr) {
-            if (sendQDATA(CQuorumDataRequest::Errors::QUORUM_BLOCK_NOT_FOUND, request_limit_exceeded)) {
-                m_peer_manager->PeerMisbehaving(pfrom.GetId(), 25, "request limit exceeded");
+        const CBlockIndex* pQuorumBaseBlockIndex{nullptr};
+        {
+            LOCK(::cs_main);
+            const auto* pindex = m_chainman.m_blockman.LookupBlockIndex(request.GetQuorumHash());
+            if (pindex != nullptr && m_chainman.ActiveChain().Contains(pindex)) {
+                pQuorumBaseBlockIndex = pindex;
             }
+        }
+        if (pQuorumBaseBlockIndex == nullptr) {
+            // Not misbehavior: the requester may simply be ahead of us or on another fork.
+            sendQDATA(CQuorumDataRequest::Errors::QUORUM_BLOCK_NOT_FOUND, /*request_limit_exceeded=*/false);
             return;
         }
 
+        // Active-chain keys are bounded by chain blocks × LLMQ types, so register the request
+        // before the commitment lookup: the lookup misses EvoDB's caches for blocks without a
+        // mined commitment, and rate limiting must gate that cost, not the other way around.
+        const CQuorumDataRequestKey key(pfrom.GetVerifiedProRegTxHash(), false, request.GetQuorumHash(),
+                                        request.GetLLMQType());
+        const auto registration = m_qman.RegisterDataRequest(key, request, /*add_expiry_bias=*/false);
+        if (registration == DataRequestRegistration::RequesterLimitExceeded) {
+            m_peer_manager->PeerMisbehaving(pfrom.GetId(), 25, "too many quorum data requests");
+            return;
+        }
+        if (registration == DataRequestRegistration::CapacityExhausted) {
+            return;
+        }
+        const bool request_limit_exceeded = registration == DataRequestRegistration::RateLimited;
+
         const auto pQuorum = m_qman.GetQuorum(request.GetLLMQType(), request.GetQuorumHash());
         if (pQuorum == nullptr) {
+            // No mined commitment for this block. Not misbehavior on its own: the commitment is
+            // mined after the quorum base block, so we can know the base block while still lagging
+            // behind the commitment the requester saw. Repeats within the expiry window were
+            // rate-limited above and do score.
             if (sendQDATA(CQuorumDataRequest::Errors::QUORUM_NOT_FOUND, request_limit_exceeded)) {
                 m_peer_manager->PeerMisbehaving(pfrom.GetId(), 25, "request limit exceeded");
             }
@@ -329,7 +358,7 @@ DataRequestStatus NetQuorum::RequestQuorumData(CNode& peer, const CQuorum& quoru
                                     quorum.m_quorum_base_block_index->GetBlockHash(), quorum.qc->llmqType);
     const CQuorumDataRequest request(quorum.qc->llmqType, quorum.m_quorum_base_block_index->GetBlockHash(),
                                      nDataMask, proTxHash);
-    if (!m_qman.RegisterDataRequest(key, request)) {
+    if (m_qman.RegisterDataRequest(key, request) != DataRequestRegistration::Accepted) {
         return m_qman.GetDataRequestStatus(peer.GetVerifiedProRegTxHash(), /*we_requested=*/true,
                                            quorum.m_quorum_base_block_index->GetBlockHash(), quorum.qc->llmqType);
     }

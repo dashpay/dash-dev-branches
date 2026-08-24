@@ -24,7 +24,9 @@ from test_framework.psbt import (
     PSBT_IN_SHA256,
     PSBT_IN_HASH160,
     PSBT_IN_HASH256,
+    PSBT_IN_NON_WITNESS_UTXO,
 )
+from test_framework.script import CScript, OP_TRUE
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import (
     assert_approx,
@@ -77,12 +79,21 @@ class PSBTTest(BitcoinTestFramework):
 
         self.nodes[0].walletpassphrase(passphrase="password", timeout=1000000)
 
-        # Sign the transaction and send
-        signed_tx = self.nodes[0].walletprocesspsbt(psbt=psbtx, finalize=False)['psbt']
-        finalized_tx = self.nodes[0].walletprocesspsbt(psbt=psbtx, finalize=True)['psbt']
-        assert signed_tx != finalized_tx
-        final_tx = self.nodes[0].finalizepsbt(signed_tx)['hex']
-        self.nodes[0].sendrawtransaction(final_tx)
+        # Sign the transaction but don't finalize
+        processed_psbt = self.nodes[0].walletprocesspsbt(psbt=psbtx, finalize=False)
+        assert "hex" not in processed_psbt
+        signed_psbt = processed_psbt['psbt']
+
+        # Finalize and send
+        finalized_hex = self.nodes[0].finalizepsbt(signed_psbt)['hex']
+        self.nodes[0].sendrawtransaction(finalized_hex)
+
+        # Alternative method: sign AND finalize in one command
+        processed_finalized_psbt = self.nodes[0].walletprocesspsbt(psbt=psbtx, finalize=True)
+        finalized_psbt = processed_finalized_psbt['psbt']
+        finalized_psbt_hex = processed_finalized_psbt['hex']
+        assert signed_psbt != finalized_psbt
+        assert finalized_psbt_hex == finalized_hex
 
         # Manually selected inputs can be locked:
         assert_equal(len(self.nodes[0].listlockunspent()), 0)
@@ -139,7 +150,7 @@ class PSBTTest(BitcoinTestFramework):
         # Check decodepsbt fee calculation (input values shall only be counted once per UTXO)
         assert_equal(decoded['fee'], created_psbt['fee'])
         assert_equal(walletprocesspsbt_out['complete'], True)
-        self.nodes[1].sendrawtransaction(self.nodes[1].finalizepsbt(walletprocesspsbt_out['psbt'])['hex'])
+        self.nodes[1].sendrawtransaction(walletprocesspsbt_out['hex'])
 
         self.log.info("Test walletcreatefundedpsbt fee rate of 10000 sat/vB and 0.1 BTC/kvB produces a total fee at or slightly below -maxtxfee (~0.05290000)")
         res1 = self.nodes[1].walletcreatefundedpsbt(inputs, outputs, 0, {"fee_rate": 10000, "add_inputs": True})
@@ -230,7 +241,7 @@ class PSBTTest(BitcoinTestFramework):
         # partially sign with node 2. This should be complete and sendable
         walletprocesspsbt_out = self.nodes[2].walletprocesspsbt(psbtx)
         assert_equal(walletprocesspsbt_out['complete'], True)
-        self.nodes[2].sendrawtransaction(self.nodes[2].finalizepsbt(walletprocesspsbt_out['psbt'])['hex'])
+        self.nodes[2].sendrawtransaction(walletprocesspsbt_out['hex'])
 
         # check that walletprocesspsbt fails to decode a non-psbt
         rawtx = self.nodes[1].createrawtransaction([{"txid":txid,"vout":p2pkh_pos}], {self.nodes[1].getnewaddress():9.99})
@@ -514,14 +525,13 @@ class PSBTTest(BitcoinTestFramework):
         assert not signed['complete']
         signed = self.nodes[0].walletprocesspsbt(signed['psbt'])
         assert signed['complete']
-        self.nodes[0].finalizepsbt(signed['psbt'])
 
         psbt = wallet.walletcreatefundedpsbt([ext_utxo], {self.nodes[0].getnewaddress(): 15}, 0, {"add_inputs": True, "solving_data":{"descriptors": [desc]}})
         signed = wallet.walletprocesspsbt(psbt['psbt'])
         assert not signed['complete']
         signed = self.nodes[0].walletprocesspsbt(signed['psbt'])
         assert signed['complete']
-        final = self.nodes[0].finalizepsbt(signed['psbt'], False)
+        final = signed['hex']
 
         dec = self.nodes[0].decodepsbt(signed["psbt"])
         for i, txin in enumerate(dec["tx"]["vin"]):
@@ -555,8 +565,8 @@ class PSBTTest(BitcoinTestFramework):
         )
         signed = wallet.walletprocesspsbt(psbt["psbt"])
         signed = self.nodes[0].walletprocesspsbt(signed["psbt"])
-        final = self.nodes[0].finalizepsbt(signed["psbt"])
-        assert self.nodes[0].testmempoolaccept([final["hex"]])[0]["allowed"]
+        final = signed["hex"]
+        assert self.nodes[0].testmempoolaccept([final])[0]["allowed"]
         # Reducing the weight should have a lower fee
         psbt2 = wallet.walletcreatefundedpsbt(
             inputs=[{"txid": ext_utxo["txid"], "vout": ext_utxo["vout"], "size": low_input_weight}],
@@ -636,6 +646,21 @@ class PSBTTest(BitcoinTestFramework):
         psbt2 = PSBT(g=PSBTMap({PSBT_GLOBAL_UNSIGNED_TX: tx.serialize()}), i=[PSBTMap()], o=[PSBTMap()]).to_base64()
         assert_raises_rpc_error(-8, "PSBTs not compatible (different transactions)", self.nodes[0].combinepsbt, [psbt1, psbt2])
         assert_equal(self.nodes[0].combinepsbt([psbt1, psbt1]), psbt1)
+
+        self.log.info("Test that PSBT inputs are being checked via script execution")
+        acs_prev_tx = CTransaction()
+        acs_prev_tx.vin = [CTxIn(outpoint=COutPoint(hash=int('dd' * 32, 16), n=0), scriptSig=b"")]
+        acs_prev_tx.vout = [CTxOut(nValue=0, scriptPubKey=CScript([OP_TRUE]))]
+        acs_prev_tx.rehash()
+        tx = CTransaction()
+        tx.vin = [CTxIn(outpoint=COutPoint(hash=acs_prev_tx.sha256, n=0), scriptSig=b"")]
+        tx.vout = [CTxOut(nValue=0, scriptPubKey=b"")]
+        psbt = PSBT()
+        psbt.g = PSBTMap({PSBT_GLOBAL_UNSIGNED_TX: tx.serialize()})
+        psbt.i = [PSBTMap({bytes([PSBT_IN_NON_WITNESS_UTXO]) : acs_prev_tx.serialize()})]
+        psbt.o = [PSBTMap()]
+        assert_equal(self.nodes[0].finalizepsbt(psbt.to_base64()),
+            {'hex': tx.serialize().hex(), 'complete': True})
 
 
 if __name__ == '__main__':

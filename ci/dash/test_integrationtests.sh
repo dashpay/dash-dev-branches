@@ -28,6 +28,11 @@ fi
 
 cd "build-ci/dashcore-$BUILD_TARGET"
 
+if [ -n "${CI_LIMIT_STACK_SIZE}" ]; then
+  # Upstream uses 512, which segfaults dashd during test framework startup.
+  ulimit -s 1024
+fi
+
 if [ "$SOCKETEVENTS" = "" ]; then
   # Let's switch socketevents mode to some random mode
   R=$((RANDOM%3))

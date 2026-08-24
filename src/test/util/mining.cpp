@@ -10,7 +10,6 @@
 #include <evo/evodb.h>
 #include <key_io.h>
 #include <node/context.h>
-#include <node/miner.h>
 #include <pow.h>
 #include <primitives/transaction.h>
 #include <script/standard.h>
@@ -78,11 +77,12 @@ COutPoint MineBlock(const NodeContext& node, const CScript& coinbase_scriptPubKe
     return {block->vtx[0]->GetHash(), 0};
 }
 
-std::shared_ptr<CBlock> PrepareBlock(const NodeContext& node, const CScript& coinbase_scriptPubKey)
+std::shared_ptr<CBlock> PrepareBlock(const NodeContext& node, const CScript& coinbase_scriptPubKey,
+                                     const BlockAssembler::Options& assembler_options)
 {
     assert(node.mempool);
     auto block = std::make_shared<CBlock>(
-        BlockAssembler{node.chainman->ActiveChainstate(), node, Assert(node.mempool.get())}
+        BlockAssembler{node.chainman->ActiveChainstate(), node, Assert(node.mempool.get()), assembler_options}
             .CreateNewBlock(coinbase_scriptPubKey)
             ->block);
 
@@ -90,6 +90,13 @@ std::shared_ptr<CBlock> PrepareBlock(const NodeContext& node, const CScript& coi
     block->hashMerkleRoot = BlockMerkleRoot(*block);
 
     return block;
+}
+
+std::shared_ptr<CBlock> PrepareBlock(const NodeContext& node, const CScript& coinbase_scriptPubKey)
+{
+    BlockAssembler::Options assembler_options;
+    ApplyArgsManOptions(*node.args, assembler_options);
+    return PrepareBlock(node, coinbase_scriptPubKey, assembler_options);
 }
 
 struct BlockValidationStateCatcher : public CValidationInterface {

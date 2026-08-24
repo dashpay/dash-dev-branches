@@ -219,8 +219,7 @@ RPCHelpMan encryptwallet()
                 "\nEncrypts the wallet with 'passphrase'. This is for first time encryption.\n"
                 "After this, any calls that interact with private keys such as sending or signing \n"
                 "will require the passphrase to be set prior the making these calls.\n"
-                "Use the walletpassphrase call for this, and then walletlock call.\n"
-                "If the wallet is already encrypted, use the walletpassphrasechange call.\n",
+                "Use the walletpassphrase call for this, and then walletlock call.\n",
                 {
                     {"passphrase", RPCArg::Type::STR, RPCArg::Optional::NO, "The pass phrase to encrypt the wallet with. It must be at least 1 character, but should be long."},
                 },
@@ -266,7 +265,7 @@ RPCHelpMan encryptwallet()
     if (pwallet->IsHDEnabled()) {
         return "wallet encrypted; If you forget the passphrase, you will lose access to your funds. Make sure that you have backup of your seed or mnemonic.";
     }
-    return "wallet encrypted; The keypool has been flushed. You need to make a new backup.";
+    return "wallet encrypted; The keypool has been flushed. You need to make a new backup with the backupwallet RPC.";
 },
     };
 }

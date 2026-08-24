@@ -90,9 +90,6 @@ using node::SnapshotMetadata;
 using node::UndoReadFromDisk;
 using node::UnlinkPrunedFiles;
 
-#define MICRO 0.000001
-#define MILLI 0.001
-
 /** Maximum kilobytes for transactions to store for processing during reorg */
 static const unsigned int MAX_DISCONNECTED_TX_POOL_SIZE = 20000;
 /** Time to wait between writing blocks/block index to disk. */
@@ -2179,21 +2176,20 @@ static unsigned int GetBlockScriptFlags(const CBlockIndex* pindex, const Chainst
 }
 
 
-
-static int64_t nTimeCheck = 0;
-static int64_t nTimeForks = 0;
-static int64_t nTimeVerify = 0;
-static int64_t nTimeUndo = 0;
-static int64_t nTimeISFilter = 0;
-static int64_t nTimeSubsidy = 0;
-static int64_t nTimeValueValid = 0;
-static int64_t nTimePayeeValid = 0;
-static int64_t nTimeProcessSpecial = 0;
-static int64_t nTimeDashSpecific = 0;
-static int64_t nTimeConnect = 0;
-static int64_t nTimeIndexWrite = 0;
-static int64_t nTimeTotal = 0;
-static int64_t nBlocksTotal = 0;
+static SteadyClock::duration time_check{};
+static SteadyClock::duration time_forks{};
+static SteadyClock::duration time_connect{};
+static SteadyClock::duration time_verify{};
+static SteadyClock::duration time_undo{};
+static SteadyClock::duration time_is_filter{};
+static SteadyClock::duration time_subsidy{};
+static SteadyClock::duration time_value_valid{};
+static SteadyClock::duration time_payee_valid{};
+static SteadyClock::duration time_process_special{};
+static SteadyClock::duration time_dash_specific{};
+static SteadyClock::duration time_index{};
+static SteadyClock::duration time_total{};
+static int64_t num_blocks_total = 0;
 
 /** Apply the effects of this block (with given index) on the UTXO set represented by coins.
  *  Validity checks that depend on the UTXO set are also done; ConnectBlock()
@@ -2201,7 +2197,7 @@ static int64_t nBlocksTotal = 0;
 bool Chainstate::ConnectBlock(const CBlock& block, BlockValidationState& state, CBlockIndex* pindex,
                                CCoinsViewCache& view, bool fJustCheck)
 {
-    int64_t nTimeStart = GetTimeMicros();
+    const auto time_start{SteadyClock::now()};
 
     AssertLockHeld(cs_main);
     assert(pindex);
@@ -2258,7 +2254,7 @@ bool Chainstate::ConnectBlock(const CBlock& block, BlockValidationState& state, 
             return AbortNode(state, EvoDbInconsistencyMessage());
         }
     }
-    nBlocksTotal++;
+    num_blocks_total++;
 
     // Special case for the genesis block, skipping connection of its transactions
     // (its coinbase is unspendable)
@@ -2299,8 +2295,12 @@ bool Chainstate::ConnectBlock(const CBlock& block, BlockValidationState& state, 
         }
     }
 
-    int64_t nTime1 = GetTimeMicros(); nTimeCheck += nTime1 - nTimeStart;
-    LogPrint(BCLog::BENCHMARK, "    - Sanity checks: %.2fms [%.2fs (%.2fms/blk)]\n", MILLI * (nTime1 - nTimeStart), nTimeCheck * MICRO, nTimeCheck * MILLI / nBlocksTotal);
+    const auto time_1{SteadyClock::now()};
+    time_check += time_1 - time_start;
+    LogPrint(BCLog::BENCHMARK, "    - Sanity checks: %.2fms [%.2fs (%.2fms/blk)]\n",
+             Ticks<MillisecondsDouble>(time_1 - time_start),
+             Ticks<SecondsDouble>(time_check),
+             Ticks<MillisecondsDouble>(time_check) / num_blocks_total);
 
     // Do not allow blocks that contain transactions which 'overwrite' older transactions,
     // unless those are already completely spent.
@@ -2356,8 +2356,12 @@ bool Chainstate::ConnectBlock(const CBlock& block, BlockValidationState& state, 
     // Get the script flags for this block
     unsigned int flags{GetBlockScriptFlags(pindex, m_chainman)};
 
-    int64_t nTime2 = GetTimeMicros(); nTimeForks += nTime2 - nTime1;
-    LogPrint(BCLog::BENCHMARK, "    - Fork checks: %.2fms [%.2fs (%.2fms/blk)]\n", MILLI * (nTime2 - nTime1), nTimeForks * MICRO, nTimeForks * MILLI / nBlocksTotal);
+    const auto time_2{SteadyClock::now()};
+    time_forks += time_2 - time_1;
+    LogPrint(BCLog::BENCHMARK, "    - Fork checks: %.2fms [%.2fs (%.2fms/blk)]\n",
+             Ticks<MillisecondsDouble>(time_2 - time_1),
+             Ticks<SecondsDouble>(time_forks),
+             Ticks<MillisecondsDouble>(time_forks) / num_blocks_total);
 
     CBlockUndo blockundo;
 
@@ -2383,8 +2387,12 @@ bool Chainstate::ConnectBlock(const CBlock& block, BlockValidationState& state, 
                      pindex->GetBlockHash().ToString(), state.ToString());
     }
 
-    int64_t nTime2_1 = GetTimeMicros(); nTimeProcessSpecial += nTime2_1 - nTime2;
-    LogPrint(BCLog::BENCHMARK, "      - ProcessSpecialTxsInBlock: %.2fms [%.2fs (%.2fms/blk)]\n", MILLI * (nTime2_1 - nTime2), nTimeProcessSpecial * MICRO, nTimeProcessSpecial * MILLI / nBlocksTotal);
+    const auto time_2_1{SteadyClock::now()};
+    time_process_special += time_2_1 - time_2;
+    LogPrint(BCLog::BENCHMARK, "      - ProcessSpecialTxsInBlock: %.2fms [%.2fs (%.2fms/blk)]\n",
+             Ticks<MillisecondsDouble>(time_2_1 - time_2),
+             Ticks<SecondsDouble>(time_process_special),
+             Ticks<MillisecondsDouble>(time_process_special) / num_blocks_total);
 
     for (unsigned int i = 0; i < block.vtx.size(); i++)
     {
@@ -2455,16 +2463,25 @@ bool Chainstate::ConnectBlock(const CBlock& block, BlockValidationState& state, 
         UpdateCoins(tx, view, i == 0 ? undoDummy : blockundo.vtxundo.back(), pindex->nHeight);
     }
 
-    int64_t nTime3 = GetTimeMicros(); nTimeConnect += nTime3 - nTime2;
-    LogPrint(BCLog::BENCHMARK, "      - Connect %u transactions: %.2fms (%.3fms/tx, %.3fms/txin) [%.2fs (%.2fms/blk)]\n", (unsigned)block.vtx.size(), MILLI * (nTime3 - nTime2), MILLI * (nTime3 - nTime2) / block.vtx.size(), nInputs <= 1 ? 0 : MILLI * (nTime3 - nTime2) / (nInputs-1), nTimeConnect * MICRO, nTimeConnect * MILLI / nBlocksTotal);
-
+    const auto time_3{SteadyClock::now()};
+    time_connect += time_3 - time_2;
+    LogPrint(BCLog::BENCHMARK, "      - Connect %u transactions: %.2fms (%.3fms/tx, %.3fms/txin) [%.2fs (%.2fms/blk)]\n", (unsigned)block.vtx.size(),
+             Ticks<MillisecondsDouble>(time_3 - time_2), Ticks<MillisecondsDouble>(time_3 - time_2) / block.vtx.size(),
+             nInputs <= 1 ? 0 : Ticks<MillisecondsDouble>(time_3 - time_2) / (nInputs - 1),
+             Ticks<SecondsDouble>(time_connect),
+             Ticks<MillisecondsDouble>(time_connect) / num_blocks_total);
 
     if (!control.Wait()) {
         LogPrintf("ERROR: %s: CheckQueue failed\n", __func__);
         return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "block-validation-failed");
     }
-    int64_t nTime4 = GetTimeMicros(); nTimeVerify += nTime4 - nTime2;
-    LogPrint(BCLog::BENCHMARK, "    - Verify %u txins: %.2fms (%.3fms/txin) [%.2fs (%.2fms/blk)]\n", nInputs - 1, MILLI * (nTime4 - nTime2), nInputs <= 1 ? 0 : MILLI * (nTime4 - nTime2) / (nInputs-1), nTimeVerify * MICRO, nTimeVerify * MILLI / nBlocksTotal);
+    const auto time_4{SteadyClock::now()};
+    time_verify += time_4 - time_2;
+    LogPrint(BCLog::BENCHMARK, "    - Verify %u txins: %.2fms (%.3fms/txin) [%.2fs (%.2fms/blk)]\n", nInputs - 1,
+             Ticks<MillisecondsDouble>(time_4 - time_2),
+             nInputs <= 1 ? 0 : Ticks<MillisecondsDouble>(time_4 - time_2) / (nInputs - 1),
+             Ticks<SecondsDouble>(time_verify),
+             Ticks<MillisecondsDouble>(time_verify) / num_blocks_total);
 
 
     // DASH
@@ -2498,8 +2515,12 @@ bool Chainstate::ConnectBlock(const CBlock& block, BlockValidationState& state, 
         }
     }
 
-    int64_t nTime5_1 = GetTimeMicros(); nTimeISFilter += nTime5_1 - nTime4;
-    LogPrint(BCLog::BENCHMARK, "      - IS filter: %.2fms [%.2fs (%.2fms/blk)]\n", MILLI * (nTime5_1 - nTime4), nTimeISFilter * MICRO, nTimeISFilter * MILLI / nBlocksTotal);
+    const auto time_5_1{SteadyClock::now()};
+    time_is_filter += time_5_1 - time_4;
+    LogPrint(BCLog::BENCHMARK, "      - IS filter: %.2fms [%.2fs (%.2fms/blk)]\n",
+             Ticks<MillisecondsDouble>(time_5_1 - time_4),
+             Ticks<SecondsDouble>(time_is_filter),
+             Ticks<MillisecondsDouble>(time_is_filter) / num_blocks_total);
 
     // DASH : MODIFIED TO CHECK MASTERNODE PAYMENTS AND SUPERBLOCKS
 
@@ -2508,8 +2529,12 @@ bool Chainstate::ConnectBlock(const CBlock& block, BlockValidationState& state, 
     CAmount feeReward = nFees;
     std::string strError;
 
-    int64_t nTime5_2 = GetTimeMicros(); nTimeSubsidy += nTime5_2 - nTime5_1;
-    LogPrint(BCLog::BENCHMARK, "      - GetBlockSubsidy: %.2fms [%.2fs (%.2fms/blk)]\n", MILLI * (nTime5_2 - nTime5_1), nTimeSubsidy * MICRO, nTimeSubsidy * MILLI / nBlocksTotal);
+    const auto time_5_2{SteadyClock::now()};
+    time_subsidy += time_5_2 - time_5_1;
+    LogPrint(BCLog::BENCHMARK, "      - GetBlockSubsidy: %.2fms [%.2fs (%.2fms/blk)]\n",
+             Ticks<MillisecondsDouble>(time_5_2 - time_5_1),
+             Ticks<SecondsDouble>(time_subsidy),
+             Ticks<MillisecondsDouble>(time_subsidy) / num_blocks_total);
 
     const bool is_v24_active{DeploymentActiveAfter(pindex->pprev, m_chainman, Consensus::DEPLOYMENT_V24)};
     const SuperBlockCheckType check_superblock = !m_chain_helper->IsSuperblockValidationRequired(pindex)
@@ -2523,8 +2548,12 @@ bool Chainstate::ConnectBlock(const CBlock& block, BlockValidationState& state, 
         return state.Invalid(BlockValidationResult::BLOCK_RESULT_UNSET, "bad-cb-amount");
     }
 
-    int64_t nTime5_3 = GetTimeMicros(); nTimeValueValid += nTime5_3 - nTime5_2;
-    LogPrint(BCLog::BENCHMARK, "      - IsBlockValueValid: %.2fms [%.2fs (%.2fms/blk)]\n", MILLI * (nTime5_3 - nTime5_2), nTimeValueValid * MICRO, nTimeValueValid * MILLI / nBlocksTotal);
+    const auto time_5_3{SteadyClock::now()};
+    time_value_valid += time_5_3 - time_5_2;
+    LogPrint(BCLog::BENCHMARK, "      - IsBlockValueValid: %.2fms [%.2fs (%.2fms/blk)]\n",
+             Ticks<MillisecondsDouble>(time_5_3 - time_5_2),
+             Ticks<SecondsDouble>(time_value_valid),
+             Ticks<MillisecondsDouble>(time_value_valid) / num_blocks_total);
 
     const MnRewardEra mn_reward_era{GetMnRewardEraAfter(pindex->pprev, m_chainman)};
     if (!m_chain_helper->mn_payments->IsBlockPayeeValid(m_chain, *block.vtx[0], pindex->pprev, blockSubsidy, feeReward, mn_reward_era, is_v24_active, check_superblock)) {
@@ -2533,33 +2562,49 @@ bool Chainstate::ConnectBlock(const CBlock& block, BlockValidationState& state, 
         return state.Invalid(BlockValidationResult::BLOCK_RESULT_UNSET, "bad-cb-payee");
     }
 
-    int64_t nTime5_4 = GetTimeMicros(); nTimePayeeValid += nTime5_4 - nTime5_3;
-    LogPrint(BCLog::BENCHMARK, "      - IsBlockPayeeValid: %.2fms [%.2fs (%.2fms/blk)]\n", MILLI * (nTime5_4 - nTime5_3), nTimePayeeValid * MICRO, nTimePayeeValid * MILLI / nBlocksTotal);
+    const auto time_5_4{SteadyClock::now()};
+    time_payee_valid += time_5_4 - time_5_3;
+    LogPrint(BCLog::BENCHMARK, "      - IsBlockPayeeValid: %.2fms [%.2fs (%.2fms/blk)]\n",
+             Ticks<MillisecondsDouble>(time_5_4 - time_5_3),
+             Ticks<SecondsDouble>(time_payee_valid),
+             Ticks<MillisecondsDouble>(time_payee_valid) / num_blocks_total);
 
-    int64_t nTime5 = GetTimeMicros(); nTimeDashSpecific += nTime5 - nTime4;
-    LogPrint(BCLog::BENCHMARK, "    - Dash specific: %.2fms [%.2fs (%.2fms/blk)]\n", MILLI * (nTime5 - nTime4), nTimeDashSpecific * MICRO, nTimeDashSpecific * MILLI / nBlocksTotal);
+    const auto time_5{SteadyClock::now()};
+    time_dash_specific += time_5 - time_4;
+    LogPrint(BCLog::BENCHMARK, "    - Dash specific: %.2fms [%.2fs (%.2fms/blk)]\n",
+             Ticks<MillisecondsDouble>(time_5 - time_4),
+             Ticks<SecondsDouble>(time_dash_specific),
+             Ticks<MillisecondsDouble>(time_dash_specific) / num_blocks_total);
 
     // END DASH
 
     if (fJustCheck)
         return true;
 
-    int64_t nTime6 = GetTimeMicros();
+    const auto time_6{SteadyClock::now()};
 
     if (!m_blockman.WriteUndoDataForBlock(blockundo, state, *pindex)) {
         return false;
     }
 
-    int64_t nTime7 = GetTimeMicros(); nTimeUndo += nTime7 - nTime6;
-    LogPrint(BCLog::BENCHMARK, "    - Write undo data: %.2fms [%.2fs (%.2fms/blk)]\n", MILLI * (nTime7 - nTime6), nTimeUndo * MICRO, nTimeUndo * MILLI / nBlocksTotal);
+    const auto time_7{SteadyClock::now()};
+    time_undo += time_7 - time_6;
+    LogPrint(BCLog::BENCHMARK, "    - Write undo data: %.2fms [%.2fs (%.2fms/blk)]\n",
+             Ticks<MillisecondsDouble>(time_7 - time_6),
+             Ticks<SecondsDouble>(time_undo),
+             Ticks<MillisecondsDouble>(time_undo) / num_blocks_total);
 
     if (!pindex->IsValid(BLOCK_VALID_SCRIPTS)) {
         pindex->RaiseValidity(BLOCK_VALID_SCRIPTS);
         m_blockman.m_dirty_blockindex.insert(pindex);
     }
 
-    int64_t nTime8 = GetTimeMicros(); nTimeIndexWrite += nTime8 - nTime7;
-    LogPrint(BCLog::BENCHMARK, "      - Index writing: %.2fms [%.2fs (%.2fms/blk)]\n", MILLI * (nTime8 - nTime7), nTimeIndexWrite * MICRO, nTimeIndexWrite * MILLI / nBlocksTotal);
+    const auto time_8{SteadyClock::now()};
+    time_index += time_8 - time_7;
+    LogPrint(BCLog::BENCHMARK, "      - Index writing: %.2fms [%.2fs (%.2fms/blk)]\n",
+             Ticks<MillisecondsDouble>(time_8 - time_7),
+             Ticks<SecondsDouble>(time_index),
+             Ticks<MillisecondsDouble>(time_index) / num_blocks_total);
 
     // add this block to the view's block chain
     view.SetBestBlock(pindex->GetBlockHash());
@@ -2574,7 +2619,7 @@ bool Chainstate::ConnectBlock(const CBlock& block, BlockValidationState& state, 
         uiInterface.NotifyMasternodeListChanged(mnlu.new_list, pindex);
     }
 
-    ::g_stats_client->timing("ConnectBlock_ms", (nTime8 - nTimeStart) / 1000, 1.0f);
+    ::g_stats_client->timing("ConnectBlock_ms", Ticks<std::chrono::milliseconds>(time_8 - time_start), 1.0f);
 
     TRACE6(validation, block_connected,
         block_hash.data(),
@@ -2582,7 +2627,7 @@ bool Chainstate::ConnectBlock(const CBlock& block, BlockValidationState& state, 
         block.vtx.size(),
         nInputs,
         nSigOps,
-        nTime8 - nTimeStart // in microseconds (µs)
+        time_8 - time_start // in microseconds (µs)
     );
 
     return true;
@@ -2923,7 +2968,7 @@ bool Chainstate::DisconnectTip(BlockValidationState& state, DisconnectedBlockTra
     ScopedBLSLegacyScheme bls_scheme_guard{
         !DeploymentActiveAt(*pindexDelete, m_params.GetConsensus(), Consensus::DEPLOYMENT_V19)};
     // Apply the block atomically to the chain state.
-    int64_t nStart = GetTimeMicros();
+    const auto time_start{SteadyClock::now()};
     {
         auto dbTx = m_evoDb.BeginTransaction(EvoDbIdentity());
 
@@ -2935,7 +2980,8 @@ bool Chainstate::DisconnectTip(BlockValidationState& state, DisconnectedBlockTra
         assert(flushed);
         dbTx->Commit();
     }
-    LogPrint(BCLog::BENCHMARK, "- Disconnect block: %.2fms\n", (GetTimeMicros() - nStart) * MILLI);
+    LogPrint(BCLog::BENCHMARK, "- Disconnect block: %.2fms\n",
+             Ticks<MillisecondsDouble>(SteadyClock::now() - time_start));
 
     {
         // Prune locks that began at or after the tip should be moved backward so they get a chance to reorg
@@ -2994,10 +3040,10 @@ bool Chainstate::DisconnectTip(BlockValidationState& state, DisconnectedBlockTra
     return true;
 }
 
-static int64_t nTimeConnectTotal = 0;
-static int64_t nTimeFlush = 0;
-static int64_t nTimeChainState = 0;
-static int64_t nTimePostConnect = 0;
+static SteadyClock::duration time_connect_total{};
+static SteadyClock::duration time_flush{};
+static SteadyClock::duration time_chainstate{};
+static SteadyClock::duration time_post_connect{};
 
 struct PerBlockConnectTrace {
     CBlockIndex* pindex = nullptr;
@@ -3057,7 +3103,7 @@ bool Chainstate::ConnectTip(BlockValidationState& state, CBlockIndex* pindexNew,
     // unchanged tip.
     ScopedBLSLegacyScheme bls_scheme_guard;
     // Read block from disk.
-    int64_t nTime1 = GetTimeMicros();
+    const auto time_1{SteadyClock::now()};
     std::shared_ptr<const CBlock> pthisBlock;
     if (!pblock) {
         std::shared_ptr<CBlock> pblockNew = std::make_shared<CBlock>();
@@ -3071,11 +3117,12 @@ bool Chainstate::ConnectTip(BlockValidationState& state, CBlockIndex* pindexNew,
     }
     const CBlock& blockConnecting = *pthisBlock;
     // Apply the block atomically to the chain state.
-    int64_t nTime2 = GetTimeMicros();
-    int64_t nTime3;
+    const auto time_2{SteadyClock::now()};
+    SteadyClock::time_point time_3;
     // When adding aggregate statistics in the future, keep in mind that
-    // nBlocksTotal may be zero until the ConnectBlock() call below.
-    LogPrint(BCLog::BENCHMARK, "  - Load block from disk: %.2fms\n", (nTime2 - nTime1) * MILLI);
+    // num_blocks_total may be zero until the ConnectBlock() call below.
+    LogPrint(BCLog::BENCHMARK, "  - Load block from disk: %.2fms\n",
+             Ticks<MillisecondsDouble>(time_2 - time_1));
     {
         auto dbTx = m_evoDb.BeginTransaction(EvoDbIdentity());
 
@@ -3087,21 +3134,33 @@ bool Chainstate::ConnectTip(BlockValidationState& state, CBlockIndex* pindexNew,
                 InvalidBlockFound(pindexNew, state);
             return error("%s: ConnectBlock %s failed, %s", __func__, pindexNew->GetBlockHash().ToString(), state.ToString());
         }
-        nTime3 = GetTimeMicros(); nTimeConnectTotal += nTime3 - nTime2;
-        assert(nBlocksTotal > 0);
-        LogPrint(BCLog::BENCHMARK, "  - Connect total: %.2fms [%.2fs (%.2fms/blk)]\n", (nTime3 - nTime2) * MILLI, nTimeConnectTotal * MICRO, nTimeConnectTotal * MILLI / nBlocksTotal);
+        time_3 = SteadyClock::now();
+        time_connect_total += time_3 - time_2;
+        assert(num_blocks_total > 0);
+        LogPrint(BCLog::BENCHMARK, "  - Connect total: %.2fms [%.2fs (%.2fms/blk)]\n",
+                 Ticks<MillisecondsDouble>(time_3 - time_2),
+                 Ticks<SecondsDouble>(time_connect_total),
+                 Ticks<MillisecondsDouble>(time_connect_total) / num_blocks_total);
         bool flushed = view.Flush();
         assert(flushed);
         dbTx->Commit();
     }
-    int64_t nTime4 = GetTimeMicros(); nTimeFlush += nTime4 - nTime3;
-    LogPrint(BCLog::BENCHMARK, "  - Flush: %.2fms [%.2fs (%.2fms/blk)]\n", (nTime4 - nTime3) * MILLI, nTimeFlush * MICRO, nTimeFlush * MILLI / nBlocksTotal);
+    const auto time_4{SteadyClock::now()};
+    time_flush += time_4 - time_3;
+    LogPrint(BCLog::BENCHMARK, "  - Flush: %.2fms [%.2fs (%.2fms/blk)]\n",
+             Ticks<MillisecondsDouble>(time_4 - time_3),
+             Ticks<SecondsDouble>(time_flush),
+             Ticks<MillisecondsDouble>(time_flush) / num_blocks_total);
     // Write the chain state to disk, if necessary.
     if (!FlushStateToDisk(state, FlushStateMode::IF_NEEDED)) {
         return false;
     }
-    int64_t nTime5 = GetTimeMicros(); nTimeChainState += nTime5 - nTime4;
-    LogPrint(BCLog::BENCHMARK, "  - Writing chainstate: %.2fms [%.2fs (%.2fms/blk)]\n", (nTime5 - nTime4) * MILLI, nTimeChainState * MICRO, nTimeChainState * MILLI / nBlocksTotal);
+    const auto time_5{SteadyClock::now()};
+    time_chainstate += time_5 - time_4;
+    LogPrint(BCLog::BENCHMARK, "  - Writing chainstate: %.2fms [%.2fs (%.2fms/blk)]\n",
+             Ticks<MillisecondsDouble>(time_5 - time_4),
+             Ticks<SecondsDouble>(time_chainstate),
+             Ticks<MillisecondsDouble>(time_chainstate) / num_blocks_total);
     // Remove conflicting transactions from the mempool.;
     if (m_mempool) {
         m_mempool->removeForBlock(blockConnecting.vtx, pindexNew->nHeight);
@@ -3116,15 +3175,23 @@ bool Chainstate::ConnectTip(BlockValidationState& state, CBlockIndex* pindexNew,
     if (this == &m_chainman.ActiveChainstate()) bls_scheme_guard.Commit();
     UpdateTip(pindexNew);
 
-    int64_t nTime6 = GetTimeMicros(); nTimePostConnect += nTime6 - nTime5; nTimeTotal += nTime6 - nTime1;
-    LogPrint(BCLog::BENCHMARK, "  - Connect postprocess: %.2fms [%.2fs (%.2fms/blk)]\n", (nTime6 - nTime5) * MILLI, nTimePostConnect * MICRO, nTimePostConnect * MILLI / nBlocksTotal);
-    LogPrint(BCLog::BENCHMARK, "- Connect block: %.2fms [%.2fs (%.2fms/blk)]\n", (nTime6 - nTime1) * MILLI, nTimeTotal * MICRO, nTimeTotal * MILLI / nBlocksTotal);
+    const auto time_6{SteadyClock::now()};
+    time_post_connect += time_6 - time_5;
+    time_total += time_6 - time_1;
+    LogPrint(BCLog::BENCHMARK, "  - Connect postprocess: %.2fms [%.2fs (%.2fms/blk)]\n",
+             Ticks<MillisecondsDouble>(time_6 - time_5),
+             Ticks<SecondsDouble>(time_post_connect),
+             Ticks<MillisecondsDouble>(time_post_connect) / num_blocks_total);
+    LogPrint(BCLog::BENCHMARK, "- Connect block: %.2fms [%.2fs (%.2fms/blk)]\n",
+             Ticks<MillisecondsDouble>(time_6 - time_1),
+             Ticks<SecondsDouble>(time_total),
+             Ticks<MillisecondsDouble>(time_total) / num_blocks_total);
 
     unsigned int nSigOps = 0;
     for (const auto& tx : blockConnecting.vtx) {
         nSigOps += GetLegacySigOpCount(*tx);
     }
-    ::g_stats_client->timing("ConnectTip_ms", (nTime6 - nTime1) / 1000, 1.0f);
+    ::g_stats_client->timing("ConnectTip_ms", Ticks<std::chrono::milliseconds>(time_6 - time_1), 1.0f);
     ::g_stats_client->gauge("blocks.tip.SizeBytes", ::GetSerializeSize(blockConnecting, PROTOCOL_VERSION), 1.0f);
     ::g_stats_client->gauge("blocks.tip.Height", m_chain.Height(), 1.0f);
     ::g_stats_client->gauge("blocks.tip.Version", blockConnecting.nVersion, 1.0f);

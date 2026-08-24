@@ -748,13 +748,15 @@ class AssetLocksTest(DashTestFramework):
         self.mine_quorum_2_nodes()
         self.check_mempool_result(tx=asset_unlock_tx, result_expected={'allowed': False, 'reject-reason': 'bad-assetunlock-too-old-quorum'})
 
+        self.test_admissible_asset_unlock_ancestor_package(node_wallet, pubkey)
+
         asset_unlock_tx = self.create_assetunlock(620, 4000 * COIN + 1, pubkey)
         txid_in_block = self.send_tx(asset_unlock_tx)
         self.log.info(f"{txid_in_block} should not be mined")
         tip_hash = self.generate(node, 1)[0]
         assert txid_in_block not in node.getblock(tip_hash)['tx']
 
-        asset_unlock_tx = self.create_assetunlock(621, 4000 * COIN, pubkey)
+        asset_unlock_tx = self.create_assetunlock(621, 3999 * COIN, pubkey)
         txid_in_block = self.send_tx(asset_unlock_tx)
         self.log.info(f"{txid_in_block} should be mined")
         tip_hash = self.generate(node, 1)[0]
@@ -765,6 +767,45 @@ class AssetLocksTest(DashTestFramework):
         self.log.info(f"{txid_in_block} should not be mined")
         tip_hash = self.generate(node, 1)[0]
         assert txid_in_block not in node.getblock(tip_hash)['tx']
+
+        self.test_asset_unlock_ancestor_package(node_wallet, asset_unlock_tx, txid_in_block)
+
+    def create_asset_unlock_child(self, node_wallet, asset_unlock_tx, asset_unlock_txid):
+        child_value = Decimal(asset_unlock_tx.vout[0].nValue - tiny_amount) / COIN
+        child_hex = node_wallet.createrawtransaction(
+            [{'txid': asset_unlock_txid, 'vout': 0}],
+            {node_wallet.getnewaddress(): child_value})
+        signed_child = node_wallet.signrawtransactionwithwallet(child_hex)
+        assert signed_child['complete']
+        child_txid = node_wallet.sendrawtransaction(signed_child['hex'])
+
+        # Ensure package selection considers the child before its Asset Unlock
+        # ancestor is considered on its own.
+        node_wallet.prioritisetransaction(child_txid, COIN)
+        return child_txid
+
+    def test_admissible_asset_unlock_ancestor_package(self, node_wallet, pubkey):
+        self.log.info("Test an admissible Asset Unlock ancestor package")
+        asset_unlock_tx = self.create_assetunlock(619, COIN, pubkey)
+        asset_unlock_txid = self.send_tx(asset_unlock_tx)
+        child_txid = self.create_asset_unlock_child(node_wallet, asset_unlock_tx, asset_unlock_txid)
+
+        template_txids = {tx_from_hex(tx['data']).rehash() for tx in node_wallet.getblocktemplate()['transactions']}
+        assert asset_unlock_txid in template_txids
+        assert child_txid in template_txids
+
+        tip_hash = self.generate(node_wallet, 1)[0]
+        mined_txids = node_wallet.getblock(tip_hash)['tx']
+        assert asset_unlock_txid in mined_txids
+        assert child_txid in mined_txids
+
+    def test_asset_unlock_ancestor_package(self, node_wallet, asset_unlock_tx, asset_unlock_txid):
+        self.log.info("Test an Asset Unlock that exceeds the current limit as an ancestor package")
+        child_txid = self.create_asset_unlock_child(node_wallet, asset_unlock_tx, asset_unlock_txid)
+
+        template_txids = {tx_from_hex(tx['data']).rehash() for tx in node_wallet.getblocktemplate()['transactions']}
+        assert asset_unlock_txid not in template_txids
+        assert child_txid not in template_txids
 
     def test_asset_locks_v2_pre_v24(self, node_wallet, node, pubkey):
         self.log.info("Testing asset lock v2 rejection before v24 activation...")

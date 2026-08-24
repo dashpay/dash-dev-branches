@@ -281,7 +281,7 @@ bool CCreditPoolDiff::Lock(const CTransaction& tx, TxValidationState& state)
     return state.Invalid(TxValidationResult::TX_CONSENSUS, "failed-creditpool-lock-invalid");
 }
 
-bool CCreditPoolDiff::Unlock(const CTransaction& tx, TxValidationState& state)
+bool CCreditPoolDiff::Unlock(const CTransaction& tx, TxValidationState& state, std::optional<uint64_t>* inserted_index)
 {
     uint64_t index{0};
     CAmount toUnlock{0};
@@ -299,11 +299,13 @@ bool CCreditPoolDiff::Unlock(const CTransaction& tx, TxValidationState& state)
     }
 
     newIndexes.insert(index);
+    if (inserted_index) *inserted_index = index;
     sessionUnlocked += toUnlock;
     return true;
 }
 
-bool CCreditPoolDiff::ProcessLockUnlockTransaction(const CTransaction& tx, TxValidationState& state)
+bool CCreditPoolDiff::ProcessLockUnlockTransaction(const CTransaction& tx, TxValidationState& state,
+                                                   std::optional<uint64_t>* inserted_index)
 {
     if (!tx.IsSpecialTxVersion()) return true;
 
@@ -312,7 +314,7 @@ bool CCreditPoolDiff::ProcessLockUnlockTransaction(const CTransaction& tx, TxVal
         case TRANSACTION_ASSET_LOCK:
             return Lock(tx, state);
         case TRANSACTION_ASSET_UNLOCK:
-            return Unlock(tx, state);
+            return Unlock(tx, state, inserted_index);
         default:
             return true;
         }
@@ -320,6 +322,32 @@ bool CCreditPoolDiff::ProcessLockUnlockTransaction(const CTransaction& tx, TxVal
         LogPrintf("%s -- failed: %s\n", __func__, e.what());
         return state.Invalid(TxValidationResult::TX_CONSENSUS, "failed-procassetlocksinblock");
     }
+}
+
+bool CCreditPoolDiff::ProcessLockUnlockTransactions(const std::vector<CTransactionRef>& txs, TxValidationState& state)
+{
+    const auto initialLocked = sessionLocked;
+    const auto initialUnlocked = sessionUnlocked;
+    std::vector<uint64_t> insertedIndexes;
+
+    for (const auto& tx : txs) {
+        std::optional<uint64_t> inserted_index;
+        if (ProcessLockUnlockTransaction(*tx, state, &inserted_index)) {
+            if (inserted_index) insertedIndexes.push_back(*inserted_index);
+            continue;
+        }
+
+        // Roll back exactly what this invocation changed: amounts are scalar
+        // snapshots, and only the indexes inserted above are erased so that
+        // state committed by earlier packages is left untouched.
+        for (const uint64_t index : insertedIndexes) {
+            newIndexes.erase(index);
+        }
+        sessionLocked = initialLocked;
+        sessionUnlocked = initialUnlocked;
+        return false;
+    }
+    return true;
 }
 
 std::optional<CCreditPoolDiff> GetCreditPoolDiffForBlock(CCreditPoolManager& cpoolman,

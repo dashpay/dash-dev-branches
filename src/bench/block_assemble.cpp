@@ -6,6 +6,7 @@
 #include <consensus/consensus.h>
 #include <consensus/validation.h>
 #include <script/standard.h>
+#include <node/miner.h>
 #include <test/util/mining.h>
 #include <test/util/script.h>
 #include <test/util/setup_common.h>
@@ -51,5 +52,18 @@ static void AssembleBlock(benchmark::Bench& bench)
         PrepareBlock(test_setup->m_node, SCRIPT_PUB);
     });
 }
+static void BlockAssemblerAddPackageTxns(benchmark::Bench& bench)
+{
+    FastRandomContext det_rand{true};
+    auto testing_setup{MakeNoLogFileContext<TestChain100Setup>()};
+    testing_setup->PopulateMempool(det_rand, /*num_transactions=*/1000, /*submit=*/true);
+    node::BlockAssembler::Options assembler_options;
+    assembler_options.test_block_validity = false;
+
+    bench.run([&] {
+        PrepareBlock(testing_setup->m_node, P2SH_OP_TRUE, assembler_options);
+    });
+}
 
 BENCHMARK(AssembleBlock, benchmark::PriorityLevel::HIGH);
+BENCHMARK(BlockAssemblerAddPackageTxns, benchmark::PriorityLevel::LOW);

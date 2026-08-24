@@ -762,6 +762,14 @@ bool CWallet::IsSpent(const COutPoint& outpoint) const
     return false;
 }
 
+bool CWallet::IsWalletUTXOSpendable(const CWalletTx& wtx) const
+{
+    AssertLockHeld(cs_wallet);
+    const int depth{GetTxDepthInMainChain(wtx)};
+    if (depth < 0) return false;
+    return depth > 0 || wtx.InMempool();
+}
+
 void CWallet::AddToSpends(const COutPoint& outpoint, const uint256& wtxid, WalletBatch* batch)
 {
     mapTxSpends.insert(std::make_pair(outpoint, wtxid));
@@ -1440,6 +1448,11 @@ void CWallet::transactionRemovedFromMempool(const CTransactionRef& tx, MemPoolRe
         auto it = mapWallet.find(tx->GetHash());
         if (it != mapWallet.end()) {
             RefreshMempoolStatus(it->second, chain());
+            // The transaction is inactive now, so its outputs stop counting as wallet
+            // funds. The anonymizable tallies are served from a cache that would keep
+            // handing out the old answer until some unrelated event cleared it.
+            fAnonymizableTallyCached = false;
+            fAnonymizableTallyCachedNonDenom = false;
         }
     }
     // Handle transactions that were removed from the mempool because they
@@ -2130,12 +2143,12 @@ bool CWallet::ShouldResend() const
 
     // Do this infrequently and randomly to avoid giving away
     // that these are our transactions.
-    if (GetTime() < m_next_resend) return false;
+    if (NodeClock::now() < m_next_resend) return false;
 
     return true;
 }
 
-int64_t CWallet::GetDefaultNextResend() { return GetTime() + (1 * 60 * 60) + GetRand(2 * 60 * 60); }
+NodeClock::time_point CWallet::GetDefaultNextResend() { return FastRandomContext{}.rand_uniform_delay(NodeClock::now() + 1h, 2h); }
 
 // Resubmit transactions from the wallet to the mempool, optionally asking the
 // mempool to relay them. On startup, we will do this for all unconfirmed
@@ -3264,6 +3277,7 @@ std::shared_ptr<CWallet> CWallet::Create(WalletContext& context, const std::stri
         for (auto spk_man : walletInstance->GetActiveScriptPubKeyMans()) {
             if (spk_man->HavePrivateKeys()) {
                 warnings.push_back(strprintf(_("Warning: Private keys detected in wallet {%s} with disabled private keys"), walletFile));
+                break;
             }
         }
     }
@@ -4553,16 +4567,19 @@ bool CWallet::MigrateToSQLite(bilingual_str& error)
 
     // Close this database and delete the file
     fs::path db_path = fs::PathFromString(m_database->Filename());
-    fs::path db_dir = db_path.parent_path();
     m_database->Close();
     fs::remove(db_path);
+
+    // Generate the path for the location of the migrated wallet
+    // Wallets that are plain files rather than wallet directories will be migrated to be wallet directories.
+    const fs::path wallet_path = fsbridge::AbsPathJoin(GetWalletDir(), fs::PathFromString(m_name));
 
     // Make new DB
     DatabaseOptions opts;
     opts.require_create = true;
     opts.require_format = DatabaseFormat::SQLITE;
     DatabaseStatus db_status;
-    std::unique_ptr<WalletDatabase> new_db = MakeDatabase(db_dir, opts, db_status, error);
+    std::unique_ptr<WalletDatabase> new_db = MakeDatabase(wallet_path, opts, db_status, error);
     assert(new_db); // This is to prevent doing anything further with this wallet. The original file was deleted, but a backup exists.
     m_database.reset();
     m_database = std::move(new_db);
@@ -4988,7 +5005,7 @@ util::Result<MigrationResult> MigrateLegacyToDescriptor(const std::string& walle
         // Migration successful, unload the wallet locally, then reload it.
         assert(local_wallet.use_count() == 1);
         local_wallet.reset();
-        LoadWallet(context, wallet_name, /*load_on_start=*/std::nullopt, options, status, error, warnings);
+        res.wallet = LoadWallet(context, wallet_name, /*load_on_start=*/std::nullopt, options, status, error, warnings);
         res.wallet_name = wallet_name;
     } else {
         // Migration failed, cleanup

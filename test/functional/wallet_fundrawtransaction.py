@@ -530,8 +530,7 @@ class RawTransactionsTest(BitcoinTestFramework):
         funded_psbt = wmulti.walletcreatefundedpsbt(inputs=inputs, outputs=outputs, options={'changeAddress': w2.getrawchangeaddress()})['psbt']
 
         signed_psbt = w2.walletprocesspsbt(funded_psbt)
-        final_psbt = w2.finalizepsbt(signed_psbt['psbt'])
-        self.nodes[2].sendrawtransaction(final_psbt['hex'])
+        self.nodes[2].sendrawtransaction(signed_psbt['hex'])
         self.generate(self.nodes[2], 1)
 
         # Make sure funds are received at node1.
@@ -1113,7 +1112,6 @@ class RawTransactionsTest(BitcoinTestFramework):
 
         # Case (3), Explicit add_inputs=true and preset inputs (with preset inputs not-covering the target amount)
         options["add_inputs"] = True
-        options["add_to_wallet"] = False
         assert "psbt" in wallet.walletcreatefundedpsbt(outputs=[{addr1: 8}], inputs=inputs, options=options)
 
         # Case (4), Explicit add_inputs=true and preset inputs (with preset inputs covering the target amount)

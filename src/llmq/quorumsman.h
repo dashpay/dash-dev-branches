@@ -48,6 +48,18 @@ class CDKGSessionManager;
 class CQuorumBlockProcessor;
 class CQuorumSnapshotManager;
 
+//! A peer normally needs data for only a handful of quorums at once. These limits keep
+//! attacker-controlled inbound tracking bounded independently of request expiry or block production.
+static constexpr size_t MAX_INBOUND_DATA_REQUESTS_PER_REQUESTER{64};
+static constexpr size_t MAX_INBOUND_DATA_REQUESTS{4096};
+
+enum class DataRequestRegistration : uint8_t {
+    Accepted,
+    RateLimited,
+    RequesterLimitExceeded,
+    CapacityExhausted,
+};
+
 /**
  * The quorum manager maintains quorums which were mined on chain. When a quorum is requested from the manager,
  * it will lookup the commitment (through CQuorumBlockProcessor) and build a CQuorum object from it.
@@ -70,6 +82,8 @@ private:
     mutable Mutex cs_data_requests;
     mutable std::unordered_map<CQuorumDataRequestKey, CQuorumDataRequest, StaticSaltedHasher> mapQuorumDataRequests
         GUARDED_BY(cs_data_requests);
+    mutable std::unordered_map<uint256, size_t, StaticSaltedHasher> m_inbound_request_counts GUARDED_BY(cs_data_requests);
+    mutable size_t m_inbound_request_count GUARDED_BY(cs_data_requests){0};
 
     mutable Mutex m_cs_maps;
     mutable std::map<Consensus::LLMQType, Uint256LruHashMap<CQuorumPtr>> mapQuorumsCache
@@ -140,9 +154,10 @@ public:
     bool IsMasternode() const;
     bool IsWatching() const;
 
-    //! Request tracking for QGETDATA/QDATA — used by NetQuorum and RPC
-    bool RegisterDataRequest(const CQuorumDataRequestKey& key, const CQuorumDataRequest& request,
-                             bool add_expiry_bias = true) const
+    //! Request tracking for QGETDATA/QDATA — used by NetQuorum and RPC. Inbound entries are
+    //! bounded per requester and globally; outbound entries initiated by us do not consume either budget.
+    DataRequestRegistration RegisterDataRequest(const CQuorumDataRequestKey& key, const CQuorumDataRequest& request,
+                                                bool add_expiry_bias = true) const
         EXCLUSIVE_LOCKS_REQUIRED(!cs_data_requests);
     enum class DataResponseValidation : uint8_t { OK, NotRequested, AlreadyReceived, Mismatch };
     DataResponseValidation ValidateDataResponse(const CQuorumDataRequestKey& key,
