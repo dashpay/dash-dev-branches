@@ -326,6 +326,22 @@ void ChainTestingSetup::LoadVerifyActivateChainstate()
 {
     auto& chainman{*Assert(m_node.chainman)};
 
+    // peerman and cj_walletman reference llmq_ctx, the mempool and the Dash
+    // managers recreated by the reload below. No test uses them across a
+    // reload: destroy them (clearing connman's raw m_msgproc pointer first)
+    // so future use after a reload fails on a null pointer instead of
+    // silently reading freed memory; such a test must rebuild them itself,
+    // as AppInitMain constructs them only after the chainstate is loaded.
+    if (m_node.peerman) {
+        CConnman::Options connman_options;
+        connman_options.socketEventsMode = ::g_socket_events_mode;
+        m_node.connman->Init(connman_options);
+        m_node.peerman.reset();
+    }
+#ifdef ENABLE_WALLET
+    m_node.cj_walletman.reset();
+#endif // ENABLE_WALLET
+
     node::ChainstateLoadOptions options{ChainstateLoadOptionsForTest()};
 
     if (options.reindex || options.reindex_chainstate) {
