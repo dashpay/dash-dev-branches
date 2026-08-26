@@ -7,6 +7,7 @@
 
 #include <bls/bls_ies.h>
 #include <evo/types.h>
+#include <llmq/cache.h>
 #include <llmq/params.h>
 #include <llmq/quorums.h>
 #include <llmq/types.h>
@@ -86,10 +87,8 @@ private:
     mutable size_t m_inbound_request_count GUARDED_BY(cs_data_requests){0};
 
     mutable Mutex m_cs_maps;
-    mutable std::map<Consensus::LLMQType, Uint256LruHashMap<CQuorumPtr>> mapQuorumsCache
-        GUARDED_BY(m_cs_maps);
-    mutable std::map<Consensus::LLMQType, Uint256LruHashMap<std::vector<CQuorumCPtr>>> scanQuorumsCache
-        GUARDED_BY(m_cs_maps);
+    mutable PerLlmqTypeCache<CQuorumPtr> mapQuorumsCache GUARDED_BY(m_cs_maps);
+    mutable PerLlmqTypeCache<std::vector<CQuorumCPtr>> scanQuorumsCache GUARDED_BY(m_cs_maps);
 
     // On mainnet, we have around 62 quorums active at any point; let's cache a little more than double that to be safe.
     // it maps `quorum_hash` to `pindex`

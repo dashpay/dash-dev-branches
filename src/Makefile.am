@@ -297,6 +297,7 @@ BITCOIN_CORE_H = \
   key_io.h \
   limitedmap.h \
   llmq/blockprocessor.h \
+  llmq/cache.h \
   llmq/commitment.h \
   llmq/context.h \
   llmq/debug.h \
