@@ -468,20 +468,31 @@ public:
 
         CCoinControl coin_control;
         coin_control.destChange = fund_destination;
-        coin_control.fRequireAllInputs = false;
+        // Spend only from fund_destination
+        coin_control.m_allow_other_inputs = false;
+        std::vector<COutput> address_coins;
         for (const auto& output : AvailableCoinsListUnspent(*m_wallet).All()) {
             CTxDestination destination;
             if (ExtractDestination(output.txout.scriptPubKey, destination) && destination == fund_destination) {
-                coin_control.Select(output.outpoint);
+                address_coins.push_back(output);
             }
         }
-        if (!coin_control.HasSelected()) {
+        if (address_coins.empty()) {
             return util::Error{
                 strprintf(Untranslated("No funds at specified address %s"), EncodeDestination(fund_destination))};
         }
 
-        auto result{CreateTransaction(*m_wallet, recipients, RANDOM_CHANGE_POSITION, coin_control,
-                                      /*sign=*/true, tx.vExtraPayload.size())};
+        // Every selected coin is force-spent, so select as few as possible: largest
+        // first, adding another one only while they don't cover amount plus fees
+        std::sort(address_coins.begin(), address_coins.end(),
+                  [](const COutput& a, const COutput& b) { return a.txout.nValue > b.txout.nValue; });
+        util::Result<CreatedTransactionResult> result{util::Error{}};
+        for (const COutput& coin : address_coins) {
+            coin_control.Select(coin.outpoint);
+            result = CreateTransaction(*m_wallet, recipients, RANDOM_CHANGE_POSITION, coin_control,
+                                       /*sign=*/true, tx.vExtraPayload.size());
+            if (result) break;
+        }
         if (!result) return util::Error{util::ErrorString(result)};
 
         tx.vin = result->tx->vin;

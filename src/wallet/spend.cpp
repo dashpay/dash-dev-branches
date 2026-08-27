@@ -1300,6 +1300,7 @@ bool GenBudgetSystemCollateralTx(CWallet& wallet, CTransactionRef& tx, uint256 h
     CCoinControl coinControl;
     if (!outpoint.IsNull()) {
         coinControl.Select(outpoint);
+        coinControl.m_allow_other_inputs = false;
     }
 
     auto res{CreateTransaction(wallet, vecSend, RANDOM_CHANGE_POSITION, coinControl)};

@@ -1151,51 +1151,5 @@ BOOST_AUTO_TEST_CASE(check_max_weight)
     }
 }
 
-/* --------------------------- Dash-specific tests start here --------------------------- */
-BOOST_AUTO_TEST_CASE(minimum_inputs_test)
-{
-    std::unique_ptr<CWallet> wallet = std::make_unique<CWallet>(m_node.chain.get(), /*coinjoin_loader=*/nullptr, "", m_args, CreateMockWalletDatabase());
-    wallet->LoadWallet();
-    LOCK(wallet->cs_wallet);
-    wallet->SetWalletFlag(WALLET_FLAG_DESCRIPTORS);
-    wallet->SetupDescriptorScriptPubKeyMans("", "");
-
-    // Create coins (denominations) for a target that can be met without consuming all the coins
-    CoinsResult available_coins{};
-    CAmount target{25 * COIN};
-    add_coin(available_coins, *wallet,  9 * COIN, CFeeRate(0), /*nAge=*/6*24, /*fIsFromMe=*/false, /*nInput=*/0, /*spendable=*/true);
-    add_coin(available_coins, *wallet, 16 * COIN, CFeeRate(0), /*nAge=*/6*24, /*fIsFromMe=*/false, /*nInput=*/0, /*spendable=*/true);
-    add_coin(available_coins, *wallet, 24 * COIN, CFeeRate(0), /*nAge=*/6*24, /*fIsFromMe=*/false, /*nInput=*/0, /*spendable=*/true);
-
-    // Setup coin control to select from the given coins (!m_allow_other_inputs) *but* consume as little
-    // as possible (!fRequireAllInputs) and select our coins.
-    CCoinControl coin_control{};
-    coin_control.m_allow_other_inputs = false;
-    coin_control.fRequireAllInputs = false;
-    for (const auto& coin : available_coins.All()) {
-        coin_control.Select(coin.outpoint);
-    }
-
-    // Select coins
-    FastRandomContext rand{};
-    CoinSelectionParams coin_selection_params{
-        rand,
-        /*change_output_size=*/0,
-        /*change_spend_size=*/0,
-        /*min_change_target=*/CENT,
-        /*effective_feerate=*/CFeeRate(0),
-        /*long_term_feerate=*/CFeeRate(0),
-        /*discard_feerate=*/CFeeRate(0),
-        /*tx_noinputs_size=*/0,
-        /*avoid_partial=*/false,
-    };
-    auto result = SelectCoins(*wallet, available_coins, /*pre_set_inputs=*/{}, target, coin_control, coin_selection_params);
-    BOOST_REQUIRE(result);
-
-    // Should consume only the first two coins (9 + 16) >= 25 and account correctly
-    BOOST_CHECK_EQUAL(result->GetInputSet().size(), 2);
-    BOOST_CHECK_EQUAL(result->GetSelectedValue(), 25 * COIN);
-}
-
 BOOST_AUTO_TEST_SUITE_END()
 } // namespace wallet
