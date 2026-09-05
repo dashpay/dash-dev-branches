@@ -1697,9 +1697,7 @@ class DashTestFramework(BitcoinTestFramework):
         addrs_platform_p2p = r + 1
         addrs_platform_https = r + 2
 
-        fund_txid = self.nodes[0].sendtoaddress(funds_address, 1)
-        self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
-        evo_info.bury_tx(self, genIdx=0, txid=fund_txid, depth=1)
+        self.nodes[0].sendtoaddress(funds_address, 1)
 
         protx_success = False
         try:

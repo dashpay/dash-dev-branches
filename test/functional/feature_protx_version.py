@@ -180,8 +180,6 @@ class ProTxVersionTest(DashTestFramework):
         assert_equal(state['version'], 2)
         payout_before = state['payoutAddress']
         node.sendtoaddress(payout_mn.fundsAddr, 1)
-        self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
-        self.generate(node, 1)
         payout_mn.update_service(node, submit=True, addrs_core_p2p=[f'127.0.0.1:{payout_mn.nodePort}'])
         self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
         self.generate(node, 1)
@@ -189,8 +187,6 @@ class ProTxVersionTest(DashTestFramework):
         assert_equal(state['version'], 3)
         assert_equal([p['address'] for p in state['payouts']], [payout_before])
         node.sendtoaddress(mn.fundsAddr, 1)
-        self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
-        self.generate(node, 1)
 
         self.log.info("A basic-scheme masternode reports version 2 before any post-v24 update")
         assert_equal(node.protx('info', mn.proTxHash)['state']['version'], 2)
@@ -206,8 +202,6 @@ class ProTxVersionTest(DashTestFramework):
         self.log.info("Migration v1 [legacy] protx masternode to v3 by update-registar with a rotated key")
         assert_equal(node.protx('info', legacy_mn.proTxHash)['state']['version'], 1)
         node.sendtoaddress(legacy_mn.fundsAddr, 1)
-        self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
-        self.generate(node, 1)
         # Switch to a fresh basic-scheme operator key and the non-legacy update_registrar RPC
         legacy_mn.legacy = False
         new_operator = node.bls('generate') # basic (non-legacy) scheme
@@ -253,8 +247,6 @@ class ProTxVersionTest(DashTestFramework):
         assert_equal(node.protx('info', surviving_legacy_mn.proTxHash)['state']['version'], 1)
         key_before = node.protx('info', surviving_legacy_mn.proTxHash)['state']['pubKeyOperator']
         node.sendtoaddress(surviving_legacy_mn.fundsAddr, 1)
-        self.bump_mocktime(10 * 60 + 1)  # make the funding tx safe to include in a block
-        self.generate(node, 1)
         upserv_hash = surviving_legacy_mn.update_service(node, submit=True,
                                                          addrs_core_p2p=[f'127.0.0.1:{surviving_legacy_mn.nodePort}'])
         self.bump_mocktime(10 * 60 + 1)
@@ -281,10 +273,7 @@ class ProTxVersionTest(DashTestFramework):
 
     def test_revoke_protx(self, node_idx, revoke_mn: MasternodeInfo):
         funds_address = self.nodes[0].getnewaddress()
-        fund_txid = self.nodes[0].sendtoaddress(funds_address, 1)
-        self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
-        tip = self.generate(self.nodes[0], 1)[0]
-        assert_equal(self.nodes[0].getrawtransaction(fund_txid, 1, tip)['confirmations'], 1)
+        self.nodes[0].sendtoaddress(funds_address, 1)
 
         protx_result = revoke_mn.revoke(self.nodes[0], submit=True, reason=1, fundsAddr=funds_address)
         self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
@@ -304,10 +293,7 @@ class ProTxVersionTest(DashTestFramework):
                 return
 
     def test_update_service_protx(self, mn: MasternodeInfo):
-        fund_txid = self.nodes[0].sendtoaddress(mn.fundsAddr, 1)
-        self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
-        tip = self.generate(self.nodes[0], 1)[0]
-        assert_equal(self.nodes[0].getrawtransaction(fund_txid, 1, tip)['confirmations'], 1)
+        self.nodes[0].sendtoaddress(mn.fundsAddr, 1)
 
         protx_result = mn.update_service(self.nodes[0], submit=True, addrs_core_p2p=[f'127.0.0.2:{mn.nodePort}'])
         self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block

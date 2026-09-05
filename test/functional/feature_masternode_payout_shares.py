@@ -193,8 +193,6 @@ class MasternodePayoutSharesTest(DashTestFramework):
 
         updated_payouts = [{"address": node.getnewaddress(), "reward": 1250} for _ in range(8)]
         node.sendtoaddress(mn.fundsAddr, 1)
-        self.bump_mocktime(10 * 60 + 1)
-        self.generate(node, 1, sync_fun=self.no_op)
         update_hash = mn.update_registrar(node, submit=True, payouts=updated_payouts, fundsAddr=mn.fundsAddr)
         assert update_hash is not None
         self.bump_mocktime(10 * 60 + 1)
@@ -207,8 +205,6 @@ class MasternodePayoutSharesTest(DashTestFramework):
 
         operator_payout = node.getnewaddress()
         node.sendtoaddress(mn.fundsAddr, 1)
-        self.bump_mocktime(10 * 60 + 1)
-        self.generate(node, 1, sync_fun=self.no_op)
         service_hash = mn.update_service(
             node,
             submit=True,
@@ -254,8 +250,6 @@ class MasternodePayoutSharesTest(DashTestFramework):
             paid_owner_total += payee["amount"]
 
         node.sendtoaddress(mn.fundsAddr, 1)
-        self.bump_mocktime(10 * 60 + 1)
-        self.generate(node, 1, sync_fun=self.no_op)
         revoke_hash = mn.revoke(node, submit=True, reason=1, fundsAddr=mn.fundsAddr)
         assert revoke_hash is not None
         self.bump_mocktime(10 * 60 + 1)
