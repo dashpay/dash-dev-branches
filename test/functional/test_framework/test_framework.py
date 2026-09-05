@@ -1184,10 +1184,6 @@ class MasternodeInfo:
     nodeIdx: Optional[int] = None
     friendlyName: Optional[str] = None
 
-    def bury_tx(self, test: BitcoinTestFramework, genIdx: int, txid: str, depth: int):
-        chain_tip = test.generate(test.nodes[genIdx], depth)[0]
-        assert_equal(test.nodes[genIdx].getrawtransaction(txid, 1, chain_tip)['confirmations'], depth)
-
     def generate_addresses(self, node: TestNode, force_all: bool = False):
         if not self.collateral_address or force_all:
             self.collateral_address = node.getnewaddress()
@@ -1654,6 +1650,13 @@ class DashTestFramework(BitcoinTestFramework):
         self.log.info("Successfully started and synced proTx:"+str(created_mn_info.proTxHash))
         return created_mn_info
 
+    def bury_tx(self, node: TestNode, txid: Optional[str], sync_fun=None):
+        assert txid is not None
+        self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
+        chain_tip = self.generate(node, 1, sync_fun=sync_fun)[0]
+        assert_equal(node.getrawtransaction(txid, 1, chain_tip)['confirmations'], 1)
+        return chain_tip
+
     def dynamically_prepare_masternode(self, idx, evo=False, rnd=None) -> MasternodeInfo:
         mn = MasternodeInfo(evo=evo, legacy=(not softfork_active(self.nodes[0], 'v19')))
         mn.generate_addresses(self.nodes[0])
@@ -1665,8 +1668,7 @@ class DashTestFramework(BitcoinTestFramework):
 
         outputs = {mn.collateral_address: mn.get_collateral_value(), mn.fundsAddr: 1}
         collateral_txid = self.nodes[0].sendmany("", outputs)
-        self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
-        mn.bury_tx(self, genIdx=0, txid=collateral_txid, depth=1)
+        self.bury_tx(self.nodes[0], txid=collateral_txid)
         collateral_vout = mn.get_collateral_vout(self.nodes[0], collateral_txid)
 
         addrs_core_p2p = ['127.0.0.1:%d' % node_p2p_port]
@@ -1677,8 +1679,7 @@ class DashTestFramework(BitcoinTestFramework):
                                    platform_node_id=platform_node_id, addrs_platform_p2p=addrs_platform_p2p, addrs_platform_https=addrs_platform_https)
         assert protx_result is not None
 
-        self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
-        mn.bury_tx(self, genIdx=0, txid=protx_result, depth=1)
+        self.bury_tx(self.nodes[0], txid=protx_result)
 
         mn.set_params(proTxHash=protx_result, operator_reward=operatorReward, collateral_txid=collateral_txid, collateral_vout=collateral_vout, nodePort=node_p2p_port)
         self.mninfo.append(mn)
@@ -1703,8 +1704,7 @@ class DashTestFramework(BitcoinTestFramework):
         try:
             protx_result = evo_info.update_service(self.nodes[0], True, f'127.0.0.1:{evo_info.nodePort}', platform_node_id, addrs_platform_p2p, addrs_platform_https, operator_reward_address, funds_address)
             assert protx_result is not None
-            self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
-            evo_info.bury_tx(self, genIdx=0, txid=protx_result, depth=1)
+            self.bury_tx(self.nodes[0], txid=protx_result)
             self.log.info("Updated EvoNode %s: platformNodeID=%s, platformP2PPort=%s, platformHTTPPort=%s" % (evo_info.proTxHash, platform_node_id, addrs_platform_p2p, addrs_platform_https))
             protx_success = True
         except Exception:

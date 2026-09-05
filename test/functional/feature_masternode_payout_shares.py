@@ -86,8 +86,7 @@ class MasternodePayoutSharesTest(DashTestFramework):
         oversized_payouts = [{"address": node.getnewaddress(), "reward": 1000} for _ in range(9)]
 
         collateral_txid = node.sendmany("", {mn.collateral_address: mn.get_collateral_value(), mn.fundsAddr: 1})
-        self.bump_mocktime(10 * 60 + 1)
-        self.generate(node, 1, sync_fun=self.no_op)
+        self.bury_tx(node, collateral_txid)
         mn.collateral_txid = collateral_txid
         mn.collateral_vout = mn.get_collateral_vout(node, collateral_txid)
 
@@ -128,8 +127,7 @@ class MasternodePayoutSharesTest(DashTestFramework):
             fundsAddr=mn.fundsAddr,
         )
         assert protx_hash is not None
-        self.bump_mocktime(10 * 60 + 1)
-        self.generate(node, 1, sync_fun=self.no_op)
+        self.bury_tx(node, protx_hash)
         mn.set_params(proTxHash=protx_hash)
 
         raw = node.getrawtransaction(protx_hash, 1)
@@ -195,8 +193,7 @@ class MasternodePayoutSharesTest(DashTestFramework):
         node.sendtoaddress(mn.fundsAddr, 1)
         update_hash = mn.update_registrar(node, submit=True, payouts=updated_payouts, fundsAddr=mn.fundsAddr)
         assert update_hash is not None
-        self.bump_mocktime(10 * 60 + 1)
-        self.generate(node, 1, sync_fun=self.no_op)
+        self.bury_tx(node, update_hash)
 
         update_raw = node.getrawtransaction(update_hash, 1)
         assert_equal(update_raw["proUpRegTx"]["version"], 3)
@@ -213,8 +210,7 @@ class MasternodePayoutSharesTest(DashTestFramework):
             fundsAddr=mn.fundsAddr,
         )
         assert service_hash is not None
-        self.bump_mocktime(10 * 60 + 1)
-        self.generate(node, 1, sync_fun=self.no_op)
+        self.bury_tx(node, service_hash)
 
         info = node.protx("info", protx_hash)
         assert_equal(info["state"]["version"], 3)
@@ -252,8 +248,7 @@ class MasternodePayoutSharesTest(DashTestFramework):
         node.sendtoaddress(mn.fundsAddr, 1)
         revoke_hash = mn.revoke(node, submit=True, reason=1, fundsAddr=mn.fundsAddr)
         assert revoke_hash is not None
-        self.bump_mocktime(10 * 60 + 1)
-        self.generate(node, 1, sync_fun=self.no_op)
+        self.bury_tx(node, revoke_hash)
 
         info = node.protx("info", protx_hash)
         assert_equal(info["state"]["version"], 3)

@@ -62,6 +62,11 @@ class EvoNode:
         self.mn.set_params(nodePort=p2p_port(node.index))
         self.node = node
 
+    def bury_tx(self, test: BitcoinTestFramework, node: TestNode, txid: str):
+        test.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
+        chain_tip = test.generate(node, 1)[0]
+        assert_equal(node.getrawtransaction(txid, 1, chain_tip)['confirmations'], 1)
+
     def generate_collateral(self, test: BitcoinTestFramework):
         assert self.mn.nodeIdx is not None
         # Generate enough blocks to cover collateral amount
@@ -70,7 +75,7 @@ class EvoNode:
             test.generate(self.node, 10, sync_fun=test.no_op)
         # Create collateral UTXO
         collateral_txid = self.node.sendmany("", {self.mn.collateral_address: self.mn.get_collateral_value(), self.mn.fundsAddr: 1})
-        self.mn.bury_tx(test, self.mn.nodeIdx, collateral_txid, 1)
+        self.bury_tx(test, self.node, collateral_txid)
         collateral_vout = self.mn.get_collateral_vout(self.node, collateral_txid)
         self.mn.set_params(collateral_txid=collateral_txid, collateral_vout=collateral_vout)
 
@@ -105,7 +110,7 @@ class EvoNode:
         assert protx_output is not None
         # Bury ProTx transaction and check if masternode is online
         self.mn.set_params(proTxHash=protx_output, operator_reward=0)
-        self.mn.bury_tx(test, self.mn.nodeIdx, protx_output, 1)
+        self.bury_tx(test, self.node, protx_output)
         assert_equal(self.is_mn_visible(), True)
         test.log.debug(f"Registered EvoNode with collateral_txid={self.mn.collateral_txid}, collateral_vout={self.mn.collateral_vout}, provider_txid={self.mn.proTxHash}")
         return self.mn.proTxHash
@@ -118,7 +123,7 @@ class EvoNode:
         if (code and msg) or not submit:
             return protx_output
         assert protx_output is not None
-        self.mn.bury_tx(test, self.mn.nodeIdx, protx_output, 1)
+        self.bury_tx(test, self.node, protx_output)
         assert_equal(self.is_mn_visible(), True)
         test.log.debug(f"Updated EvoNode with collateral_txid={self.mn.collateral_txid}, collateral_vout={self.mn.collateral_vout}, provider_txid={self.mn.proTxHash}")
         return protx_output
@@ -140,7 +145,7 @@ class EvoNode:
         raw_tx = self.node.signrawtransactionwithwallet(raw_tx)['hex']
         # Send that transaction, resulting txid is new collateral
         new_collateral_txid = self.node.sendrawtransaction(raw_tx)
-        self.mn.bury_tx(test, self.mn.nodeIdx, new_collateral_txid, 1)
+        self.bury_tx(test, self.node, new_collateral_txid)
         new_collateral_vout = self.mn.get_collateral_vout(self.node, new_collateral_txid)
         old_protx_hash = self.mn.proTxHash
         self.mn.set_params(proTxHash="", collateral_txid=new_collateral_txid, collateral_vout=new_collateral_vout)

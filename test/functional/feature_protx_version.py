@@ -180,9 +180,8 @@ class ProTxVersionTest(DashTestFramework):
         assert_equal(state['version'], 2)
         payout_before = state['payoutAddress']
         node.sendtoaddress(payout_mn.fundsAddr, 1)
-        payout_mn.update_service(node, submit=True, addrs_core_p2p=[f'127.0.0.1:{payout_mn.nodePort}'])
-        self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
-        self.generate(node, 1)
+        upserv_hash = payout_mn.update_service(node, submit=True, addrs_core_p2p=[f'127.0.0.1:{payout_mn.nodePort}'])
+        self.bury_tx(node, upserv_hash)
         state = node.protx('info', payout_mn.proTxHash)['state']
         assert_equal(state['version'], 3)
         assert_equal([p['address'] for p in state['payouts']], [payout_before])
@@ -194,8 +193,7 @@ class ProTxVersionTest(DashTestFramework):
         self.log.info("A v3 ProUpRegTx reusing the basic operator key is accepted, but leaves the "
                       "stored masternode version at 3 even no operator key change took place")
         protx_result = mn.update_registrar(node, submit=True, fundsAddr=mn.fundsAddr)
-        self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
-        tip = self.generate(node, 1)[0]
+        tip = self.bury_tx(node, protx_result)
         assert_equal(node.getrawtransaction(protx_result, 1, tip)['proUpRegTx']['version'], 3)
         assert_equal(node.protx('info', mn.proTxHash)['state']['version'], 3)
 
@@ -208,10 +206,9 @@ class ProTxVersionTest(DashTestFramework):
         legacy_mn.pubKeyOperator = new_operator['public']
         legacy_mn.keyOperator = new_operator['secret']
         migrate_result = legacy_mn.update_registrar(node, submit=True, fundsAddr=legacy_mn.fundsAddr)
-        self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
         assert legacy_mn.nodeIdx is not None
         old_peer_ids = self.get_peer_ids(legacy_mn.nodeIdx)
-        tip = self.generate(node, 1, sync_fun=self.no_op)[0]
+        tip = self.bury_tx(node, migrate_result, sync_fun=self.no_op)
         assert_equal(node.getrawtransaction(migrate_result, 1, tip)['proUpRegTx']['version'], 3)
         assert_equal(node.protx('info', legacy_mn.proTxHash)['state']['version'], 3)
         # Changing the operator key makes every peer drop its existing connections to this
@@ -249,12 +246,11 @@ class ProTxVersionTest(DashTestFramework):
         node.sendtoaddress(surviving_legacy_mn.fundsAddr, 1)
         upserv_hash = surviving_legacy_mn.update_service(node, submit=True,
                                                          addrs_core_p2p=[f'127.0.0.1:{surviving_legacy_mn.nodePort}'])
-        self.bump_mocktime(10 * 60 + 1)
         # Same CMNAuth disconnect as a key rotation: SetStateVersion re-encodes pubKeyOperator, so
         # skip sync_all until the old peers are gone and this node is reconnected.
         assert surviving_legacy_mn.nodeIdx is not None
         old_peer_ids = self.get_peer_ids(surviving_legacy_mn.nodeIdx)
-        tip = self.generate(node, 1, sync_fun=self.no_op)[0]
+        tip = self.bury_tx(node, upserv_hash, sync_fun=self.no_op)
         assert_equal(node.getrawtransaction(upserv_hash, 1, tip)['proUpServTx']['version'], 3)
         state = node.protx('info', surviving_legacy_mn.proTxHash)['state']
         assert_equal(state['version'], 3)  # migrated in place
@@ -276,10 +272,8 @@ class ProTxVersionTest(DashTestFramework):
         self.nodes[0].sendtoaddress(funds_address, 1)
 
         protx_result = revoke_mn.revoke(self.nodes[0], submit=True, reason=1, fundsAddr=funds_address)
-        self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
         old_peer_ids = self.get_peer_ids(node_idx)
-        tip = self.generate(self.nodes[0], 1, sync_fun=self.no_op)[0]
-        assert_equal(self.nodes[0].getrawtransaction(protx_result, 1, tip)['confirmations'], 1)
+        self.bury_tx(self.nodes[0], protx_result, sync_fun=self.no_op)
         # Revoking a MN makes every peer drop its existing connections to it. Wait for that to
         # happen and then reconnect the corresponding node back to let sync_blocks finish
         # correctly.
@@ -296,9 +290,7 @@ class ProTxVersionTest(DashTestFramework):
         self.nodes[0].sendtoaddress(mn.fundsAddr, 1)
 
         protx_result = mn.update_service(self.nodes[0], submit=True, addrs_core_p2p=[f'127.0.0.2:{mn.nodePort}'])
-        self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
-        tip = self.generate(self.nodes[0], 1)[0]
-        assert_equal(self.nodes[0].getrawtransaction(protx_result, 1, tip)['confirmations'], 1)
+        self.bury_tx(self.nodes[0], protx_result)
 
         for node in self.nodes:
             protx_info = node.protx('info', mn.proTxHash)
