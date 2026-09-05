@@ -108,30 +108,30 @@ BASE_SCRIPTS = [
     'mempool_updatefromblock.py',
     'mempool_persist.py --descriptors',
     'p2p_quorum_data.py',
+    'feature_llmq_simplepose.py', # NOTE: needs dash_hash to pass
     'p2p_instantsend.py',
     'feature_protx_version.py',
     'feature_asset_locks.py', # NOTE: needs dash_hash to pass
-    'feature_llmq_connections.py', # NOTE: needs dash_hash to pass
+    'feature_llmq_signing.py', # NOTE: needs dash_hash to pass
     'feature_llmq_is_retroactive.py', # NOTE: needs dash_hash to pass
     'feature_llmq_chainlocks.py', # NOTE: needs dash_hash to pass
-    'feature_llmq_simplepose.py', # NOTE: needs dash_hash to pass
-    'feature_dip3_deterministicmns.py --descriptors', # NOTE: needs dash_hash to pass
     'feature_masternode_payout_shares.py',
-    'feature_llmq_signing.py', # NOTE: needs dash_hash to pass
     'feature_llmq_signing.py --spork21', # NOTE: needs dash_hash to pass
     'feature_llmq_simplepose.py --disable-spork23', # NOTE: needs dash_hash to pass
     'feature_llmq_rotation.py', # NOTE: needs dash_hash to pass
     'feature_llmq_evo.py', # NOTE: needs dash_hash to pass
-    'feature_llmq_is_cl_conflicts.py', # NOTE: needs dash_hash to pass
     'feature_llmq_dkgerrors.py', # NOTE: needs dash_hash to pass
     'feature_llmq_dkg_intake.py', # NOTE: needs dash_hash to pass
     'feature_llmq_singlenode.py', # NOTE: needs dash_hash to pass
+    'feature_llmq_connections.py', # NOTE: needs dash_hash to pass
+    'feature_llmq_is_cl_conflicts.py', # NOTE: needs dash_hash to pass
     'feature_dip4_coinbasemerkleroots.py', # NOTE: needs dash_hash to pass
     'feature_mnehf.py', # NOTE: needs dash_hash to pass
     'feature_masternode_params.py', # NOTE: needs dash_hash to pass
     'feature_governance.py --descriptors',
     'feature_governance_cl.py --descriptors',
     'rpc_verifyislock.py',
+    'feature_dip3_deterministicmns.py --descriptors', # NOTE: needs dash_hash to pass
     'feature_notifications.py',
     # vv Tests less than 60s vv
     'rpc_psbt.py --legacy-wallet',
