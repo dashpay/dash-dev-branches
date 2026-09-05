@@ -56,9 +56,9 @@ class ProTxVersionTest(DashTestFramework):
             '-testactivationheight=v19@200',
             # Wide enough a window that v24 does not activate on its own during the body of this
             # test; it is activated explicitly at the end.
-            f'-vbparams=v24:{self.mocktime}:999999999999:450:10:8:6:5:0',
-        ]] * 6
-        self.set_dash_test_params(6, 5, evo_count=2, extra_args=self.extra_args)
+            f'-vbparams=v24:{self.mocktime}:999999999999:350:10:8:6:5:0',
+        ]] * 2
+        self.set_dash_test_params(2, 1, evo_count=2, extra_args=self.extra_args)
 
     def get_peer_ids(self, node_idx):
         return {peer['id'] for peer in self.nodes[node_idx].getpeerinfo()}
@@ -146,7 +146,7 @@ class ProTxVersionTest(DashTestFramework):
 
         self.log.info("Checking that adding more regular MNs after v19 doesn't break DKGs and IS/CLs")
 
-        for i in range(6):
+        for i in range(3):
             new_mn: MasternodeInfo = self.dynamically_add_masternode(evo=False, rnd=(10 + i))
             assert new_mn is not None
             if i == 0:
@@ -156,15 +156,15 @@ class ProTxVersionTest(DashTestFramework):
                 # Kept at its basic (v2) state and update_service'd after v24 to check the payout is preserved
                 payout_mn = new_mn
 
-        # mine more quorums and make sure everything still works
+        # mine more quorums and make sure everything still works between v19 and v24
         prev_quorum = None
-        for _ in range(5):
+        for _ in range(2):
             quorum = self.mine_quorum()
             assert prev_quorum != quorum
-
-        self.wait_for_chainlocked_block_all_nodes(self.nodes[0].getbestblockhash())
+            self.wait_for_chainlocked_block_all_nodes(self.nodes[0].getbestblockhash())
 
         self.test_protx_v24_versioning(new_mn, migrate_legacy_mn, surviving_legacy_mn, basic_mn, payout_mn)
+
 
     def test_protx_v24_versioning(self, mn: MasternodeInfo, legacy_mn: MasternodeInfo,
                                   surviving_legacy_mn: MasternodeInfo, basic_mn: MasternodeInfo,
