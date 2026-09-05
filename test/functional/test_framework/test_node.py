@@ -118,6 +118,9 @@ class TestNode():
             # threads, and every thread costs ~0.9 MB of thread-local storage (BLS context).
             "-par=2",
             "-rpcthreads=2",
+            # The signature and script execution caches are allocated and zero-filled at startup
+            # whether or not anything is ever cached; 1 MiB still leaves 16384 entries each.
+            "-maxsigcachesize=1",
         ]
         if self.mocktime != 0:
             self.args.append(f"-mocktime={mocktime}")
