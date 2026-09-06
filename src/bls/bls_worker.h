@@ -56,6 +56,7 @@ public:
 
     void Start(int16_t worker_count);
     void Stop();
+    void PushJob(std::function<void()> job);
 
 #ifndef BUILD_BITCOIN_INTERNAL
     bool GenerateContributions(int threshold, Span<CBLSId> ids, BLSVerificationVectorPtr& vvecRet, std::vector<CBLSSecretKey>& skSharesRet);
