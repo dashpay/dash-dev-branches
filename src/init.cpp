@@ -2562,6 +2562,9 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     connOptions.m_peer_connect_timeout = peer_connect_timeout;
     connOptions.socketEventsMode = ::g_socket_events_mode;
     connOptions.m_active_masternode = node.active_ctx != nullptr;
+    // wallets may mix with CoinJoin, which connects to the mixing masternode
+    connOptions.m_masternode_connections = node.active_ctx != nullptr || quorums_watch ||
+                                           node.wallet_loader != nullptr;
 
     // Port to bind to if `-bind=addr` is provided without a `:port` suffix.
     const uint16_t default_bind_port =

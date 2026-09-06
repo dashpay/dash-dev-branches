@@ -4093,10 +4093,11 @@ bool CConnman::Start(CDeterministicMNManager& dmnman, CMasternodeMetaMan& mn_met
             [this, connect = connOptions.m_specified_outgoing, &dmnman] { ThreadOpenConnections(connect, dmnman); });
     }
 
-    // Initiate masternode connections
-    threadOpenMasternodeConnections = std::thread(&util::TraceThread, "mncon", [this, &dmnman, &mn_metaman, &mn_sync] {
-        ThreadOpenMasternodeConnections(dmnman, mn_metaman, mn_sync);
-    });
+    if (m_masternode_connections) {
+        threadOpenMasternodeConnections = std::thread(&util::TraceThread, "mncon", [this, &dmnman, &mn_metaman, &mn_sync] {
+            ThreadOpenMasternodeConnections(dmnman, mn_metaman, mn_sync);
+        });
+    }
 
     // Process messages
     threadMessageHandler = std::thread(&util::TraceThread, "msghand", [this] { ThreadMessageHandler(); });
