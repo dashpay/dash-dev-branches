@@ -207,7 +207,7 @@ bool CSpecialTxProcessor::CheckSpecialTxInner(const CChain* chain, const CTransa
     if (!tx.HasExtraPayloadField())
         return true;
 
-    if (!DeploymentActiveAfter(pindexPrev, m_chainman.GetConsensus(), Consensus::DEPLOYMENT_DIP0003)) {
+    if (!DeploymentActiveAfter(pindexPrev, m_consensus_params, Consensus::DEPLOYMENT_DIP0003)) {
         return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-tx-type-dip3-inactive");
     }
 
@@ -320,8 +320,7 @@ bool CSpecialTxProcessor::RebuildListFromBlock(const CBlock& block, gsl::not_nul
 
     newList.DecreaseScores();
 
-    const bool isMNRewardReallocation{
-        DeploymentActiveAfter(pindexPrev, m_chainman.GetConsensus(), Consensus::DEPLOYMENT_MN_RR)};
+    const bool isMNRewardReallocation{DeploymentActiveAfter(pindexPrev, m_consensus_params, Consensus::DEPLOYMENT_MN_RR)};
     const bool is_v24_deployed{DeploymentActiveAfter(pindexPrev, m_chainman, Consensus::DEPLOYMENT_V24)};
 
     // we skip the coinbase
