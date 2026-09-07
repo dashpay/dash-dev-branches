@@ -234,8 +234,8 @@ bool CSpecialTxProcessor::CheckSpecialTxInner(const CChain* chain, const CTransa
         case TRANSACTION_QUORUM_COMMITMENT:
             return llmq::CheckLLMQCommitment({m_dmnman, m_qsnapman, m_chainman, pindexPrev}, tx, state);
         case TRANSACTION_MNHF_SIGNAL:
-            return chain ? CheckMNHFTx(m_chainman, m_qman, *chain, tx, pindexPrev, state) :
-                           CheckMNHFTx(m_chainman, m_qman, tx, pindexPrev, state);
+            return chain ? CheckMNHFTx(m_blockman, m_qman, *chain, tx, pindexPrev, state) :
+                           CheckMNHFTx(m_blockman, m_qman, tx, pindexPrev, state);
         case TRANSACTION_ASSET_LOCK:
             return CheckAssetLockTx(tx, state, DeploymentActiveAfter(pindexPrev, m_chainman, Consensus::DEPLOYMENT_V24));
         case TRANSACTION_ASSET_UNLOCK:

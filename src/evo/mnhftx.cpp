@@ -105,7 +105,7 @@ bool MNHFTxPayload::IsTriviallyValid(TxValidationState& state) const
 }
 
 template <typename GetQuorum>
-static bool CheckMNHFTxImpl(const ChainstateManager& chainman, GetQuorum&& get_quorum,
+static bool CheckMNHFTxImpl(const node::BlockManager& blockman, GetQuorum&& get_quorum,
                             const CTransaction& tx, const CBlockIndex* pindexPrev, TxValidationState& state)
 {
     if (!tx.IsSpecialTxVersion() || tx.nType != TRANSACTION_MNHF_SIGNAL) {
@@ -126,7 +126,7 @@ static bool CheckMNHFTxImpl(const ChainstateManager& chainman, GetQuorum&& get_q
         return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-mnhf-non-ehf");
     }
 
-    const CBlockIndex* pindexQuorum = WITH_LOCK(::cs_main, return chainman.m_blockman.LookupBlockIndex(mnhfTx.signal.quorumHash));
+    const CBlockIndex* pindexQuorum = WITH_LOCK(::cs_main, return blockman.LookupBlockIndex(mnhfTx.signal.quorumHash));
     if (!pindexQuorum) {
         return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-mnhf-quorum-hash");
     }
@@ -157,19 +157,19 @@ static bool CheckMNHFTxImpl(const ChainstateManager& chainman, GetQuorum&& get_q
     return true;
 }
 
-bool CheckMNHFTx(const ChainstateManager& chainman, const llmq::CQuorumManager& qman,
+bool CheckMNHFTx(const node::BlockManager& blockman, const llmq::CQuorumManager& qman,
                  const CTransaction& tx, const CBlockIndex* pindexPrev, TxValidationState& state)
 {
-    return CheckMNHFTxImpl(chainman, [&](Consensus::LLMQType llmq_type, const uint256& quorum_hash) {
+    return CheckMNHFTxImpl(blockman, [&](Consensus::LLMQType llmq_type, const uint256& quorum_hash) {
         return qman.GetQuorum(llmq_type, quorum_hash);
     }, tx, pindexPrev, state);
 }
 
-bool CheckMNHFTx(const ChainstateManager& chainman, const llmq::CQuorumManager& qman, const CChain& chain,
+bool CheckMNHFTx(const node::BlockManager& blockman, const llmq::CQuorumManager& qman, const CChain& chain,
                  const CTransaction& tx, const CBlockIndex* pindexPrev, TxValidationState& state)
 {
     AssertLockHeld(::cs_main);
-    return CheckMNHFTxImpl(chainman, [&](Consensus::LLMQType llmq_type, const uint256& quorum_hash) NO_THREAD_SAFETY_ANALYSIS {
+    return CheckMNHFTxImpl(blockman, [&](Consensus::LLMQType llmq_type, const uint256& quorum_hash) NO_THREAD_SAFETY_ANALYSIS {
         return qman.GetQuorum(llmq_type, quorum_hash, chain);
     }, tx, pindexPrev, state);
 }

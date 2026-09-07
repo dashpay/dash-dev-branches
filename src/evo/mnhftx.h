@@ -30,6 +30,9 @@ struct RPCResult;
 namespace llmq {
 class CQuorumManager;
 }
+namespace node {
+class BlockManager;
+} // namespace node
 
 // mnhf signal special transaction
 class MNHFTx
@@ -156,8 +159,8 @@ private:
 };
 
 std::optional<uint8_t> extractEHFSignal(const CTransaction& tx);
-bool CheckMNHFTx(const ChainstateManager& chainman, const llmq::CQuorumManager& qman, const CTransaction& tx, const CBlockIndex* pindexPrev, TxValidationState& state);
-bool CheckMNHFTx(const ChainstateManager& chainman, const llmq::CQuorumManager& qman, const CChain& chain,
+bool CheckMNHFTx(const node::BlockManager& blockman, const llmq::CQuorumManager& qman, const CTransaction& tx, const CBlockIndex* pindexPrev, TxValidationState& state);
+bool CheckMNHFTx(const node::BlockManager& blockman, const llmq::CQuorumManager& qman, const CChain& chain,
                  const CTransaction& tx, const CBlockIndex* pindexPrev, TxValidationState& state)
     EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 

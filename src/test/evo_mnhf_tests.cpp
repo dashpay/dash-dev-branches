@@ -74,13 +74,13 @@ BOOST_AUTO_TEST_CASE(verify_mnhf_specialtx_tests)
 
     { // wrong quorum (we don't have any indeed)
         const CTransaction tx{CTransaction(CreateMNHFTx(hash, sig, bit))};
-        CheckMNHFTx(*chainman, qman, CTransaction(tx), pindex, state);
+        CheckMNHFTx(chainman->m_blockman, qman, CTransaction(tx), pindex, state);
         BOOST_CHECK_EQUAL(state.ToString(), "bad-mnhf-quorum-hash");
     }
 
     { // non EHF fork
         const CTransaction tx{CTransaction(CreateMNHFTx(hash, sig, 28))};
-        CheckMNHFTx(*chainman, qman, CTransaction(tx), pindex, state);
+        CheckMNHFTx(chainman->m_blockman, qman, CTransaction(tx), pindex, state);
         BOOST_CHECK_EQUAL(state.ToString(), "bad-mnhf-non-ehf");
     }
 }
