@@ -278,7 +278,7 @@ static ChainstateLoadResult CompleteChainstateInitialization(ChainstateManager& 
         }
     }
 
-    if (!chain_helper->ehf_manager->ForceSignalDBUpdate()) {
+    if (!chain_helper->ehf_manager->ForceSignalDBUpdate(chainman.ActiveTip())) {
         return {ChainstateLoadStatus::FAILURE, _("Error upgrading evo database for EHF")};
     }
 
