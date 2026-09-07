@@ -239,8 +239,8 @@ bool CSpecialTxProcessor::CheckSpecialTxInner(const CChain* chain, const CTransa
         case TRANSACTION_ASSET_LOCK:
             return CheckAssetLockTx(tx, state, DeploymentActiveAfter(pindexPrev, m_chainman, Consensus::DEPLOYMENT_V24));
         case TRANSACTION_ASSET_UNLOCK:
-            return chain ? CheckAssetUnlockTx(m_chainman.m_blockman, m_qman, *chain, tx, pindexPrev, indexes, state) :
-                           CheckAssetUnlockTx(m_chainman.m_blockman, m_qman, tx, pindexPrev, indexes, state);
+            return chain ? CheckAssetUnlockTx(m_blockman, m_qman, *chain, tx, pindexPrev, indexes, state) :
+                           CheckAssetUnlockTx(m_blockman, m_qman, tx, pindexPrev, indexes, state);
         }
     } catch (const std::exception& e) {
         LogPrintf("%s -- failed: %s\n", __func__, e.what());

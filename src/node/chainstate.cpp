@@ -163,8 +163,8 @@ static ChainstateLoadResult CompleteChainstateInitialization(ChainstateManager& 
     // Initialize chain_helper
     chain_helper.reset();
     chain_helper = std::make_unique<CChainstateHelper>(evodb, dmnman, *options.mn_sync, *options.isman, *(llmq_ctx->quorum_block_processor),
-                                                       *(llmq_ctx->qsnapman), chainman, chainman.GetConsensus(), *options.chainlocks,
-                                                       *(llmq_ctx->qman));
+                                                       *(llmq_ctx->qsnapman), chainman, chainman.m_blockman, chainman.GetConsensus(),
+                                                       *options.chainlocks, *(llmq_ctx->qman));
 
     if (options.reindex) {
         pblocktree->WriteReindexing(true);

@@ -38,6 +38,9 @@ class CQuorumBlockProcessor;
 class CQuorumManager;
 class CQuorumSnapshotManager;
 } // namespace llmq
+namespace node {
+class BlockManager;
+} // namespace node
 
 extern RecursiveMutex cs_main; // NOLINT(readability-redundant-declaration)
 
@@ -50,6 +53,7 @@ private:
     llmq::CQuorumBlockProcessor& m_qblockman;
     llmq::CQuorumSnapshotManager& m_qsnapman;
     const ChainstateManager& m_chainman;
+    const node::BlockManager& m_blockman;
     const Consensus::Params& m_consensus_params;
     const chainlock::Chainlocks& m_chainlocks;
     const llmq::CQuorumManager& m_qman;
@@ -57,14 +61,16 @@ private:
 public:
     explicit CSpecialTxProcessor(CCreditPoolManager& cpoolman, CDeterministicMNManager& dmnman, CMNHFManager& mnhfman,
                                  llmq::CQuorumBlockProcessor& qblockman, llmq::CQuorumSnapshotManager& qsnapman,
-                                 const ChainstateManager& chainman, const Consensus::Params& consensus_params,
-                                 const chainlock::Chainlocks& chainlocks, const llmq::CQuorumManager& qman) :
+                                 const ChainstateManager& chainman, const node::BlockManager& blockman,
+                                 const Consensus::Params& consensus_params, const chainlock::Chainlocks& chainlocks,
+                                 const llmq::CQuorumManager& qman) :
         m_cpoolman(cpoolman),
         m_dmnman{dmnman},
         m_mnhfman{mnhfman},
         m_qblockman{qblockman},
         m_qsnapman{qsnapman},
         m_chainman(chainman),
+        m_blockman{blockman},
         m_consensus_params{consensus_params},
         m_chainlocks{chainlocks},
         m_qman{qman}
