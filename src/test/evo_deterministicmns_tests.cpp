@@ -40,6 +40,11 @@
 #include <optional>
 #include <vector>
 
+static bool IsV24Active(const ChainstateManager& chainman) EXCLUSIVE_LOCKS_REQUIRED(::cs_main)
+{
+    return DeploymentActiveAfter(chainman.ActiveChain().Tip(), chainman, Consensus::DEPLOYMENT_V24);
+}
+
 static CMutableTransaction CreateSpendTx(const ChainstateManager& chainman, SimpleUTXOMap& utxos, const CScript& scriptPayout, CAmount amount, const CKey& coinbaseKey)
 {
     CMutableTransaction tx;
@@ -530,7 +535,8 @@ void FuncProUpRegTxV3OnLegacyValid(TestChainSetup& setup)
     {
         LOCK(cs_main);
         BOOST_CHECK(CheckProUpRegTx(CTransaction(tx), chainman.ActiveChain().Tip(), dmnman,
-                                    chainman.ActiveChainstate().CoinsTip(), chainman, val_state, /*check_sigs=*/true));
+                                    chainman.ActiveChainstate().CoinsTip(), chainman.GetConsensus(),
+                                    IsV24Active(chainman), val_state, /*check_sigs=*/true));
     }
     BOOST_CHECK(val_state.IsValid());
 };
@@ -605,7 +611,8 @@ void FuncProUpRegTxV2CannotBypassV3PayoutCollateralReuse(TestChainSetup& setup)
     {
         LOCK(cs_main);
         BOOST_CHECK(!CheckProUpRegTx(CTransaction(tx_upreg), chainman.ActiveChain().Tip(), dmnman,
-                                     chainman.ActiveChainstate().CoinsTip(), chainman, val_state, /*check_sigs=*/true));
+                                     chainman.ActiveChainstate().CoinsTip(), chainman.GetConsensus(),
+                                     IsV24Active(chainman), val_state, /*check_sigs=*/true));
     }
     BOOST_CHECK_EQUAL(val_state.GetRejectReason(), "bad-protx-payee-reuse");
 }
@@ -880,7 +887,8 @@ void FuncProRegTxRejectsInvalidDeserializedExtNetInfo(TestChainSetup& setup)
         {
             LOCK(cs_main);
             BOOST_CHECK(!CheckProRegTx(BuildExtNetInfoProRegTx(std::move(net_info)), chainman.ActiveChain().Tip(),
-                                       dmnman, chainman.ActiveChainstate().CoinsTip(), chainman, state,
+                                       dmnman, chainman.ActiveChainstate().CoinsTip(), chainman.GetConsensus(),
+                                       IsV24Active(chainman), state,
                                        /*check_sigs=*/false));
         }
         BOOST_CHECK_EQUAL(state.GetResult(), TxValidationResult::TX_BAD_SPECIAL);
@@ -946,9 +954,11 @@ void FuncDIP3Protx(TestChainSetup& setup)
         {
             LOCK(cs_main);
             BOOST_REQUIRE(CheckProRegTx(CTransaction(tx), chainman.ActiveChain().Tip(), dmnman,
-                                        chainman.ActiveChainstate().CoinsTip(), chainman, dummy_state, true));
+                                        chainman.ActiveChainstate().CoinsTip(), chainman.GetConsensus(),
+                                        IsV24Active(chainman), dummy_state, true));
             BOOST_REQUIRE(CheckProRegTx(CTransaction(tx2), chainman.ActiveChain().Tip(), dmnman,
-                                        chainman.ActiveChainstate().CoinsTip(), chainman, dummy_state, true));
+                                        chainman.ActiveChainstate().CoinsTip(), chainman.GetConsensus(),
+                                        IsV24Active(chainman), dummy_state, true));
         }
         // But the signature should not verify anymore
         BOOST_REQUIRE(CheckTransactionSignature(tx, coins));
@@ -1055,9 +1065,11 @@ void FuncDIP3Protx(TestChainSetup& setup)
     {
         LOCK(cs_main);
         BOOST_REQUIRE(CheckProUpRegTx(CTransaction(tx), chainman.ActiveChain().Tip(), dmnman,
-                                      chainman.ActiveChainstate().CoinsTip(), chainman, dummy_state, true));
+                                      chainman.ActiveChainstate().CoinsTip(), chainman.GetConsensus(),
+                                      IsV24Active(chainman), dummy_state, true));
         BOOST_REQUIRE(!CheckProUpRegTx(CTransaction(tx2), chainman.ActiveChain().Tip(), dmnman,
-                                       chainman.ActiveChainstate().CoinsTip(), chainman, dummy_state, true));
+                                       chainman.ActiveChainstate().CoinsTip(), chainman.GetConsensus(),
+                                       IsV24Active(chainman), dummy_state, true));
     }
     BOOST_REQUIRE(CheckTransactionSignature(tx, coins));
     BOOST_REQUIRE(!CheckTransactionSignature(tx2, coins));
@@ -1169,7 +1181,8 @@ void FuncProUpServInvalidNType(TestChainSetup& setup)
         TxValidationState check_state;
         {
             LOCK(cs_main);
-            BOOST_CHECK(!CheckProUpServTx(CTransaction(tx), tip_index(), dmnman, chainman, check_state, /*check_sigs=*/true));
+            BOOST_CHECK(!CheckProUpServTx(CTransaction(tx), tip_index(), dmnman, chainman.GetConsensus(),
+                                          IsV24Active(chainman), check_state, /*check_sigs=*/true));
         }
         BOOST_CHECK_EQUAL(check_state.GetRejectReason(), "bad-protx-type");
 
@@ -1194,7 +1207,8 @@ void FuncProUpServInvalidNType(TestChainSetup& setup)
         TxValidationState check_state;
         {
             LOCK(cs_main);
-            BOOST_CHECK(!CheckProUpServTx(CTransaction(tx), tip_index(), dmnman, chainman, check_state, /*check_sigs=*/true));
+            BOOST_CHECK(!CheckProUpServTx(CTransaction(tx), tip_index(), dmnman, chainman.GetConsensus(),
+                                          IsV24Active(chainman), check_state, /*check_sigs=*/true));
         }
         BOOST_CHECK_EQUAL(check_state.GetRejectReason(), "bad-protx-type-mismatch");
         BOOST_CHECK(check_state.GetResult() == TxValidationResult::TX_CONSENSUS);
@@ -1234,7 +1248,8 @@ void FuncProUpServInvalidNType(TestChainSetup& setup)
         TxValidationState check_state;
         {
             LOCK(cs_main);
-            BOOST_CHECK_MESSAGE(CheckProUpServTx(CTransaction(tx), tip_index(), dmnman, chainman, check_state,
+            BOOST_CHECK_MESSAGE(CheckProUpServTx(CTransaction(tx), tip_index(), dmnman, chainman.GetConsensus(),
+                                                 IsV24Active(chainman), check_state,
                                                  /*check_sigs=*/true),
                                 "unexpected rejection: " << check_state.GetRejectReason());
         }
@@ -1903,7 +1918,8 @@ void FuncMigrationRejectedWhenKeySquatted(TestChainV24SignalBeforeV19Setup& setu
         SignTransaction(tx, spent, setup.coinbaseKey);
         TxValidationState st;
         LOCK(cs_main);
-        BOOST_CHECK(!CheckProUpServTx(CTransaction(tx), chainman.ActiveChain().Tip(), dmnman, chainman, st, true));
+        BOOST_CHECK(!CheckProUpServTx(CTransaction(tx), chainman.ActiveChain().Tip(), dmnman, chainman.GetConsensus(),
+                                      IsV24Active(chainman), st, true));
         BOOST_CHECK_EQUAL(st.GetRejectReason(), "bad-protx-dup-key");
     }
 
@@ -1927,7 +1943,8 @@ void FuncMigrationRejectedWhenKeySquatted(TestChainV24SignalBeforeV19Setup& setu
         TxValidationState st;
         LOCK(cs_main);
         BOOST_CHECK(!CheckProUpRegTx(CTransaction(tx), chainman.ActiveChain().Tip(), dmnman,
-                                     chainman.ActiveChainstate().CoinsTip(), chainman, st, true));
+                                     chainman.ActiveChainstate().CoinsTip(), chainman.GetConsensus(),
+                                     IsV24Active(chainman), st, true));
         BOOST_CHECK_EQUAL(st.GetRejectReason(), "bad-protx-dup-key");
     }
 };
@@ -1957,8 +1974,9 @@ void FuncProUpServTxMigratesLegacy(TestChainV24SignalBeforeV19Setup& setup)
     {
         TxValidationState val_state;
         LOCK(cs_main);
-        BOOST_REQUIRE_MESSAGE(CheckProUpServTx(CTransaction(tx), chainman.ActiveChain().Tip(), dmnman, chainman,
-                                               val_state, /*check_sigs=*/true),
+        BOOST_REQUIRE_MESSAGE(CheckProUpServTx(CTransaction(tx), chainman.ActiveChain().Tip(), dmnman,
+                                               chainman.GetConsensus(), IsV24Active(chainman), val_state,
+                                               /*check_sigs=*/true),
                               "migration ProUpServTx rejected: " << val_state.GetRejectReason());
     }
     setup.ProcessBlock({tx});
@@ -2185,10 +2203,12 @@ void FuncSameMnSameBlockVersionCrossingKeyRotation(TestChainV24SignalBeforeV19Se
         LOCK(cs_main);
         TxValidationState s1, s2;
         BOOST_REQUIRE_MESSAGE(CheckProUpRegTx(CTransaction(tx1), chainman.ActiveChain().Tip(), dmnman,
-                                              chainman.ActiveChainstate().CoinsTip(), chainman, s1, true),
+                                              chainman.ActiveChainstate().CoinsTip(), chainman.GetConsensus(),
+                                              IsV24Active(chainman), s1, true),
                               "tx1 rejected standalone: " << s1.GetRejectReason());
         BOOST_REQUIRE_MESSAGE(CheckProUpRegTx(CTransaction(tx2), chainman.ActiveChain().Tip(), dmnman,
-                                              chainman.ActiveChainstate().CoinsTip(), chainman, s2, true),
+                                              chainman.ActiveChainstate().CoinsTip(), chainman.GetConsensus(),
+                                              IsV24Active(chainman), s2, true),
                               "tx2 rejected standalone: " << s2.GetRejectReason());
     }
 
@@ -2291,10 +2311,12 @@ void FuncSameMnSameBlockMigrationConsistent(TestChainV24SignalBeforeV19Setup& se
         LOCK(cs_main);
         TxValidationState s1, s2;
         BOOST_REQUIRE_MESSAGE(CheckProUpRegTx(CTransaction(tx1), chainman.ActiveChain().Tip(), dmnman,
-                                              chainman.ActiveChainstate().CoinsTip(), chainman, s1, true),
+                                              chainman.ActiveChainstate().CoinsTip(), chainman.GetConsensus(),
+                                              IsV24Active(chainman), s1, true),
                               "tx1 rejected standalone: " << s1.GetRejectReason());
         BOOST_REQUIRE_MESSAGE(CheckProUpRegTx(CTransaction(tx2), chainman.ActiveChain().Tip(), dmnman,
-                                              chainman.ActiveChainstate().CoinsTip(), chainman, s2, true),
+                                              chainman.ActiveChainstate().CoinsTip(), chainman.GetConsensus(),
+                                              IsV24Active(chainman), s2, true),
                               "tx2 rejected standalone: " << s2.GetRejectReason());
     }
 
@@ -2493,10 +2515,12 @@ void FuncSameBlockCrossSchemeKeyPairRejected(TestChainV24SignalBeforeV19Setup& s
         LOCK(cs_main);
         TxValidationState s1, s2;
         BOOST_REQUIRE_MESSAGE(CheckProUpRegTx(CTransaction(tx1), chainman.ActiveChain().Tip(), dmnman,
-                                              chainman.ActiveChainstate().CoinsTip(), chainman, s1, true),
+                                              chainman.ActiveChainstate().CoinsTip(), chainman.GetConsensus(),
+                                              IsV24Active(chainman), s1, true),
                               "tx1 rejected standalone: " << s1.GetRejectReason());
         BOOST_REQUIRE_MESSAGE(CheckProUpRegTx(CTransaction(tx2), chainman.ActiveChain().Tip(), dmnman,
-                                              chainman.ActiveChainstate().CoinsTip(), chainman, s2, true),
+                                              chainman.ActiveChainstate().CoinsTip(), chainman.GetConsensus(),
+                                              IsV24Active(chainman), s2, true),
                               "tx2 rejected standalone: " << s2.GetRejectReason());
     }
 
@@ -2602,7 +2626,8 @@ void FuncMempoolRejectsCrossSchemeKeyRace(TestChainV24SignalBeforeV19Setup& setu
         TxValidationState st;
         LOCK(cs_main);
         BOOST_REQUIRE_MESSAGE(CheckProUpRegTx(CTransaction(tx_second), chainman.ActiveChain().Tip(), dmnman,
-                                              chainman.ActiveChainstate().CoinsTip(), chainman, st,
+                                              chainman.ActiveChainstate().CoinsTip(), chainman.GetConsensus(),
+                                              IsV24Active(chainman), st,
                                               /*check_sigs=*/true),
                               "second claim should still pass its consensus check: " << st.GetRejectReason());
     }
@@ -2676,7 +2701,8 @@ void FuncProUpRegTxRejectsCrossSchemeKeyReuse(TestChainV24SignalBeforeV19Setup& 
     auto check_upreg = [&](const CMutableTransaction& tx, TxValidationState& st) {
         LOCK(cs_main);
         return CheckProUpRegTx(CTransaction(tx), chainman.ActiveChain().Tip(), dmnman,
-                               chainman.ActiveChainstate().CoinsTip(), chainman, st, /*check_sigs=*/true);
+                               chainman.ActiveChainstate().CoinsTip(), chainman.GetConsensus(), IsV24Active(chainman),
+                               st, /*check_sigs=*/true);
     };
 
     // MN-A tries to take MN-B's key under the OTHER encoding, via a v1 payload. This is the reverse
@@ -2751,7 +2777,8 @@ void FuncProRegTxRejectsCrossSchemeKeyReuse(TestChainV24SignalBeforeV19Setup& se
     auto check_proreg = [&](const CMutableTransaction& tx, TxValidationState& st) {
         LOCK(cs_main);
         return CheckProRegTx(CTransaction(tx), chainman.ActiveChain().Tip(), dmnman,
-                             chainman.ActiveChainstate().CoinsTip(), chainman, st, /*check_sigs=*/true);
+                             chainman.ActiveChainstate().CoinsTip(), chainman.GetConsensus(), IsV24Active(chainman), st,
+                             /*check_sigs=*/true);
     };
 
     setup.MineToV19();
@@ -2873,8 +2900,8 @@ void FuncPreV24BehaviourUnchanged(TestChainSetup& setup)
     {
         TxValidationState val_state;
         LOCK(cs_main);
-        BOOST_CHECK_MESSAGE(CheckProUpServTx(CTransaction(tx_ups), chainman.ActiveChain().Tip(), dmnman, chainman,
-                                             val_state, /*check_sigs=*/true),
+        BOOST_CHECK_MESSAGE(CheckProUpServTx(CTransaction(tx_ups), chainman.ActiveChain().Tip(), dmnman,
+                                             chainman.GetConsensus(), IsV24Active(chainman), val_state, /*check_sigs=*/true),
                             "pre-v24 v2 ProUpServTx wrongly rejected: " << val_state.GetRejectReason());
     }
     setup.CreateAndProcessBlock({tx_ups}, coinbase_pk);
@@ -2901,7 +2928,8 @@ void FuncPreV24BehaviourUnchanged(TestChainSetup& setup)
         TxValidationState val_state;
         LOCK(cs_main);
         BOOST_CHECK_MESSAGE(CheckProUpRegTx(CTransaction(tx_upreg), chainman.ActiveChain().Tip(), dmnman,
-                                            chainman.ActiveChainstate().CoinsTip(), chainman, val_state,
+                                            chainman.ActiveChainstate().CoinsTip(), chainman.GetConsensus(),
+                                            IsV24Active(chainman), val_state,
                                             /*check_sigs=*/true),
                             "pre-v24 same-key ProUpRegTx wrongly rejected: " << val_state.GetRejectReason());
     }
@@ -2968,7 +2996,8 @@ void FuncStaleSpecialTxDoesNotPoisonTemplate(TestChainV24SignalBeforeV19Setup& s
         TxValidationState val_state;
         LOCK(cs_main);
         BOOST_REQUIRE(!CheckProRegTx(CTransaction(tx_stale), chainman.ActiveChain().Tip(), dmnman,
-                                     chainman.ActiveChainstate().CoinsTip(), chainman, val_state,
+                                     chainman.ActiveChainstate().CoinsTip(), chainman.GetConsensus(),
+                                     IsV24Active(chainman), val_state,
                                      /*check_sigs=*/true));
         BOOST_REQUIRE_EQUAL(val_state.GetRejectReason(), "bad-protx-dup-key");
     }
@@ -3023,7 +3052,8 @@ void FuncProUpRegTxMigratesLegacySameKey(TestChainV24SignalBeforeV19Setup& setup
         {
             LOCK(cs_main);
             BOOST_REQUIRE_MESSAGE(CheckProUpRegTx(CTransaction(tx), chainman.ActiveChain().Tip(), dmnman,
-                                                  chainman.ActiveChainstate().CoinsTip(), chainman, val_state,
+                                                  chainman.ActiveChainstate().CoinsTip(), chainman.GetConsensus(),
+                                                  IsV24Active(chainman), val_state,
                                                   /*check_sigs=*/true),
                                   "same-key migration rejected: " << val_state.GetRejectReason());
         }
@@ -3052,7 +3082,8 @@ void FuncProUpRegTxMigratesLegacySameKey(TestChainV24SignalBeforeV19Setup& setup
         {
             LOCK(cs_main);
             BOOST_REQUIRE_MESSAGE(CheckProUpRegTx(CTransaction(tx), chainman.ActiveChain().Tip(), dmnman,
-                                                  chainman.ActiveChainstate().CoinsTip(), chainman, val_state,
+                                                  chainman.ActiveChainstate().CoinsTip(), chainman.GetConsensus(),
+                                                  IsV24Active(chainman), val_state,
                                                   /*check_sigs=*/true),
                                   "new-key rotation rejected: " << val_state.GetRejectReason());
         }
