@@ -198,32 +198,29 @@ bool CheckCbTxBestChainlock(const CCbTx& cbTx, const CBlockIndex* pindex, const 
     return true;
 }
 
-static bool CheckSpecialTxInner(CDeterministicMNManager& dmnman, llmq::CQuorumSnapshotManager& qsnapman,
-                                const ChainstateManager& chainman, const llmq::CQuorumManager& qman,
-                                const CChain* chain,
-                                const CTransaction& tx, const CBlockIndex* pindexPrev, const CCoinsViewCache& view,
-                                const std::optional<CRangesSet>& indexes, bool check_sigs, TxValidationState& state)
-    EXCLUSIVE_LOCKS_REQUIRED(::cs_main)
+bool CSpecialTxProcessor::CheckSpecialTxInner(const CChain* chain, const CTransaction& tx, const CBlockIndex* pindexPrev,
+                                              const CCoinsViewCache& view, const std::optional<CRangesSet>& indexes,
+                                              bool check_sigs, TxValidationState& state)
 {
     AssertLockHeld(::cs_main);
 
     if (!tx.HasExtraPayloadField())
         return true;
 
-    if (!DeploymentActiveAfter(pindexPrev, chainman.GetConsensus(), Consensus::DEPLOYMENT_DIP0003)) {
+    if (!DeploymentActiveAfter(pindexPrev, m_chainman.GetConsensus(), Consensus::DEPLOYMENT_DIP0003)) {
         return state.Invalid(TxValidationResult::TX_BAD_SPECIAL, "bad-tx-type-dip3-inactive");
     }
 
     try {
         switch (tx.nType) {
         case TRANSACTION_PROVIDER_REGISTER:
-            return CheckProRegTx(tx, pindexPrev, dmnman, view, chainman, state, check_sigs);
+            return CheckProRegTx(tx, pindexPrev, m_dmnman, view, m_chainman, state, check_sigs);
         case TRANSACTION_PROVIDER_UPDATE_SERVICE:
-            return CheckProUpServTx(tx, pindexPrev, dmnman, chainman, state, check_sigs);
+            return CheckProUpServTx(tx, pindexPrev, m_dmnman, m_chainman, state, check_sigs);
         case TRANSACTION_PROVIDER_UPDATE_REGISTRAR:
-            return CheckProUpRegTx(tx, pindexPrev, dmnman, view, chainman, state, check_sigs);
+            return CheckProUpRegTx(tx, pindexPrev, m_dmnman, view, m_chainman, state, check_sigs);
         case TRANSACTION_PROVIDER_UPDATE_REVOKE:
-            return CheckProUpRevTx(tx, pindexPrev, dmnman, chainman, state, check_sigs);
+            return CheckProUpRevTx(tx, pindexPrev, m_dmnman, m_chainman, state, check_sigs);
         case TRANSACTION_COINBASE: {
             if (!tx.IsCoinBase()) {
                 return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-cbtx-invalid");
@@ -235,15 +232,15 @@ static bool CheckSpecialTxInner(CDeterministicMNManager& dmnman, llmq::CQuorumSn
             }
         }
         case TRANSACTION_QUORUM_COMMITMENT:
-            return llmq::CheckLLMQCommitment({dmnman, qsnapman, chainman, pindexPrev}, tx, state);
+            return llmq::CheckLLMQCommitment({m_dmnman, m_qsnapman, m_chainman, pindexPrev}, tx, state);
         case TRANSACTION_MNHF_SIGNAL:
-            return chain ? CheckMNHFTx(chainman, qman, *chain, tx, pindexPrev, state) :
-                           CheckMNHFTx(chainman, qman, tx, pindexPrev, state);
+            return chain ? CheckMNHFTx(m_chainman, m_qman, *chain, tx, pindexPrev, state) :
+                           CheckMNHFTx(m_chainman, m_qman, tx, pindexPrev, state);
         case TRANSACTION_ASSET_LOCK:
-            return CheckAssetLockTx(tx, state, DeploymentActiveAfter(pindexPrev, chainman, Consensus::DEPLOYMENT_V24));
+            return CheckAssetLockTx(tx, state, DeploymentActiveAfter(pindexPrev, m_chainman, Consensus::DEPLOYMENT_V24));
         case TRANSACTION_ASSET_UNLOCK:
-            return chain ? CheckAssetUnlockTx(chainman.m_blockman, qman, *chain, tx, pindexPrev, indexes, state) :
-                           CheckAssetUnlockTx(chainman.m_blockman, qman, tx, pindexPrev, indexes, state);
+            return chain ? CheckAssetUnlockTx(m_chainman.m_blockman, m_qman, *chain, tx, pindexPrev, indexes, state) :
+                           CheckAssetUnlockTx(m_chainman.m_blockman, m_qman, tx, pindexPrev, indexes, state);
         }
     } catch (const std::exception& e) {
         LogPrintf("%s -- failed: %s\n", __func__, e.what());
@@ -256,8 +253,7 @@ static bool CheckSpecialTxInner(CDeterministicMNManager& dmnman, llmq::CQuorumSn
 bool CSpecialTxProcessor::CheckSpecialTx(const CTransaction& tx, const CBlockIndex* pindexPrev, const CCoinsViewCache& view, bool check_sigs, TxValidationState& state)
 {
     AssertLockHeld(::cs_main);
-    return CheckSpecialTxInner(m_dmnman, m_qsnapman, m_chainman, m_qman, nullptr, tx, pindexPrev, view, std::nullopt, check_sigs,
-                               state);
+    return CheckSpecialTxInner(nullptr, tx, pindexPrev, view, std::nullopt, check_sigs, state);
 }
 
 static void HandleQuorumCommitment(const llmq::CFinalCommitment& qc, const std::vector<CDeterministicMNCPtr>& members,
@@ -752,9 +748,8 @@ bool CSpecialTxProcessor::ProcessSpecialTxsInBlock(Chainstate& chainstate, const
             TxValidationState tx_state;
             // At this moment CheckSpecialTx() may fail by 2 possible ways:
             // consensus failures and "TX_BAD_SPECIAL"
-            if (!CheckSpecialTxInner(m_dmnman, m_qsnapman, m_chainman, m_qman, &chainstate.m_chain,
-                                     *ptr_tx, pindex->pprev, view, indexes,
-                                     fCheckCbTxMerkleRoots, tx_state)) {
+            if (!CheckSpecialTxInner(&chainstate.m_chain, *ptr_tx, pindex->pprev, view, indexes, fCheckCbTxMerkleRoots,
+                                     tx_state)) {
                 assert(tx_state.GetResult() == TxValidationResult::TX_CONSENSUS || tx_state.GetResult() == TxValidationResult::TX_BAD_SPECIAL);
                 return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, tx_state.GetRejectReason(),
                                  strprintf("Special Transaction check failed (tx hash %s) %s", ptr_tx->GetHash().ToString(), tx_state.GetDebugMessage()));

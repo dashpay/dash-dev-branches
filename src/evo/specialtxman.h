@@ -20,6 +20,7 @@ class CCoinsViewCache;
 class CCreditPoolManager;
 class CDeterministicMNList;
 class CDeterministicMNManager;
+class CRangesSet;
 class CTransaction;
 class ChainstateManager;
 class Chainstate;
@@ -90,6 +91,9 @@ public:
                               BlockValidationState& state, CDeterministicMNList& mnListRet);
 
 private:
+    bool CheckSpecialTxInner(const CChain* chain, const CTransaction& tx, const CBlockIndex* pindexPrev,
+                             const CCoinsViewCache& view, const std::optional<CRangesSet>& indexes, bool check_sigs,
+                             TxValidationState& state) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
     bool CheckCreditPoolDiffForBlock(const CBlock& block, const CBlockIndex* pindex, const CCbTx& cbTx,
                                      BlockValidationState& state) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 };
