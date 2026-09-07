@@ -369,6 +369,8 @@ bool BlockAssembler::TestPackage(uint64_t packageSize, unsigned int packageSigOp
 // - safe TXs in regard to ChainLocks
 bool BlockAssembler::TestPackageTransactions(const CTxMemPool::setEntries& package) const
 {
+    const bool is_v24_active{
+        DeploymentActiveAfter(m_chainstate.m_chain.Tip(), m_chainstate.m_chainman, Consensus::DEPLOYMENT_V24)};
     for (CTxMemPool::txiter it : package) {
         if (!IsFinalTx(it->GetTx(), nHeight, m_lock_time_cutoff)) {
             return false;
@@ -385,7 +387,7 @@ bool BlockAssembler::TestPackageTransactions(const CTxMemPool::setEntries& packa
         // signature regardless, which is cheap enough here given how rare MNHF signals are.
         if (it->GetTx().IsSpecialTxVersion()) {
             TxValidationState tx_state;
-            if (!m_chain_helper.special_tx->CheckSpecialTx(it->GetTx(), m_chainstate.m_chain.Tip(),
+            if (!m_chain_helper.special_tx->CheckSpecialTx(it->GetTx(), m_chainstate.m_chain.Tip(), is_v24_active,
                                                            m_chainstate.CoinsTip(), /*check_sigs=*/false, tx_state)) {
                 return false;
             }
