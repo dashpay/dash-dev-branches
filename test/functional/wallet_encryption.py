@@ -31,6 +31,7 @@ class WalletEncryptionTest(BitcoinTestFramework):
         # Make sure the wallet isn't encrypted first
         msg = "test message"
         address = self.nodes[0].getnewaddress()
+        self.generatetoaddress(self.nodes[0], 101, address)
         sig = self.nodes[0].signmessage(address, msg)
         assert self.nodes[0].verifymessage(address, sig, msg)
         assert_raises_rpc_error(-15, "Error: running with an unencrypted wallet, but walletpassphrase was called", self.nodes[0].walletpassphrase, 'ff', 1)
@@ -100,7 +101,33 @@ class WalletEncryptionTest(BitcoinTestFramework):
         self.nodes[0].walletpassphrase(passphrase_with_nulls, 999000)
         sig = self.nodes[0].signmessage(address, msg)
         assert self.nodes[0].verifymessage(address, sig, msg)
+        self.nodes[0].keypoolrefill(10)
         self.nodes[0].walletlock()
+
+        self.log.info("Locked and mixing-only wallets must return unsigned send/sendall PSBTs")
+        node = self.nodes[0]
+        destination = node.getnewaddress()
+        for mixing_only in (False, True):
+            if mixing_only:
+                node.walletpassphrase(passphrase_with_nulls, 999000, True)
+            for options in ({}, {"psbt": True}, {"add_to_wallet": False}):
+                for send, recipients in ((node.send, {destination: 1}), (node.sendall, [destination])):
+                    result = send(recipients, options=options)
+                    assert_equal(result["complete"], False)
+                    assert "txid" not in result
+                    assert "hex" not in result
+                    for txin in node.decodepsbt(result["psbt"])["inputs"]:
+                        assert "partial_signatures" not in txin
+                        assert "final_scriptSig" not in txin
+            assert_equal(node.getrawmempool(), [])
+            node.walletlock()
+
+        node.walletpassphrase(passphrase_with_nulls, 999000)
+        for send, recipients in ((node.send, {destination: 1}), (node.sendall, [destination])):
+            result = send(recipients, options={"add_to_wallet": False})
+            assert_equal(result["complete"], True)
+            assert "hex" in result
+        node.walletlock()
 
 
 if __name__ == '__main__':
