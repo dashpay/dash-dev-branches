@@ -2381,9 +2381,11 @@ bool Chainstate::ConnectBlock(const CBlock& block, BlockValidationState& state, 
     blockundo.vtxundo.reserve(block.vtx.size() - 1);
     bool fDIP0001Active_context = DeploymentActiveAt(*pindex, params.GetConsensus(), Consensus::DEPLOYMENT_DIP0001);
 
+    const CAmount blockSubsidy = GetBlockSubsidy(pindex, params.GetConsensus());
+
     // MUST process special txes before updating UTXO to ensure consistency between mempool and block processing
     std::optional<MNListUpdates> mnlist_updates_opt{std::nullopt};
-    if (!m_chain_helper->special_tx->ProcessSpecialTxsInBlock(*this, block, pindex, view, fJustCheck, fScriptChecks, state, mnlist_updates_opt)) {
+    if (!m_chain_helper->special_tx->ProcessSpecialTxsInBlock(*this, block, pindex, view, blockSubsidy, fJustCheck, fScriptChecks, state, mnlist_updates_opt)) {
         return error("ConnectBlock(DASH): ProcessSpecialTxsInBlock for block %s failed with %s",
                      pindex->GetBlockHash().ToString(), state.ToString());
     }
@@ -2526,7 +2528,6 @@ bool Chainstate::ConnectBlock(const CBlock& block, BlockValidationState& state, 
     // DASH : MODIFIED TO CHECK MASTERNODE PAYMENTS AND SUPERBLOCKS
 
     // TODO: resync data (both ways?) and try to reprocess this block later.
-    CAmount blockSubsidy = GetBlockSubsidy(pindex, params.GetConsensus());
     CAmount feeReward = nFees;
     std::string strError;
 
@@ -4846,8 +4847,9 @@ bool Chainstate::RollforwardBlock(const CBlockIndex* pindex, CCoinsViewCache& in
 
     // MUST process special txes before updating UTXO to ensure consistency between mempool and block processing
     BlockValidationState state;
+    const CAmount blockSubsidy = GetBlockSubsidy(pindex, m_chainman.GetConsensus());
     std::optional<MNListUpdates> mnlist_updates_opt{std::nullopt};
-    if (!m_chain_helper->special_tx->ProcessSpecialTxsInBlock(*this, block, pindex, inputs, false /*fJustCheck*/, false /*fScriptChecks*/, state, mnlist_updates_opt)) {
+    if (!m_chain_helper->special_tx->ProcessSpecialTxsInBlock(*this, block, pindex, inputs, blockSubsidy, false /*fJustCheck*/, false /*fScriptChecks*/, state, mnlist_updates_opt)) {
         return error("RollforwardBlock(DASH): ProcessSpecialTxsInBlock for block %s failed with %s",
             pindex->GetBlockHash().ToString(), state.ToString());
     }

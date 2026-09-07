@@ -5,6 +5,7 @@
 #ifndef BITCOIN_EVO_SPECIALTXMAN_H
 #define BITCOIN_EVO_SPECIALTXMAN_H
 
+#include <consensus/amount.h>
 #include <gsl/pointers.h>
 #include <sync.h>
 #include <threadsafety.h>
@@ -72,7 +73,7 @@ public:
 
     bool CheckSpecialTx(const CTransaction& tx, const CBlockIndex* pindexPrev, const CCoinsViewCache& view, bool check_sigs, TxValidationState& state)
         EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
-    bool ProcessSpecialTxsInBlock(Chainstate& chainstate, const CBlock& block, const CBlockIndex* pindex, const CCoinsViewCache& view, bool fJustCheck,
+    bool ProcessSpecialTxsInBlock(Chainstate& chainstate, const CBlock& block, const CBlockIndex* pindex, const CCoinsViewCache& view, CAmount blockSubsidy, bool fJustCheck,
                                   bool fCheckCbTxMerkleRoots, BlockValidationState& state, std::optional<MNListUpdates>& updatesRet)
         EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
     bool UndoSpecialTxsInBlock(const Chainstate& chainstate, const CBlock& block, const CBlockIndex* pindex, std::optional<MNListUpdates>& updatesRet)
@@ -95,7 +96,7 @@ private:
                              const CCoinsViewCache& view, const std::optional<CRangesSet>& indexes, bool check_sigs,
                              TxValidationState& state) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
     bool CheckCreditPoolDiffForBlock(const CBlock& block, const CBlockIndex* pindex, const CCbTx& cbTx,
-                                     BlockValidationState& state) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
+                                     CAmount blockSubsidy, BlockValidationState& state) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 };
 
 /**

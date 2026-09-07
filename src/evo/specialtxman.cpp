@@ -686,7 +686,7 @@ bool CSpecialTxProcessor::RebuildListFromBlock(const CBlock& block, gsl::not_nul
     return true;
 }
 
-bool CSpecialTxProcessor::ProcessSpecialTxsInBlock(Chainstate& chainstate, const CBlock& block, const CBlockIndex* pindex, const CCoinsViewCache& view, bool fJustCheck,
+bool CSpecialTxProcessor::ProcessSpecialTxsInBlock(Chainstate& chainstate, const CBlock& block, const CBlockIndex* pindex, const CCoinsViewCache& view, CAmount blockSubsidy, bool fJustCheck,
                                                    bool fCheckCbTxMerkleRoots, BlockValidationState& state, std::optional<MNListUpdates>& updatesRet)
 {
     AssertLockHeld(::cs_main);
@@ -760,7 +760,7 @@ bool CSpecialTxProcessor::ProcessSpecialTxsInBlock(Chainstate& chainstate, const
         LogPrint(BCLog::BENCHMARK, "      - Loop: %.2fms [%.2fs]\n", 0.001 * (nTime3 - nTime2), nTimeLoop * 0.000001);
 
         if (opt_cbTx.has_value()) {
-            if (!CheckCreditPoolDiffForBlock(block, pindex, *opt_cbTx, state)) {
+            if (!CheckCreditPoolDiffForBlock(block, pindex, *opt_cbTx, blockSubsidy, state)) {
                 return error("CSpecialTxProcessor: CheckCreditPoolDiffForBlock for block %s failed with %s",
                              pindex->GetBlockHash().ToString(), state.ToString());
             }
@@ -922,7 +922,7 @@ bool CSpecialTxProcessor::UndoSpecialTxsInBlock(const Chainstate& chainstate, co
 }
 
 bool CSpecialTxProcessor::CheckCreditPoolDiffForBlock(const CBlock& block, const CBlockIndex* pindex, const CCbTx& cbTx,
-                                                      BlockValidationState& state)
+                                                      CAmount blockSubsidy, BlockValidationState& state)
 {
     AssertLockHeld(::cs_main);
 
@@ -930,7 +930,6 @@ bool CSpecialTxProcessor::CheckCreditPoolDiffForBlock(const CBlock& block, const
     if (!DeploymentActiveAt(*pindex, m_consensus_params, Consensus::DEPLOYMENT_V20)) return true;
 
     try {
-        const CAmount blockSubsidy = GetBlockSubsidy(pindex, m_consensus_params);
         const auto creditPoolDiff = GetCreditPoolDiffForBlock(m_cpoolman, block,
                                                               pindex->pprev, m_consensus_params, blockSubsidy, state);
         if (!creditPoolDiff.has_value()) return false;
