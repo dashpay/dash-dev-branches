@@ -6,7 +6,6 @@
 
 #include <chainlock/chainlock.h>
 #include <chainlock/clsig.h>
-#include <chainlock/handler.h>
 #include <evo/assetlocktx.h>
 #include <evo/cbtx.h>
 #include <evo/creditpool.h>
@@ -20,7 +19,6 @@
 #include <llmq/quorumsman.h>
 #include <llmq/utils.h>
 #include <messagesigner.h>
-#include <util/helpers.h>
 
 #include <chainparams.h>
 #include <coins.h>

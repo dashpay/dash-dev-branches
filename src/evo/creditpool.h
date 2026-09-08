@@ -6,6 +6,7 @@
 #define BITCOIN_EVO_CREDITPOOL_H
 
 #include <consensus/amount.h>
+#include <primitives/transaction.h>
 #include <saltedhasher.h>
 #include <serialize.h>
 #include <sync.h>
@@ -13,8 +14,6 @@
 #include <tinyformat.h>
 #include <unordered_lru_cache.h>
 #include <util/ranges_set.h>
-
-#include <evo/assetlocktx.h>
 
 #include <gsl/pointers.h>
 
