@@ -80,8 +80,9 @@ public:
     bool CheckSpecialTx(const CTransaction& tx, const CBlockIndex* pindexPrev, bool is_v24_active,
                         const CCoinsViewCache& view, bool check_sigs, TxValidationState& state)
         EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
-    bool ProcessSpecialTxsInBlock(Chainstate& chainstate, const CBlock& block, const CBlockIndex* pindex, const CCoinsViewCache& view, CAmount blockSubsidy, bool fJustCheck,
-                                  bool fCheckCbTxMerkleRoots, BlockValidationState& state, std::optional<MNListUpdates>& updatesRet)
+    bool ProcessSpecialTxsInBlock(Chainstate& chainstate, const CBlock& block, const CBlockIndex* pindex, bool is_v24_active,
+                                  const CCoinsViewCache& view, CAmount blockSubsidy, bool fJustCheck, bool fCheckCbTxMerkleRoots,
+                                  BlockValidationState& state, std::optional<MNListUpdates>& updatesRet)
         EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
     bool UndoSpecialTxsInBlock(const Chainstate& chainstate, const CBlock& block, const CBlockIndex* pindex, std::optional<MNListUpdates>& updatesRet)
         EXCLUSIVE_LOCKS_REQUIRED(::cs_main);

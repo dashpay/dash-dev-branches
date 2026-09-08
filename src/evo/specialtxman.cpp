@@ -688,8 +688,10 @@ bool CSpecialTxProcessor::RebuildListFromBlock(const CBlock& block, gsl::not_nul
     return true;
 }
 
-bool CSpecialTxProcessor::ProcessSpecialTxsInBlock(Chainstate& chainstate, const CBlock& block, const CBlockIndex* pindex, const CCoinsViewCache& view, CAmount blockSubsidy, bool fJustCheck,
-                                                   bool fCheckCbTxMerkleRoots, BlockValidationState& state, std::optional<MNListUpdates>& updatesRet)
+bool CSpecialTxProcessor::ProcessSpecialTxsInBlock(Chainstate& chainstate, const CBlock& block, const CBlockIndex* pindex,
+                                                   bool is_v24_active, const CCoinsViewCache& view, CAmount blockSubsidy,
+                                                   bool fJustCheck, bool fCheckCbTxMerkleRoots, BlockValidationState& state,
+                                                   std::optional<MNListUpdates>& updatesRet)
 {
     AssertLockHeld(::cs_main);
 
@@ -741,7 +743,6 @@ bool CSpecialTxProcessor::ProcessSpecialTxsInBlock(Chainstate& chainstate, const
             indexes = std::move(creditPool.indexes);
         }
 
-        const bool is_v24_active{DeploymentActiveAfter(pindex->pprev, m_chainman, Consensus::DEPLOYMENT_V24)};
         for (size_t i = 0; i < block.vtx.size(); ++i) {
             // we validated CCbTx above, starts from the 2nd transaction
             if (i == 0 && block.vtx[i]->nType == TRANSACTION_COINBASE) continue;
