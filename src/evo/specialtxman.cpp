@@ -688,9 +688,10 @@ bool CSpecialTxProcessor::RebuildListFromBlock(const CBlock& block, gsl::not_nul
     return true;
 }
 
-bool CSpecialTxProcessor::ProcessSpecialTxsInBlock(Chainstate& chainstate, const CBlock& block, const CBlockIndex* pindex,
-                                                   bool is_v24_active, const CCoinsViewCache& view, CAmount blockSubsidy,
-                                                   bool fJustCheck, bool fCheckCbTxMerkleRoots, BlockValidationState& state,
+bool CSpecialTxProcessor::ProcessSpecialTxsInBlock(Chainstate& chainstate, const CChain& chain, const CBlock& block,
+                                                   const CBlockIndex* pindex, bool is_v24_active,
+                                                   const CCoinsViewCache& view, CAmount blockSubsidy, bool fJustCheck,
+                                                   bool fCheckCbTxMerkleRoots, BlockValidationState& state,
                                                    std::optional<MNListUpdates>& updatesRet)
 {
     AssertLockHeld(::cs_main);
@@ -751,8 +752,8 @@ bool CSpecialTxProcessor::ProcessSpecialTxsInBlock(Chainstate& chainstate, const
             TxValidationState tx_state;
             // At this moment CheckSpecialTx() may fail by 2 possible ways:
             // consensus failures and "TX_BAD_SPECIAL"
-            if (!CheckSpecialTxInner(&chainstate.m_chain, *ptr_tx, pindex->pprev, is_v24_active, view, indexes,
-                                     fCheckCbTxMerkleRoots, tx_state)) {
+            if (!CheckSpecialTxInner(&chain, *ptr_tx, pindex->pprev, is_v24_active, view, indexes, fCheckCbTxMerkleRoots,
+                                     tx_state)) {
                 assert(tx_state.GetResult() == TxValidationResult::TX_CONSENSUS || tx_state.GetResult() == TxValidationResult::TX_BAD_SPECIAL);
                 return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, tx_state.GetRejectReason(),
                                  strprintf("Special Transaction check failed (tx hash %s) %s", ptr_tx->GetHash().ToString(), tx_state.GetDebugMessage()));
@@ -849,8 +850,7 @@ bool CSpecialTxProcessor::ProcessSpecialTxsInBlock(Chainstate& chainstate, const
             LogPrint(BCLog::BENCHMARK, "      - CalcCbTxMerkleRootQuorums: %.2fms [%.2fs]\n",
                      0.001 * (nTime6_2 - nTime6_1), nTimeMerkleQuorums * 0.000001);
 
-            if (!CheckCbTxBestChainlock(*opt_cbTx, pindex, m_consensus_params, chainstate.m_chain, m_qman,
-                                        m_chainlocks, state)) {
+            if (!CheckCbTxBestChainlock(*opt_cbTx, pindex, m_consensus_params, chain, m_qman, m_chainlocks, state)) {
                 // pass the state returned by the function above
                 return false;
             }
