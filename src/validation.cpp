@@ -2388,9 +2388,19 @@ bool Chainstate::ConnectBlock(const CBlock& block, BlockValidationState& state, 
 
     // MUST process special txes before updating UTXO to ensure consistency between mempool and block processing
     std::optional<MNListUpdates> mnlist_updates_opt{std::nullopt};
-    if (!m_chain_helper->special_tx->ProcessSpecialTxsInBlock(*this, m_chain, block, pindex, is_v24_active, view, blockSubsidy, fJustCheck, fScriptChecks, state, mnlist_updates_opt)) {
+    CDeterministicMNList mn_list;
+    if (!m_chain_helper->special_tx->ProcessSpecialTxsInBlock(*this, m_chain, block, pindex, is_v24_active, view, blockSubsidy, fJustCheck, fScriptChecks, state, mnlist_updates_opt, mn_list)) {
         return error("ConnectBlock(DASH): ProcessSpecialTxsInBlock for block %s failed with %s",
                      pindex->GetBlockHash().ToString(), state.ToString());
+    }
+    if (!fJustCheck) {
+        // Persist the list produced by this chainstate's own connection of
+        // the snapshot base block (no-op for every other block). Snapshot
+        // activation may populate the shared MN-list cache with seeded
+        // state, so completion must not reconstruct this value through that
+        // cache. Before DIP3 activates, mn_list is the independently
+        // computed empty list.
+        RecordBackgroundMNListHash(pindex, mn_list);
     }
 
     const auto time_2_1{SteadyClock::now()};
@@ -4852,10 +4862,12 @@ bool Chainstate::RollforwardBlock(const CBlockIndex* pindex, CCoinsViewCache& in
     const CAmount blockSubsidy = GetBlockSubsidy(pindex, m_chainman.GetConsensus());
     const bool is_v24_active{DeploymentActiveAfter(pindex->pprev, m_chainman, Consensus::DEPLOYMENT_V24)};
     std::optional<MNListUpdates> mnlist_updates_opt{std::nullopt};
-    if (!m_chain_helper->special_tx->ProcessSpecialTxsInBlock(*this, m_chain, block, pindex, is_v24_active, inputs, blockSubsidy, /*fJustCheck=*/false, /*fCheckCbTxMerkleRoots=*/false, state, mnlist_updates_opt)) {
+    CDeterministicMNList mn_list;
+    if (!m_chain_helper->special_tx->ProcessSpecialTxsInBlock(*this, m_chain, block, pindex, is_v24_active, inputs, blockSubsidy, /*fJustCheck=*/false, /*fCheckCbTxMerkleRoots=*/false, state, mnlist_updates_opt, mn_list))
         return error("RollforwardBlock(DASH): ProcessSpecialTxsInBlock for block %s failed with %s",
             pindex->GetBlockHash().ToString(), state.ToString());
     }
+    RecordBackgroundMNListHash(pindex, mn_list);
 
     for (size_t i = 0; i < block.vtx.size(); i++) {
         const CTransactionRef& tx = block.vtx[i];
