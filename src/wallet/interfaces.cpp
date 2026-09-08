@@ -820,7 +820,7 @@ public:
     }
     std::unique_ptr<Handler> handleLockedCoinsChanged(LockedCoinsChangedFn fn) override
     {
-        return MakeHandler(m_wallet->NotifyLockedCoinsChanged.connect(fn));
+        return MakeSignalHandler(m_wallet->NotifyLockedCoinsChanged.connect(fn));
     }
     std::vector<Governance::Object> getGovernanceObjects() override
     {
