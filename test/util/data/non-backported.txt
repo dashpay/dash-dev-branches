@@ -3,6 +3,7 @@ src/active/*.h
 src/batchedlogger.*
 src/bench/blockfilter_index.cpp
 src/bench/bls*.cpp
+src/bench/net_processing.cpp
 src/bls/*.cpp
 src/bls/*.h
 src/cachemap.h

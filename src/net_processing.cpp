@@ -583,7 +583,7 @@ public:
 
     /** Overridden from CValidationInterface. */
     void BlockConnected(const std::shared_ptr<const CBlock>& pblock, const CBlockIndex* pindexConnected) override
-        EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_recent_confirmed_transactions_mutex);
+        EXCLUSIVE_LOCKS_REQUIRED(!m_object_request_mutex, !m_peer_mutex, !m_recent_confirmed_transactions_mutex);
     void BlockDisconnected(const std::shared_ptr<const CBlock> &block, const CBlockIndex* pindex) override
         EXCLUSIVE_LOCKS_REQUIRED(!m_recent_confirmed_transactions_mutex);
     void UpdatedBlockTip(const CBlockIndex *pindexNew, const CBlockIndex *pindexFork, bool fInitialDownload) override
@@ -594,12 +594,15 @@ public:
         EXCLUSIVE_LOCKS_REQUIRED(!m_most_recent_block_mutex);
 
     /** Implement NetEventsInterface */
-    void InitializeNode(CNode& node, ServiceFlags our_services) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
-    void FinalizeNode(const CNode& node) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
+    void InitializeNode(CNode& node, ServiceFlags our_services) override
+        EXCLUSIVE_LOCKS_REQUIRED(!m_object_request_mutex, !m_peer_mutex);
+    void FinalizeNode(const CNode& node) override EXCLUSIVE_LOCKS_REQUIRED(!m_object_request_mutex, !m_peer_mutex);
     bool ProcessMessages(CNode* pfrom, std::atomic<bool>& interrupt) override
-        EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_recent_confirmed_transactions_mutex, !m_most_recent_block_mutex, g_msgproc_mutex);
+        EXCLUSIVE_LOCKS_REQUIRED(!m_object_request_mutex, !m_peer_mutex, !m_recent_confirmed_transactions_mutex,
+                                 !m_most_recent_block_mutex, g_msgproc_mutex);
     bool SendMessages(CNode* pto) override
-        EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_recent_confirmed_transactions_mutex, !m_most_recent_block_mutex, g_msgproc_mutex);
+        EXCLUSIVE_LOCKS_REQUIRED(!m_object_request_mutex, !m_peer_mutex, !m_recent_confirmed_transactions_mutex,
+                                 !m_most_recent_block_mutex, g_msgproc_mutex);
 
     /** Implement PeerManager */
     void StartScheduledTasks(CScheduler& scheduler) override;
@@ -619,10 +622,11 @@ public:
     void UnitTestMisbehaving(NodeId peer_id, int howmuch) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex) { Misbehaving(*Assert(GetPeerRef(peer_id)), howmuch, ""); };
     void ProcessMessage(CNode& pfrom, const std::string& msg_type, CDataStream& vRecv,
                         const std::chrono::microseconds time_received, const std::atomic<bool>& interruptMsgProc) override
-        EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_recent_confirmed_transactions_mutex, !m_most_recent_block_mutex, g_msgproc_mutex);
+        EXCLUSIVE_LOCKS_REQUIRED(!m_object_request_mutex, !m_peer_mutex, !m_recent_confirmed_transactions_mutex,
+                                 !m_most_recent_block_mutex, g_msgproc_mutex);
     void UpdateLastBlockAnnounceTime(NodeId node, int64_t time_in_seconds) override;
     bool IsBanned(NodeId pnode) override EXCLUSIVE_LOCKS_REQUIRED(cs_main, !m_peer_mutex);
-    size_t GetRequestedObjectCount(NodeId nodeid) const override EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
+    size_t GetRequestedObjectCount(NodeId nodeid) const override EXCLUSIVE_LOCKS_REQUIRED(!m_object_request_mutex);
 
     /** Implements external handlers logic */
     void AddExtraHandler(std::unique_ptr<NetHandler>&& handler) override;
@@ -635,10 +639,13 @@ public:
     /** Implement PeerManagerInternal */
     void PeerMisbehaving(const NodeId pnode, const int howmuch, const std::string& message = "") override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
     bool PeerIsBanned(const NodeId node_id) override EXCLUSIVE_LOCKS_REQUIRED(cs_main, !m_peer_mutex);
-    void PeerEraseObjectRequest(const NodeId nodeid, const CInv& inv) override EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
-    bool PeerConsumeObjectRequest(NodeId nodeid, const CInv& inv) override EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
-    GetDataResponse PeerConsumeGetDataResponse(NodeId nodeid, const CInv& inv) override EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
-    void PeerForgetObjectRequest(const CInv& inv) override EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
+    void PeerEraseObjectRequest(const NodeId nodeid, const CInv& inv) override
+        EXCLUSIVE_LOCKS_REQUIRED(!m_object_request_mutex, ::cs_main);
+    bool PeerConsumeObjectRequest(NodeId nodeid, const CInv& inv) override
+        EXCLUSIVE_LOCKS_REQUIRED(!m_object_request_mutex, ::cs_main);
+    GetDataResponse PeerConsumeGetDataResponse(NodeId nodeid, const CInv& inv) override
+        EXCLUSIVE_LOCKS_REQUIRED(!m_object_request_mutex, ::cs_main);
+    void PeerForgetObjectRequest(const CInv& inv) override EXCLUSIVE_LOCKS_REQUIRED(!m_object_request_mutex, ::cs_main);
     void PeerPushInventory(NodeId nodeid, const CInv& inv) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
     void PeerRelayInv(const CInv& inv) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
     void PeerRelayInvFiltered(const CInv& inv, const CTransaction& relatedTx) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
@@ -646,15 +653,18 @@ public:
     void PeerRelayDSQ(const CCoinJoinQueue& queue) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
     void PeerRelayTransaction(const uint256& txid) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
     void PeerRelayRecoveredSig(const llmq::CRecoveredSig& sig, bool proactive_relay) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
-    void PeerAskPeersForTransaction(const uint256& txid) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
-    size_t PeerGetRequestedObjectCount(NodeId nodeid) const override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, ::cs_main);
-    void PeerPostProcessMessage(MessageProcessingResult&& ret) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
+    void PeerAskPeersForTransaction(const uint256& txid) override
+        EXCLUSIVE_LOCKS_REQUIRED(!m_object_request_mutex, !m_peer_mutex);
+    size_t PeerGetRequestedObjectCount(NodeId nodeid) const override
+        EXCLUSIVE_LOCKS_REQUIRED(!m_object_request_mutex, !m_peer_mutex);
+    void PeerPostProcessMessage(MessageProcessingResult&& ret) override
+        EXCLUSIVE_LOCKS_REQUIRED(!m_object_request_mutex, !m_peer_mutex);
 
 private:
     void _RelayTransaction(const uint256& txid) EXCLUSIVE_LOCKS_REQUIRED(cs_main, !m_peer_mutex);
 
     /** Ask peers that have a transaction in their inventory to relay it to us. */
-    void AskPeersForTransaction(const uint256& txid) EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
+    void AskPeersForTransaction(const uint256& txid) EXCLUSIVE_LOCKS_REQUIRED(!m_object_request_mutex, !m_peer_mutex);
 
     /** Relay inventories to peers that find it relevant */
     void RelayInvFiltered(const CInv& inv, const CTransaction& relatedTx) EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
@@ -668,14 +678,15 @@ private:
     /** Register with m_object_request that an inv has been received from a peer, computing the
      *  request delay from the peer's preferredness and in-flight load. */
     void AddObjectAnnouncement(const CNode& node, const CInv& inv, std::chrono::microseconds current_time)
-        EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
+        EXCLUSIVE_LOCKS_REQUIRED(!m_object_request_mutex, ::cs_main);
 
     /** Delete all announcements of a transaction across all peers, under both inv types it may
      *  have been announced with (MSG_TX and MSG_DSTX). */
-    void ForgetTx(const uint256& txid) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
+    void ForgetTx(const uint256& txid) EXCLUSIVE_LOCKS_REQUIRED(!m_object_request_mutex, ::cs_main);
 
     /** Helper to process result of external handlers of message */
-    void PostProcessMessage(MessageProcessingResult&& ret, NodeId node) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
+    void PostProcessMessage(MessageProcessingResult&& ret, NodeId node) override
+        EXCLUSIVE_LOCKS_REQUIRED(!m_object_request_mutex, !m_peer_mutex);
 
     /** Consider evicting an outbound peer based on the amount of time they've been behind our tip */
     void ConsiderEviction(CNode& pto, Peer& peer, std::chrono::seconds time_in_seconds) EXCLUSIVE_LOCKS_REQUIRED(cs_main, g_msgproc_mutex);
@@ -745,8 +756,7 @@ private:
      *                     reconsidered.
      * @return             True if there are still orphans in this peer's work set.
      */
-    bool ProcessOrphanTx(NodeId node_id)
-        EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, cs_main);
+    bool ProcessOrphanTx(NodeId node_id) EXCLUSIVE_LOCKS_REQUIRED(!m_object_request_mutex, !m_peer_mutex, cs_main);
     /** Process a single headers message from a peer. */
     void ProcessHeadersMessage(CNode& pfrom, Peer& peer,
                                const std::vector<CBlockHeader>& headers,
@@ -1095,8 +1105,10 @@ private:
 
     /** Tracks announced inventories (transactions and all Dash-specific object types), and which
      *  peer to request them from next. All policy (preferredness, delays, per-type expiry) is
-     *  decided by the callers; see AddObjectAnnouncement and the getdata section of SendMessages. */
-    TxRequestTracker m_object_request GUARDED_BY(::cs_main);
+     *  decided by the callers; see AddObjectAnnouncement and the getdata section of SendMessages.
+     *  Acquire cs_main before m_object_request_mutex when both are needed. */
+    mutable Mutex m_object_request_mutex;
+    TxRequestTracker m_object_request GUARDED_BY(m_object_request_mutex);
 
     void AddToCompactExtraTransactions(const CTransactionRef& tx) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex);
 
@@ -1616,6 +1628,7 @@ void PeerManagerImpl::AddObjectAnnouncement(const CNode& node, const CInv& inv, 
     const CNodeState* state = State(node.GetId());
     if (state == nullptr) return;
 
+    LOCK(m_object_request_mutex);
     if (m_object_request.Count(node.GetId()) >= MAX_PEER_OBJECT_ANNOUNCEMENTS) {
         // Too many queued announcements from this peer
         return;
@@ -1642,13 +1655,14 @@ void PeerManagerImpl::AddObjectAnnouncement(const CNode& node, const CInv& inv, 
 void PeerManagerImpl::ForgetTx(const uint256& txid)
 {
     AssertLockHeld(cs_main);
+    LOCK(m_object_request_mutex);
     m_object_request.ForgetTxHash(CInv(MSG_TX, txid));
     m_object_request.ForgetTxHash(CInv(MSG_DSTX, txid));
 }
 
 size_t PeerManagerImpl::GetRequestedObjectCount(NodeId nodeid) const
 {
-    AssertLockHeld(cs_main);
+    LOCK(m_object_request_mutex);
     return m_object_request.Count(nodeid);
 }
 
@@ -1711,7 +1725,7 @@ void PeerManagerImpl::InitializeNode(CNode& node, ServiceFlags our_services) {
     {
         LOCK(cs_main);
         m_node_states.emplace_hint(m_node_states.end(), std::piecewise_construct, std::forward_as_tuple(nodeid), std::forward_as_tuple(node.IsInboundConn()));
-        assert(m_object_request.Count(nodeid) == 0);
+        assert(WITH_LOCK(m_object_request_mutex, return m_object_request.Count(nodeid)) == 0);
     }
     PeerRef peer = std::make_shared<Peer>(nodeid, our_services);
     {
@@ -1777,7 +1791,7 @@ void PeerManagerImpl::FinalizeNode(const CNode& node) {
         }
     }
     m_orphanage.EraseForPeer(nodeid);
-    m_object_request.DisconnectedPeer(nodeid);
+    WITH_LOCK(m_object_request_mutex, m_object_request.DisconnectedPeer(nodeid));
     if (m_txreconciliation) m_txreconciliation->ForgetPeer(nodeid);
     m_num_preferred_download_peers -= state->fPreferredDownload;
     m_peers_downloading_from -= (!state->vBlocksInFlight.empty());
@@ -1794,7 +1808,7 @@ void PeerManagerImpl::FinalizeNode(const CNode& node) {
         assert(m_peers_downloading_from == 0);
         assert(m_outbound_peers_with_protect_from_disconnect == 0);
         assert(m_orphanage.Size() == 0);
-        assert(m_object_request.Size() == 0);
+        assert(WITH_LOCK(m_object_request_mutex, return m_object_request.Size()) == 0);
     }
     } // cs_main
 
@@ -2450,7 +2464,8 @@ void PeerManagerImpl::AskPeersForTransaction(const uint256& txid)
             LogPrintf("PeerManagerImpl::%s -- txid=%s: asking other peer %d for correct TX\n", __func__,
                       txid.ToString(), peer->m_id);
 
-            m_object_request.ReceivedInv(peer->m_id, CInv(MSG_TX, txid), /*preferred=*/true, current_time);
+            WITH_LOCK(m_object_request_mutex,
+                      m_object_request.ReceivedInv(peer->m_id, CInv(MSG_TX, txid), /*preferred=*/true, current_time));
         }
     }
 }
@@ -3750,7 +3765,7 @@ void PeerManagerImpl::PostProcessMessage(MessageProcessingResult&& result, NodeI
         if (peer) Misbehaving(*peer, result.m_error->score, result.m_error->message);
     }
     if (result.m_to_erase) {
-        WITH_LOCK(cs_main, m_object_request.ReceivedResponse(node, result.m_to_erase.value()));
+        WITH_LOCK(m_object_request_mutex, m_object_request.ReceivedResponse(node, result.m_to_erase.value()));
     }
     for (const auto& tx : result.m_transactions) {
         WITH_LOCK(cs_main, _RelayTransaction(tx));
@@ -3758,7 +3773,7 @@ void PeerManagerImpl::PostProcessMessage(MessageProcessingResult&& result, NodeI
     for (const auto& inv : result.m_inventory) {
         // An inv being relayed is available locally, so there is no need to request it from
         // anyone anymore.
-        WITH_LOCK(cs_main, m_object_request.ForgetTxHash(inv));
+        WITH_LOCK(m_object_request_mutex, m_object_request.ForgetTxHash(inv));
         RelayInv(inv);
     }
 }
@@ -4813,6 +4828,7 @@ void PeerManagerImpl::ProcessMessage(
             // A MSG_TX request may be answered with a DSTX message and vice versa (a getdata for
             // either type serves the underlying transaction), so complete whichever announcement
             // type the request was tracked under.
+            LOCK(m_object_request_mutex);
             m_object_request.ReceivedResponse(pfrom.GetId(), CInv(MSG_TX, txid));
             m_object_request.ReceivedResponse(pfrom.GetId(), CInv(MSG_DSTX, txid));
         }
@@ -5601,13 +5617,13 @@ void PeerManagerImpl::ProcessMessage(
 
         uint256 hash = spork.GetHash();
         CInv spork_inv{MSG_SPORK, hash};
-        WITH_LOCK(::cs_main, m_object_request.ReceivedResponse(pfrom.GetId(), spork_inv));
+        WITH_LOCK(m_object_request_mutex, m_object_request.ReceivedResponse(pfrom.GetId(), spork_inv));
         if (!m_sporkman.IsValidSpork(spork)) {
             Misbehaving(*peer, 100, strprintf("invalid spork received. peer=%d", pfrom.GetId()));
             return;
         }
         if (m_sporkman.ProcessSpork(spork, strprintf(" peer=%d", pfrom.GetId()))) {
-            WITH_LOCK(::cs_main, m_object_request.ForgetTxHash(spork_inv));
+            WITH_LOCK(m_object_request_mutex, m_object_request.ForgetTxHash(spork_inv));
             RelayInv(spork_inv);
         }
         return;
@@ -5655,7 +5671,7 @@ void PeerManagerImpl::ProcessMessage(
             return;
         }
 
-        LOCK(cs_main);
+        LOCK(m_object_request_mutex);
         for (CInv &inv : vInv) {
             if (inv.IsKnownType()) {
                 // If we receive a NOTFOUND message for an inv we requested, mark the announcement
@@ -6232,6 +6248,7 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
 
     MaybeSendAddr(*pto, *peer, current_time);
 
+    std::vector<CInv> vGetData;
     {
         LOCK(cs_main);
 
@@ -6717,7 +6734,6 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
         //
         // Message: getdata (blocks)
         //
-        std::vector<CInv> vGetData;
         if (CanServeBlocks(*peer) && pto->CanRelay() && ((sync_blocks_and_headers_from_peer && !IsLimitedPeer(*peer)) || !m_chainman.ActiveChainstate().IsInitialBlockDownload()) && state.vBlocksInFlight.size() < MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
             std::vector<const CBlockIndex*> vToDownload;
             NodeId staller = -1;
@@ -6735,49 +6751,65 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
                 }
             }
         }
+    } // release cs_main
 
-        //
-        // Message: getdata (non-blocks)
-        //
+    //
+    // Message: getdata (non-blocks)
+    //
 
-        // DASH unlike Bitcoin, this loop requests all Dash-specific object types too. The request
-        // expiry doubles as the fallback-to-another-peer trigger, so time-sensitive object types
-        // use a shorter per-type interval (see GetObjectInterval).
-        std::vector<std::pair<NodeId, CInv>> expired;
-        auto requestable = m_object_request.GetRequestable(pto->GetId(), current_time, &expired);
-        for (const auto& entry : expired) {
-            LogPrint(BCLog::NET, "timeout of inflight object %s from peer=%d\n", entry.second.ToString(), entry.first);
-        }
+    // DASH unlike Bitcoin, this loop requests all Dash-specific object types too. The request
+    // expiry doubles as the fallback-to-another-peer trigger, so time-sensitive object types
+    // use a shorter per-type interval (see GetObjectInterval).
+    std::vector<std::pair<NodeId, CInv>> expired;
+    auto requestable = WITH_LOCK(m_object_request_mutex,
+                                 return m_object_request.GetRequestable(pto->GetId(), current_time, &expired));
+    for (const auto& entry : expired) {
+        LogPrint(BCLog::NET, "timeout of inflight object %s from peer=%d\n", entry.second.ToString(), entry.first);
+    }
+    // Availability checks need cs_main, tracker updates need m_object_request_mutex. Take each
+    // once for the whole batch rather than once per inventory.
+    std::vector<CInv> requested;
+    std::vector<CInv> already_have;
+    {
+        LOCK(cs_main);
+        CNodeState& state{*Assert(State(pto->GetId()))};
         for (const CInv& inv : requestable) {
-            if (!AlreadyHave(inv)) {
-                LogPrint(BCLog::NET, "Requesting %s peer=%d\n", inv.ToString(), pto->GetId());
-                vGetData.push_back(inv);
-                if (vGetData.size() >= MAX_GETDATA_SZ) {
-                    m_connman.PushMessage(pto, msgMaker.Make(NetMsgType::GETDATA, vGetData));
-                    vGetData.clear();
-                }
-                m_object_request.RequestedTx(pto->GetId(), inv, current_time + GetObjectInterval(inv.type));
-                if (IsGetDataOnlyObject(inv.type)) {
-                    // Remember that we asked, so that an answer arriving after the tracker entry is
-                    // gone -- expired, or erased because the object turned up elsewhere -- is not
-                    // mistaken for an unsolicited push. See GetDataResponse.
-                    state.m_recent_object_requests.insert(inv.hash,
-                                                          RequestedObject{inv.type, current_time});
-                }
-            } else {
+            if (AlreadyHave(inv)) {
                 // We have already seen this object, no need to download. This is for belated
                 // announcements of objects which arrived via another peer; the tracker has no
                 // direct means to remove them once the object is received elsewhere.
-                m_object_request.ForgetTxHash(inv);
+                already_have.push_back(inv);
+                continue;
+            }
+            LogPrint(BCLog::NET, "Requesting %s peer=%d\n", inv.ToString(), pto->GetId());
+            vGetData.push_back(inv);
+            requested.push_back(inv);
+            if (vGetData.size() >= MAX_GETDATA_SZ) {
+                m_connman.PushMessage(pto, msgMaker.Make(NetMsgType::GETDATA, vGetData));
+                vGetData.clear();
+            }
+            if (IsGetDataOnlyObject(inv.type)) {
+                // Remember that we asked, so that an answer arriving after the tracker entry is
+                // gone -- expired, or erased because the object turned up elsewhere -- is not
+                // mistaken for an unsolicited push. See GetDataResponse.
+                state.m_recent_object_requests.insert(inv.hash, RequestedObject{inv.type, current_time});
             }
         }
-
-
-        if (!vGetData.empty()) {
-            m_connman.PushMessage(pto, msgMaker.Make(NetMsgType::GETDATA, vGetData));
-            LogPrint(BCLog::NET, "SendMessages -- GETDATA -- pushed size = %lu peer=%d\n", vGetData.size(), pto->GetId());
+    }
+    {
+        LOCK(m_object_request_mutex);
+        for (const CInv& inv : requested) {
+            m_object_request.RequestedTx(pto->GetId(), inv, current_time + GetObjectInterval(inv.type));
         }
-    } // release cs_main
+        for (const CInv& inv : already_have) {
+            m_object_request.ForgetTxHash(inv);
+        }
+    }
+
+    if (!vGetData.empty()) {
+        m_connman.PushMessage(pto, msgMaker.Make(NetMsgType::GETDATA, vGetData));
+        LogPrint(BCLog::NET, "SendMessages -- GETDATA -- pushed size = %lu peer=%d\n", vGetData.size(), pto->GetId());
+    }
     return true;
 }
 
@@ -6797,18 +6829,18 @@ void PeerManagerImpl::PeerEraseObjectRequest(const NodeId nodeid, const CInv& in
     // Completing only this peer's announcement is deliberate: an invalid or unusable object must
     // not stop us from fetching it from honest peers. Cleanup across peers happens once the object
     // is accepted and AlreadyHave(inv) turns true.
-    m_object_request.ReceivedResponse(nodeid, inv);
+    WITH_LOCK(m_object_request_mutex, m_object_request.ReceivedResponse(nodeid, inv));
 }
 
 bool PeerManagerImpl::PeerConsumeObjectRequest(NodeId nodeid, const CInv& inv)
 {
-    return m_object_request.ReceivedResponse(nodeid, inv);
+    return WITH_LOCK(m_object_request_mutex, return m_object_request.ReceivedResponse(nodeid, inv));
 }
 
 GetDataResponse PeerManagerImpl::PeerConsumeGetDataResponse(NodeId nodeid, const CInv& inv)
 {
     CNodeState* state = State(nodeid);
-    if (m_object_request.ReceivedRequestedResponse(nodeid, inv)) {
+    if (WITH_LOCK(m_object_request_mutex, return m_object_request.ReceivedRequestedResponse(nodeid, inv))) {
         // Answered on time. Spend the late-answer grace too, so the GETDATA cannot also pay for a
         // replay of the same payload.
         if (state != nullptr) state->m_recent_object_requests.erase(inv.hash);
@@ -6838,7 +6870,7 @@ GetDataResponse PeerManagerImpl::PeerConsumeGetDataResponse(NodeId nodeid, const
 
 void PeerManagerImpl::PeerForgetObjectRequest(const CInv& inv)
 {
-    m_object_request.ForgetTxHash(inv);
+    WITH_LOCK(m_object_request_mutex, m_object_request.ForgetTxHash(inv));
 }
 
 void PeerManagerImpl::PeerPushInventory(NodeId nodeid, const CInv& inv)

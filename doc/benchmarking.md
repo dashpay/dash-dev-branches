@@ -53,6 +53,17 @@ More benchmarks are needed for, in no particular order:
 - Cuckoo Cache
 - P2P throughput
 
+Inventory processing
+--------------------
+
+`InventoryBatch100` and `InventoryBatch50000` exercise the peer-manager INV,
+GETDATA scheduling, and NOTFOUND paths without sockets. They use spork
+inventories whose hashes are absent locally and clear the request state after
+every iteration. Use an optimized build to measure CPU cost; debug builds
+additionally enable expensive container and lock-order checks.
+
+    src/bench/bench_dash -filter='InventoryBatch.*' -min-time=5000
+
 Going Further
 --------------------
 
