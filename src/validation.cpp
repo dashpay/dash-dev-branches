@@ -2034,8 +2034,8 @@ DisconnectResult Chainstate::DisconnectBlock(const CBlock& block, const CBlockIn
         return DISCONNECT_FAILED;
     }
 
-    std::optional<MNListUpdates> mnlist_updates_opt{std::nullopt};
-    if (!m_chain_helper->special_tx->UndoSpecialTxsInBlock(*this, block, pindex, mnlist_updates_opt)) {
+    MNListUpdates mnlist_updates;
+    if (!m_chain_helper->special_tx->UndoSpecialTxsInBlock(*this, block, pindex, mnlist_updates)) {
         error("DisconnectBlock(): UndoSpecialTxsInBlock failed");
         return DISCONNECT_FAILED;
     }
@@ -2093,10 +2093,9 @@ DisconnectResult Chainstate::DisconnectBlock(const CBlock& block, const CBlockIn
     view.SetBestBlock(pindex->pprev->GetBlockHash());
     m_evoDb.WriteBestBlock(EvoDbIdentity(), pindex->pprev->GetBlockHash());
 
-    if (this == &m_chainman.ActiveChainstate() && mnlist_updates_opt.has_value()) {
-        auto& mnlu = mnlist_updates_opt.value();
-        GetMainSignals().NotifyMasternodeListChanged(true, mnlu.old_list, mnlu.diff);
-        uiInterface.NotifyMasternodeListChanged(mnlu.new_list, pindex->pprev);
+    if (this == &m_chainman.ActiveChainstate() && mnlist_updates.diff.HasChanges()) {
+        GetMainSignals().NotifyMasternodeListChanged(true, mnlist_updates.old_list, mnlist_updates.diff);
+        uiInterface.NotifyMasternodeListChanged(mnlist_updates.new_list, pindex->pprev);
     }
 
     auto finish = Now<SteadyMilliseconds>();
@@ -2387,9 +2386,8 @@ bool Chainstate::ConnectBlock(const CBlock& block, BlockValidationState& state, 
     const bool is_v24_active{DeploymentActiveAfter(pindex->pprev, m_chainman, Consensus::DEPLOYMENT_V24)};
 
     // MUST process special txes before updating UTXO to ensure consistency between mempool and block processing
-    std::optional<MNListUpdates> mnlist_updates_opt{std::nullopt};
-    CDeterministicMNList mn_list;
-    if (!m_chain_helper->special_tx->ProcessSpecialTxsInBlock(*this, m_chain, block, pindex, is_v24_active, view, blockSubsidy, fJustCheck, fScriptChecks, state, mnlist_updates_opt, mn_list)) {
+    MNListUpdates mnlist_updates;
+    if (!m_chain_helper->special_tx->ProcessSpecialTxsInBlock(*this, m_chain, block, pindex, is_v24_active, view, blockSubsidy, fJustCheck, fScriptChecks, state, mnlist_updates)) {
         return error("ConnectBlock(DASH): ProcessSpecialTxsInBlock for block %s failed with %s",
                      pindex->GetBlockHash().ToString(), state.ToString());
     }
@@ -2398,9 +2396,9 @@ bool Chainstate::ConnectBlock(const CBlock& block, BlockValidationState& state, 
         // the snapshot base block (no-op for every other block). Snapshot
         // activation may populate the shared MN-list cache with seeded
         // state, so completion must not reconstruct this value through that
-        // cache. Before DIP3 activates, mn_list is the independently
+        // cache. Before DIP3 activates, new_list is the independently
         // computed empty list.
-        RecordBackgroundMNListHash(pindex, mn_list);
+        RecordBackgroundMNListHash(pindex, mnlist_updates.new_list);
     }
 
     const auto time_2_1{SteadyClock::now()};
@@ -2627,10 +2625,9 @@ bool Chainstate::ConnectBlock(const CBlock& block, BlockValidationState& state, 
     // Block is committed: keep the scheme it switched to (fJustCheck dry runs returned above).
     bls_scheme_guard.Commit();
 
-    if (this == &m_chainman.ActiveChainstate() && mnlist_updates_opt.has_value()) {
-        const auto& mnlu = mnlist_updates_opt.value();
-        GetMainSignals().NotifyMasternodeListChanged(false, mnlu.old_list, mnlu.diff);
-        uiInterface.NotifyMasternodeListChanged(mnlu.new_list, pindex);
+    if (this == &m_chainman.ActiveChainstate() && mnlist_updates.diff.HasChanges()) {
+        GetMainSignals().NotifyMasternodeListChanged(false, mnlist_updates.old_list, mnlist_updates.diff);
+        uiInterface.NotifyMasternodeListChanged(mnlist_updates.new_list, pindex);
     }
 
     ::g_stats_client->timing("ConnectBlock_ms", Ticks<std::chrono::milliseconds>(time_8 - time_start), 1.0f);
@@ -4861,13 +4858,12 @@ bool Chainstate::RollforwardBlock(const CBlockIndex* pindex, CCoinsViewCache& in
     BlockValidationState state;
     const CAmount blockSubsidy = GetBlockSubsidy(pindex, m_chainman.GetConsensus());
     const bool is_v24_active{DeploymentActiveAfter(pindex->pprev, m_chainman, Consensus::DEPLOYMENT_V24)};
-    std::optional<MNListUpdates> mnlist_updates_opt{std::nullopt};
-    CDeterministicMNList mn_list;
-    if (!m_chain_helper->special_tx->ProcessSpecialTxsInBlock(*this, m_chain, block, pindex, is_v24_active, inputs, blockSubsidy, /*fJustCheck=*/false, /*fCheckCbTxMerkleRoots=*/false, state, mnlist_updates_opt, mn_list))
+    MNListUpdates mnlist_updates;
+    if (!m_chain_helper->special_tx->ProcessSpecialTxsInBlock(*this, m_chain, block, pindex, is_v24_active, inputs, blockSubsidy, /*fJustCheck=*/false, /*fCheckCbTxMerkleRoots=*/false, state, mnlist_updates)) {
         return error("RollforwardBlock(DASH): ProcessSpecialTxsInBlock for block %s failed with %s",
             pindex->GetBlockHash().ToString(), state.ToString());
     }
-    RecordBackgroundMNListHash(pindex, mn_list);
+    RecordBackgroundMNListHash(pindex, mnlist_updates.new_list);
 
     for (size_t i = 0; i < block.vtx.size(); i++) {
         const CTransactionRef& tx = block.vtx[i];

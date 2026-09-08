@@ -25,7 +25,6 @@
 #include <univalue.h>
 
 #include <functional>
-#include <optional>
 #include <memory>
 #include <ranges>
 
@@ -624,7 +623,7 @@ CDeterministicMNManager::~CDeterministicMNManager() = default;
 
 bool CDeterministicMNManager::ProcessBlock(const CBlock& block, gsl::not_null<const CBlockIndex*> pindex,
                                            BlockValidationState& state, const CDeterministicMNList& newList,
-                                           std::optional<MNListUpdates>& updatesRet)
+                                           MNListUpdates& updatesRet)
 {
     AssertLockHeld(::cs_main);
 
@@ -692,9 +691,7 @@ bool CDeterministicMNManager::ProcessBlock(const CBlock& block, gsl::not_null<co
         return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "failed-dmn-block");
     }
 
-    if (diff.HasChanges()) {
-        updatesRet = {.old_list = oldList, .new_list = newList, .diff = diff};
-    }
+    updatesRet = {.old_list = oldList, .new_list = newList, .diff = diff};
 
     if (::g_stats_client->active()) {
         const auto counts{newList.GetCounts()};
@@ -723,7 +720,7 @@ bool CDeterministicMNManager::ProcessBlock(const CBlock& block, gsl::not_null<co
     return true;
 }
 
-bool CDeterministicMNManager::UndoBlock(gsl::not_null<const CBlockIndex*> pindex, std::optional<MNListUpdates>& updatesRet)
+bool CDeterministicMNManager::UndoBlock(gsl::not_null<const CBlockIndex*> pindex, MNListUpdates& updatesRet)
 {
     int nHeight = pindex->nHeight;
     uint256 blockHash = pindex->GetBlockHash();

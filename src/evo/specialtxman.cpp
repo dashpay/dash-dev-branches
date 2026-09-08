@@ -692,8 +692,7 @@ bool CSpecialTxProcessor::ProcessSpecialTxsInBlock(Chainstate& chainstate, const
                                                    const CBlockIndex* pindex, bool is_v24_active,
                                                    const CCoinsViewCache& view, CAmount blockSubsidy, bool fJustCheck,
                                                    bool fCheckCbTxMerkleRoots, BlockValidationState& state,
-                                                   std::optional<MNListUpdates>& updatesRet,
-                                                   CDeterministicMNList& mn_list_ret)
+                                                   MNListUpdates& updatesRet)
 {
     AssertLockHeld(::cs_main);
 
@@ -787,14 +786,15 @@ bool CSpecialTxProcessor::ProcessSpecialTxsInBlock(Chainstate& chainstate, const
         LogPrint(BCLog::BENCHMARK, "      - m_qblockman.ProcessBlock: %.2fms [%.2fs]\n", 0.001 * (nTime5 - nTime4),
                  nTimeQuorum * 0.000001);
 
+        CDeterministicMNList mn_list;
         if (DeploymentActiveAt(*pindex, m_consensus_params, Consensus::DEPLOYMENT_DIP0003)) {
-            if (!BuildNewListFromBlock(block, pindex->pprev, is_v24_active, view, true, state, mn_list_ret)) {
+            if (!BuildNewListFromBlock(block, pindex->pprev, is_v24_active, view, true, state, mn_list)) {
                 // pass the state returned by the function above
                 return false;
             }
-            mn_list_ret.SetBlockHash(pindex->GetBlockHash());
+            mn_list.SetBlockHash(pindex->GetBlockHash());
 
-            if (!fJustCheck && !m_dmnman.ProcessBlock(block, pindex, state, mn_list_ret, updatesRet)) {
+            if (!fJustCheck && !m_dmnman.ProcessBlock(block, pindex, state, mn_list, updatesRet)) {
                 // pass the state returned by the function above
                 return false;
             }
@@ -811,7 +811,7 @@ bool CSpecialTxProcessor::ProcessSpecialTxsInBlock(Chainstate& chainstate, const
             static int64_t nTimeCbTxCL = 0;
 
             uint256 calculatedMerkleRootMNL;
-            if (!CalcCbTxMerkleRootMNList(calculatedMerkleRootMNL, mn_list_ret.to_sml(), state)) {
+            if (!CalcCbTxMerkleRootMNList(calculatedMerkleRootMNL, mn_list.to_sml(), state)) {
                 // pass the state returned by the function above
                 return false;
             }
@@ -882,7 +882,7 @@ bool CSpecialTxProcessor::ProcessSpecialTxsInBlock(Chainstate& chainstate, const
     return true;
 }
 
-bool CSpecialTxProcessor::UndoSpecialTxsInBlock(const Chainstate& chainstate, const CBlock& block, const CBlockIndex* pindex, std::optional<MNListUpdates>& updatesRet)
+bool CSpecialTxProcessor::UndoSpecialTxsInBlock(const Chainstate& chainstate, const CBlock& block, const CBlockIndex* pindex, MNListUpdates& updatesRet)
 {
     AssertLockHeld(::cs_main);
 

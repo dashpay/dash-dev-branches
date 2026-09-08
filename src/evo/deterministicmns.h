@@ -717,6 +717,10 @@ constexpr int llmq_max_blocks() {
     return max_blocks;
 }
 
+/** Outcome of applying a block to the deterministic masternode list: the list
+ *  before and after the block and the diff between them. A block that leaves
+ *  the list untouched yields an empty diff (see diff.HasChanges()); for an
+ *  undone block the lists are only filled when the diff has changes. */
 struct MNListUpdates
 {
     CDeterministicMNList old_list;
@@ -777,9 +781,9 @@ public:
     ~CDeterministicMNManager();
 
     bool ProcessBlock(const CBlock& block, gsl::not_null<const CBlockIndex*> pindex, BlockValidationState& state,
-                      const CDeterministicMNList& newList, std::optional<MNListUpdates>& updatesRet)
+                      const CDeterministicMNList& newList, MNListUpdates& updatesRet)
         EXCLUSIVE_LOCKS_REQUIRED(!cs, ::cs_main);
-    bool UndoBlock(gsl::not_null<const CBlockIndex*> pindex, std::optional<MNListUpdates>& updatesRet) EXCLUSIVE_LOCKS_REQUIRED(!cs);
+    bool UndoBlock(gsl::not_null<const CBlockIndex*> pindex, MNListUpdates& updatesRet) EXCLUSIVE_LOCKS_REQUIRED(!cs);
 
     void UpdatedBlockTip(gsl::not_null<const CBlockIndex*> pindex) EXCLUSIVE_LOCKS_REQUIRED(!cs);
 
