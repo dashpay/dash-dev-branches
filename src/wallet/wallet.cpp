@@ -2323,6 +2323,12 @@ TransactionError CWallet::FillPSBT(PartiallySignedTransaction& psbtx, bool& comp
     }
     const PrecomputedTransactionData txdata = PrecomputePSBTData(psbtx);
     LOCK(cs_wallet);
+    if (sign && IsLocked()) {
+        // A mixing-only unlock still exposes private keys to the
+        // ScriptPubKeyMans, so refuse to sign here and report zero signed inputs.
+        sign = false;
+        n_signed = nullptr;
+    }
     // Get all of the previous transactions
     for (unsigned int i = 0; i < psbtx.tx->vin.size(); ++i) {
         const CTxIn& txin = psbtx.tx->vin[i];
