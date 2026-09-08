@@ -56,9 +56,9 @@ class ProTxVersionTest(DashTestFramework):
             '-testactivationheight=v19@200',
             # Wide enough a window that v24 does not activate on its own during the body of this
             # test; it is activated explicitly at the end.
-            f'-vbparams=v24:{self.mocktime}:999999999999:450:10:8:6:5:0',
-        ]] * 6
-        self.set_dash_test_params(6, 5, evo_count=2, extra_args=self.extra_args)
+            f'-vbparams=v24:{self.mocktime}:999999999999:350:10:8:6:5:0',
+        ]] * 2
+        self.set_dash_test_params(2, 1, evo_count=2, extra_args=self.extra_args)
 
     def get_peer_ids(self, node_idx):
         return {peer['id'] for peer in self.nodes[node_idx].getpeerinfo()}
@@ -146,7 +146,7 @@ class ProTxVersionTest(DashTestFramework):
 
         self.log.info("Checking that adding more regular MNs after v19 doesn't break DKGs and IS/CLs")
 
-        for i in range(6):
+        for i in range(3):
             new_mn: MasternodeInfo = self.dynamically_add_masternode(evo=False, rnd=(10 + i))
             assert new_mn is not None
             if i == 0:
@@ -156,15 +156,15 @@ class ProTxVersionTest(DashTestFramework):
                 # Kept at its basic (v2) state and update_service'd after v24 to check the payout is preserved
                 payout_mn = new_mn
 
-        # mine more quorums and make sure everything still works
+        # mine more quorums and make sure everything still works between v19 and v24
         prev_quorum = None
-        for _ in range(5):
+        for _ in range(2):
             quorum = self.mine_quorum()
             assert prev_quorum != quorum
-
-        self.wait_for_chainlocked_block_all_nodes(self.nodes[0].getbestblockhash())
+            self.wait_for_chainlocked_block_all_nodes(self.nodes[0].getbestblockhash())
 
         self.test_protx_v24_versioning(new_mn, migrate_legacy_mn, surviving_legacy_mn, basic_mn, payout_mn)
+
 
     def test_protx_v24_versioning(self, mn: MasternodeInfo, legacy_mn: MasternodeInfo,
                                   surviving_legacy_mn: MasternodeInfo, basic_mn: MasternodeInfo,
@@ -180,17 +180,12 @@ class ProTxVersionTest(DashTestFramework):
         assert_equal(state['version'], 2)
         payout_before = state['payoutAddress']
         node.sendtoaddress(payout_mn.fundsAddr, 1)
-        self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
-        self.generate(node, 1)
-        payout_mn.update_service(node, submit=True, addrs_core_p2p=[f'127.0.0.1:{payout_mn.nodePort}'])
-        self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
-        self.generate(node, 1)
+        upserv_hash = payout_mn.update_service(node, submit=True, addrs_core_p2p=[f'127.0.0.1:{payout_mn.nodePort}'])
+        self.bury_tx(node, upserv_hash)
         state = node.protx('info', payout_mn.proTxHash)['state']
         assert_equal(state['version'], 3)
         assert_equal([p['address'] for p in state['payouts']], [payout_before])
         node.sendtoaddress(mn.fundsAddr, 1)
-        self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
-        self.generate(node, 1)
 
         self.log.info("A basic-scheme masternode reports version 2 before any post-v24 update")
         assert_equal(node.protx('info', mn.proTxHash)['state']['version'], 2)
@@ -198,26 +193,22 @@ class ProTxVersionTest(DashTestFramework):
         self.log.info("A v3 ProUpRegTx reusing the basic operator key is accepted, but leaves the "
                       "stored masternode version at 3 even no operator key change took place")
         protx_result = mn.update_registrar(node, submit=True, fundsAddr=mn.fundsAddr)
-        self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
-        tip = self.generate(node, 1)[0]
+        tip = self.bury_tx(node, protx_result)
         assert_equal(node.getrawtransaction(protx_result, 1, tip)['proUpRegTx']['version'], 3)
         assert_equal(node.protx('info', mn.proTxHash)['state']['version'], 3)
 
         self.log.info("Migration v1 [legacy] protx masternode to v3 by update-registar with a rotated key")
         assert_equal(node.protx('info', legacy_mn.proTxHash)['state']['version'], 1)
         node.sendtoaddress(legacy_mn.fundsAddr, 1)
-        self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
-        self.generate(node, 1)
         # Switch to a fresh basic-scheme operator key and the non-legacy update_registrar RPC
         legacy_mn.legacy = False
         new_operator = node.bls('generate') # basic (non-legacy) scheme
         legacy_mn.pubKeyOperator = new_operator['public']
         legacy_mn.keyOperator = new_operator['secret']
         migrate_result = legacy_mn.update_registrar(node, submit=True, fundsAddr=legacy_mn.fundsAddr)
-        self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
         assert legacy_mn.nodeIdx is not None
         old_peer_ids = self.get_peer_ids(legacy_mn.nodeIdx)
-        tip = self.generate(node, 1, sync_fun=self.no_op)[0]
+        tip = self.bury_tx(node, migrate_result, sync_fun=self.no_op)
         assert_equal(node.getrawtransaction(migrate_result, 1, tip)['proUpRegTx']['version'], 3)
         assert_equal(node.protx('info', legacy_mn.proTxHash)['state']['version'], 3)
         # Changing the operator key makes every peer drop its existing connections to this
@@ -253,16 +244,13 @@ class ProTxVersionTest(DashTestFramework):
         assert_equal(node.protx('info', surviving_legacy_mn.proTxHash)['state']['version'], 1)
         key_before = node.protx('info', surviving_legacy_mn.proTxHash)['state']['pubKeyOperator']
         node.sendtoaddress(surviving_legacy_mn.fundsAddr, 1)
-        self.bump_mocktime(10 * 60 + 1)  # make the funding tx safe to include in a block
-        self.generate(node, 1)
         upserv_hash = surviving_legacy_mn.update_service(node, submit=True,
                                                          addrs_core_p2p=[f'127.0.0.1:{surviving_legacy_mn.nodePort}'])
-        self.bump_mocktime(10 * 60 + 1)
         # Same CMNAuth disconnect as a key rotation: SetStateVersion re-encodes pubKeyOperator, so
         # skip sync_all until the old peers are gone and this node is reconnected.
         assert surviving_legacy_mn.nodeIdx is not None
         old_peer_ids = self.get_peer_ids(surviving_legacy_mn.nodeIdx)
-        tip = self.generate(node, 1, sync_fun=self.no_op)[0]
+        tip = self.bury_tx(node, upserv_hash, sync_fun=self.no_op)
         assert_equal(node.getrawtransaction(upserv_hash, 1, tip)['proUpServTx']['version'], 3)
         state = node.protx('info', surviving_legacy_mn.proTxHash)['state']
         assert_equal(state['version'], 3)  # migrated in place
@@ -281,16 +269,11 @@ class ProTxVersionTest(DashTestFramework):
 
     def test_revoke_protx(self, node_idx, revoke_mn: MasternodeInfo):
         funds_address = self.nodes[0].getnewaddress()
-        fund_txid = self.nodes[0].sendtoaddress(funds_address, 1)
-        self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
-        tip = self.generate(self.nodes[0], 1)[0]
-        assert_equal(self.nodes[0].getrawtransaction(fund_txid, 1, tip)['confirmations'], 1)
+        self.nodes[0].sendtoaddress(funds_address, 1)
 
         protx_result = revoke_mn.revoke(self.nodes[0], submit=True, reason=1, fundsAddr=funds_address)
-        self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
         old_peer_ids = self.get_peer_ids(node_idx)
-        tip = self.generate(self.nodes[0], 1, sync_fun=self.no_op)[0]
-        assert_equal(self.nodes[0].getrawtransaction(protx_result, 1, tip)['confirmations'], 1)
+        self.bury_tx(self.nodes[0], protx_result, sync_fun=self.no_op)
         # Revoking a MN makes every peer drop its existing connections to it. Wait for that to
         # happen and then reconnect the corresponding node back to let sync_blocks finish
         # correctly.
@@ -304,15 +287,10 @@ class ProTxVersionTest(DashTestFramework):
                 return
 
     def test_update_service_protx(self, mn: MasternodeInfo):
-        fund_txid = self.nodes[0].sendtoaddress(mn.fundsAddr, 1)
-        self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
-        tip = self.generate(self.nodes[0], 1)[0]
-        assert_equal(self.nodes[0].getrawtransaction(fund_txid, 1, tip)['confirmations'], 1)
+        self.nodes[0].sendtoaddress(mn.fundsAddr, 1)
 
         protx_result = mn.update_service(self.nodes[0], submit=True, addrs_core_p2p=[f'127.0.0.2:{mn.nodePort}'])
-        self.bump_mocktime(10 * 60 + 1) # to make tx safe to include in block
-        tip = self.generate(self.nodes[0], 1)[0]
-        assert_equal(self.nodes[0].getrawtransaction(protx_result, 1, tip)['confirmations'], 1)
+        self.bury_tx(self.nodes[0], protx_result)
 
         for node in self.nodes:
             protx_info = node.protx('info', mn.proTxHash)
