@@ -2323,7 +2323,12 @@ TransactionError CWallet::FillPSBT(PartiallySignedTransaction& psbtx, bool& comp
     }
     const PrecomputedTransactionData txdata = PrecomputePSBTData(psbtx);
     LOCK(cs_wallet);
-    const bool can_sign = sign && !IsLocked();
+    if (sign && IsLocked()) {
+        // A mixing-only unlock still exposes private keys to the
+        // ScriptPubKeyMans, so refuse to sign here and report zero signed inputs.
+        sign = false;
+        n_signed = nullptr;
+    }
     // Get all of the previous transactions
     for (unsigned int i = 0; i < psbtx.tx->vin.size(); ++i) {
         const CTxIn& txin = psbtx.tx->vin[i];
@@ -2349,12 +2354,12 @@ TransactionError CWallet::FillPSBT(PartiallySignedTransaction& psbtx, bool& comp
     // Fill in information from ScriptPubKeyMans
     for (ScriptPubKeyMan* spk_man : GetAllScriptPubKeyMans()) {
         int n_signed_this_spkm = 0;
-        TransactionError res = spk_man->FillPSBT(psbtx, txdata, sighash_type, can_sign, bip32derivs, &n_signed_this_spkm, finalize);
+        TransactionError res = spk_man->FillPSBT(psbtx, txdata, sighash_type, sign, bip32derivs, &n_signed_this_spkm, finalize);
         if (res != TransactionError::OK) {
             return res;
         }
 
-        if (n_signed && (!sign || can_sign)) {
+        if (n_signed) {
             (*n_signed) += n_signed_this_spkm;
         }
     }
