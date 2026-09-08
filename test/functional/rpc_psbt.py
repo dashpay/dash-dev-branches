@@ -77,6 +77,10 @@ class PSBTTest(BitcoinTestFramework):
         unsigned_tx = self.nodes[0].walletprocesspsbt(psbtx, False)
         assert_equal(unsigned_tx['complete'], False)
 
+        # Unlocking for mixing only must not allow signing either
+        self.nodes[0].walletpassphrase("password", 1000000, True)
+        assert_equal(self.nodes[0].send({self.nodes[2].getnewaddress(): 10})['complete'], False)
+
         self.nodes[0].walletpassphrase(passphrase="password", timeout=1000000)
 
         # Sign the transaction but don't finalize
