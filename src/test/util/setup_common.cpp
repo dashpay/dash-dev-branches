@@ -605,7 +605,10 @@ CBlock TestChainSetup::CreateBlock(
         Assert(cbTx.has_value());
         BlockValidationState state;
         CDeterministicMNList mn_list;
-        if (!chainstate.ChainHelper().special_tx->BuildNewListFromBlock(block, chainstate.m_chain.Tip(), chainstate.CoinsTip(), true, state, mn_list)) {
+        const CBlockIndex* pindexPrev{chainstate.m_chain.Tip()};
+        const bool is_v24_active{DeploymentActiveAfter(pindexPrev, chainstate.m_chainman, Consensus::DEPLOYMENT_V24)};
+        if (!chainstate.ChainHelper().special_tx->BuildNewListFromBlock(block, pindexPrev, is_v24_active,
+                                                                        chainstate.CoinsTip(), true, state, mn_list)) {
             Assert(false);
         }
         if (!CalcCbTxMerkleRootMNList(cbTx->merkleRootMNList, mn_list.to_sml(), state)) {

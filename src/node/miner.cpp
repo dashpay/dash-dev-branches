@@ -280,7 +280,9 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript& sc
 
         BlockValidationState state;
         CDeterministicMNList mn_list;
-        if (!m_chain_helper.special_tx->BuildNewListFromBlock(*pblock, pindexPrev, m_chainstate.CoinsTip(), true, state, mn_list)) {
+        const bool is_v24_active{DeploymentActiveAfter(pindexPrev, m_chainstate.m_chainman, Consensus::DEPLOYMENT_V24)};
+        if (!m_chain_helper.special_tx->BuildNewListFromBlock(*pblock, pindexPrev, is_v24_active,
+                                                              m_chainstate.CoinsTip(), true, state, mn_list)) {
             throw std::runtime_error(strprintf("%s: BuildNewListFromBlock failed: %s", __func__, state.ToString()));
         }
         if (!CalcCbTxMerkleRootMNList(cbTx.merkleRootMNList, mn_list.to_sml(), state)) {

@@ -276,18 +276,18 @@ static void HandleQuorumCommitment(const llmq::CFinalCommitment& qc, const std::
 }
 
 bool CSpecialTxProcessor::BuildNewListFromBlock(const CBlock& block, gsl::not_null<const CBlockIndex*> pindexPrev,
-                                                const CCoinsViewCache& view, bool debugLogs,
+                                                bool is_v24_active, const CCoinsViewCache& view, bool debugLogs,
                                                 BlockValidationState& state, CDeterministicMNList& mnListRet)
 {
     AssertLockHeld(cs_main);
     CDeterministicMNList oldList = m_dmnman.GetListForBlock(pindexPrev);
-    return RebuildListFromBlock(block, pindexPrev, oldList, view, debugLogs, state, mnListRet);
+    return RebuildListFromBlock(block, pindexPrev, is_v24_active, oldList, view, debugLogs, state, mnListRet);
 }
 
 bool CSpecialTxProcessor::RebuildListFromBlock(const CBlock& block, gsl::not_null<const CBlockIndex*> pindexPrev,
-                                                const CDeterministicMNList& prevList, const CCoinsViewCache& view,
-                                                bool debugLogs, BlockValidationState& state,
-                                                CDeterministicMNList& mnListRet)
+                                               bool is_v24_active, const CDeterministicMNList& prevList,
+                                               const CCoinsViewCache& view, bool debugLogs, BlockValidationState& state,
+                                               CDeterministicMNList& mnListRet)
 {
     // Verify that prevList either represents an empty/initial state (default-constructed),
     // or it matches the previous block's hash.
@@ -323,7 +323,6 @@ bool CSpecialTxProcessor::RebuildListFromBlock(const CBlock& block, gsl::not_nul
     newList.DecreaseScores();
 
     const bool isMNRewardReallocation{DeploymentActiveAfter(pindexPrev, m_consensus_params, Consensus::DEPLOYMENT_MN_RR)};
-    const bool is_v24_deployed{DeploymentActiveAfter(pindexPrev, m_chainman, Consensus::DEPLOYMENT_V24)};
 
     // we skip the coinbase
     for (int i = 1; i < static_cast<int>(block.vtx.size()); i++) {
@@ -410,7 +409,7 @@ bool CSpecialTxProcessor::RebuildListFromBlock(const CBlock& block, gsl::not_nul
             // to each other and two of them could claim one operator key under different encodings.
             // Re-probe the list as rebuilt so far. AddMN() reports a duplicate by throwing, which
             // would escape block assembly, so reject cleanly here instead.
-            if (is_v24_deployed &&
+            if (is_v24_active &&
                 newList.HasOperatorKeyUnderAnyScheme(dmn->pdmnState->pubKeyOperator.Get(), /*self=*/uint256())) {
                 return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-protx-dup-key");
             }
@@ -456,8 +455,9 @@ bool CSpecialTxProcessor::RebuildListFromBlock(const CBlock& block, gsl::not_nul
 
             auto newState = std::make_shared<CDeterministicMNState>(*dmn->pdmnState);
             const uint16_t current_version{static_cast<uint16_t>(newState->nVersion)};
-            const uint16_t target_version{is_v24_deployed ? std::max<uint16_t>(current_version, opt_proTx->nVersion) : current_version};
-            if (is_v24_deployed) {
+            const uint16_t target_version{is_v24_active ? std::max<uint16_t>(current_version, opt_proTx->nVersion)
+                                                        : current_version};
+            if (is_v24_active) {
                 // Extended addresses support in v24 means that the version can be updated
                 newState->nVersion = opt_proTx->nVersion;
             }
@@ -478,7 +478,7 @@ bool CSpecialTxProcessor::RebuildListFromBlock(const CBlock& block, gsl::not_nul
                     newState->platformHTTPPort = 0;
                 }
             }
-            if (is_v24_deployed && !SetStateVersion(*newState, target_version, dmn->nType, state)) {
+            if (is_v24_active && !SetStateVersion(*newState, target_version, dmn->nType, state)) {
                 return false;
             }
             if (newState->IsBanned()) {
@@ -497,7 +497,7 @@ bool CSpecialTxProcessor::RebuildListFromBlock(const CBlock& block, gsl::not_nul
             // against pindexPrev, so re-check against the list as rebuilt so far: if another
             // masternode holds this key under either encoding, the re-key in UpdateMN() would throw
             // out of block assembly.
-            if (is_v24_deployed && IsSchemeMigration(current_version, target_version) &&
+            if (is_v24_active && IsSchemeMigration(current_version, target_version) &&
                 newList.HasOperatorKeyUnderAnyScheme(dmn->pdmnState->pubKeyOperator.Get(),
                                                      /*self=*/opt_proTx->proTxHash)) {
                 return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-protx-dup-key");
@@ -521,8 +521,8 @@ bool CSpecialTxProcessor::RebuildListFromBlock(const CBlock& block, gsl::not_nul
             auto newState = std::make_shared<CDeterministicMNState>(*dmn->pdmnState);
             const uint16_t old_version{static_cast<uint16_t>(newState->nVersion)};
             const bool operator_changed{newState->pubKeyOperator != opt_proTx->pubKeyOperator};
-            const uint16_t target_version{is_v24_deployed ? std::max<uint16_t>(old_version, opt_proTx->nVersion)
-                                                          : (operator_changed ? opt_proTx->nVersion : old_version)};
+            const uint16_t target_version{is_v24_active ? std::max<uint16_t>(old_version, opt_proTx->nVersion)
+                                                        : (operator_changed ? opt_proTx->nVersion : old_version)};
 
             // Per-transaction checks ran against pindexPrev, so an earlier transaction in this same
             // block is invisible to them. Re-evaluate against the list as rebuilt so far: this update
@@ -533,7 +533,7 @@ bool CSpecialTxProcessor::RebuildListFromBlock(const CBlock& block, gsl::not_nul
             // routine update is not blocked.
             {
                 const bool migrating{IsSchemeMigration(old_version, target_version)};
-                if (is_v24_deployed && (operator_changed || migrating) &&
+                if (is_v24_active && (operator_changed || migrating) &&
                     newList.HasOperatorKeyUnderAnyScheme(opt_proTx->pubKeyOperator.Get(),
                                                          /*self=*/opt_proTx->proTxHash)) {
                     return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-protx-dup-key");
@@ -585,7 +585,7 @@ bool CSpecialTxProcessor::RebuildListFromBlock(const CBlock& block, gsl::not_nul
             // preserved (never silently downgraded), so pick the target the same max-based way the registrar
             // path does and restore it below. Pre-v24 keep the historical reset-to-legacy behaviour.
             uint16_t target_version{ProTxVersion::LegacyBLS};
-            if (is_v24_deployed) {
+            if (is_v24_active) {
                 target_version = std::max<uint16_t>(old_version, opt_proTx->nVersion);
             }
             newState->ResetOperatorFields();
@@ -786,7 +786,7 @@ bool CSpecialTxProcessor::ProcessSpecialTxsInBlock(Chainstate& chainstate, const
 
         CDeterministicMNList mn_list;
         if (DeploymentActiveAt(*pindex, m_consensus_params, Consensus::DEPLOYMENT_DIP0003)) {
-            if (!BuildNewListFromBlock(block, pindex->pprev, view, true, state, mn_list)) {
+            if (!BuildNewListFromBlock(block, pindex->pprev, is_v24_active, view, true, state, mn_list)) {
                 // pass the state returned by the function above
                 return false;
             }

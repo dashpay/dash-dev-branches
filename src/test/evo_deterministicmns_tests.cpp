@@ -1238,7 +1238,8 @@ void FuncProUpServInvalidNType(TestChainSetup& setup)
         CDeterministicMNList mn_list;
         LOCK(cs_main);
         BOOST_CHECK(!chainman.ActiveChainstate().ChainHelper().special_tx->BuildNewListFromBlock(
-            block, tip_index(), chainman.ActiveChainstate().CoinsTip(), /*debugLogs=*/false, state, mn_list));
+            block, tip_index(), IsV24Active(chainman), chainman.ActiveChainstate().CoinsTip(), /*debugLogs=*/false,
+            state, mn_list));
         BOOST_CHECK_EQUAL(state.GetRejectReason(), expected_reason);
     }
 
@@ -1507,7 +1508,8 @@ void FuncTestMempoolProRegReplacementUpdateConflict(TestChainSetup& setup)
         BlockValidationState state;
         CDeterministicMNList mn_list;
         BOOST_CHECK(!chainman.ActiveChainstate().ChainHelper().special_tx->BuildNewListFromBlock(
-            hazard_block, tip_index(), chainman.ActiveChainstate().CoinsTip(), /*debugLogs=*/false, state, mn_list));
+            hazard_block, tip_index(), IsV24Active(chainman), chainman.ActiveChainstate().CoinsTip(),
+            /*debugLogs=*/false, state, mn_list));
         BOOST_CHECK_EQUAL(state.GetRejectReason(), "bad-protx-hash");
     }
 
@@ -2226,7 +2228,7 @@ void FuncSameMnSameBlockVersionCrossingKeyRotation(TestChainV24SignalBeforeV19Se
         auto& chain_helper = *Assert(setup.m_node.chain_helper.get());
         try {
             rebuilt = chain_helper.special_tx->RebuildListFromBlock(
-                block, chainman.ActiveChain().Tip(), dmnman.GetListAtChainTip(),
+                block, chainman.ActiveChain().Tip(), IsV24Active(chainman), dmnman.GetListAtChainTip(),
                 chainman.ActiveChainstate().CoinsTip(), /*debugLogs=*/false, block_state, mn_list_ret);
         } catch (const std::exception& e) {
             thrown = e.what();
@@ -2335,7 +2337,7 @@ void FuncSameMnSameBlockMigrationConsistent(TestChainV24SignalBeforeV19Setup& se
         auto& chain_helper = *Assert(setup.m_node.chain_helper.get());
         BOOST_CHECK_NO_THROW(
             rebuilt = chain_helper.special_tx->RebuildListFromBlock(
-                block, chainman.ActiveChain().Tip(), dmnman.GetListAtChainTip(),
+                block, chainman.ActiveChain().Tip(), IsV24Active(chainman), dmnman.GetListAtChainTip(),
                 chainman.ActiveChainstate().CoinsTip(), /*debugLogs=*/false, block_state, mn_list_ret));
     }
     BOOST_REQUIRE_MESSAGE(rebuilt, "same-key migration across one block was rejected: " << block_state.GetRejectReason());
@@ -2542,7 +2544,7 @@ void FuncSameBlockCrossSchemeKeyPairRejected(TestChainV24SignalBeforeV19Setup& s
         auto& chain_helper = *Assert(setup.m_node.chain_helper.get());
         BOOST_CHECK_NO_THROW(
             rebuilt = chain_helper.special_tx->RebuildListFromBlock(
-                block, chainman.ActiveChain().Tip(), dmnman.GetListAtChainTip(),
+                block, chainman.ActiveChain().Tip(), IsV24Active(chainman), dmnman.GetListAtChainTip(),
                 chainman.ActiveChainstate().CoinsTip(), /*debugLogs=*/false, block_state, mn_list_ret));
     }
     BOOST_CHECK_MESSAGE(!rebuilt, "a block claiming one operator key under two encodings was accepted");
