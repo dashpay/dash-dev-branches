@@ -111,11 +111,7 @@ int SyncManager::RequestGovernanceObjectVotes(const std::vector<CNode*>& vNodesC
             // initiated from another node, so skip it too.
             if (!pnode->CanRelay() || (m_connman.IsActiveMasternode() && pnode->IsInboundConn())) continue;
             // stop early to prevent setAskFor overflow
-            {
-                LOCK(::cs_main);
-                size_t nProjectedSize = m_peer_manager->PeerGetRequestedObjectCount(pnode->GetId()) + nProjectedVotes;
-                if (nProjectedSize > MAX_INV_SZ) continue;
-            }
+            if (m_peer_manager->PeerGetRequestedObjectCount(pnode->GetId()) + nProjectedVotes > MAX_INV_SZ) continue;
             // to early to ask the same node
             if (mapAskedRecently[nHashGovobj].count(pnode->addr)) continue;
 
