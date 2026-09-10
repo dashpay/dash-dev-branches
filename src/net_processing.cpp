@@ -5569,7 +5569,14 @@ void PeerManagerImpl::ProcessMessage(
 
     if (msg_type == NetMsgType::GETQUORUMROTATIONINFO) {
         llmq::CGetQuorumRotationInfo cmd;
-        vRecv >> cmd;
+        try {
+            vRecv >> cmd;
+        } catch (const std::ios_base::failure& e) {
+            // An oversized base block list throws before any element is decoded; attribute it to the
+            // peer here rather than letting the outer catch drop it silently.
+            Misbehaving(*peer, 100, strprintf("malformed getqrinfo received. peer=%d error=%s", pfrom.GetId(), e.what()));
+            return;
+        }
 
         LOCK(cs_main);
 
