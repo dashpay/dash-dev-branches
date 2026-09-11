@@ -28,5 +28,6 @@ LLMQContext::LLMQContext(CDeterministicMNManager& dmnman, CEvoDB& evo_db, Chains
 
 LLMQContext::~LLMQContext()
 {
+    qman->InterruptWarming();
     bls_worker->Stop();
 }

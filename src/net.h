@@ -1245,6 +1245,9 @@ public:
         SocketEventsMode socketEventsMode = SocketEventsMode::Select;
         bool m_i2p_accept_incoming;
         bool m_active_masternode = false;
+        //! Run the thread that opens connections to masternodes; only masternodes, quorum watchers and
+        //! CoinJoin mixing ever request them.
+        bool m_masternode_connections = true;
     };
 
     void Init(const Options& connOptions) EXCLUSIVE_LOCKS_REQUIRED(!m_added_nodes_mutex, !m_total_bytes_sent_mutex)
@@ -1283,6 +1286,7 @@ public:
         socketEventsMode = connOptions.socketEventsMode;
         m_onion_binds = connOptions.onion_binds;
         m_active_masternode = connOptions.m_active_masternode;
+        m_masternode_connections = connOptions.m_masternode_connections;
     }
 
     CConnman(uint64_t seed0, uint64_t seed1, AddrMan& addrman, const NetGroupManager& netgroupman,
@@ -1928,6 +1932,7 @@ private:
 
     /** Flag for activating masternode mode */
     bool m_active_masternode{false};
+    bool m_masternode_connections{true};
 
     SocketEventsMode socketEventsMode;
     std::unique_ptr<EdgeTriggeredEvents> m_edge_trig_events{nullptr};

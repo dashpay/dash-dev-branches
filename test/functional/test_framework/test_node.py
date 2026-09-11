@@ -114,6 +114,13 @@ class TestNode():
             "-debugexclude=leveldb",
             "-debugexclude=rand",
             "-uacomment=testnode%d" % i,  # required for subversion uniqueness across peers
+            # Two threads keep the check queues and the RPC server concurrent; more only adds
+            # threads, and every thread costs ~0.9 MB of thread-local storage (BLS context).
+            "-par=2",
+            "-rpcthreads=2",
+            # The signature and script execution caches are allocated and zero-filled at startup
+            # whether or not anything is ever cached; 1 MiB still leaves 16384 entries each.
+            "-maxsigcachesize=1",
         ]
         if self.mocktime != 0:
             self.args.append(f"-mocktime={mocktime}")
@@ -138,6 +145,8 @@ class TestNode():
             self.args.append("-logsourcelocations")
         if self.version_is_at_least(22010000):
             self.args.append("-loglevel=trace")
+        if self.version_is_at_least(23000000):
+            self.args.append("-parbls=2")
 
         # Default behavior from global -v2transport flag is added to args to persist it over restarts.
         # May be overwritten in individual tests, using extra_args.
