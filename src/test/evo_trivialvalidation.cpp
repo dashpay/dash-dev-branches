@@ -38,7 +38,9 @@ void TestTxHelper(const CMutableTransaction& tx, gsl::not_null<const CBlockIndex
                   const std::optional<std::string>& expected_error, const ChainstateManager& chainman)
 {
     TxValidationState dummy_state;
-    auto opt_payload = GetValidatedPayload<T>(CTransaction{tx}, pindexPrev, chainman, dummy_state);
+    auto opt_payload = GetValidatedPayload<T>(CTransaction{tx}, pindexPrev, chainman.GetConsensus(),
+                                              DeploymentActiveAfter(pindexPrev, chainman, Consensus::DEPLOYMENT_V24),
+                                              dummy_state);
 
     BOOST_CHECK_EQUAL(opt_payload.has_value(), !expected_error.has_value());
 

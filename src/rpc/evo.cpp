@@ -1610,11 +1610,13 @@ static UniValue evodb_verify_or_repair_impl(const JSONRPCRequest& request, bool 
     }
 
     // Create a callback that wraps CSpecialTxProcessor::RebuildListFromBlock
-    auto build_list_func = [&chain_helper](const CBlock& block, const CBlockIndex* const pindexPrev,
-                                           const CDeterministicMNList& prevList, const CCoinsViewCache& view,
-                                           bool debugLogs, BlockValidationState& state,
-                                           CDeterministicMNList& mnListRet) -> bool {
-        return chain_helper.special_tx->RebuildListFromBlock(block, pindexPrev, prevList, view, debugLogs, state, mnListRet);
+    auto build_list_func = [&chain_helper, &chainman](const CBlock& block, const CBlockIndex* const pindexPrev,
+                                                      const CDeterministicMNList& prevList, const CCoinsViewCache& view,
+                                                      bool debugLogs, BlockValidationState& state,
+                                                      CDeterministicMNList& mnListRet) -> bool {
+        const bool is_v24_active{DeploymentActiveAfter(pindexPrev, chainman, Consensus::DEPLOYMENT_V24)};
+        return chain_helper.special_tx->RebuildListFromBlock(block, pindexPrev, is_v24_active, prevList, view,
+                                                             debugLogs, state, mnListRet);
     };
 
     // Call the dmnman method to do the work

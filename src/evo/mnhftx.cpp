@@ -16,7 +16,6 @@
 
 #include <chain.h>
 #include <chainparams.h>
-#include <validation.h>
 #include <versionbits.h>
 
 #include <algorithm>
@@ -45,9 +44,9 @@ CMutableTransaction MNHFTxPayload::PrepareTx() const
     return tx;
 }
 
-CMNHFManager::CMNHFManager(CEvoDB& evoDb, const ChainstateManager& chainman) :
+CMNHFManager::CMNHFManager(CEvoDB& evoDb, const Consensus::Params& consensus_params) :
     m_evoDb(evoDb),
-    m_chainman{chainman}
+    m_consensus_params{consensus_params}
 {
     assert(globalInstance == nullptr);
     globalInstance = this;
@@ -61,7 +60,7 @@ CMNHFManager::~CMNHFManager()
 
 CMNHFManager::Signals CMNHFManager::GetSignalsStage(const CBlockIndex* const pindexPrev)
 {
-    if (!DeploymentActiveAfter(pindexPrev, m_chainman.GetConsensus(), Consensus::DEPLOYMENT_V20)) return {};
+    if (!DeploymentActiveAfter(pindexPrev, m_consensus_params, Consensus::DEPLOYMENT_V20)) return {};
 
     Signals signals_tmp = GetForBlock(pindexPrev);
 
@@ -105,7 +104,7 @@ bool MNHFTxPayload::IsTriviallyValid(TxValidationState& state) const
 }
 
 template <typename GetQuorum>
-static bool CheckMNHFTxImpl(const ChainstateManager& chainman, GetQuorum&& get_quorum,
+static bool CheckMNHFTxImpl(const node::BlockManager& blockman, GetQuorum&& get_quorum,
                             const CTransaction& tx, const CBlockIndex* pindexPrev, TxValidationState& state)
 {
     if (!tx.IsSpecialTxVersion() || tx.nType != TRANSACTION_MNHF_SIGNAL) {
@@ -126,7 +125,7 @@ static bool CheckMNHFTxImpl(const ChainstateManager& chainman, GetQuorum&& get_q
         return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-mnhf-non-ehf");
     }
 
-    const CBlockIndex* pindexQuorum = WITH_LOCK(::cs_main, return chainman.m_blockman.LookupBlockIndex(mnhfTx.signal.quorumHash));
+    const CBlockIndex* pindexQuorum = WITH_LOCK(::cs_main, return blockman.LookupBlockIndex(mnhfTx.signal.quorumHash));
     if (!pindexQuorum) {
         return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-mnhf-quorum-hash");
     }
@@ -157,19 +156,19 @@ static bool CheckMNHFTxImpl(const ChainstateManager& chainman, GetQuorum&& get_q
     return true;
 }
 
-bool CheckMNHFTx(const ChainstateManager& chainman, const llmq::CQuorumManager& qman,
+bool CheckMNHFTx(const node::BlockManager& blockman, const llmq::CQuorumManager& qman,
                  const CTransaction& tx, const CBlockIndex* pindexPrev, TxValidationState& state)
 {
-    return CheckMNHFTxImpl(chainman, [&](Consensus::LLMQType llmq_type, const uint256& quorum_hash) {
+    return CheckMNHFTxImpl(blockman, [&](Consensus::LLMQType llmq_type, const uint256& quorum_hash) {
         return qman.GetQuorum(llmq_type, quorum_hash);
     }, tx, pindexPrev, state);
 }
 
-bool CheckMNHFTx(const ChainstateManager& chainman, const llmq::CQuorumManager& qman, const CChain& chain,
+bool CheckMNHFTx(const node::BlockManager& blockman, const llmq::CQuorumManager& qman, const CChain& chain,
                  const CTransaction& tx, const CBlockIndex* pindexPrev, TxValidationState& state)
 {
     AssertLockHeld(::cs_main);
-    return CheckMNHFTxImpl(chainman, [&](Consensus::LLMQType llmq_type, const uint256& quorum_hash) NO_THREAD_SAFETY_ANALYSIS {
+    return CheckMNHFTxImpl(blockman, [&](Consensus::LLMQType llmq_type, const uint256& quorum_hash) NO_THREAD_SAFETY_ANALYSIS {
         return qman.GetQuorum(llmq_type, quorum_hash, chain);
     }, tx, pindexPrev, state);
 }
@@ -301,7 +300,7 @@ CMNHFManager::Signals CMNHFManager::GetForBlock(const CBlockIndex* pindex)
             LogPrintf("re-index EHF signals at block %d\n", pindex_top->nHeight);
         }
         CBlock block;
-        if (!ReadBlockFromDisk(block, pindex_top, m_chainman.GetConsensus())) {
+        if (!ReadBlockFromDisk(block, pindex_top, m_consensus_params)) {
             throw std::runtime_error("failed-getehfforblock-read");
         }
         BlockValidationState state;
@@ -341,7 +340,7 @@ std::optional<CMNHFManager::Signals> CMNHFManager::GetFromCache(const CBlockInde
     }
     {
         LOCK(cs_cache);
-        if (!DeploymentActiveAt(*pindex, m_chainman.GetConsensus(), Consensus::DEPLOYMENT_V20)) {
+        if (!DeploymentActiveAt(*pindex, m_consensus_params, Consensus::DEPLOYMENT_V20)) {
             mnhfCache.insert(blockHash, signals);
             return signals;
         }
@@ -351,7 +350,7 @@ std::optional<CMNHFManager::Signals> CMNHFManager::GetFromCache(const CBlockInde
         mnhfCache.insert(blockHash, signals);
         return signals;
     }
-    if (!DeploymentActiveAt(*pindex, m_chainman.GetConsensus(), Consensus::DEPLOYMENT_MN_RR)) {
+    if (!DeploymentActiveAt(*pindex, m_consensus_params, Consensus::DEPLOYMENT_MN_RR)) {
         // before mn_rr activation we are safe
         if (m_evoDb.Read(std::make_pair(DB_SIGNALS, blockHash), signals)) {
             LOCK(cs_cache);
@@ -366,7 +365,7 @@ void CMNHFManager::AddToCache(const Signals& signals, const CBlockIndex* const p
 {
     assert(pindex != nullptr);
     const uint256& blockHash = pindex->GetBlockHash();
-    if (DeploymentActiveAt(*pindex, m_chainman.GetConsensus(), Consensus::DEPLOYMENT_V20) &&
+    if (DeploymentActiveAt(*pindex, m_consensus_params, Consensus::DEPLOYMENT_V20) &&
         !m_evoDb.WriteDerived(std::make_pair(DB_SIGNALS_v2, blockHash), signals)) {
         // A mismatch is local EvoDB corruption, not a statement about the
         // block. Abort here: some callers (miner, RPC) never pass through a
@@ -390,14 +389,14 @@ void CMNHFManager::AddSignal(const CBlockIndex* const pindex, int bit)
     AddToCache(signals, pindex);
 }
 
-bool CMNHFManager::ForceSignalDBUpdate()
+bool CMNHFManager::ForceSignalDBUpdate(const CBlockIndex* tip)
 {
     // force ehf signals db update
     auto dbTx = m_evoDb.BeginTransaction();
 
     const bool last_legacy = bls::bls_legacy_scheme.load();
     bls::bls_legacy_scheme.store(false);
-    GetSignalsStage(m_chainman.ActiveTip());
+    GetSignalsStage(tip);
     bls::bls_legacy_scheme.store(last_legacy);
 
     dbTx->Commit();

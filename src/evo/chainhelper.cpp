@@ -22,18 +22,18 @@
 CChainstateHelper::CChainstateHelper(CEvoDB& evodb, CDeterministicMNManager& dmnman, const CMasternodeSync& mn_sync,
                                      llmq::CInstantSendManager& isman, llmq::CQuorumBlockProcessor& qblockman,
                                      llmq::CQuorumSnapshotManager& qsnapman, const ChainstateManager& chainman,
-                                     const Consensus::Params& consensus_params, const chainlock::Chainlocks& chainlocks,
-                                     const llmq::CQuorumManager& qman) :
+                                     const node::BlockManager& blockman, const Consensus::Params& consensus_params,
+                                     const chainlock::Chainlocks& chainlocks, const llmq::CQuorumManager& qman) :
     isman{isman},
     mn_sync{mn_sync},
     m_dmnman{dmnman},
     credit_pool_manager{std::make_unique<CCreditPoolManager>(evodb, chainman)},
     m_chainlocks{chainlocks},
-    ehf_manager{std::make_unique<CMNHFManager>(evodb, chainman)},
+    ehf_manager{std::make_unique<CMNHFManager>(evodb, consensus_params)},
     superblocks{std::make_unique<governance::SuperblockManager>()},
     mn_payments{std::make_unique<CMNPaymentsProcessor>(dmnman, *superblocks, consensus_params)},
     special_tx{std::make_unique<CSpecialTxProcessor>(*credit_pool_manager, dmnman, *ehf_manager, qblockman, qsnapman,
-                                                     chainman, consensus_params, chainlocks, qman)}
+                                                     chainman, blockman, consensus_params, chainlocks, qman)}
 {}
 
 CChainstateHelper::~CChainstateHelper() = default;

@@ -37,6 +37,9 @@ class CQuorumBlockProcessor;
 class CQuorumManager;
 class CQuorumSnapshotManager;
 } // namespace llmq
+namespace node {
+class BlockManager;
+} // namespace node
 class CChainstateHelper
 {
 private:
@@ -59,8 +62,8 @@ public:
     explicit CChainstateHelper(CEvoDB& evodb, CDeterministicMNManager& dmnman, const CMasternodeSync& mn_sync,
                                llmq::CInstantSendManager& isman, llmq::CQuorumBlockProcessor& qblockman,
                                llmq::CQuorumSnapshotManager& qsnapman, const ChainstateManager& chainman,
-                               const Consensus::Params& consensus_params, const chainlock::Chainlocks& chainlocks,
-                               const llmq::CQuorumManager& qman);
+                               const node::BlockManager& blockman, const Consensus::Params& consensus_params,
+                               const chainlock::Chainlocks& chainlocks, const llmq::CQuorumManager& qman);
     ~CChainstateHelper();
 
     bool IsSuperblockValidationRequired(const CBlockIndex* const pindex);
